@@ -1,0 +1,13 @@
+flake8==3.8.4
+numpy==1.21.*
+scipy==1.7.3
+scikit-image==0.18.0
+matplotlib==3.4.2
+pytest==6.2.*
+pytest_console_scripts==1.2.*
+pytest-cov==3.0.*
+tqdm==4.61.*
+imageio==2.9.*
+nibabel==3.2.*
+coverage==6.1.*
+SimpleITK==2.1.*
