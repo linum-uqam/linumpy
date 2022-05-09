@@ -12,3 +12,5 @@ We highly recommend working in a [Python Virtual Environment].
 
 [LINUM]:https://linum.info.uqam.ca
 [Python Virtual Environment]:https://virtualenv.pypa.io/en/latest/
+
+**Linumpy** documentation is available: https://linumpy.readthedocs.io/en/latest/
