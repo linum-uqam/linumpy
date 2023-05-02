@@ -1,23 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""
-Linumpy
-=======
-Linumpy is a small library containing tools and utilities to
-quickly work with microscopy and serial histology data.
-
-License
-=======
-``linumpy`` licensed under the terms of the MIT license. See the file
-"LICENSE" for information on the history of this software, terms & conditions
-for usage, and a DISCLAIMER OF ALL WARRANTIES.
-
-All trademarks referenced herein are property of their respective holders.
-
-Copyright (c) 2021--, Laboratoire d'Imagerie Numérique, Neurophotonique et Microscopie [LINUM],
-Université du Québec à Montréal (UQÀM).
-"""
 
 import glob
 
@@ -61,7 +44,6 @@ opts = dict(name="linumpy",
             maintainer="Joël Lefebvre",
             maintainer_email="lefebvre.joel@uqam.ca",
             description="linumpy: microscopy tools and utilities",
-            long_description=__doc__,
             url="https://github.com/linum-uqam/linumpy",
             download_url="",
             classifiers=CLASSIFIERS,
