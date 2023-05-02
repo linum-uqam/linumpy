@@ -1,8 +1,34 @@
-import os
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+
+import glob
 
 from setuptools import setup, find_packages
 
+# Versions
+_version_major = 0
+_version_minor = 1
+_version_micro = ''
+_version_extra = ''
 
+# Construct full version string from these.
+_ver = [_version_major, _version_minor]
+if _version_micro:
+    _ver.append(_version_micro)
+if _version_extra:
+    _ver.append(_version_extra)
+__version__ = '.'.join(map(str, _ver))
+
+# PyPi Package Information
+CLASSIFIERS = ["Development Status :: 1 - Planning",
+               "Environment :: Console",
+               "Intended Audience :: Science/Research",
+               "Operating System :: OS Independent",
+               "Programming Language :: Python",
+               "Topic :: Scientific/Engineering"]
+
+# Read the requirements
 with open('requirements.txt') as f:
     required_dependencies = f.read().splitlines()
     external_dependencies = []
@@ -14,27 +40,21 @@ with open('requirements.txt') as f:
         else:
             external_dependencies.append(dependency)
 
-# Get version and release info, which is all stored in linumpy/version.py
-ver_file = os.path.join('linumpy', 'version.py')
-with open(ver_file) as f:
-    exec(f.read())
-opts = dict(name=NAME,
-            maintainer=MAINTAINER,
-            maintainer_email=MAINTAINER_EMAIL,
-            description=DESCRIPTION,
-            long_description=LONG_DESCRIPTION,
-            url=URL,
-            download_url=DOWNLOAD_URL,
-            license=LICENSE,
+opts = dict(name="linumpy",
+            maintainer="Joël Lefebvre",
+            maintainer_email="lefebvre.joel@uqam.ca",
+            description="linumpy: microscopy tools and utilities",
+            url="https://github.com/linum-uqam/linumpy",
+            download_url="",
             classifiers=CLASSIFIERS,
-            author=AUTHOR,
-            author_email=AUTHOR_EMAIL,
-            platforms=PLATFORMS,
-            version=VERSION,
+            author="The LINUM developers",
+            author_email="",
+            platforms="OS Independent",
+            version=__version__,
             packages=find_packages(),
             setup_requires=['numpy'],
             install_requires=external_dependencies,
-            scripts=SCRIPTS,
+            scripts=glob.glob("scripts/*.py"),
             include_package_data=True)
 
 setup(**opts)
