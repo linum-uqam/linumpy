@@ -28,6 +28,10 @@ CLASSIFIERS = ["Development Status :: 1 - Planning",
                "Programming Language :: Python",
                "Topic :: Scientific/Engineering"]
 
+# Load long description
+with open("README.md", "r") as fh:
+    long_description = fh.read()
+
 # Read the requirements
 with open('requirements.txt') as f:
     required_dependencies = f.read().splitlines()
@@ -44,6 +48,8 @@ opts = dict(name="linumpy",
             maintainer="Joël Lefebvre",
             maintainer_email="lefebvre.joel@uqam.ca",
             description="linumpy: microscopy tools and utilities",
+            long_description=description,
+            long_description_content_type="text/markdown",
             url="https://github.com/linum-uqam/linumpy",
             download_url="",
             classifiers=CLASSIFIERS,
