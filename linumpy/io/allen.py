@@ -8,7 +8,8 @@ Methods to download data from the Allen Institute
 from pathlib import Path
 
 import SimpleITK as sitk
-from allensdk.api.queries.reference_space_api import ReferenceSpaceApi
+import requests
+from tqdm import tqdm
 
 AVAILABLE_RESOLUTIONS = [10, 25, 50, 100]
 
@@ -34,11 +35,18 @@ def download_template(resolution: int, cache: bool = True, cache_dir: str = ".da
     output.mkdir(exist_ok=True, parents=True)
 
     # Preparing the filenames
-    nrrd_file = output.parent / f"allen_template_{resolution}um.nrrd"
+    nrrd_file = output / f"allen_template_{resolution}um.nrrd"
 
-    # Downloading the template
-    rpa = ReferenceSpaceApi(base_uri=str(output.parent))
-    rpa.download_template_volume(resolution=resolution, file_name=nrrd_file)
+    # Preparing the request
+    url = f"http://download.alleninstitute.org/informatics-archive/current-release/mouse_ccf/average_template/average_template_{int(resolution)}.nrrd"
+
+    # Check that the data is in cache
+    if not (nrrd_file.is_file()):
+        # Download the template
+        response = requests.get(url, stream=True)
+        with open(nrrd_file, "wb") as f:
+            for data in tqdm(response.iter_content()):
+                f.write(data)
 
     # Loading the nrrd file
     vol = sitk.ReadImage(str(nrrd_file))
