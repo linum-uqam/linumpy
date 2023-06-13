@@ -8,6 +8,13 @@
 pip install linumpy
 ```
 
+To install the tool for development, clone the repository and then install them with
+
+```
+pip install -e .
+```
+
+
 We highly recommend working in a [Python Virtual Environment].
 
 [LINUM]:https://linum.info.uqam.ca
