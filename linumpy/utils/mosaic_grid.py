@@ -528,8 +528,8 @@ def addVolumeToMosaic(volume, pos, mosaic, blendingMethod='diffusion', factor=3,
         volume = np.reshape(volume, [nx, ny, nz])
 
     # Position of tile in mosaic reference frame
-    wx = np.int(pos[0])
-    wy = np.int(pos[1])
+    wx = int(pos[0])
+    wy = int(pos[1])
 
     if len(pos) == 3:
         wz = pos[2]

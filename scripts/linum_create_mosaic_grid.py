@@ -84,14 +84,13 @@ def main():
 
     # Sniff the directory
     data_info = FileUtils.dataSniffer(input_directory)
-
     # Create the data object
     data = FileUtils.SlicerData(input_directory,
                                 gridshape=data_info["gridshape"],
                                 prototype=data_info["prototype"],
                                 extension=data_info["extension"])
     data.startIdx = data_info["startIdx"]
-
+    print(data)
     # Load the first volume and get its shape
     data.checkVolShape()
 
