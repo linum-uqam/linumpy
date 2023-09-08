@@ -1,3 +1,5 @@
+#! /usr/bin/env python
+# -*- coding: utf-8 -*-
 """ All functions required by more than two other stitching module is kept here
 """
 import numpy as np
