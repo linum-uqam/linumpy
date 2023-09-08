@@ -17,7 +17,7 @@ def _build_arg_parser():
     p.add_argument("input_image",
                    help="Full path to a 2D mosaic grid image.")
     p.add_argument("output_image", default=None,
-                   help="Full path to the croppd mosaic grid image (must be .tiff or .tif)")
+                   help="Full path to the cropped mosaic grid image (must be .tiff or .tif)")
     p.add_argument("--xmin", type=int, default=0,
                    help="Minimum x limit in pixel (default=%(default)s)")
     p.add_argument("--xmax", type=int, default=-1,
@@ -57,7 +57,6 @@ def main():
 
     # Load the image
     image = sitk.GetArrayFromImage(sitk.ReadImage(str(input_image)))
-    #print("size of input image = ",image.shape)
 
     # Create the mosaic grid object
     mosaic = MosaicGrid(image, tile_shape=tile_shape)
@@ -67,13 +66,9 @@ def main():
 
     # Save the cropped mosaic grid
     img = mosaic.image
-    #print("size of output image = ",img.shape)
-    output_image.parent.mkdir(exist_ok=True, parents=True)
-
-    # Save the grid and mask
     img = sitk.GetImageFromArray(img)
+    output_image.parent.mkdir(exist_ok=True, parents=True)
     sitk.WriteImage(img, str(output_image))
-
 
 if __name__ == "__main__":
     main()
