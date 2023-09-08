@@ -1,3 +1,6 @@
+#! /usr/bin/env python
+# -*- coding: utf-8 -*-
+
 import SimpleITK as sitk
 import numpy as np
 from skimage.feature import peak_local_max

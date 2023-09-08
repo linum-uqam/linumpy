@@ -92,6 +92,5 @@ def main():
     output_file.parent.mkdir(exist_ok=True, parents=True)
     sitk.WriteImage(sitk.GetImageFromArray(fixed_image), str(output_file))
 
-
 if __name__ == "__main__":
     main()

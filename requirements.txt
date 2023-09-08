@@ -9,3 +9,5 @@ tables==3.8.0
 pybasic-illumination-correction==0.1.1
 dipy==1.7.0
 scikit-learn==1.2.2
+ome-zarr==0.8.0
+zarr==2.16.1
