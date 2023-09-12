@@ -20,7 +20,7 @@ def _build_arg_parser():
                    help="Full path to the .zarr directory")
     p.add_argument("--resolution_xy", type=float, default=3.0,
                    help="Lateral (xy) resolution in micron. (default=%(default)s)")
-    p.add_argument("--resolution_z", type=float, default=3.5,
+    p.add_argument("--resolution_z", type=float, default=200,
                    help="Axial (z) resolution in micron. (default=%(default)s)")
     return p
 
@@ -41,27 +41,41 @@ def create_transformation_dict(scales, levels):
         coord_transforms.append(transform_dict)
     return coord_transforms
 
+def generate_axes_dict():
+    """
+    Generate the axes dictionary for the zarr file.
+
+    :return: The axes dictionary
+    """
+    axes = [
+        {"name": "z", "type": "space", "unit": "micrometer"},
+        {"name": "y", "type": "space", "unit": "micrometer"},
+        {"name": "x", "type": "space", "unit": "micrometer"}
+    ]
+    return axes
+
 def main():
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
     path = Path(args.zarr_directory)
     path.parent.mkdir(exist_ok=True, parents=True)   
-    scales = (args.resolution_xy, args.resolution_xy, args.resolution_z)
+    scales = (args.resolution_z, args.resolution_xy, args.resolution_xy)
 
     # Load the data
     img=nib.load(args.input_image)
     img_array=img.get_fdata()
+    img_array=img_array.astype(np.float32)
 
     # Prepare the chunk size
     dim = np.shape(img_array)
-    chunk_size_z = 1; chunk_size_y = dim[1]; chunk_size_x = dim[2]    
+    chunk_size_z = 1; chunk_size_y = 32; chunk_size_x = 32    
     chunks = (chunk_size_z, chunk_size_y, chunk_size_x)
 
     # write the image data
     store = parse_url(path, mode="w").store
     root = zarr.open_group(path, mode="w")
-    write_image(image=img_array, group=root, axes="zyx",
+    write_image(image=img_array, group=root, axes=generate_axes_dict(),
                 coordinate_transformations=create_transformation_dict(scales, 5),
                 storage_options=dict(chunks=chunks))
 
