@@ -13,9 +13,6 @@ from skimage.exposure import match_histograms
 from pathlib import Path
 import random
 
-
-# TODO: Use seed for the random generator for reproducibility?
-
 def _build_arg_parser():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
@@ -32,9 +29,10 @@ def _build_arg_parser():
                    help="Maximum empty pixel fraction within an overlap to tolerate (default=%(default)s)")
     p.add_argument("--n_samples", type=int, default=512,
                    help="Maximum number of tile pairs to use for the optimization. (default=%(default)s)")
+    p.add_argument("--seed", type=int,
+                   help="Seed value for the random random number generator")
 
     return p
-
 
 def main():
     # Parse arguments
@@ -77,6 +75,8 @@ def main():
     tile_count = 0
 
     # Loop over mosaics (random order)
+    if args.seed is not None:
+        random.seed=args.seed
     mosaic_idx = list(range(len(mosaics)))
     random.shuffle(mosaic_idx)
     for m_id in mosaic_idx:
