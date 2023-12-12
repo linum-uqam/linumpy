@@ -18,7 +18,7 @@ def _build_arg_parser():
                    help="Full path to the output .nii image, with axis in ZYX order")
     p.add_argument("--resolution_xy", type=float, default=3.0,
                    help="Lateral (xy) resolution in micron. (default=%(default)s)")
-    p.add_argument("--resolution_z", type=float, default=3.5,
+    p.add_argument("--resolution_z", type=float, default=200,
                    help="Axial (z) resolution in microns. (default=%(default)s)")
     return p
 
