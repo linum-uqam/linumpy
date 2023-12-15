@@ -33,7 +33,7 @@ def main():
 
     # Detect the slices ids
     files = [Path(x) for x in args.input_images]
-    pattern = r"slice_(\d+)_.*"
+    pattern = r".*z(\d+)_.*"
     slice_ids = []
     for f in files:
         foo = re.match(pattern, f.name)
@@ -41,14 +41,28 @@ def main():
 
     # Preparing the volume
     n_slices = len(slice_ids)
-    img = sitk.GetArrayFromImage(sitk.ReadImage(files[0]))
-    n_rows, n_cols = img.shape
+
+    # Detect the mosaic shape (not all mosaic grid will have the same size)
+    n_rows = 0
+    n_cols = 0
+    for f in files:
+        img = sitk.GetArrayFromImage(sitk.ReadImage(f))
+        if img.shape[0] > n_rows:
+            n_rows = img.shape[0]
+        if img.shape[1] > n_cols:
+            n_cols = img.shape[1]
     volume = np.zeros((n_rows, n_cols, n_slices), dtype=img.dtype)
 
     # Add the slices to the volume
     for z, f in zip(slice_ids, files):
         img = sitk.GetArrayFromImage(sitk.ReadImage(f))
-        volume[:, :, z] = img
+
+        # Zero padding
+        pad_r_0 = (n_rows - img.shape[0]) // 2
+        pad_r_1 = (n_rows - img.shape[0] - pad_r_0)
+        pad_c_0 = (n_cols - img.shape[1]) // 2
+        pad_c_1 = (n_cols - img.shape[1] - pad_c_0)
+        volume[:, :, z] = np.pad(img, ((pad_r_0, pad_r_1), (pad_c_0, pad_c_1)))
 
     # Save this volume
     affine = np.eye(4)
