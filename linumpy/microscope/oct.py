@@ -1,24 +1,22 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-"""
-Methods to work with the OCT raw data. This assumes that the fringes were already reconstructed.
-"""
-
 from pathlib import Path
+from typing import Union
 
 import numpy as np
+from scipy.ndimage import convolve1d
+
+
+# TODO: consider the 'n_repeat' parameter when loading the data
 
 
 class OCT:
-    def __init__(self):
-        """ Spectral-domain OCT class to reconstruct the data """
+    def __init__(self, directory: str):
+        """ Spectral-domain OCT class to reconstruct the data"""
+        self.directory = Path(directory)
+        self.info_filename = self.directory / "info.txt"
         self.info = {}
 
-        # Scan parameters
-        self.n_samples = 2048  # Number of spectrometer samples
-        self.low_depth_crop = 0  # Pixel
-        self.high_depth_crop = self.n_samples // 2  # Pixel
+        # Read the scan info
+        self.read_scan_info(self.info_filename)
 
     def read_scan_info(self, filename: str):
         """ Read the scan information file
@@ -28,11 +26,11 @@ class OCT:
             Path to the scan_file written by the OCT (.txt)
         """
         with open(filename, "r") as f:
-            content = f.read()
+            foo = f.read()
 
         # Process the file input
-        content = content.split("\n")
-        for elem in content:
+        foo = foo.split("\n")
+        for elem in foo:
             hello = elem.split(": ")
             if len(hello) == 1:
                 continue
@@ -43,23 +41,20 @@ class OCT:
                 val = int(val)
             self.info[key] = val
 
-    def load_image(self, directory: str) -> np.ndarray:
-        """ Load reconstructed OCT data
+    def load_image(self, crop: bool = True, galvo_shift: Union[bool, int] = False) -> np.ndarray:
+        """ Load an image dataset
         Parameters
         ----------
-        directory
-            Full path to a directory containing the oct data as .bin files
-
+        crop
+            If crop is True, the galvo returns will be cropped from the volume
+        galvo_shift
+            If galvo_shift is True, the galvo return position will be evaluated from the data. If a integer shift is
+            given, this value will be used to fix the galvo return position.
         Notes
         -----
-        The directory should also contain the info.txt file
+        * The returned volume is in this order : z, x (a-line), y (b-scan)
+        * This method doesn't consider repeated a-lines or b-scans
         """
-        dir_name = Path(directory)
-
-        # Read the information
-        info_filename = dir_name / "info.txt"
-        self.read_scan_info(info_filename)
-
         # Create numpy array
         # n_avg = self.info['n_repeat']  # TODO: use the number of averages when loading the data
         n_alines = self.info['nx']
@@ -69,7 +64,7 @@ class OCT:
         n_z = self.info["bottom_z"] - self.info["top_z"] + 1
 
         # Load the fringe
-        files = list(dir_name.rglob("image_*.bin"))
+        files = list(self.directory.rglob("image_*.bin"))
         files.sort()
         vol = None
         for file in files:
@@ -82,6 +77,76 @@ class OCT:
             else:
                 vol = np.concatenate((vol, foo), axis=2)
 
+        # Compensate the galvo shift
+        if isinstance(galvo_shift, bool) and galvo_shift is True:
+            galvo_shift = self.detect_galvo_shift(vol)
+            vol = np.roll(vol, galvo_shift, axis=1)
+        elif isinstance(galvo_shift, int) and galvo_shift != 0:
+            vol = np.roll(vol, galvo_shift, axis=1)
+
         # Crop the volume
-        vol = vol[:, 0:n_alines, 0:n_bscans]
+        if crop:
+            vol = vol[:, 0:n_alines, 0:n_bscans]
+
         return vol
+
+    def detect_galvo_shift(self, vol: np.ndarray = None) -> int:
+        """Detect the galvo shift necessary to place the galvo return at the end of the bscans stack"""
+        if vol is None:
+            vol = self.load_image(crop=False)
+        bscan = vol.mean(axis=(0, 2))
+        n_extra = self.info['n_extra']
+        kernel = np.ones([n_extra, ])
+        response = convolve1d(1 - bscan, kernel, mode="wrap")
+        pos = np.argmax(response) - n_extra // 2
+        galvo_shift = int(-pos - n_extra - 1)
+
+        return galvo_shift
+
+    @property
+    def position_available(self) -> bool:
+        """True if the position is available in the info.txt file"""
+        return 'stage_x_pos_mm' in self.info
+
+    @property
+    def dimension(self) -> tuple[float, float, float]:
+        """OCT physical dimension in mm from the info.txt file. Will be (1, 1, 1) if not found"""
+        try:
+            nz = self.shape[2]
+            rz = self.resolution[2]
+            return self.info['width'] / 1000.0, self.info['height'] / 1000.0, nz * rz
+        except KeyError:
+            return 1, 1, 1
+
+    @property
+    def position(self) -> tuple[float, float, float]:
+        """OCT physical position in mm from the info.txt file. Will be (0, 0, 0) if not found"""
+        try:
+            x = float(self.info['stage_x_pos_mm'])
+            y = float(self.info['stage_y_pos_mm'])
+            z = float(self.info['stage_z_pos_mm'])
+            return x, y, z
+        except KeyError:
+            return 0, 0, 0
+
+    @property
+    def resolution(self) -> tuple[float, float, float]:
+        """OCT physical resolution in mm from the info.txt file. Will be (1, 1, 1) if not found"""
+        try:
+            rx = self.info['width'] / self.info['nx'] / 1000.0
+            ry = self.info['height'] / self.info['ny'] / 1000.0
+            rz = 3.5 / 1000.0  # TODO: add this info to the info.txt file
+            return rx, ry, rz
+        except KeyError:
+            return 1, 1, 1
+
+    @property
+    def shape(self) -> tuple[float, float, float]:
+        """OCT shape in pixel from the info.txt file. Returns (nx, ny, nz)"""
+        nx = self.info['nx']
+        ny = self.info['ny']
+        if 'bottom_z' in self.info and 'top_z' in self.info:
+            nz = self.info['bottom_z'] - self.info['top_z'] + 1
+        else:
+            nz = self.n_samples // 2
+        return nx, ny, nz
