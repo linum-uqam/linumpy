@@ -1,8 +1,8 @@
 #!/usr/bin/env nextflow
 nextflow.enable.dsl=2
 
-params.input_directory = "/home/jreynaud/scratch/mosaic_grids"
-params.output_directory = "/home/jreynaud/scratch/reconstructed_data"
+params.input_directory = "/home/joel/data/2023-12-08-F3-Multiorientation-coronal-sagittal-45/mosaic_grids"
+params.output_directory = "/home/joel/data/2023-12-08-F3-Multiorientation-coronal-sagittal-45/reconstruction_2d"
 
 params.xmin = 20
 params.xmax = 380
@@ -138,7 +138,7 @@ process zarr_conversion {
 
 workflow{
     // Detect every tile directory
-    slices = channel.fromPath(params.input_directory + "/*mosaic_grid.nii")
+    slices = channel.fromPath(params.input_directory + "/mosaic_grid_z*.tiff")
 
     // Remove compressed stripes caused by the raster scan
     crop_tiles(slices.flatten())
