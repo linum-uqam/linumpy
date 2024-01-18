@@ -35,7 +35,7 @@ def main():
     elif output_volume.name.endswith(".nii.gz"):
         extension = ".nii.gz"
     assert extension in [".nii", ".nii.gz"], "The output file must be a .nii or .nii.gz file."
-    resolution = args.resolution
+    resolution = args.resolution / 1000.0 # Resolution in mm
 
     # Load the nifti volume
     vol = sitk.ReadImage(str(input_volume))
