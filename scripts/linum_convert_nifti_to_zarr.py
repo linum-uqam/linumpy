@@ -9,7 +9,7 @@ import dask.array as da
 import nibabel as nib
 import numpy as np
 
-from linumpy.conversion import save_zarr
+from linumpy.io.zarr import save_zarr
 
 
 def _build_arg_parser():

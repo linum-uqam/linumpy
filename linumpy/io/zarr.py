@@ -12,10 +12,8 @@ from ome_zarr.scale import Scaler, ArrayLike
 from ome_zarr.writer import write_image
 from skimage.transform import resize
 
-base_key = "reconstructed_frame"
-
 """ 
-    This file contains functions for converting between different file formats.
+    This file contains functions for working with zarr files
 """
 
 
