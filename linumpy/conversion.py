@@ -25,8 +25,8 @@ class CustomScaler(Scaler):
     A custom scaler that can downsample 3D images for OME-Zarr Conversion
     """
 
-    def __init__(self, downscale=2, method="nearest"):
-        super().__init__(downscale=downscale, method=method)
+    def __init__(self, downscale=2, method="nearest", max_layer=5):
+        super().__init__(downscale=downscale, method=method, max_layer=max_layer)
 
     def nearest(self, base: np.ndarray) -> List[np.ndarray]:
         """
@@ -100,7 +100,7 @@ def create_transformation_dict(scales, levels):
     :return:
     """
     coord_transforms = []
-    for i in range(levels):
+    for i in range(levels+1):
         transform_dict = [{
             "type": "scale",
             "scale": [scales[0] * (2 ** i), scales[1] * (2 ** i), scales[2] * (2 ** i)]
@@ -144,5 +144,5 @@ def save_zarr(data, zarr_file, scales=(6.5, 6.5, 6.5), chunks=(32, 32, 32), n_le
     root = zarr.group(store=store)
     write_image(image=data, group=root, axes=generate_axes_dict(),
                 coordinate_transformations=create_transformation_dict(scales, n_levels),
-                storage_options=dict(chunks=chunks), scaler=CustomScaler(downscale=2, method="nearest"))
+                storage_options=dict(chunks=chunks), scaler=CustomScaler(downscale=2, method="nearest", max_layer=n_levels-1))
     print("Done!")

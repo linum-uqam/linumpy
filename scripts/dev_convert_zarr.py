@@ -24,7 +24,7 @@ omezarr_directory = Path("G:/frans/2024-01-12-S9-Coronal/dev_tiles_z05.ome-zarr"
 # Create a zarr.zip?
 # Read the mosaic metadat and use for ome-zarr
 chunk_size = tuple([128] * 3)
-n_levels = 4
+n_levels = 2 # FIXME: we cannot use a different number of levels, it creates this error : ValueError: coordinate_transformations count: 4 must match datasets 5
 
 # Analyze the tiles
 tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory)
