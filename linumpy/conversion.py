@@ -1,5 +1,5 @@
-import os
 import shutil
+from pathlib import Path
 from typing import List, Tuple, Any, Callable, Union
 
 import dask.array as da
@@ -11,7 +11,6 @@ from ome_zarr.io import parse_url
 from ome_zarr.scale import Scaler, ArrayLike
 from ome_zarr.writer import write_image
 from skimage.transform import resize
-from pathlib import Path
 
 base_key = "reconstructed_frame"
 
@@ -100,7 +99,7 @@ def create_transformation_dict(scales, levels):
     :return:
     """
     coord_transforms = []
-    for i in range(levels+1):
+    for i in range(levels):
         transform_dict = [{
             "type": "scale",
             "scale": [scales[0] * (2 ** i), scales[1] * (2 ** i), scales[2] * (2 ** i)]
@@ -116,17 +115,19 @@ def generate_axes_dict():
     :return: The axes dictionary
     """
     axes = [
-        {"name": "x", "type": "space", "unit": "micrometer"},
-        {"name": "y", "type": "space", "unit": "micrometer"},
-        {"name": "z", "type": "space", "unit": "micrometer"}
+        {"name": "z", "type": "space", "unit": "mm"},
+        {"name": "y", "type": "space", "unit": "mm"},
+        {"name": "x", "type": "space", "unit": "mm"}
     ]
     return axes
-def save_zarr(data, zarr_file, scales=(6.5, 6.5, 6.5), chunks=(32, 32, 32), n_levels=5, overwrite=True):
+
+
+def save_zarr(data, zarr_file, scales=(1e-3, 1e-3, 1e-3), chunks=(128, 128, 128), n_levels=5, overwrite=True):
     """
     Save a numpy array to a zarr file.
     :param data: The data to save.
     :param zarr_file: The zarr file to save to.
-    :param scales: The resolution of the image, in z y x order.
+    :param scales: The resolution in mm of the volume, in z y x order.
     :param chunks: The chunk size to use.
     :return:
     """
@@ -140,9 +141,10 @@ def save_zarr(data, zarr_file, scales=(6.5, 6.5, 6.5), chunks=(32, 32, 32), n_le
 
     directory.mkdir(exist_ok=overwrite, parents=True)
     store = parse_url(zarr_file, mode="w").store
-
     root = zarr.group(store=store)
+    scaler = CustomScaler(downscale=2, method="nearest", max_layer=n_levels)
+
     write_image(image=data, group=root, axes=generate_axes_dict(),
-                coordinate_transformations=create_transformation_dict(scales, n_levels),
-                storage_options=dict(chunks=chunks), scaler=CustomScaler(downscale=2, method="nearest", max_layer=n_levels-1))
+                coordinate_transformations=create_transformation_dict(scales, n_levels + 1),
+                storage_options=dict(chunks=chunks), scaler=scaler)
     print("Done!")
