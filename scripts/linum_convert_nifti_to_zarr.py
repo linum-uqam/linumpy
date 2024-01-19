@@ -3,81 +3,49 @@
 
 """Convert a nifti volume into a .zarr volume"""
 
+import argparse
+
+import dask.array as da
 import nibabel as nib
 import numpy as np
-from ome_zarr.io import parse_url
-from ome_zarr.writer import write_image
-import zarr
-from pathlib import Path
-import argparse
+
+from linumpy.conversion import save_zarr
+
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_image",
-                   help="Full path to a 3D .nii image, with axis in ZYX order.")
+    p.add_argument("input",
+                   help="Full path to a 3D .nii file")
     p.add_argument("zarr_directory",
                    help="Full path to the .zarr directory")
-    p.add_argument("--resolution_xy", type=float, default=3.0,
-                   help="Lateral (xy) resolution in micron. (default=%(default)s)")
-    p.add_argument("--resolution_z", type=float, default=200,
-                   help="Axial (z) resolution in micron. (default=%(default)s)")
+    p.add_argument("--chunk_size", type=int, default=128,
+                   help="Chunk size in pixel (default=%(default)s)")
+    p.add_argument("--n_levels", type=int, default=5,
+                   help="Number of levels in the pyramid (default=%(default)s)")
     return p
 
-def create_transformation_dict(scales, levels):
-    """
-    Create a dictionary with the transformation information for 3D images.
-
-    :param scales: The scale of the image, in z y x order.
-    :param levels: The number of levels in the pyramid.
-    :return:
-    """
-    coord_transforms = []
-    for i in range(levels):
-        transform_dict = [{
-            "type": "scale",
-            "scale": [scales[0] * (2 ** i), scales[1] * (2 ** i), scales[2] * (2 ** i)]
-        }]
-        coord_transforms.append(transform_dict)
-    return coord_transforms
-
-def generate_axes_dict():
-    """
-    Generate the axes dictionary for the zarr file.
-
-    :return: The axes dictionary
-    """
-    axes = [
-        {"name": "z", "type": "space", "unit": "micrometer"},
-        {"name": "y", "type": "space", "unit": "micrometer"},
-        {"name": "x", "type": "space", "unit": "micrometer"}
-    ]
-    return axes
 
 def main():
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
-    path = Path(args.zarr_directory)
-    path.parent.mkdir(exist_ok=True, parents=True)   
-    scales = (args.resolution_z, args.resolution_xy, args.resolution_xy)
+
+    # Prepare the zarr information
+    chunks = tuple([args.chunk_size] * 3)
+    img = nib.load(str(args.input))
+    resolution = np.array(img.header['pixdim'][1:4]) # Resolution in mm
 
     # Load the data
-    img=nib.load(args.input_image)
-    img_array=img.get_fdata()
-    img_array=img_array.astype(np.float32)
+    vol = img.get_fdata()
 
-    # Prepare the chunk size
-    dim = np.shape(img_array)
-    chunk_size_z = 1; chunk_size_y = 32; chunk_size_x = 32    
-    chunks = (chunk_size_z, chunk_size_y, chunk_size_x)
+    # Invert the x and z axis
+    vol = np.moveaxis(vol, (0, 1, 2), (2, 1, 0))
+    resolution = resolution[::-1]
 
-    # write the image data
-    store = parse_url(path, mode="w").store
-    root = zarr.open_group(path, mode="w")
-    write_image(image=img_array, group=root, axes=generate_axes_dict(),
-                coordinate_transformations=create_transformation_dict(scales, 5),
-                storage_options=dict(chunks=chunks))
+    # Save the zarr
+    save_zarr(da.from_array(vol, chunks=chunks), args.zarr_directory, scales=resolution, chunks=chunks, n_levels=args.n_levels)
+
 
 if __name__ == "__main__":
     main()
