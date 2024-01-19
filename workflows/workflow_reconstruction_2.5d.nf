@@ -135,16 +135,16 @@ process resample_stack {
         """
 }
 
-// TODO: Convert the stack to .zarr format for visualization
-process zarr_conversion {
+// Convert the stack to .zarr format for visualization
+process convert_to_zarr {
     input:
-        path(stack_zyx)
+        path stack
     output:
-        path("stack.zarr")
-    publishDir path: "${params.output_directory}", mode: 'copy'
+        path "stack.ome_zarr"
+    publishDir path: "${params.output_directory}", mode: 'move'
     script:
         """
-        linum_convert_nifti_to_zarr.py $stack_zyx stack.zarr --resolution_xy ${params.spacing_xy} --resolution_z ${params.spacing_z}
+        linum_convert_nifti_to_zarr.py $stack stack.ome_zarr
         """
 }
 
@@ -176,5 +176,5 @@ workflow{
     resample_stack(stack_mosaic.out)
 
     // Convert the stack to .zarr format for visualization
-
+    convert_to_zarr(stack_mosaic.out)
 }
