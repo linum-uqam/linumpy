@@ -23,6 +23,8 @@ def _build_arg_parser():
                    help="Chunk size in pixel (default=%(default)s)")
     p.add_argument("--n_levels", type=int, default=5,
                    help="Number of levels in the pyramid (default=%(default)s)")
+    p.add_argument("--normalize", action="store_true",
+                     help="Normalize the data (default=%(default)s)")
     return p
 
 
@@ -37,14 +39,20 @@ def main():
     resolution = np.array(img.header['pixdim'][1:4]) # Resolution in mm
 
     # Load the data
-    vol = img.get_fdata()
+    vol = img.get_fdata(dtype=np.float32) # Neuroglancer doesn't support float64
+
+    # Normalize the data
+    if args.normalize:
+        vol -= vol.min()
+        vol /= vol.max()
 
     # Invert the x and z axis
     vol = np.moveaxis(vol, (0, 1, 2), (2, 1, 0))
+    vol = da.from_array(vol, chunks=chunks)
     resolution = resolution[::-1]
 
     # Save the zarr
-    save_zarr(da.from_array(vol, chunks=chunks), args.zarr_directory, scales=resolution, chunks=chunks, n_levels=args.n_levels)
+    save_zarr(vol, args.zarr_directory, scales=resolution, chunks=chunks, n_levels=args.n_levels)
 
 
 if __name__ == "__main__":
