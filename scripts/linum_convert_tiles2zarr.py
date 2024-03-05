@@ -11,6 +11,7 @@ import zarr
 from tqdm.auto import tqdm
 import shutil
 
+from skimage.transform import resize
 from linumpy import reconstruction
 from linumpy.io.zarr import save_zarr
 from linumpy.microscope.oct import OCT
@@ -32,6 +33,7 @@ flip_lr = False
 flip_ud = False
 crop = False
 n_levels = 5
+output_resolution = 10.0 # micron per pixel (minimum resolution). If -1, use keep the raw data resolution
 
 
 def preprocess_volume(oct) -> np.ndarray:
@@ -63,8 +65,16 @@ n_mz = mz_max - mz_min + 1
 oct = OCT(tiles[0])
 vol = preprocess_volume(oct)
 resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
-mosaic_shape = [vol.shape[0], n_mx * vol.shape[1], n_my * vol.shape[2]]
-chunk_size = [vol.shape[2], vol.shape[0], vol.shape[1]]
+
+
+# Compute the rescaled tile size based on the minimum target output resolution
+if output_resolution != -1:
+    target_resolution = [output_resolution, output_resolution, output_resolution]
+    tile_size = [int(vol.shape[i] * resolution[i] * 1000 / target_resolution[i]) for i in range(3)]
+else:
+    tile_size = vol.shape
+mosaic_shape = [tile_size[0], n_mx * tile_size[1], n_my * tile_size[2]]
+
 
 # Assemble an initial zarr
 store = zarr.NestedDirectoryStore(tmp_zarr_directory)
@@ -72,13 +82,18 @@ root = zarr.group(store=store, overwrite=True)
 ome_root = zarr.group(store=zarr.NestedDirectoryStore(tmp_zarr_directory), overwrite=True)
 
 # Add a group
-mosaic = root.zeros(f"slice_{z:02d}", shape=mosaic_shape, chunks=oct.shape, dtype=np.float32)
+mosaic = root.zeros(f"slice_{z:02d}", shape=mosaic_shape, chunks=tile_size, dtype=np.float32)
 
 for i in tqdm(range(len(tiles)), desc="Reading tiles"):
     f = tiles[i]
     mx, my, mz = tiles_pos[i]
     oct = OCT(f)
     vol = preprocess_volume(oct)
+
+    # Rescale the volume
+    if output_resolution != -1:
+        vol = resize(vol, tile_size, anti_aliasing=True, order=1, preserve_range=True)
+
     rmin = mx * vol.shape[1]
     cmin = my * vol.shape[2]
     rmax = rmin + vol.shape[1]
