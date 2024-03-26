@@ -5,6 +5,7 @@
 
 import argparse
 import multiprocessing
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -24,7 +25,7 @@ def _build_arg_parser():
                    help="Full path to a directory where to save the output tiff stack")
     p.add_argument("-r", "--resolution", type=float, default=10.0,
                    help="Output isotropic resolution in micron per pixel. (default=%(default)s)")
-    p.add_argument("--basename", default="mosaic_grid_3d_",
+    p.add_argument("--basename", default="mosaic_grid_3d",
                    help="Basename of the output file (default=%(default)s)")
     p.add_argument("-z", "--slice", type=int, default=0,
                    help="Slice to process (default=%(default)s)")
@@ -111,7 +112,8 @@ def main():
 
     # Create the zarr persistent array
     zarr_file = output_directory / filename
-    synchronizer = zarr.ProcessSynchronizer('mosaic_grid_3d.sync')
+    process_sync_file = output_directory / filename.replace(".zarr", ".sync")
+    synchronizer = zarr.ProcessSynchronizer(process_sync_file)
     mosaic = zarr.open(zarr_file, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=tile_size,
                        synchronizer=synchronizer)
 
@@ -129,6 +131,9 @@ def main():
     # Process the tiles in parallel
     with multiprocessing.Pool(n_cpus) as pool:
         pool.map(process_tile, params)
+
+    # Remove the process sync file
+    shutil.rmtree(process_sync_file)
 
 
 if __name__ == "__main__":
