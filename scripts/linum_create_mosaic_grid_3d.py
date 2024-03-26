@@ -4,23 +4,16 @@
 """Convert 3D OCT tiles to a 3D mosaic grid"""
 
 import argparse
+import multiprocessing
 from pathlib import Path
 
-import imageio as io
 import numpy as np
+import zarr
 from skimage.transform import resize
-from tqdm.auto import tqdm
 
 from linumpy import reconstruction
 from linumpy.microscope.oct import OCT
-import zarr
 
-
-# Tasks
-# TODO: use dask and data loader to reduce IO and reduce memory usage.
-# TODO: use ome-tiff format to keep metadata about the resolution, etc.
-# TODO: parallelize the loading process.
-# TODO: use the zarr format instead of tiff.
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
@@ -47,6 +40,31 @@ def preprocess_volume(vol: np.ndarray) -> np.ndarray:
     vol = np.flip(vol, axis=1)
     return vol
 
+
+def process_tile(params: dict):
+    """Process a tile and add it to the mosaic"""
+    f = params["file"]
+    mx, my, mz = params["tile_pos"]
+    crop = params["crop"]
+    tile_size = params["tile_size"]
+    mosaic = params["mosaic"]
+
+    # Load the tile
+    oct = OCT(f)
+    vol = oct.load_image(crop=crop)
+    vol = preprocess_volume(vol)
+
+    # Rescale the volume
+    vol = resize(vol, tile_size, anti_aliasing=True, order=1, preserve_range=True)
+
+    # Compute the tile position
+    rmin = mx * vol.shape[1]
+    cmin = my * vol.shape[2]
+    rmax = rmin + vol.shape[1]
+    cmax = cmin + vol.shape[2]
+    mosaic[:, rmin:rmax, cmin:cmax] = vol
+
+
 def main():
     # Parse arguments
     p = _build_arg_parser()
@@ -59,6 +77,7 @@ def main():
     z = args.slice
     output_resolution = args.resolution
     crop = not args.keep_galvo_return
+    n_cpus = multiprocessing.cpu_count() - 1
 
     # Analyze the tiles
     tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
@@ -86,32 +105,30 @@ def main():
 
     # Generate a file name that contains info about the resolution and tiles shape
     if output_resolution == -1:
-        filename = f"{basename}_z{z:02d}_res_{resolution}_tiles_{tile_size[0]}x{tile_size[1]}x{tile_size[2]}.tiff"
+        filename = f"{basename}_z{z:02d}_res_{resolution}_tiles_{tile_size[0]}x{tile_size[1]}x{tile_size[2]}.zarr"
     else:
-        filename = f"{basename}_z{z:02d}_res{output_resolution:.1f}um_tiles_{tile_size[0]}x{tile_size[1]}x{tile_size[2]}.tiff"
+        filename = f"{basename}_z{z:02d}_res{output_resolution:.1f}um_tiles_{tile_size[0]}x{tile_size[1]}x{tile_size[2]}.zarr"
 
-    # Prepare the mosaic
-    mosaic = np.zeros(mosaic_shape, dtype=np.float32)
-    for i in tqdm(range(len(tiles)), desc="Reading tiles"):
-        f = tiles[i]
-        mx, my, mz = tiles_pos[i]
-        oct = OCT(f)
-        vol = oct.load_image(crop=crop)
-        vol = preprocess_volume(vol)
+    # Create the zarr persistent array
+    zarr_file = output_directory / filename
+    synchronizer = zarr.ProcessSynchronizer('mosaic_grid_3d.sync')
+    mosaic = zarr.open(zarr_file, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=tile_size,
+                       synchronizer=synchronizer)
 
-        # Rescale the volume
-        vol = resize(vol, tile_size, anti_aliasing=True, order=1, preserve_range=True)
+    # Create a params dictionary for every tile
+    params = []
+    for i in range(len(tiles)):
+        params.append({
+            "file": tiles[i],
+            "tile_pos": tiles_pos[i],
+            "crop": crop,
+            "tile_size": tile_size,
+            "mosaic": mosaic
+        })
 
-        # Compute the tile position
-        rmin = mx * vol.shape[1]
-        cmin = my * vol.shape[2]
-        rmax = rmin + vol.shape[1]
-        cmax = cmin + vol.shape[2]
-        mosaic[:, rmin:rmax, cmin:cmax] = vol
-
-    # Save the mosaic as a tiff stack
-    output_file = output_directory / filename
-    io.volwrite(output_file, mosaic)
+    # Process the tiles in parallel
+    with multiprocessing.Pool(n_cpus) as pool:
+        pool.map(process_tile, params)
 
 
 if __name__ == "__main__":
