@@ -14,6 +14,7 @@ from skimage.transform import resize
 
 from linumpy import reconstruction
 from linumpy.microscope.oct import OCT
+from tqdm.auto import tqdm
 
 
 def _build_arg_parser():
@@ -130,7 +131,8 @@ def main():
 
     # Process the tiles in parallel
     with multiprocessing.Pool(n_cpus) as pool:
-        pool.map(process_tile, params)
+        results = tqdm(pool.imap(process_tile, params), total=len(params))
+        tuple(results)
 
     # Remove the process sync file
     shutil.rmtree(process_sync_file)
