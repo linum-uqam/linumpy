@@ -13,8 +13,6 @@ from tqdm.auto import tqdm
 
 
 # TODO: add option to export the flatfields and darkfields
-# TODO: add option to estimate the darkfield
-# TODO: add default parameter to control the number of CPU for this task.
 # TODO: parallelize the processing of the tiles
 
 def _build_arg_parser():
@@ -99,6 +97,7 @@ def main():
 
     # Remove the process sync file
     shutil.rmtree(process_sync_file)
+
 
 if __name__ == "__main__":
     main()
