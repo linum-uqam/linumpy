@@ -22,12 +22,10 @@ def _build_arg_parser():
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("tiles_directory",
                    help="Full path to a directory containing the tiles to process")
-    p.add_argument("output_directory",
-                   help="Full path to a directory where to save the output tiff stack")
+    p.add_argument("output_zarr",
+                   help="Full path to the output zarr file")
     p.add_argument("-r", "--resolution", type=float, default=10.0,
                    help="Output isotropic resolution in micron per pixel. (default=%(default)s)")
-    p.add_argument("--basename", default="mosaic_grid_3d",
-                   help="Basename of the output file (default=%(default)s)")
     p.add_argument("-z", "--slice", type=int, default=0,
                    help="Slice to process (default=%(default)s)")
     p.add_argument("--keep_galvo_return", action="store_true",
@@ -74,8 +72,7 @@ def main():
 
     # Parameters
     tiles_directory = Path(args.tiles_directory)
-    output_directory = Path(args.output_directory)
-    basename = args.basename
+    zarr_file = Path(args.output_zarr)
     z = args.slice
     output_resolution = args.resolution
     crop = not args.keep_galvo_return
@@ -105,15 +102,8 @@ def main():
         tile_size = [int(vol.shape[i] * resolution[i] * 1000 / output_resolution) for i in range(3)]
     mosaic_shape = [tile_size[0], n_mx * tile_size[1], n_my * tile_size[2]]
 
-    # Generate a file name that contains info about the resolution and tiles shape
-    if output_resolution == -1:
-        filename = f"{basename}_z{z:02d}_res_{resolution}_tiles_{tile_size[0]}x{tile_size[1]}x{tile_size[2]}.zarr"
-    else:
-        filename = f"{basename}_z{z:02d}_res{output_resolution:.1f}um_tiles_{tile_size[0]}x{tile_size[1]}x{tile_size[2]}.zarr"
-
     # Create the zarr persistent array
-    zarr_file = output_directory / filename
-    process_sync_file = output_directory / filename.replace(".zarr", ".sync")
+    process_sync_file = str(zarr_file).replace(".zarr", ".sync")
     synchronizer = zarr.ProcessSynchronizer(process_sync_file)
     mosaic = zarr.open(zarr_file, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=tile_size,
                        synchronizer=synchronizer)
