@@ -41,7 +41,7 @@ class OCT:
                 val = int(val)
             self.info[key] = val
 
-    def load_image(self, crop: bool = True, galvo_shift: Union[bool, int] = False) -> np.ndarray:
+    def load_image(self, crop: bool = True, galvo_shift: Union[bool, int] = False, camera_shift: bool = True) -> np.ndarray:
         """ Load an image dataset
         Parameters
         ----------
@@ -50,6 +50,9 @@ class OCT:
         galvo_shift
             If galvo_shift is True, the galvo return position will be evaluated from the data. If a integer shift is
             given, this value will be used to fix the galvo return position.
+        camera_shift
+            If camera_shift is True, the camera shift will be evaluated and compoensated from the data. This will detect
+            the first pixel of the scan that is always overexposed and shift the data to compensate for this.
         Notes
         -----
         * The returned volume is in this order : z, x (a-line), y (b-scan)
@@ -77,6 +80,16 @@ class OCT:
             else:
                 vol = np.concatenate((vol, foo), axis=2)
 
+        # Compensate the camera shift
+        if camera_shift:
+            img = vol.mean(axis=0)
+            pix_max = np.where(img == img.max())
+            cam_shift = pix_max[0][0]
+            vol = np.roll(vol, -cam_shift, axis=1)
+
+            # Replace the saturated pixel value by its neighbor
+            vol[:, 0, 0] = vol[:, 1, 0]
+
         # Compensate the galvo shift
         if isinstance(galvo_shift, bool) and galvo_shift is True:
             galvo_shift = self.detect_galvo_shift(vol)
@@ -87,7 +100,6 @@ class OCT:
         # Crop the volume
         if crop:
             vol = vol[:, 0:n_alines, 0:n_bscans]
-
         return vol
 
     def detect_galvo_shift(self, vol: np.ndarray = None) -> int:
