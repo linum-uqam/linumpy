@@ -12,6 +12,7 @@ from skimage.filters import threshold_otsu
 from skimage.exposure import match_histograms
 from pathlib import Path
 import random
+import zarr
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
@@ -24,7 +25,7 @@ def _build_arg_parser():
                    help="Initial overlap fraction between 0 and 1 for the optimization. (default=%(default)s)")
     p.add_argument("-t", "--tile_shape", nargs="+", type=int, default=400,
                    help="Tile shape in pixel. You can provide both the row and col shape if different. Additional "
-                        "shapes will be ignored. (default=%(default)s)")
+                        "shapes will be ignored. Note that this will be ignored if a zarr is provided. The zarr chunks will be used instead. (default=%(default)s)")
     p.add_argument("--maximum_empty_fraction", type=float, default=0.9,
                    help="Maximum empty pixel fraction within an overlap to tolerate (default=%(default)s)")
     p.add_argument("--n_samples", type=int, default=512,
@@ -45,6 +46,8 @@ def main():
         input_images = [input_images]
     output_transform = Path(args.output_transform)
     max_empty_fraction = args.maximum_empty_fraction
+
+    # Compute the tile shape
     tile_shape = args.tile_shape
     if isinstance(tile_shape, int):
         tile_shape = [tile_shape] * 2
@@ -52,15 +55,22 @@ def main():
         tile_shape = [tile_shape[0]] * 2
     elif len(tile_shape) > 2:
         tile_shape = tile_shape[0:2]
+    if input_images[0].endswith(".zarr"):
+        img = zarr.open(input_images[0], mode="r")
+        tile_shape = img.chunks
 
     # Check the output filename extensions
-    assert "".join(output_transform.suffixes) in [".npy"], "output_transform must be a .npy file"
+    assert output_transform.name.endswith(".npy"), "output_transform must be a .npy file"
 
     # Load all input images
     mosaics = []
     thresholds = []
     for file in input_images:
-        image = sitk.GetArrayFromImage(sitk.ReadImage(str(file)))
+        if file.endswith(".zarr"):
+            img = zarr.open(str(file), mode="r")
+            image = img[:]
+        else:
+            image = sitk.GetArrayFromImage(sitk.ReadImage(str(file)))
         mosaic = mosaic_grid.MosaicGrid(image, tile_shape=tile_shape, overlap_fraction=args.initial_overlap)
         mosaics.append(mosaic)
 
