@@ -7,9 +7,7 @@
 import argparse
 from pathlib import Path
 
-import SimpleITK as sitk
 import numpy as np
-import imageio as io
 import zarr
 
 from linumpy.utils.mosaic_grid import addVolumeToMosaic
