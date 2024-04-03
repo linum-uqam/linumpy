@@ -21,3 +21,11 @@ We highly recommend working in a [Python Virtual Environment].
 [Python Virtual Environment]:https://virtualenv.pypa.io/en/latest/
 
 **Linumpy** documentation is available: https://linumpy.readthedocs.io/en/latest/
+
+# Execution
+
+To execute the scripts, you can use the following command:
+
+```
+nextflow run workflow_soct_3d_slice_reconstruction.nf -resume
+```
