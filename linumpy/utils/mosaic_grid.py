@@ -502,30 +502,34 @@ class MosaicGrid():
 
 
 def addVolumeToMosaic(volume, pos, mosaic, blendingMethod='diffusion', factor=3, width=1.0):
-    """Add a single volume into a mosaic, using the specified blendingMethod.
+    """Add a single volume into a mosaic.
+    Parameters
+    ----------
+    volume : ndarray
+        Volume to add to the mosaic
+    pos : (2,) tuple
+        Position of this volume in mosaic coordinates (XY in pixel)
+    mosaic : ndarray
+        Mosaic in which the volume is stitched
+    blendingMethod : str, optional
+        Blending method to use (available : 'diffusion', 'average', 'none')
+    factor : int, optional
+        Subsampling factor used by the diffusion blending method.
+    width : float, optional
+        Blending transition width (between 0 and 1) used by the diffusion blending method, defaults to 1.0.
 
-    :param vol: Volume to add to the mosaic
-    :type vol: ndarray
-    :param pos: Position of this volume in mosaic coordinates
-    :type pos: (2,) tuple
-    :param mosaic: Mosaic in which the volume is stitched
-    :type mosaic: ndarray
-    :param blendingMethod: Blending method to use (available : 'diffusion', 'average', 'none'), defaults to 'diffusion'
-    :type blendingMethod: str, optional
-    :param factor: Subsampling factor used by the diffusion blending method.
-    :type factor: int, optional
-    :param width: Blending transition width (between 0 and 1) used by the diffusion blending method, defaults to 1.0.
-    :type width: float, optional
-    :return: Updated mosaic
-    :rtype: ndarray
+    Returns
+    -------
+    ndarray
+        The updated mosaic
     """
     # Mask representing the overlap of the mosaic and the new volume
     if volume.ndim == 3:
-        nx, ny, nz = volume.shape
+        nz, nx, ny = volume.shape
     elif volume.ndim == 2:
         nx, ny = volume.shape
         nz = 1
-        volume = np.reshape(volume, [nx, ny, nz])
+        volume = np.reshape(volume, [nz, nx, ny])
 
     # Position of tile in mosaic reference frame
     wx = int(pos[0])
@@ -536,8 +540,8 @@ def addVolumeToMosaic(volume, pos, mosaic, blendingMethod='diffusion', factor=3,
     else:
         wz = 0
 
-    if mosaic.ndim == 3 and mosaic.shape[2] != 1:
-        mask = mosaic[wx:wx + nx, wy:wy + ny, wz:wz + nz].mean(axis=2) > 0  # Todo : Use a 3D mask instead.
+    if mosaic.ndim == 3 and mosaic.shape[0] != 1:
+        mask = mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny].mean(axis=0) > 0
     else:
         mask = np.squeeze(mosaic[wx:wx + nx, wy:wy + ny, 0]) > 0
 
@@ -555,7 +559,8 @@ def addVolumeToMosaic(volume, pos, mosaic, blendingMethod='diffusion', factor=3,
     else:  # No overlap between mosaic and volume.
         alpha = np.ones([nx, ny])
 
-    if width > 0 and width < 1 and blendingMethod == 'diffusion':
+    # Adjusting the blending weights for the diffusion method
+    if 0 < width < 1 and blendingMethod == 'diffusion':
         lowThresh = 0.5 * (1.0 - width)
         highThresh = 1.0 - lowThresh
         alpha = (alpha - lowThresh) / float(highThresh - lowThresh)
@@ -563,14 +568,11 @@ def addVolumeToMosaic(volume, pos, mosaic, blendingMethod='diffusion', factor=3,
         alpha[alpha < 0] = 0
 
     # Repeating the matrix for each z slice
-    alpha = np.tile(np.reshape(alpha, [nx, ny, 1]), [1, 1, nz])
+    alpha = np.tile(np.reshape(alpha, [1, nx, ny]), [nz, 1, 1])
 
     # Adding the volume to the mosaic using the blending weights computed above
-    try:
-        mosaic[wx:wx + nx, wy:wy + ny, wz:wz + nz] = volume * alpha + (1 - alpha) * mosaic[wx:wx + nx, wy:wy + ny,
-                                                                                    wz:wz + nz]
-    except:
-        print("Unable to add volume")
+    mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny] = volume * alpha + (1 - alpha) * mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny]
+
     return mosaic
 
 
