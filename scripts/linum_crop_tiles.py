@@ -6,7 +6,6 @@
 import argparse
 from pathlib import Path
 import SimpleITK as sitk
-import matplotlib.pyplot as plt
 
 from linumpy.utils.mosaic_grid import MosaicGrid
 
