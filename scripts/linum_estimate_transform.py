@@ -6,7 +6,7 @@
 import argparse
 import numpy as np
 import SimpleITK as sitk
-from linumpy.utils import registration
+from linumpy.utils.registration import pairWisePhaseCorrelation
 from linumpy.utils import mosaic_grid
 from skimage.filters import threshold_otsu
 from skimage.exposure import match_histograms
@@ -119,7 +119,7 @@ def main():
                     o2 = match_histograms(o2, o1)
 
                     # Perform pairwise registration
-                    dx, dy = registration.pairWisePhaseCorrelation(o1, o2)
+                    dx, dy = pairWisePhaseCorrelation(o1, o2)
 
                     # Compute the tile position
                     if r == -1:
