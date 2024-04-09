@@ -329,7 +329,7 @@ def ITKRegistration(
     MI = reg.GetMetricValue()
     return deltas, MI
 
-def registration(im1, im2):
+def align_images_sitk(im1, im2):
     #plt.subplot(121)
     #plt.imshow(im1)
     #plt.subplot(122)
