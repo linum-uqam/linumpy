@@ -12,7 +12,6 @@ import re
 
 import nibabel as nib
 import numpy as np
-import tables
 from PIL import Image
 from pathlib import Path
 
@@ -172,11 +171,6 @@ def load_volumeByFilename(filename: str, volshape: tuple=(512, 512, 120), precis
         if len(np.unique(volume)) == 2 and convert2Bool:
             volume = volume.astype(bool)
 
-    elif extension in [".h5"]:
-        f = tables.open_file(filename)
-        volume = f.root.x
-        if len(np.unique(volume)) == 2 and convert2Bool:
-            volume = volume.astype(bool)
     elif extension in [".npy"]:
         volume = np.load(filename)
 
