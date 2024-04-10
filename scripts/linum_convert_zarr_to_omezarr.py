@@ -8,12 +8,13 @@ import argparse
 import zarr
 
 from linumpy.io.zarr import save_zarr
+from pathlib import Path
 
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input", nargs="+",
+    p.add_argument("input",
                    help="Full path to a 2D mosaic grid image.")
     p.add_argument("output",
                    help="Flatfield filename (must be a .nii or .nii.gz file).")
@@ -29,8 +30,8 @@ def main():
     args = p.parse_args()
 
     # Parameters
-    input_file = args.input
-    output_file = args.output
+    input_file = Path(args.input)
+    output_file = Path(args.output)
     resolution = args.resolution  # in microns
 
     foo = zarr.open(input_file, mode="r")

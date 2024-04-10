@@ -11,3 +11,4 @@ scikit-learn==1.2.2
 ome-zarr==0.8.0
 zarr==2.16.1
 napari==0.4.18
+napari-ome-zarr==0.5.2
