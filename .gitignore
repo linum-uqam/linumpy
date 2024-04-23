@@ -166,3 +166,6 @@ cython_debug/
 .nextflow/
 *.nextflow.log*
 workflows/work/
+
+# Macos
+.DS_Store
