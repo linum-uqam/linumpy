@@ -1,53 +1,70 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""Detects the tiles in a directory and generates a 2D AIP mosaic grid.
-
-.. note::
-    * The input directory must only contain the (reconstructed) volume tiles for a single slice.
-    * The script expects the tile filename to contain the x , y and z position (in that order)
-    * This script assumes that the tiles are volumes and that the last axis is the z axis for the average intensity projection (AIP)
-"""
+"""Convert 3D OCT tiles to a 2D mosaic grid"""
 
 import argparse
+import multiprocessing
+import shutil
 from pathlib import Path
 
-import SimpleITK as sitk
+import imageio as io
 import numpy as np
-from tqdm import tqdm
+import zarr
+from pqdm.processes import pqdm
+from skimage.transform import resize
 
-from linumpy.stitching import FileUtils
+from linumpy import reconstruction
+from linumpy.microscope.oct import OCT
 
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_directory",
-                   help="Full path to a directory containing the tiles to assemble for a single slice.")
-    p.add_argument("output_image",
-                   help="Assembled mosaic grid filename (must be a nii or nii.gz)")
-    p.add_argument("--output_mask", default=None,
-                   help="Optional mosaic data mask filename (must be a nii or nii.gz)")
-    p.add_argument("--rot", type=int, default=0,
-                   help="Number of 90deg rotations to apply to the tiles. (default=%(default)s).")
-    p.add_argument("--xmin", type=int, default=0,
-                   help="Minimum x position (row) for the average intensity projection. (default=%(default)s)")
-    p.add_argument("--xmax", type=int, default=-1,
-                   help="Maximum x position (row) for the average intensity projection (-1 means last slice). (default=%(default)s)")
-    p.add_argument("--ymin", type=int, default=0,
-                   help="Minimum y position (col) for the average intensity projection. (default=%(default)s)")
-    p.add_argument("--ymax", type=int, default=-1,
-                   help="Maximum y position (col) for the average intensity projection (-1 means last slice). (default=%(default)s)")
-    p.add_argument("--zmin", type=int, default=0,
-                   help="Minimum z position for the average intensity projection. (default=%(default)s)")
-    p.add_argument("--zmax", type=int, default=-1,
-                   help="Maximum z position for the average intensity projection (-1 means last slice). (default=%(default)s)")
-    p.add_argument("--flip_rows", action="store_true",
-                   help="Flip the rows of each tile after cropping, but before applying the rotation.")
-    p.add_argument("--flip_cols", action="store_true",
-                   help="Flip the columns of each tile after cropping, but before applying the rotation.")
+    p.add_argument("tiles_directory",
+                   help="Full path to a directory containing the tiles to process")
+    p.add_argument("output_file",
+                   help="Full path to the output file (tiff or zarr)")
+    p.add_argument("-r", "--resolution", type=float, default=-1,
+                   help="Output isotropic resolution in micron per pixel. (Use -1 to keep the original resolution). (default=%(default)s)")
+    p.add_argument("-z", "--slice", type=int, default=0,
+                   help="Slice to process (default=%(default)s)")
+    p.add_argument("--keep_galvo_return", action="store_true",
+                   help="Keep the galvo return signal (default=%(default)s)")
 
     return p
+
+
+def preprocess_volume(vol: np.ndarray) -> np.ndarray:
+    """Preprocess the volume by rotating and flipping it and computing the average intensity projection"""
+    vol = np.rot90(vol, k=3, axes=(1, 2))
+    vol = np.flip(vol, axis=1)
+    img = np.mean(vol, axis=0)
+    return img
+
+
+def process_tile(params: dict):
+    """Process a tile and add it to the mosaic"""
+    f = params["file"]
+    mx, my, mz = params["tile_pos"]
+    crop = params["crop"]
+    tile_size = params["tile_size"]
+    mosaic = params["mosaic"]
+
+    # Load the tile
+    oct = OCT(f)
+    vol = oct.load_image(crop=crop)
+    vol = preprocess_volume(vol)
+
+    # Rescale the volume
+    vol = resize(vol, tile_size, anti_aliasing=True, order=1, preserve_range=True)
+
+    # Compute the tile position
+    rmin = mx * vol.shape[0]
+    cmin = my * vol.shape[1]
+    rmax = rmin + vol.shape[0]
+    cmax = cmin + vol.shape[1]
+    mosaic[rmin:rmax, cmin:cmax] = vol
 
 
 def main():
@@ -56,99 +73,73 @@ def main():
     args = p.parse_args()
 
     # Parameters
-    input_directory = Path(args.input_directory)
-    output_image = Path(args.output_image)
-    output_mask = args.output_mask
-    if output_mask is not None:
-        output_mask = Path(args.output_mask)
-
-    # Cropping limits
-    xmin = args.xmin
-    xmax = args.xmax
-    ymin = args.ymin
-    ymax = args.ymax
-    zmin = args.zmin
-    zmax = args.zmax
-
-    # Flipping
-    flip_rows = args.flip_rows
-    flip_cols = args.flip_cols
-
-    # Rotation
-    n_rot90 = args.rot
-
-    # Check the output filename extensions
-    assert "".join(output_image.suffixes) in [".nii", ".nii.gz"], "output_image must be a .nii or .nii.gz file"
-    if output_mask is not None:
-        assert "".join(output_mask.suffixes) in [".nii", ".nii.gz"], "output_mask must be a .nii or .nii.gz file"
-
-    # Sniff the directory
-    data_info = FileUtils.dataSniffer(input_directory)
-    # Create the data object
-    data = FileUtils.SlicerData(input_directory,
-                                gridshape=data_info["gridshape"],
-                                prototype=data_info["prototype"],
-                                extension=data_info["extension"])
-    data.startIdx = data_info["startIdx"]
-    print(data)
-    # Load the first volume and get its shape
-    data.checkVolShape()
-
-    # Prepare the mosaic & mask (load if existing and updating)
-    if xmin == 0 and xmax == -1:
-        nrows = data.volshape[0]
-        xmax = nrows
+    tiles_directory = Path(args.tiles_directory)
+    output_file = Path(args.output_file)
+    assert output_file.suffix in [".tiff", ".zarr"], "The output file must be a .tiff or .zarr file."
+    if output_file.suffix == ".zarr":
+        zarr_file = output_file
     else:
-        nrows = xmax - xmin
-    if ymin == 0 and ymax == -1:
-        ncols = data.volshape[1]
-        ymax = ncols
+        zarr_file = output_file.with_suffix(".zarr")
+    z = args.slice
+    output_resolution = args.resolution
+    crop = not args.keep_galvo_return
+    n_cpus = multiprocessing.cpu_count() - 1
+
+    # Analyze the tiles
+    tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
+    if len(tiles) == 0:
+        print(f"No tiles found in the directory for the slice z={z}.")
+        return
+    mx = [tiles_pos[i][0] for i in range(len(tiles_pos))]
+    my = [tiles_pos[i][1] for i in range(len(tiles_pos))]
+    mx_min = min(mx)
+    mx_max = max(mx)
+    my_min = min(my)
+    my_max = max(my)
+    n_mx = mx_max - mx_min + 1
+    n_my = my_max - my_min + 1
+
+    # Prepare the mosaic_grid
+    oct = OCT(tiles[0])
+    vol = oct.load_image(crop=crop)
+    vol = preprocess_volume(vol)
+    resolution = [oct.resolution[0], oct.resolution[1]]
+
+    # Compute the rescaled tile size based on the minimum target output resolution
+    if output_resolution == -1:
+        tile_size = vol.shape
     else:
-        ncols = ymax - ymin
-    mosaic_nrows = data.gridshape[0]
-    mosaic_ncols = data.gridshape[1]
-    # If n_rots is odd, switch the nrows and nvols
-    if n_rot90 % 2 == 1:
-        nrows = data.volshape[1]
-        ncols = data.volshape[0]
-    mosaic = np.zeros((nrows * mosaic_nrows, ncols * mosaic_ncols))
-    if output_mask is not None:
-        mosaic_mask = np.zeros_like(mosaic)
+        tile_size = [int(vol.shape[i] * resolution[i] * 1000 / output_resolution) for i in range(2)]
+    mosaic_shape = [n_mx * tile_size[0], n_my * tile_size[1]]
 
-    # Loop over the tiles and load them
-    for vol, pos in tqdm(data.sliceIterator(z=0, returnPos=True), total=mosaic_nrows * mosaic_ncols):
-        # Cropping and compute the average intensity projection (AIP)
-        img = vol[xmin:xmax, ymin:ymax, zmin:zmax].mean(axis=2)
+    # Create the zarr persistent array
+    process_sync_file = str(zarr_file).replace(".zarr", ".sync")
+    synchronizer = zarr.ProcessSynchronizer(process_sync_file)
+    mosaic = zarr.open(zarr_file, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=tile_size,
+                       synchronizer=synchronizer)
 
-        # Flip the axis
-        if flip_rows:
-            img = np.flipud(img)
-        if flip_cols:
-            img = np.fliplr(img)
+    # Create a params dictionary for every tile
+    params = []
+    for i in range(len(tiles)):
+        params.append({
+            "file": tiles[i],
+            "tile_pos": tiles_pos[i],
+            "crop": crop,
+            "tile_size": tile_size,
+            "mosaic": mosaic
+        })
 
-        # Perform in-plane rotations
-        img = np.rot90(img, k=n_rot90)
+    # Process the tiles in parallel
+    pqdm(params, process_tile, n_jobs=n_cpus, desc="Processing tiles")
 
-        # Compute the mosaic grid position
-        i = pos[0] * nrows
-        j = pos[1] * ncols
+    # Remove the process sync file
+    shutil.rmtree(process_sync_file)
 
-        # Place in the mosaic grid
-        mosaic[i:i + nrows, j:j + ncols] = img
-
-        # Update the data mask
-        if output_mask is not None:
-            mosaic_mask[i:i + nrows, j:j + ncols] = 1
-
-    # Create the parent directory for the output
-    output_image.parent.mkdir(exist_ok=True, parents=True)
-    if output_mask is not None:
-        output_mask.parent.mkdir(exist_ok=True, parents=True)
-
-    # Save the grid and mask
-    sitk.WriteImage(sitk.GetImageFromArray(mosaic), str(output_image))
-    if output_mask is not None:
-        sitk.WriteImage(sitk.GetImageFromArray(mosaic_mask), str(output_mask))
+    # Convert the mosaic to a tiff file
+    if output_file.suffix == ".tiff":
+        img = mosaic[:]
+        io.imsave(output_file, img)
+        shutil.rmtree(zarr_file)
 
 
 if __name__ == "__main__":
