@@ -11,6 +11,8 @@ import nibabel as nib
 import numpy as np
 import pandas
 from tqdm.auto import tqdm
+import zarr
+
 
 from linumpy.utils_images import apply_xy_shift
 
@@ -35,6 +37,10 @@ def main():
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
+
+    # Parameters
+    zarr_file = Path(args.output_volume)
+    assert zarr_file.suffix == ".zarr", "Output volume must be a zarr file."
 
     # Detect the slices ids
     files = [Path(x) for x in args.input_images]
@@ -83,10 +89,16 @@ def main():
     y1 = max(ymax)
     nx = int((x1 - x0))
     ny = int((y1 - y0))
-    volume_shape = (ny, nx, n_slices)
+    volume_shape = (n_slices, ny, nx)
+
+    # Create the zarr persistent array
+    process_sync_file = str(zarr_file).replace(".zarr", ".sync")
+    synchronizer = zarr.ProcessSynchronizer(process_sync_file)
+    mosaic = zarr.open(zarr_file, mode="w", shape=volume_shape, dtype=np.float32, chunks=(1, 256, 256),
+                       synchronizer=synchronizer)
 
     # Create the volume
-    volume = np.zeros(volume_shape, dtype=np.float32)
+    #volume = np.zeros(volume_shape, dtype=np.float32)
 
     # Loop over the slices
     for i in tqdm(range(len(files)), unit="slice", desc="Stacking slices"):
@@ -104,20 +116,22 @@ def main():
             dy = np.cumsum(dy_list)[i - 1] + y0
 
         # Apply the shift
-        img = apply_xy_shift(img, volume[:, :, 0], dx, dy)
+        img = apply_xy_shift(img, mosaic[0,:,:], dx, dy)
 
         # Add the slice to the volume
-        volume[:, :, z] = img
+        mosaic[z, :, :] = img
+
+        del img
 
     # Save this volume
-    affine = np.eye(4)
-    affine[0, 0] = args.resolution_xy / 1000.0  # x resolution in mm
-    affine[1, 1] = args.resolution_xy / 1000.0  # y resolution in mm
-    affine[2, 2] = args.resolution_z / 1000.0  # z resolution in mm
-    img = nib.Nifti1Image(volume, affine)
-    output_file = Path(args.output_volume)
-    output_file.parent.mkdir(exist_ok=True, parents=True)
-    nib.save(img, output_file)
+    # affine = np.eye(4)
+    # affine[0, 0] = args.resolution_xy / 1000.0  # x resolution in mm
+    # affine[1, 1] = args.resolution_xy / 1000.0  # y resolution in mm
+    # affine[2, 2] = args.resolution_z / 1000.0  # z resolution in mm
+    # img = nib.Nifti1Image(volume, affine)
+    # output_file = Path(args.output_volume)
+    # output_file.parent.mkdir(exist_ok=True, parents=True)
+    # nib.save(img, output_file)
 
 
 if __name__ == "__main__":
