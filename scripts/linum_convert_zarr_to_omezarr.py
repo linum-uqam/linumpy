@@ -18,7 +18,7 @@ def _build_arg_parser():
                    help="Full path to a 2D mosaic grid image.")
     p.add_argument("output",
                    help="Flatfield filename (must be a .nii or .nii.gz file).")
-    p.add_argument("-r", "--resolution", type=float, default=1.0,
+    p.add_argument("-r", "--resolution", nargs="+", type=float, default=1.0,
                    help="Resolution of the image in microns. (default=%(default)s)")
 
     return p
@@ -34,8 +34,16 @@ def main():
     output_file = Path(args.output)
     resolution = args.resolution  # in microns
 
+    assert len(resolution) in [1, 3], "Resolution must be a single value or a tuple of 3 values"
+
+    # Convert the resolution to mm
+    scales = []
+    if len(resolution) == 1:
+        scales = [resolution[0] * 1e-3] * 3
+    else:
+        scales = [r * 1e-3 for r in resolution]
+
     foo = zarr.open(input_file, mode="r")
-    scales = [resolution * 1e-3] * 3  # convert to mm
     save_zarr(foo, output_file, scales=scales, overwrite=True)
 
 
