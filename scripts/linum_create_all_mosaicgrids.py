@@ -20,6 +20,8 @@ def _build_arg_parser():
                    help="Output isotropic resolution in micron per pixel. (Use -1 to keep the original resolution). (default=%(default)s)")
     p.add_argument("-e", "--extension", default=".tiff", choices=[".tiff", ".zarr"],
                      help="Output extension (default=%(default)s)")
+    p.add_argument("--n_cpus", type=int, default=-1,
+                     help="Number of CPUs to use for parallel processing (default=%(default)s). If -1, all CPUs - 1 are used.")
 
     return p
 
@@ -33,6 +35,7 @@ def main():
     output_directory = args.output_directory
     resolution = args.resolution
     extension = args.extension
+    n_cpus = args.n_cpus
 
     # Get a list of slices to process
     tiles, tiles_id = reconstruction.get_tiles_ids(input_directory)
@@ -40,7 +43,7 @@ def main():
 
     for z in tqdm(slices, desc="Creating mosaic grids", unit="slice"):
         output_file = f"{output_directory}/mosaic_grid_z{z:02d}{extension}"
-        cmd = f"linum_create_mosaic_grid.py {input_directory} {output_file} --slice {z} --resolution {resolution}"
+        cmd = f"linum_create_mosaic_grid.py {input_directory} {output_file} --slice {z} --resolution {resolution} --n_cpus {n_cpus}"
         subprocess.run(cmd, shell=True)
 
 if __name__ == "__main__":
