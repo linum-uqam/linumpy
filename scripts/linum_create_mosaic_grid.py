@@ -31,6 +31,8 @@ def _build_arg_parser():
                    help="Slice to process (default=%(default)s)")
     p.add_argument("--keep_galvo_return", action="store_true",
                    help="Keep the galvo return signal (default=%(default)s)")
+    p.add_argument("--n_cpus", type=int, default=-1,
+                   help="Number of CPUs to use for parallel processing (default=%(default)s). If -1, all CPUs - 1 are used.")
 
     return p
 
@@ -46,7 +48,7 @@ def preprocess_volume(vol: np.ndarray) -> np.ndarray:
 def process_tile(params: dict):
     """Process a tile and add it to the mosaic"""
     f = params["file"]
-    mx, my, mz = params["tile_pos"]
+    rmin, rmax, cmin, cmax = params["tile_pos_px"]
     crop = params["crop"]
     tile_size = params["tile_size"]
     mosaic = params["mosaic"]
@@ -60,10 +62,6 @@ def process_tile(params: dict):
     vol = resize(vol, tile_size, anti_aliasing=True, order=1, preserve_range=True)
 
     # Compute the tile position
-    rmin = mx * vol.shape[0]
-    cmin = my * vol.shape[1]
-    rmax = rmin + vol.shape[0]
-    cmax = cmin + vol.shape[1]
     mosaic[rmin:rmax, cmin:cmax] = vol
 
 
@@ -83,7 +81,9 @@ def main():
     z = args.slice
     output_resolution = args.resolution
     crop = not args.keep_galvo_return
-    n_cpus = multiprocessing.cpu_count() - 1
+    n_cpus = args.n_cpus
+    if n_cpus == -1:
+        n_cpus = multiprocessing.cpu_count() - 1
 
     # Analyze the tiles
     tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
@@ -112,6 +112,17 @@ def main():
         tile_size = [int(vol.shape[i] * resolution[i] * 1000 / output_resolution) for i in range(2)]
     mosaic_shape = [n_mx * tile_size[0], n_my * tile_size[1]]
 
+    # Compute the tile position in pixel within the mosaic
+    tile_size = (tile_size[0], tile_size[1])
+    tile_pos_px = []
+    for i in range(len(tiles_pos)):
+        mx, my, mz = tiles_pos[i]
+        rmin = (mx - mx_min) * tile_size[0]
+        rmax = rmin + tile_size[0]
+        cmin = (my - my_min) * tile_size[1]
+        cmax = cmin + tile_size[1]
+        tile_pos_px.append((rmin, rmax, cmin, cmax))
+
     # Create the zarr persistent array
     process_sync_file = str(zarr_file).replace(".zarr", ".sync")
     synchronizer = zarr.ProcessSynchronizer(process_sync_file)
@@ -123,7 +134,7 @@ def main():
     for i in range(len(tiles)):
         params.append({
             "file": tiles[i],
-            "tile_pos": tiles_pos[i],
+            "tile_pos_px": tile_pos_px[i],
             "crop": crop,
             "tile_size": tile_size,
             "mosaic": mosaic
