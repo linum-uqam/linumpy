@@ -14,7 +14,7 @@ def _build_arg_parser():
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_zarr",
                    help="Full path to the Zarr file.")
-    p.add_argument("-r", "--resolution", type=float, default=10.0,
+    p.add_argument("-r", "--resolution",  nargs="+", type=float, default=1.0,
                    help="Resolution in micrometer (default=%(default)s)")
 
     return p
@@ -28,14 +28,19 @@ def main():
     # Parameters
     zarr_location = args.input_zarr
     resolution = args.resolution
+    assert len(resolution) in [1, 3], "Resolution must be a single value or a tuple of 3 values"
 
     # Load the volume
     vol = zarr.open(zarr_location, mode="r")
-    scale = (resolution, resolution, resolution)
+    scales = []
+    if len(resolution) == 1:
+        scales = [resolution[0] * 1e-3] * 3
+    else:
+        scales = [r * 1e-3 for r in resolution]
 
     # Prepare the viewer
     viewer = napari.Viewer()
-    viewer.add_image(vol, scale=scale, colormap="magma")
+    viewer.add_image(vol, scale=scales, colormap="magma")
     viewer.scale_bar.visible = True
     viewer.scale_bar.unit = "um"
 
