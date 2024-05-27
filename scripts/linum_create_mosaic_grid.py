@@ -33,6 +33,10 @@ def _build_arg_parser():
                    help="Keep the galvo return signal (default=%(default)s)")
     p.add_argument("--n_cpus", type=int, default=-1,
                    help="Number of CPUs to use for parallel processing (default=%(default)s). If -1, all CPUs - 1 are used.")
+    p.add_argument("--normalize", action="store_true",
+                   help="Normalize the mosaic (default=%(default)s)")
+    p.add_argument("--saturation", type=float, default=99.9,
+                   help="Saturation value for the normalization (default=%(default)s)")
 
     return p
 
@@ -145,6 +149,14 @@ def main():
 
     # Remove the process sync file
     shutil.rmtree(process_sync_file)
+
+    # Normalize the mosaic
+    if args.normalize:
+        imin = np.min(mosaic)
+        imax = np.percentile(mosaic, args.saturation)
+        mosaic = (mosaic - imin) / (imax - imin)
+        mosaic[mosaic < 0] = 0
+        mosaic[mosaic > 1] = 1
 
     # Convert the mosaic to a tiff file
     if output_file.suffix == ".tiff":
