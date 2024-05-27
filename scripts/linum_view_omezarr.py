@@ -38,7 +38,7 @@ def main():
     viewer.scale_bar.unit = "mm"
 
     # Set the color limits
-    imin = root[n_scales-1][:].min()
+    imin = max(root[n_scales-1][:].min(), 0)
     imax = np.percentile(root[n_scales-1][:], 99.9)
     layers[0].contrast_limits = [imin, imax]
 
