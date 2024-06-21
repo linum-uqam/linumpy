@@ -41,7 +41,7 @@ def main():
     tiles, tiles_id = reconstruction.get_tiles_ids(input_directory)
     slices = list(set([t[2] for t in tiles_id]))
 
-    for z in tqdm(slices, desc="Creating mosaic grids", unit="slice"):
+    for z in tqdm(slices, desc="Creating mosaic grids", unit="slice", leave=True):
         output_file = f"{output_directory}/mosaic_grid_z{z:02d}{extension}"
         cmd = f"linum_create_mosaic_grid.py {input_directory} {output_file} --slice {z} --resolution {resolution} --n_cpus {n_cpus}"
         subprocess.run(cmd, shell=True)
