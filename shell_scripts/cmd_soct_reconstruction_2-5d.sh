@@ -13,7 +13,7 @@ module load apptainer
 # Parameters
 DIRECTORY=/lustre04/scratch/jolefc/2024-06-05-S34-Coronal
 WORKFLOW_FILE=$DIRECTORY/workflow_reconstruction_2.5d.nf
-CONFIG_FILE=$DIRECTORY/reconstruction.config
+CONFIG_FILE=$DIRECTORY/reconstruction_2.5d_beluga.config
 SINGULARITY=$DIRECTORY/linumpy.sif
 
 nextflow run $WORKFLOW_FILE -c $CONFIG_FILE -with-singularity $SINGULARITY --directory $DIRECTORY -resume
