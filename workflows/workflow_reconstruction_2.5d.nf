@@ -136,7 +136,7 @@ process resample_stack {
 }
 
 // Convert the stack to .zarr format for visualization
-process convert_to_zarr {
+process convert_to_omezarr {
     input:
         path stack
     output:
@@ -144,7 +144,7 @@ process convert_to_zarr {
     publishDir path: "${params.output_directory}", mode: 'move'
     script:
         """
-        linum_convert_nifti_to_zarr.py $stack stack.ome_zarr
+        linum_convert_zarr_to_omezarr.py $stack stack.ome_zarr -r ${params.spacing_z} ${params.spacing_xy} ${params.spacing_xy}
         """
 }
 
@@ -175,6 +175,6 @@ workflow{
     // Resample the stack to 10, 25, 50, and 100 micron resolutions
     //resample_stack(stack_mosaic.out)
 
-    // Convert the stack to .zarr format for visualization
-    //convert_to_zarr(stack_mosaic.out)
+    // Convert the stack to .ome_zarr format for visualization
+    convert_to_omezarr(stack_mosaic.out)
 }
