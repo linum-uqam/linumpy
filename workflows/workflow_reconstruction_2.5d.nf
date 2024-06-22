@@ -109,7 +109,7 @@ process stack_mosaic {
         path images
     output:
         path "stack.zarr"
-    publishDir path: "${params.output_directory}", mode: 'copy'
+    //publishDir path: "${params.output_directory}", mode: 'copy'
     script:
     """
     linum_stack_slices.py $images stack.zarr --xy_shifts ${params.xy_shift_file} --resolution_xy ${params.spacing_xy} --resolution_z ${params.spacing_z}
@@ -132,6 +132,19 @@ process resample_stack {
         linum_resample.py $stack stack_25um.nii 25.0
         linum_resample.py $stack stack_50um.nii 50.0
         linum_resample.py $stack stack_100um.nii 100.0
+        """
+}
+
+// Compress the zarr to zip for transfer
+process compress_stack {
+    input:
+        path stack
+    output:
+        path "stack.zarr.zip"
+    publishDir path: "${params.output_directory}", mode: 'copy'
+    script:
+        """
+        zip -r stack.zarr.zip $stack
         """
 }
 
@@ -176,5 +189,8 @@ workflow{
     //resample_stack(stack_mosaic.out)
 
     // Convert the stack to .ome_zarr format for visualization
-    convert_to_omezarr(stack_mosaic.out)
+    //convert_to_omezarr(stack_mosaic.out)
+
+    // Compress the stack to zip for transfer
+    compress_stack(stack_mosaic.out)
 }
