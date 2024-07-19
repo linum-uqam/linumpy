@@ -16,8 +16,6 @@ import zarr
 
 from linumpy.utils_images import apply_xy_shift
 
-# TODO: add option to give a folder
-
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
@@ -30,6 +28,8 @@ def _build_arg_parser():
                    help="CSV file containing the xy shifts for each slice")
     p.add_argument("--resolution_xy", type=float, default=1.0,
                    help="Lateral (xy) resolution in micron. (default=%(default)s)")
+    p.add_argument("--pattern", default=".*z(\d+)_.*",
+                     help="Regular expression pattern to extract the slice number from the filename. (default=%)")
     p.add_argument("--resolution_z", type=float, default=1.0,
                    help="Axial (z) resolution in micron, corresponding to the z distance between images in the stack. (default=%(default)s)")
     return p
@@ -47,7 +47,7 @@ def main():
     # Detect the slices ids
     files = [Path(x) for x in args.input_images]
     files.sort()
-    pattern = r".*z(\d+)_.*"
+    pattern = args.pattern
     slice_ids = []
     for f in files:
         foo = re.match(pattern, f.name)
