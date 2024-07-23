@@ -14,8 +14,8 @@ def _build_arg_parser():
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_zarr",
                    help="Full path to the Zarr file.")
-    p.add_argument("-r", "--resolution",  nargs="+", type=float, default=1.0,
-                   help="Resolution in micrometer (default=%(default)s)")
+    p.add_argument("-r", "--resolution",  nargs="+", type=float, default=[1.0],
+                   help="Resolution in micrometer in the Z, X, Y order.")
 
     return p
 
