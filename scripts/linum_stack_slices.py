@@ -21,11 +21,11 @@ def _build_arg_parser():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_images", nargs="+",
-                   help="Full path to a 2D mosaic grid image.")
+                   help="Full path to a 2D mosaic grid image (nifti files).")
     p.add_argument("output_volume",
-                   help="Assembled volume filename (must be a nii or nii.gz)")
-    p.add_argument("--xy_shifts", required=True,
-                   help="CSV file containing the xy shifts for each slice. (default=%(default)s)")
+                   help="Assembled volume filename (must be a .zarr)")
+    p.add_argument("--xy_shifts", required=False, default=None,
+                   help="CSV file containing the xy shifts for each slice")
     p.add_argument("--resolution_xy", type=float, default=1.0,
                    help="Lateral (xy) resolution in micron. (default=%(default)s)")
     p.add_argument("--resolution_z", type=float, default=1.0,
@@ -52,10 +52,14 @@ def main():
         slice_ids.append(int(foo.groups()[0]))
     n_slices = np.max(slice_ids) - np.min(slice_ids) + 1
 
-    # Load cvs containing the shift values for each slice
-    df = pandas.read_csv(args.xy_shifts)
-    dx_list = np.array(df["x_shift"].tolist())
-    dy_list = np.array(df["y_shift"].tolist())
+    if args.xy_shifts is None:
+        dx_list = np.zeros(len(files))
+        dy_list = np.zeros(len(files))
+    else:
+        # Load cvs containing the shift values for each slice
+        df = pandas.read_csv(args.xy_shifts)
+        dx_list = np.array(df["x_shift"].tolist())
+        dy_list = np.array(df["y_shift"].tolist())
 
     # Compute the volume shape
     xmin = []
