@@ -15,9 +15,9 @@ def _build_arg_parser():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input",
-                   help="Full path to a zarr file (.zarr)")
+                   help="Full path to a 2D mosaic grid image.")
     p.add_argument("output",
-                   help="Full path to the output ome-zarr file (.ome-zarr)")
+                   help="Flatfield filename (must be a .nii or .nii.gz file).")
     p.add_argument("-r", "--resolution", nargs="+", type=float, default=1.0,
                    help="Resolution of the image in microns. (default=%(default)s)")
 

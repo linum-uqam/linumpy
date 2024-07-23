@@ -15,10 +15,10 @@ Notes
 Add the -resume flag to resume the pipeline from the last successfully completed process.
 */
 
-params.directory = "/home/linum/Data/2024-06-05-S34-Coronal/reconstruction_2-5d"
-params.input_directory = params.directory + "/mosaicgrids"
+params.directory = "/home/joel/data/2023-12-08-F3-Multiorientation-coronal-sagittal-45"
+params.input_directory = params.directory + "/mosaic_grids"
 params.xy_shift_file = params.directory + "/mosaicgrids_shift_xy.csv"
-params.output_directory = params.directory
+params.output_directory = params.directory + "/reconstruction_2-5d"
 
 // Tile shape
 params.tile_nx = 400
@@ -51,7 +51,7 @@ process crop_tiles {
         tuple val(mosaic_directory.baseName), path("${mosaic_directory.baseName}_cropped.tif")
     script:
     """
-    linum_crop_tiles.py $mosaic_directory ${mosaic_directory.baseName}_cropped.tif --xmin ${params.xmin} --xmax ${params.xmax} --ymin ${params.ymin} --ymax ${params.ymax} --tile_shape ${params.tile_nx} ${params.tile_ny}
+    linum_crop_tiles $mosaic_directory ${mosaic_directory.baseName}_cropped.tif --xmin ${params.xmin} --xmax ${params.xmax} --ymin ${params.ymin} --ymax ${params.ymax} --tile_shape ${params.tile_nx} ${params.tile_ny}
     """
 }
 
@@ -63,7 +63,7 @@ process estimate_illumination_bias {
         tuple val(key), path("${key}_flatfield.nii"), path("${key}_darkfield.nii")
     script:
     """
-    linum_estimate_illumination.py $mosaic_grid ${key}_flatfield.nii --tile_shape ${params.nx} ${params.ny} --output_darkfield ${key}_darkfield.nii
+    linum_estimate_illumination $mosaic_grid ${key}_flatfield.nii --tile_shape ${params.nx} ${params.ny} --output_darkfield ${key}_darkfield.nii
     """
 }
 
@@ -75,7 +75,7 @@ process compensate_illumination_bias {
         tuple val(key), path("${key}_mosaic_grid_compensated.nii.gz")
     script:
         """
-        linum_compensate_illumination.py $mosaic_grid ${key}_mosaic_grid_compensated.nii.gz  --flatfield $flatfield --darkfield $darkfield --tile_shape ${params.nx} ${params.ny}
+        linum_compensate_illumination $mosaic_grid ${key}_mosaic_grid_compensated.nii.gz  --flatfield $flatfield --darkfield $darkfield --tile_shape ${params.nx} ${params.ny}
         """
 }
 
@@ -87,7 +87,7 @@ process estimate_position {
         path "position_transform.npy"
     script:
         """
-        linum_estimate_transform.py $mosaic_grids position_transform.npy --tile_shape ${params.nx} ${params.ny} --initial_overlap ${params.initial_overlap}
+        linum_estimate_transform $mosaic_grids position_transform.npy --tile_shape ${params.nx} ${params.ny} --initial_overlap ${params.initial_overlap}
         """
 }
 
@@ -99,7 +99,7 @@ process stitch_mosaic {
         tuple val(key), path("${key}_stitched.nii")
     script:
         """
-        linum_stitch_2d.py $image $transform ${key}_stitched.nii --blending_method diffusion --tile_shape ${params.nx} ${params.ny}
+        linum_stitch_2d $image $transform ${key}_stitched.nii --blending_method diffusion --tile_shape ${params.nx} ${params.ny}
         """
 }
 
@@ -108,11 +108,11 @@ process stack_mosaic {
     input:
         path images
     output:
-        path "stack.zarr"
-    //publishDir path: "${params.output_directory}", mode: 'copy'
+        path "stack.nii"
+    publishDir path: "${params.output_directory}", mode: 'copy'
     script:
     """
-    linum_stack_slices.py $images stack.zarr --xy_shifts ${params.xy_shift_file} --resolution_xy ${params.spacing_xy} --resolution_z ${params.spacing_z}
+    linum_stack_slices $images stack.nii --xy_shifts ${params.xy_shift_file} --resolution_xy ${params.spacing_xy} --resolution_z ${params.spacing_z}
     """
 }
 
@@ -135,21 +135,8 @@ process resample_stack {
         """
 }
 
-// Compress the zarr to zip for transfer
-process compress_stack {
-    input:
-        path stack
-    output:
-        path "stack.zarr.zip"
-    publishDir path: "${params.output_directory}", mode: 'copy'
-    script:
-        """
-        zip -r stack.zarr.zip $stack
-        """
-}
-
 // Convert the stack to .zarr format for visualization
-process convert_to_omezarr {
+process convert_to_zarr {
     input:
         path stack
     output:
@@ -157,7 +144,7 @@ process convert_to_omezarr {
     publishDir path: "${params.output_directory}", mode: 'move'
     script:
         """
-        linum_convert_zarr_to_omezarr.py $stack stack.ome_zarr -r ${params.spacing_z} ${params.spacing_xy} ${params.spacing_xy}
+        linum_convert_nifti_to_zarr.py $stack stack.ome_zarr
         """
 }
 
@@ -186,11 +173,8 @@ workflow{
     stack_mosaic(stitch_mosaic.out.map{it[1]}.collect())
 
     // Resample the stack to 10, 25, 50, and 100 micron resolutions
-    //resample_stack(stack_mosaic.out)
+    resample_stack(stack_mosaic.out)
 
-    // Convert the stack to .ome_zarr format for visualization
-    //convert_to_omezarr(stack_mosaic.out)
-
-    // Compress the stack to zip for transfer
-    compress_stack(stack_mosaic.out)
+    // Convert the stack to .zarr format for visualization
+    convert_to_zarr(stack_mosaic.out)
 }

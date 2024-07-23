@@ -20,7 +20,7 @@ def get_tiles_ids(directory, z: int = None):
     file_pattern = r"tile_x(?P<x>\d+)_y(?P<y>\d+)_z(?P<z>\d+)"
     tile_ids = []
     n_tiles = len(tiles)
-    for t in tqdm(tiles, desc="Extracting tile ids", total=n_tiles, leave=False):
+    for t in tqdm(tiles, desc="Extracting tile ids", total=n_tiles):
         # Extract the tile's mosaic position.
         match = re.match(file_pattern, t.name)
         mx = int(match.group("x"))
@@ -42,7 +42,7 @@ def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_
     tiles_positions_px = []
     tiles_positions_mm = []
     mosaic_tile_pos = []
-    for t in tqdm(tiles, desc="Reading mosaic info", leave=False):
+    for t in tqdm(tiles, desc="Reading mosaic info"):
         oct = OCT(t)
 
         # Extract the tile's mosaic position.

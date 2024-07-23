@@ -16,8 +16,6 @@ import zarr
 
 from linumpy.utils_images import apply_xy_shift
 
-# TODO: add option to give a folder
-
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(

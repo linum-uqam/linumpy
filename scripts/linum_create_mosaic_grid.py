@@ -87,7 +87,7 @@ def main():
     crop = not args.keep_galvo_return
     n_cpus = args.n_cpus
     if n_cpus == -1:
-        n_cpus = multiprocessing.cpu_count() - 2
+        n_cpus = multiprocessing.cpu_count() - 1
 
     # Analyze the tiles
     tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
