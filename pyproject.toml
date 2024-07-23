@@ -44,7 +44,14 @@ linumpy = "linumpy"
 scripts = "scripts"
 
 [project.scripts]
+linum_compensate_illlumination = "scripts.linum_compensate_illumination:main"
 linum_convert_nifti_to_zarr = "scripts.linum_convert_nifti_to_zarr:main"
+linum_crop_tiles = "scripts.linum_crop_tiles:main"
+linum_estimate_illumination = "scripts.linum_estimate_illumination:main"
+linum_estimate_transform = "scripts.linum_estimate_transform:main"
+linum_stack_slices = "scripts.linum_stack_slices:main"
+linum_stitch_2d = "scripts.linum_stitch_2d:main"
+linum_view_omezarr = "scripts.linum_view_omezarr:main"
 linum_view_zarr = "scripts.linum_view_zarr:main"
 
 [project.urls]
