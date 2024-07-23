@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "linumpy"
+version = "0.1.1"
+authors = [
+    {name="The LINUM developers"},
+    {name="Joël Lefebvre", email="lefebvre.joel@uqam.ca"}
+]
+description = "linumpy: microscopy tools and utilities"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Topic :: Scientific/Engineering"
+]
+dependencies = [
+    "numpy",
+    "scipy",
+    "scikit-image",
+    "scikit-learn",
+    "matplotlib",
+    "nibabel",
+    "dipy",
+    "SimpleITK",
+    "tqdm",
+    "pqdm",
+    "pybasic-illumination-correction",
+    "zarr",
+    "ome-zarr>=0.9.0",
+    "napari[all]",
+    "napari-ome-zarr"
+]
+license = {file="LICENSE"}
+
+[tool.setuptools.package-dir]
+linumpy = "linumpy"
+scripts = "scripts"
+
+[project.scripts]
+linum_compensate_illlumination = "scripts.linum_compensate_illumination:main"
+linum_convert_nifti_to_zarr = "scripts.linum_convert_nifti_to_zarr:main"
+linum_crop_tiles = "scripts.linum_crop_tiles:main"
+linum_estimate_illumination = "scripts.linum_estimate_illumination:main"
+linum_estimate_transform = "scripts.linum_estimate_transform:main"
+linum_stack_slices = "scripts.linum_stack_slices:main"
+linum_stitch_2d = "scripts.linum_stitch_2d:main"
+linum_view_omezarr = "scripts.linum_view_omezarr:main"
+linum_view_zarr = "scripts.linum_view_zarr:main"
+
+[project.urls]
+Homepage = "https://github.com/linum-uqam/linumpy-private"
+Issues = "https://github.com/linum-uqam/linumpy-private/issues"
