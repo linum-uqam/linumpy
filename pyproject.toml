@@ -45,6 +45,7 @@ scripts = "scripts"
 
 [project.scripts]
 linum_convert_nifti_to_zarr = "scripts.linum_convert_nifti_to_zarr:main"
+linum_view_zarr = "scripts.linum_view_zarr:main"
 
 [project.urls]
 Homepage = "https://github.com/linum-uqam/linumpy-private"
