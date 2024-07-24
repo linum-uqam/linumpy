@@ -34,10 +34,14 @@ dependencies = [
     "pybasic-illumination-correction",
     "zarr",
     "ome-zarr>=0.9.0",
+]
+license = {file="LICENSE"}
+
+[project.optional-dependencies]
+napari = [
     "napari[all]",
     "napari-ome-zarr"
 ]
-license = {file="LICENSE"}
 
 [tool.setuptools.package-dir]
 linumpy = "linumpy"
