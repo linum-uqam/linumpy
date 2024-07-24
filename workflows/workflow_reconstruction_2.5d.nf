@@ -51,7 +51,7 @@ process crop_tiles {
         tuple val(mosaic_directory.baseName), path("${mosaic_directory.baseName}_cropped.tif")
     script:
     """
-    linum_crop_tiles.py $mosaic_directory ${mosaic_directory.baseName}_cropped.tif --xmin ${params.xmin} --xmax ${params.xmax} --ymin ${params.ymin} --ymax ${params.ymax} --tile_shape ${params.tile_nx} ${params.tile_ny}
+    linum_crop_tiles $mosaic_directory ${mosaic_directory.baseName}_cropped.tif --xmin ${params.xmin} --xmax ${params.xmax} --ymin ${params.ymin} --ymax ${params.ymax} --tile_shape ${params.tile_nx} ${params.tile_ny}
     """
 }
 
@@ -63,7 +63,7 @@ process estimate_illumination_bias {
         tuple val(key), path("${key}_flatfield.nii"), path("${key}_darkfield.nii")
     script:
     """
-    linum_estimate_illumination.py $mosaic_grid ${key}_flatfield.nii --tile_shape ${params.nx} ${params.ny} --output_darkfield ${key}_darkfield.nii
+    linum_estimate_illumination $mosaic_grid ${key}_flatfield.nii --tile_shape ${params.nx} ${params.ny} --output_darkfield ${key}_darkfield.nii
     """
 }
 
@@ -75,7 +75,7 @@ process compensate_illumination_bias {
         tuple val(key), path("${key}_mosaic_grid_compensated.nii.gz")
     script:
         """
-        linum_compensate_illumination.py $mosaic_grid ${key}_mosaic_grid_compensated.nii.gz  --flatfield $flatfield --darkfield $darkfield --tile_shape ${params.nx} ${params.ny}
+        linum_compensate_illumination $mosaic_grid ${key}_mosaic_grid_compensated.nii.gz  --flatfield $flatfield --darkfield $darkfield --tile_shape ${params.nx} ${params.ny}
         """
 }
 
@@ -87,7 +87,7 @@ process estimate_position {
         path "position_transform.npy"
     script:
         """
-        linum_estimate_transform.py $mosaic_grids position_transform.npy --tile_shape ${params.nx} ${params.ny} --initial_overlap ${params.initial_overlap}
+        linum_estimate_transform $mosaic_grids position_transform.npy --tile_shape ${params.nx} ${params.ny} --initial_overlap ${params.initial_overlap}
         """
 }
 
@@ -99,7 +99,7 @@ process stitch_mosaic {
         tuple val(key), path("${key}_stitched.nii")
     script:
         """
-        linum_stitch_2d.py $image $transform ${key}_stitched.nii --blending_method diffusion --tile_shape ${params.nx} ${params.ny}
+        linum_stitch_2d $image $transform ${key}_stitched.nii --blending_method diffusion --tile_shape ${params.nx} ${params.ny}
         """
 }
 
@@ -112,7 +112,7 @@ process stack_mosaic {
     //publishDir path: "${params.output_directory}", mode: 'copy'
     script:
     """
-    linum_stack_slices.py $images stack.zarr --xy_shifts ${params.xy_shift_file} --resolution_xy ${params.spacing_xy} --resolution_z ${params.spacing_z}
+    linum_stack_slices $images stack.zarr --xy_shifts ${params.xy_shift_file} --resolution_xy ${params.spacing_xy} --resolution_z ${params.spacing_z}
     """
 }
 
@@ -128,10 +128,10 @@ process resample_stack {
     publishDir path: "${params.output_directory}", mode: 'copy'
     script:
         """
-        linum_resample.py $stack stack_10um.nii 10.0
-        linum_resample.py $stack stack_25um.nii 25.0
-        linum_resample.py $stack stack_50um.nii 50.0
-        linum_resample.py $stack stack_100um.nii 100.0
+        linum_resample $stack stack_10um.nii 10.0
+        linum_resample $stack stack_25um.nii 25.0
+        linum_resample $stack stack_50um.nii 50.0
+        linum_resample $stack stack_100um.nii 100.0
         """
 }
 
@@ -157,7 +157,7 @@ process convert_to_omezarr {
     publishDir path: "${params.output_directory}", mode: 'move'
     script:
         """
-        linum_convert_zarr_to_omezarr.py $stack stack.ome_zarr -r ${params.spacing_z} ${params.spacing_xy} ${params.spacing_xy}
+        linum_convert_zarr_to_omezarr $stack stack.ome_zarr -r ${params.spacing_z} ${params.spacing_xy} ${params.spacing_xy}
         """
 }
 
