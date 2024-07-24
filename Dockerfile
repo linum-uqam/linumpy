@@ -15,10 +15,6 @@ RUN apt-get update && apt-get install -y \
 # Upgrade pip, setuptools and wheel
 RUN pip install --upgrade pip setuptools wheel build
 
-# Install Python dependencies from requirements.txt with verbose output
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -v -r requirements.txt
-
+# Install with verbose output
 COPY . .
-
-RUN pip install -e .
+RUN pip install --no-cache-dir -v -e .
