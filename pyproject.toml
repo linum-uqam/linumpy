@@ -26,6 +26,7 @@ dependencies = [
     "scikit-image",
     "scikit-learn",
     "matplotlib",
+    "pandas",
     "nibabel",
     "dipy",
     "SimpleITK",
@@ -48,8 +49,9 @@ linumpy = "linumpy"
 scripts = "scripts"
 
 [project.scripts]
-linum_compensate_illlumination = "scripts.linum_compensate_illumination:main"
+linum_compensate_illumination = "scripts.linum_compensate_illumination:main"
 linum_convert_nifti_to_zarr = "scripts.linum_convert_nifti_to_zarr:main"
+linum_convert_zarr_to_omezarr = "scripts.linum_convert_zarr_to_omezarr:main"
 linum_crop_tiles = "scripts.linum_crop_tiles:main"
 linum_estimate_illumination = "scripts.linum_estimate_illumination:main"
 linum_estimate_transform = "scripts.linum_estimate_transform:main"
