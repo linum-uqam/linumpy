@@ -17,7 +17,7 @@ Add the -resume flag to resume the pipeline from the last successfully completed
 
 params.directory = "/home/linum/Data/2024-06-05-S34-Coronal/reconstruction_2-5d"
 params.input_directory = params.directory + "/mosaicgrids"
-params.xy_shift_file = params.directory + "/mosaicgrids_shift_xy.csv"
+params.xy_shift_file = params.directory + "/shifts_xy.csv"
 params.output_directory = params.directory
 
 // Tile shape
@@ -107,12 +107,13 @@ process stitch_mosaic {
 process stack_mosaic {
     input:
         path images
+        path xy_shifts
     output:
         path "stack.zarr"
-    //publishDir path: "${params.output_directory}", mode: 'copy'
+    publishDir path: "${params.output_directory}", mode: 'copy'
     script:
     """
-    linum_stack_slices $images stack.zarr --xy_shifts ${params.xy_shift_file} --resolution_xy ${params.spacing_xy} --resolution_z ${params.spacing_z}
+    linum_stack_slices $images stack.zarr --xy_shifts $xy_shifts --resolution_xy ${params.spacing_xy} --resolution_z ${params.spacing_z}
     """
 }
 
@@ -183,14 +184,16 @@ workflow{
     stitch_mosaic(mosaic_grids_compensated.combine(estimate_position.out))
 
     // Stack the mosaic to get an estimate of the 3D volume
-    stack_mosaic(stitch_mosaic.out.map{it[1]}.collect())
-
-    // Resample the stack to 10, 25, 50, and 100 micron resolutions
-    //resample_stack(stack_mosaic.out)
-
-    // Convert the stack to .ome_zarr format for visualization
-    //convert_to_omezarr(stack_mosaic.out)
+    stack_mosaic(stitch_mosaic.out.map{it[1]}.collect(), params.xy_shift_file)
 
     // Compress the stack to zip for transfer
     compress_stack(stack_mosaic.out)
+
+    // Resample the stack to 10, 25, 50, and 100 micron resolutions
+    // FIXME: this process needs to be adapted to receive zarr files as input
+    //resample_stack(stack_mosaic.out)
+
+    // Convert the stack to .ome_zarr format for visualization
+    // FIXME: this process is not working when running with a docker container
+    //convert_to_omezarr(stack_mosaic.out)
 }
