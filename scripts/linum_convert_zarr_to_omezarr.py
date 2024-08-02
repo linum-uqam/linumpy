@@ -18,7 +18,7 @@ def _build_arg_parser():
                    help="Full path to a zarr file (.zarr)")
     p.add_argument("output",
                    help="Full path to the output ome-zarr file (.ome-zarr)")
-    p.add_argument("-r", "--resolution", nargs="+", type=float, default=1.0,
+    p.add_argument("-r", "--resolution", nargs="+", type=float, default=[1.0],
                    help="Resolution of the image in microns. (default=%(default)s)")
 
     return p
