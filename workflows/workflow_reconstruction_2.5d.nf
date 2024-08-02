@@ -123,16 +123,10 @@ process resample_stack {
         path stack
     output:
         path "stack_10um.nii"
-        path "stack_25um.nii"
-        path "stack_50um.nii"
-        path "stack_100um.nii"
     publishDir path: "${params.output_directory}", mode: 'copy'
     script:
         """
-        linum_resample $stack stack_10um.nii 10.0
-        linum_resample $stack stack_25um.nii 25.0
-        linum_resample $stack stack_50um.nii 50.0
-        linum_resample $stack stack_100um.nii 100.0
+        linum_convert_omezarr_to_nifti $stack stack_10um.nii --resolution 10.0
         """
 }
 
@@ -189,11 +183,11 @@ workflow{
     // Compress the stack to zip for transfer
     compress_stack(stack_mosaic.out)
 
-    // Resample the stack to 10, 25, 50, and 100 micron resolutions
-    // FIXME: this process needs to be adapted to receive zarr files as input
-    //resample_stack(stack_mosaic.out)
-
     // Convert the stack to .ome_zarr format for visualization
     // FIXME: this process is not working when running with a docker container
-    //convert_to_omezarr(stack_mosaic.out)
+    convert_to_omezarr(stack_mosaic.out)
+
+    // Resample the stack to 10 micron resolution
+    resample_stack(convert_to_omezarr.out)
+
 }
