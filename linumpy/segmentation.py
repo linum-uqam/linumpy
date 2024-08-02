@@ -1,22 +1,22 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import numpy as np
 import SimpleITK as sitk
+import numpy as np
 from scipy.ndimage.morphology import binary_erosion, binary_fill_holes
 
 
-def segmentOCT3D(vol, k=5, useLog=True, thresholdMethod="otsu"):
-    """To segment an OCT brain in 3D using Otsu and morphological watershed
+def segmentOCT3D(vol: np.ndarray, k:int=5, useLog:bool=True, thresholdMethod:str="otsu") -> np.ndarray:
+    """To segment an S-OCT brain in 3D using thresholding and morphological watershed
     Parameters
     ----------
-    vol : ndarray
+    vol
         The OCT brain to segment
-    k : int
+    k
         Median smoothing kernel size in pixel
-    useLog : bool
+    useLog
         Transform the pixel intensity with a log before computing mask
-    thresholdMethod : str
+    thresholdMethod
         'ostu', 'triangle'
     Returns
     -------
@@ -51,7 +51,17 @@ def segmentOCT3D(vol, k=5, useLog=True, thresholdMethod="otsu"):
     return mask
 
 
-def fillHoles_2Dand3D(mask):
+def fillHoles_2Dand3D(mask: np.ndarray) -> np.ndarray:
+    """Fill holes in a 2D or 3D mask
+    Parameters
+    ----------
+    mask
+        The mask to fill
+    Returns
+    -------
+    ndarray
+        The filled mask
+    """
     # Filling holes and returning the mask
     mask = binary_fill_holes(mask)
 
@@ -69,14 +79,20 @@ def fillHoles_2Dand3D(mask):
     return mask
 
 
-def removeBottom(mask, k=10, axis=2, inverse=False, fillHoles=False):
+def removeBottom(mask: np.ndarray, k:int=10, axis:int=2, inverse:bool=False, fillHoles:bool=False) -> np.ndarray:
     """Remove the bottom side of the mask.
     Parameters
     ----------
-    mask : ndarray
+    mask
         Mask to modify. The 3rd axis is assumed to be the dimension direction to modify.
-    k : int
+    k
         Number of pixel to erode
+    axis
+        Axis to erode
+    inverse
+        Inverse the operation
+    fillHoles
+        Fill holes in the mask
     Returns
     -------
     ndarray
