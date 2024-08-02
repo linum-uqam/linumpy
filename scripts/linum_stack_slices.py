@@ -5,16 +5,17 @@
 
 import argparse
 import re
+import shutil
 from pathlib import Path
 
 import nibabel as nib
 import numpy as np
 import pandas
-from tqdm.auto import tqdm
 import zarr
-
+from tqdm.auto import tqdm
 
 from linumpy.utils_images import apply_xy_shift
+
 
 # TODO: add option to give a folder
 
@@ -23,7 +24,7 @@ def _build_arg_parser():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_images", nargs="+",
-                   help="Full path to a 2D mosaic grid image (nifti files).")
+                   help="Full path to a 2D mosaic grid image (nifti files). Expects this format: '.*z(\d+)_.*' to extract the slice number.")
     p.add_argument("output_volume",
                    help="Assembled volume filename (must be a .zarr)")
     p.add_argument("--xy_shifts", required=False, default=None,
@@ -103,9 +104,6 @@ def main():
     mosaic = zarr.open(zarr_file, mode="w", shape=volume_shape, dtype=np.float32, chunks=(1, 256, 256),
                        synchronizer=synchronizer)
 
-    # Create the volume
-    #volume = np.zeros(volume_shape, dtype=np.float32)
-
     # Loop over the slices
     for i in tqdm(range(len(files)), unit="slice", desc="Stacking slices"):
         # Load the slice
@@ -122,23 +120,15 @@ def main():
             dy = np.cumsum(dy_list)[i - 1] + y0
 
         # Apply the shift
-        img = apply_xy_shift(img, mosaic[0,:,:], dx, dy)
+        img = apply_xy_shift(img, mosaic[0, :, :], dx, dy)
 
         # Add the slice to the volume
         mosaic[z, :, :] = img
 
         del img
 
-    # Save this volume
-    # affine = np.eye(4)
-    # affine[0, 0] = args.resolution_xy / 1000.0  # x resolution in mm
-    # affine[1, 1] = args.resolution_xy / 1000.0  # y resolution in mm
-    # affine[2, 2] = args.resolution_z / 1000.0  # z resolution in mm
-    # img = nib.Nifti1Image(volume, affine)
-    # output_file = Path(args.output_volume)
-    # output_file.parent.mkdir(exist_ok=True, parents=True)
-    # nib.save(img, output_file)
-
+    # Removing the synchronizer file
+    shutil.rmtree(process_sync_file)
 
 if __name__ == "__main__":
     main()
