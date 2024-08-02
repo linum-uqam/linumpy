@@ -341,7 +341,7 @@ class MosaicGrid():
         x_shape = np.ceil(xmax - xmin + self.tile_shape[0]).astype(int)
         y_shape = np.ceil(ymax - ymin + self.tile_shape[1]).astype(int)
 
-        image = np.zeros((x_shape, y_shape, 1), dtype=np.float32)
+        image = np.zeros((1, x_shape, y_shape), dtype=np.float32)
         # mask = np.zeros((x_shape, y_shape), dtype=np.float32)
         for x in range(self.n_tiles_x):
             for y in range(self.n_tiles_y):
@@ -540,10 +540,10 @@ def addVolumeToMosaic(volume, pos, mosaic, blendingMethod='diffusion', factor=3,
     else:
         wz = 0
 
-    if mosaic.ndim == 3 and mosaic.shape[0] != 1:
+    if mosaic.ndim == 3 and mosaic.shape[0] != 0:
         mask = mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny].mean(axis=0) > 0
     else:
-        mask = np.squeeze(mosaic[wx:wx + nx, wy:wy + ny, 0]) > 0
+        mask = np.squeeze(mosaic[wx:wx + nx, wy:wy + ny]) > 0
 
     # Computing the blending weights
     if np.any(mask):
@@ -571,7 +571,10 @@ def addVolumeToMosaic(volume, pos, mosaic, blendingMethod='diffusion', factor=3,
     alpha = np.tile(np.reshape(alpha, [1, nx, ny]), [nz, 1, 1])
 
     # Adding the volume to the mosaic using the blending weights computed above
-    mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny] = volume * alpha + (1 - alpha) * mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny]
+    if mosaic.ndim == 3:
+        mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny] = volume * alpha + (1 - alpha) * mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny]
+    else:
+        mosaic[wx:wx + nx, wy:wy + ny] = volume * alpha + (1 - alpha) * mosaic[wx:wx + nx, wy:wy + ny]
 
     return mosaic
 
