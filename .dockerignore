@@ -1,0 +1,9 @@
+venv/
+*.egg-info
+docs/
+
+# Nextflow files
+.nextflow/
+*.nextflow.log*
+workflows/work/
+*/work/

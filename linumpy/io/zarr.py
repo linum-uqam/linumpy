@@ -113,9 +113,9 @@ def generate_axes_dict():
     :return: The axes dictionary
     """
     axes = [
-        {"name": "z", "type": "space", "unit": "mm"},
-        {"name": "y", "type": "space", "unit": "mm"},
-        {"name": "x", "type": "space", "unit": "mm"}
+        {"name": "z", "type": "space", "unit": "millimeter"},
+        {"name": "y", "type": "space", "unit": "millimeter"},
+        {"name": "x", "type": "space", "unit": "millimeter"}
     ]
     return axes
 
