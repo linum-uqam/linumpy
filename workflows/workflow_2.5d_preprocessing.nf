@@ -57,7 +57,7 @@ process create_mosaicgrid_2d{
     publishDir path: "${params.mosaicgrids_directory}", mode: "copy"
     script:
     """
-    linum_create_mosaic_grid $directory "mosaic_grid_z${slice_id}.tiff" -z $slice_id --normalize
+    linum_create_mosaic_grid $directory "mosaic_grid_z${slice_id}.tiff" -z $slice_id --normalize --n_cpus 1
     """
 }
 
