@@ -60,6 +60,8 @@ linum_stack_slices = "scripts.linum_stack_slices:main"
 linum_stitch_2d = "scripts.linum_stitch_2d:main"
 linum_view_omezarr = "scripts.linum_view_omezarr:main"
 linum_view_zarr = "scripts.linum_view_zarr:main"
+linum_create_all_mosaicgrids = "scripts.linum_create_all_mosaicgrids:main"
+linum_create_mosaic_grid = "scripts.linum_create_mosaic_grid:main"
 
 [project.urls]
 Homepage = "https://github.com/linum-uqam/linumpy-private"
