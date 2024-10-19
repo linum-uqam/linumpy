@@ -14,6 +14,7 @@ from skimage.transform import resize
 
 from linumpy import reconstruction
 from linumpy.microscope.oct import OCT
+from linumpy.io.thorlabs import ThorOCT
 from tqdm.auto import tqdm
 
 
@@ -30,7 +31,12 @@ def _build_arg_parser():
                    help="Slice to process (default=%(default)s)")
     p.add_argument("--keep_galvo_return", action="store_true",
                    help="Keep the galvo return signal (default=%(default)s)")
-
+    p.add_argument("--data_type", type = str, default='OCT',choices=['OCT', 'PSOCT'],
+                   help="Type of the data to process (default=%(default)s)")
+    p.add_argument('--polarization', type = int, default = 1, choices = [1,2],
+                   help="Polarization index to process (In case of PSOCT data type)")
+    p.add_argument('--angle_index', type = int, default = 0,
+                   help="Angle index to process (In case of PSOCT data type)")
     return p
 
 
@@ -64,6 +70,85 @@ def process_tile(params: dict):
     cmax = cmin + vol.shape[2]
     mosaic[:, rmin:rmax, cmin:cmax] = vol
 
+def extract_positions_from_scan(scan_file_path: str):
+    """
+    Extracts the x, y positions from the .scan file.
+
+    Parameters:
+    - scan_file_path: Path to the .scan file.
+
+    Returns:
+    - A list of tuples containing the x, y positions.
+    """
+    positions = []
+    with open(scan_file_path, 'r') as file:
+        lines = file.readlines()
+
+        # Find the start of the positions section
+        positions_section = False
+        for line in lines:
+            line = line.strip()
+
+            # Mark the start of the positions section
+            if line == "------Positions------":
+                positions_section = True
+                continue
+
+            # If in the positions section, extract x, y values
+            if positions_section:
+                if line:  # Ignore empty lines
+                    # Split by comma and convert to float
+                    x, y = map(float, line.split(','))
+                    positions.append((x, y, 0))
+
+    return positions
+
+def get_PSOCT_tiles_ids(tiles_directory: str, number_of_angles:int = 2):
+    """
+    Get the .scan file and all .oct files from the tiles_directory.
+
+    Parameters:
+    - tiles_directory: Path to the directory containing the OCT tiles.
+    - number_of_angles: Number of acquisition angles.
+
+    Returns:
+    - positions: positions of the tiles in 3d
+    - grouped_files: list of file paths ordered by angles.
+    """
+    # Convert the tiles_directory to a Path object
+    tiles_path = Path(tiles_directory)
+    
+    if not tiles_path.is_dir():
+        raise ValueError(f"Provided path '{tiles_directory}' is not a valid directory.")
+    
+    # Initialize variables to store the results
+    scan_file = None
+    oct_files = []
+    grouped_files = [[] for _ in range(number_of_angles)]
+
+    # Iterate through files in the directory
+    for file in tiles_path.iterdir():
+        # Check for .scan file
+        if file.suffix == ".scan":
+            scan_file = file
+            positions = extract_positions_from_scan(scan_file)
+        # Collect .oct files
+        elif file.suffix == ".oct":
+            oct_files.append(file)
+    
+    # If no .scan file is found, raise a warning
+    if scan_file is None:
+        print("Warning: No .scan file found in the directory.")
+    
+    # If no .oct files are found, raise a warning
+    if not oct_files:
+        print("Warning: No .oct files found in the directory.")
+        
+    for i, oct_file in enumerate(oct_files):
+        angle_index = i % number_of_angles  # Determine the angle based on file index
+        grouped_files[angle_index].append(oct_file)
+    
+    return grouped_files, positions
 
 def main():
     # Parse arguments
@@ -77,9 +162,16 @@ def main():
     output_resolution = args.resolution
     crop = not args.keep_galvo_return
     n_cpus = multiprocessing.cpu_count() - 1
+    data_type = args.data_type
+    pol_index = args.polarization
+    angle_index = args.angle_index
 
     # Analyze the tiles
-    tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
+    if data_type == 'OCT':
+        tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
+    elif data_type == 'PSOCT':
+        tiles, tiles_pos = get_PSOCT_tiles_ids(tiles_directory)
+        tiles = tiles[angle_index]
     mx = [tiles_pos[i][0] for i in range(len(tiles_pos))]
     my = [tiles_pos[i][1] for i in range(len(tiles_pos))]
     mx_min = min(mx)
@@ -90,10 +182,22 @@ def main():
     n_my = my_max - my_min + 1
 
     # Prepare the mosaic_grid
-    oct = OCT(tiles[0])
-    vol = oct.load_image(crop=crop)
-    vol = preprocess_volume(vol)
-    resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
+    if data_type == 'OCT':
+        oct = OCT(tiles[0])
+        vol = oct.load_image(crop=crop)
+        vol = preprocess_volume(vol)
+        resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
+    elif data_type == 'PSCOT':
+        oct = ThorOCT(tiles[0])
+        if pol_index == 0:
+            thor = ThorOCT.load(erase_polarization_2=True)
+            vol = thor.polarization1
+        else:
+            vol = ThorOCT.load(erase_polarization_1=True)
+            vol = thor.polarization2
+        vol = preprocess_volume(vol)
+        resolution = [15, 15, 15] # not sure of these values
+    
 
     # Compute the rescaled tile size based on the minimum target output resolution
     if output_resolution == -1:
@@ -130,3 +234,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # Example usage
+    # scan_file, oct_files = get_PSOCT_tiles_ids("C:/Users/Mohamad Hawchar/Concordia University - Canada/NeuralABC as-psOCT Samples - data/2024_07_25_mouse_CB_1slice_2anglesliceIdx1_SUCCESS")
+    # print(f"Scan file: {len(scan_file)}")
+    # print(f"Angles: {len(oct_files)}")
+    # print(f"Angle 1 length: {len(oct_files[0])}")
+    # print(f"Angle 1 length: {len(oct_files[1])}")
+
