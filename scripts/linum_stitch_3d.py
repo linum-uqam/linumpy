@@ -9,7 +9,9 @@ from pathlib import Path
 
 import numpy as np
 import zarr
+import dask.array as da
 
+from linumpy.io.zarr import read_omezarr, save_zarr
 from linumpy.utils.mosaic_grid import addVolumeToMosaic
 
 
@@ -42,7 +44,7 @@ def main():
     assert output_file.name.endswith(".zarr"), "output_image must be a .zarr file"
 
     # Load the image
-    volume = zarr.open(input_file, mode="r")
+    volume, resolution = read_omezarr(input_file, level=0)
     tile_shape = volume.chunks
 
     # Load the transform
@@ -65,7 +67,8 @@ def main():
     mosaic_shape = [volume.shape[0], posx_max - posx_min, posy_max - posy_min]
 
     # Stitch the mosaic
-    mosaic = zarr.open(output_file, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=(100, 100, 100))
+    temp_store = zarr.TempStore(suffix='.zarr')
+    mosaic = zarr.open(temp_store, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=(100, 100, 100))
     for i in range(nx):
         for j in range(ny):
             # Compute the tile position in the input
@@ -80,6 +83,9 @@ def main():
             pos[0] -= posx_min
             pos[1] -= posy_min
             mosaic = addVolumeToMosaic(tile, pos, mosaic, blendingMethod=blending_method)
+    
+    out_dask = da.from_zarr(mosaic)
+    save_zarr(out_dask, output_file, resolution)
 
 
 if __name__ == "__main__":

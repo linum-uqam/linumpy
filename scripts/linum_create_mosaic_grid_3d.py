@@ -7,6 +7,7 @@ import argparse
 import multiprocessing
 import shutil
 from pathlib import Path
+from os.path import join as pjoin
 
 import numpy as np
 import dask.array as da
@@ -102,12 +103,14 @@ def main():
     # Compute the rescaled tile size based on the minimum target output resolution
     if output_resolution == -1:
         tile_size = vol.shape
+        output_resolution = resolution
     else:
         tile_size = [int(vol.shape[i] * resolution[i] * 1000 / output_resolution) for i in range(3)]
+        output_resolution = [output_resolution / 1000.0] * 3
     mosaic_shape = [tile_size[0], n_mx * tile_size[1], n_my * tile_size[2]]
 
     # Create the zarr persistent array
-    zarr_store = zarr.TempStore()
+    zarr_store = zarr.TempStore(suffix=".zarr")
     process_sync_file = zarr_store.path.replace(".zarr", ".sync")
     synchronizer = zarr.ProcessSynchronizer(process_sync_file)
     mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape, dtype=np.float32,
@@ -132,7 +135,7 @@ def main():
 
     # Convert to ome-zarr
     mosaic_dask = da.from_zarr(mosaic)
-    save_zarr(mosaic_dask, args.output_zarr, scales=resolution,
+    save_zarr(mosaic_dask, args.output_zarr, scales=output_resolution,
               chunks=tile_size, n_levels=args.n_levels)
 
     # Remove the process sync file

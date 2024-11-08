@@ -38,7 +38,8 @@ class CustomScaler(Scaler):
         new_shape = list(image.shape)
         new_shape[-1] = image.shape[-1] // self.downscale
         new_shape[-2] = image.shape[-2] // self.downscale
-        new_shape[-3] = image.shape[-3] // self.downscale
+        if len(new_shape) > 2:
+            new_shape[-3] = image.shape[-3] // self.downscale
         out_shape = tuple(new_shape)
 
         dtype = image.dtype
@@ -49,9 +50,9 @@ class CustomScaler(Scaler):
 
     def _by_plane(self, base, func):
         # This method is called by base class when interpolation methods (e.g. nearest)
-        # directly. Because `write_image` never call these methods, we don't need to
-        # implement it here. We raise an error to make sure the CustomScaler class is not
-        # used for this purpose.
+        # are called directly. Because `write_image` never call these methods, we don't
+        # need to implement it here. We raise an error to make sure the CustomScaler class
+        # is not used for this purpose.
         raise NotImplementedError("_by_plane method not implemented for CustomScaler")
 
 
@@ -184,7 +185,7 @@ def read_omezarr(zarr_path, level=0):
     multiscales_attrs = omezarr.attrs["multiscales"][0]
 
     # res = omezarr.attrs["multiscales"][0]["coordinateTransformations"][0]["scale"]
-    resolution = np.ones(3,)
+    resolution = np.ones(len(multiscales_attrs["axes"]),)
     if "coordinateTransformations" in multiscales_attrs:
         base_coord_transform = multiscales_attrs["coordinateTransformations"]
         for transform in base_coord_transform:
@@ -205,5 +206,4 @@ def read_omezarr(zarr_path, level=0):
     else:
         raise ValueError(f'Mandatory "path" field missing for level {level}.')
 
-    print(resolution)
     return vol, resolution
