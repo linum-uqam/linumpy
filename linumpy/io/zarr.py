@@ -18,13 +18,17 @@ from skimage.transform import resize
 
 class CustomScaler(Scaler):
     """
-    Custom ome_zarr.scale.Scaler class for handling downscaling in 3D.
+    Custom ome_zarr.scale.Scaler class for handling downscaling up to 3D.
 
-    Only `resize_image` method is implemented.
+    Only `resize_image` method is implemented. Interpolation is ALWAYS done
+    using 1-st order (linear) interpolation.
     """
     def resize_image(self, image):
         """
-        Resize a numpy array OR a dask array to a smaller array (not pyramid)
+        Resize a numpy array OR a dask array to a smaller array (not pyramid).
+
+        This method is the only method from the Scaler class called from
+        `ome_zarr.writer.write_image`.
         """
         if isinstance(image, da.Array):
 
@@ -58,11 +62,15 @@ class CustomScaler(Scaler):
 
 def create_transformation_dict(nlevels, ndims=3):
     """
-    Create a dictionary with the transformation information for 3D images.
+    Create a dictionary with the transformation information for
+    images up to 4 dimensions.
 
-    :param scales: The scale of the image, in z y x order.
-    :param levels: The number of levels in the pyramid.
-    :return:
+    :type nlevels: int
+    :param nlevels: The number of levels in the pyramid.
+    :type ndims: int
+    :param ndims: The number of dimensions of the dataset.
+    :type coord_transforms: list of Dict
+    :return coord_transforms: List of coordinate transformations
     """
     def _get_scale(level, ndims):
         scale_def = [1.0, (2.0**level), (2.0**level), (2.0**level)]
@@ -81,9 +89,15 @@ def create_transformation_dict(nlevels, ndims=3):
 
 def generate_axes_dict(ndims=3):
     """
-    Generate the axes dictionary for the zarr file.
+    Generate the axes dictionary for up to 4 dimensions.
 
-    :return: The axes dictionary
+    Dimensions are returned in order (c, z, y, x).
+
+    :type ndims: int
+    :param ndims: Number of dimensions.
+
+    :type axes: list of Dict
+    :return axes: The axes dictionary.
     """
     axes = [
         {"name": "c", "type": "channel"},
@@ -112,7 +126,8 @@ def save_zarr(data, store_path, scales=(1e-3, 1e-3, 1e-3),
               chunks=(128, 128, 128), n_levels=5, overwrite=True):
     """
     Save numpy array to disk in zarr format following OME-NGFF file specifications.
-    Expected ordering for axes in `data` and `scales` is `(c, z, y, x)`.
+    Expected ordering for axes in `data` and `scales` is `(c, z, y, x)`. Does not
+    support saving for multi-channel 2D images with axes (c, y, x).
 
     :type data: numpy or dask array
     :param data: numpy or dask array to save as zarr.
@@ -127,17 +142,16 @@ def save_zarr(data, store_path, scales=(1e-3, 1e-3, 1e-3),
     :type overwrite: bool
     :param overwrite: Overwrite `store_path` if it already exists.
 
-    :return  zarr_group: Resulting zarr group saved to disk.
     :type zarr_group: zarr.hierarchy.group
+    :return zarr_group: Resulting zarr group saved to disk.
     """
     # pyramidal decomposition (ome_zarr.scale.Scaler) keywords
     pyramid_kw = {"max_layer": n_levels,
                   "downscale": 2}
     ndims = len(data.shape)
 
-    # pyramid = list(pyramid_gaussian(data, **pyramid_kw))
     # metadata describes the downsampling method used for generating
-    # multiscale data representation (see also type in write_multiscale)
+    # multiscale data representation (see also type in write_image)
     metadata = {"method": "ome_zarr.scale.Scaler",
                 "version":version("ome-zarr"),
                 "args": pyramid_kw}
@@ -169,6 +183,9 @@ def save_zarr(data, store_path, scales=(1e-3, 1e-3, 1e-3),
 
 def read_omezarr(zarr_path, level=0):
     """
+    Read omezarr image at `zarr_path` and loads image data for `level` level
+    in the pyramid. Also returns voxel size for chosen level.
+
     :type zarr_path: str
     :param zarr_path: Path of OME-zarr file to load.
     :type level: int >= 0
