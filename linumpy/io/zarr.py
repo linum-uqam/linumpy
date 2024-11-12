@@ -52,6 +52,20 @@ class CustomScaler(Scaler):
         )
         return image.astype(dtype)
 
+    def linear(self, base):
+        """
+        Downsample using :func:`skimage.transform.resize`
+        with linear interpolation.
+        """
+        pyramid = [base]
+        max_axes_resize = min(len(base.shape), 3)
+        level = self.max_layer
+        while level > 0 and np.all(np.asarray(pyramid[-1].shape[:-max_axes_resize])
+                                   >= self.downscale):
+            pyramid.append(self.resize_image(pyramid[-1]))
+            level -= 1
+        return pyramid
+
     def _by_plane(self, base, func):
         # This method is called by base class when interpolation methods (e.g. nearest)
         # are called directly. Because `write_image` never call these methods, we don't
@@ -147,6 +161,7 @@ def save_zarr(data, store_path, scales=(1e-3, 1e-3, 1e-3),
     """
     # pyramidal decomposition (ome_zarr.scale.Scaler) keywords
     pyramid_kw = {"max_layer": n_levels,
+                  "method": "linear",
                   "downscale": 2}
     ndims = len(data.shape)
 
