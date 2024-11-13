@@ -118,10 +118,11 @@ def main():
     # Retrieve the results and fix the volume
     temp_store = zarr.TempStore(suffix=".zarr")
     process_sync_file = temp_store.path.replace(".zarr", ".sync")
-    print(process_sync_file)
     synchronizer = zarr.ProcessSynchronizer(process_sync_file)
     vol_output = zarr.open(temp_store, mode="w", shape=vol.shape, dtype=vol.dtype,
                            chunks=vol.chunks, synchronizer=synchronizer)
+
+    # TODO: Rebuilding volume step could be faster
     for z, f in tqdm(corrected_files, "Rebuilding volume"):
         slice_vol = io.v3.imread(str(f))
         vol_output[z] = slice_vol[:]
