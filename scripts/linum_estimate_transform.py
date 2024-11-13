@@ -64,8 +64,6 @@ def main():
         img = zarr.open(input_images[0], mode="r")
         tile_shape = img.chunks
 
-    print(tile_shape)
-
     # Check the output filename extensions
     assert output_transform.name.endswith(".npy"), "output_transform must be a .npy file"
 

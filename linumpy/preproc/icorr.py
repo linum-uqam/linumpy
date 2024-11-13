@@ -516,6 +516,7 @@ def getSmoothIntensityTransition(vol, slicesStart):
 
 def getAttenuation_Vermeer2013(vol, dz=6.5e-6, mask=None, C=None):
     """Estimates the attenuation coefficient using the Vermeer2013 model.
+
     Parameters
     ----------
     vol : ndarray
@@ -591,6 +592,95 @@ def getAttenuation_Vermeer2013(vol, dz=6.5e-6, mask=None, C=None):
         mu[bottom_mask] = bottom_mu[bottom_mask]
 
     return mu
+
+
+def get_extendedAttenuation_Vermeer2013(vol, mask=None, k=10, sigma=5,
+                                        sigma_bottom=3, dz=1, res=6.5,
+                                        zshift=3, fillHoles=False):
+    """Compute the local effective tissue attenuation using
+    the extended Vermeer model.
+
+    Parameters
+    ----------
+    vol: ndarray
+        OCT volume to process
+    mask: ndarray
+        Optional tissue mask. If none is given the water/tissue
+        interface will be detected from the data.
+    k: int
+        Median filter kernel size (px) applied before the attenuation
+        coefficient computation (applied in the XY direction).
+    sigma: int
+        Gaussian filter kernel size (px) applied axially before the
+        exponential signal fit used to extend the Alines for the extended
+        Vermeer signal evalution.
+    dz: int
+        Number of axial pixel to consider when computing the bottom slice
+        signal for the signal extension.
+    res: float
+        Axial resolution in micron / pixel
+    zshift: int
+        Number of pixel under the water-tissue interface to ignore while
+        fitting the exponential function for signal extension.
+
+    Returns
+    -------
+    ndarray
+        Computed attenuation coefficients.
+    """
+    # First the slice is denoised with a small median filter
+    if k > 0:
+        vol = sitk.GetArrayFromImage(
+            sitk.Median(sitk.GetImageFromArray(vol), (0, k, k))
+        )
+
+    # Computing tissue mask
+    if mask is None:
+        # Detecting the water / tissue interface
+        interface = xyzcorr.findTissueInterface(
+            vol, s_xy=3, s_z=1, order=1, useLog=True
+        )
+        mask = xyzcorr.maskUnderInterface(vol, interface + zshift, returnMask=True)
+
+    # Lets fit an exponential function on each Aline to extend the tissue slice.
+    exp_fit = get_gradientAttenuation(gaussian_filter(vol, (0, 0, sigma)))
+    exp_fit = np.ma.masked_array(exp_fit, ~mask).mean(axis=2)
+
+    # Fill holes left by NaN values
+    exp_fit[np.isnan(exp_fit)] = 0
+    # exp_fit = gaussian_filter(exp_fit, sigma_bottom);
+
+    # Get the signal at the interface for each Aline
+    interface_bottom = (
+        vol.shape[2] - xyzcorr.getInterfaceDepthFromMask(mask[:, :, ::-1]) - 1 - dz
+    )
+    mask_bottom = xyzcorr.maskUnderInterface(vol, interface_bottom, returnMask=True)
+    mask_bottom = (mask_bottom * mask).astype(bool)
+    i0 = np.ma.masked_array(vol, ~mask_bottom).mean(axis=2)
+    # i0 = gaussian_filter(i0, sigma_bottom)
+
+    # Compute the end-of-scan bias
+    epsilon = 1e-3
+    C = np.zeros_like(i0)
+    C[exp_fit > epsilon] = i0[exp_fit > epsilon] / exp_fit[exp_fit > epsilon]
+    C = gaussian_filter(C, sigma_bottom)
+
+    # Compute the attenuation
+    attn_cropped = getAttenuation_Vermeer2013(vol, dz=res * 1e-06, mask=mask, C=C)
+
+    # Remove NaN
+    attn_cropped[np.isnan(attn_cropped)] = 0
+
+    # Only keep attn within the mask
+    attn_cropped[~mask.astype(bool)] = 0
+
+    # Fill holes
+    if fillHoles:
+        attn_cropped = sitk.GetArrayFromImage(
+            sitk.GrayscaleFillhole(sitk.GetImageFromArray(attn_cropped))
+        )
+
+    return attn_cropped
 
 
 def getAttenuation_Faber2004(vol, mask=None, dz=6.5e-6, N=4):
