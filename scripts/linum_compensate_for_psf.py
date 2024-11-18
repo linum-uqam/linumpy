@@ -12,6 +12,14 @@ def _build_arg_parser():
                    help='Input stitched 3D slice (OME-zarr).')
     p.add_argument('out_zarr',
                    help='Output volume corrected for beam PSF (OME-zarr).')
+    p.add_argument('--out_psf',
+                   help='Optional output PSF filename.')
+    p.add_argument('--n_profiles', type=int, default=20,
+                   help='Number of intensity profiles to use [%(default)s].')
+    p.add_argument('--n_iterations', type=int, default=20,
+                   help='Number of iterations [%(default)s].')
+    p.add_argument('--smooth', type=float, default=0.01,
+                   help='Smoothing factor as a fraction of volume depth [%(default)s].')
     return p
 
 
@@ -27,15 +35,22 @@ def  main():
     res_axial_microns = res[2] * 1000
 
     # 2. estimate psf
-    zf, zr = extract_psfParametersFromMosaic(vol, res=res_axial_microns)
-    psf3d = get_3dPSF(zf, zr, res_axial_microns, vol.shape)
+    zf, zr = extract_psfParametersFromMosaic(vol, nProfiles=args.n_profiles,
+                                             res=res_axial_microns, f=args.smooth,
+                                             nIterations=args.n_iterations)
+    psf_3d = get_3dPSF(zf, zr, res_axial_microns, vol.shape)
 
     # Compensate by the PSF
-    output = vol / psf3d
+    output = vol / psf_3d
 
     # TODO: Use dask arrays
     output = np.moveaxis(output, (0, 1, 2), (2, 1, 0))
     res = res[::-1]
+
+    if args.out_psf:
+        psf_3d = np.moveaxis(psf_3d, (0, 1, 2), (2, 1, 0))
+        # when there are too many levels it'll break the viewer for some reason
+        save_zarr(psf_3d, args.out_psf, scales=res, chunks=chunks, n_levels=0)
 
     save_zarr(output, args.out_zarr, scales=res, chunks=chunks)
 
