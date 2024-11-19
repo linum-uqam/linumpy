@@ -41,7 +41,7 @@ def main():
     vol_dask /= bias_dask
 
     # Save the output
-    save_zarr(vol_dask, args.output, scales=res, chunks=chunks)
+    save_zarr(vol_dask.astype(da.float32), args.output, scales=res, chunks=chunks)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ import argparse
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-from linumpy.preproc.icorr import getAttenuation_Vermeer2013
+from linumpy.preproc.icorr import get_extendedAttenuation_Vermeer2013
 from linumpy.io.zarr import read_omezarr, save_zarr
 
 def _build_arg_parser():
@@ -44,9 +44,8 @@ def main():
     vol = np.moveaxis(zarr_vol, (0, 1, 2), (2, 1, 0))
     res_axial_microns = res[0] * 1000  # resolution is expected to be in microns
 
-    if args.mask is None:
-        mask = np.ones_like(vol, dtype=bool)
-    else:
+    mask=None
+    if args.mask is not None:
         mask_zarr, _ = read_omezarr(args.mask, level=0)
         mask = np.moveaxis(mask_zarr, (0, 1, 2), (2, 1, 0)).astype(bool)
 
@@ -57,12 +56,14 @@ def main():
     # TODO: If there is a 1.0e-6 multiplier it means dz is
     # expected to be given in meters. However, from docstring
     # the resolution appears to be expected in microns also.
-    attn = getAttenuation_Vermeer2013(vol, dz=res_axial_microns*1.0e-6, mask=mask)
-    # attn = get_extendedAttenuation_Vermeer2013(vol, mask, k=0, res=args.resolution)
+    attn = get_extendedAttenuation_Vermeer2013(vol, mask=mask, k=0,
+                                               res=res_axial_microns,
+                                               fillHoles=True, zshift=10)
 
     # Saving the attenuation
     attn = np.moveaxis(attn, (0, 1, 2), (2, 1, 0))
-    save_zarr(attn, args.output, scales=res, chunks=zarr_vol.chunks)
+    save_zarr(attn.astype(np.float32), args.output,
+              scales=res, chunks=zarr_vol.chunks)
 
 
 if __name__ == "__main__":
