@@ -49,7 +49,8 @@ def main():
 
     # Saving this bias field
     bias_field = np.moveaxis(bias_field, (0, 1, 2), (2, 1, 0))
-    save_zarr(bias_field, args.output, scales=res, chunks=vol.chunks)
+    save_zarr(bias_field.astype(np.float32), args.output,
+              scales=res, chunks=vol.chunks)
 
 
 if __name__ == "__main__":

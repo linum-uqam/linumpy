@@ -14,9 +14,11 @@ def _build_arg_parser():
                    help='Output volume corrected for beam PSF (OME-zarr).')
     p.add_argument('--out_psf',
                    help='Optional output PSF filename.')
-    p.add_argument('--n_profiles', type=int, default=20,
+    p.add_argument('--nz', type=int, default=25,
+                   help='The "nz" first voxels belonging to background [%(default)s].')
+    p.add_argument('--n_profiles', type=int, default=10,
                    help='Number of intensity profiles to use [%(default)s].')
-    p.add_argument('--n_iterations', type=int, default=20,
+    p.add_argument('--n_iterations', type=int, default=15,
                    help='Number of iterations [%(default)s].')
     p.add_argument('--smooth', type=float, default=0.01,
                    help='Smoothing factor as a fraction of volume depth [%(default)s].')
@@ -41,7 +43,11 @@ def  main():
     psf_3d = get_3dPSF(zf, zr, res_axial_microns, vol.shape)
 
     # Compensate by the PSF
-    output = vol / psf_3d
+    background = np.mean(vol[..., :args.nz])
+    output = (vol - background) / psf_3d + background
+
+    # remove negative values
+    output -= output.min()
 
     # TODO: Use dask arrays
     output = np.moveaxis(output, (0, 1, 2), (2, 1, 0))
@@ -50,9 +56,9 @@ def  main():
     if args.out_psf:
         psf_3d = np.moveaxis(psf_3d, (0, 1, 2), (2, 1, 0))
         # when there are too many levels it'll break the viewer for some reason
-        save_zarr(psf_3d, args.out_psf, scales=res, chunks=chunks, n_levels=0)
+        save_zarr(psf_3d.astype(np.float32), args.out_psf, scales=res, chunks=chunks)
 
-    save_zarr(output, args.out_zarr, scales=res, chunks=chunks)
+    save_zarr(output.astype(np.float32), args.out_zarr, scales=res, chunks=chunks)
 
 
 if __name__ == '__main__':
