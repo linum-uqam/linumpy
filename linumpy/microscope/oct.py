@@ -102,6 +102,36 @@ class OCT:
             vol = vol[:, 0:n_alines, 0:n_bscans]
         return vol
 
+    def load_fringe(self, crop: bool = True):
+        # Create numpy array
+        # n_avg = self.info['n_repeat']  # TODO: use the number of averages when loading the data
+        n_alines = self.info['nx']
+        n_bscans = self.info['ny']
+        n_extra = self.info['n_extra']
+        n_alines_per_bscan = n_alines + n_extra
+        n_z = 2048
+
+        # Load the fringe
+        files = list(self.directory.rglob("fringe_*.bin"))
+        files.sort()
+        vol = None
+        for file in files:
+            with open(file, "rb") as f:
+                foo = np.fromfile(f, dtype=np.uint16)
+            n_frames = int(len(foo) / (n_alines_per_bscan * n_z))
+            foo = np.reshape(foo, (n_z, n_alines_per_bscan, n_frames), order='F')
+            if vol is None:
+                vol = foo
+            else:
+                vol = np.concatenate((vol, foo), axis=2)
+
+        # Crop the volume
+        if crop:
+            vol = vol[:, 0:n_alines, 0:n_bscans]
+
+
+        return vol
+
     def detect_galvo_shift(self, vol: np.ndarray = None) -> int:
         """Detect the galvo shift necessary to place the galvo return at the end of the bscans stack"""
         if vol is None:
