@@ -14,6 +14,7 @@ from skimage.transform import resize
 
 from linumpy import reconstruction
 from linumpy.microscope.oct import OCT
+from linumpy.io.thorlabs import ThorOCT
 from tqdm.auto import tqdm
 
 
@@ -30,7 +31,14 @@ def _build_arg_parser():
                    help="Slice to process (default=%(default)s)")
     p.add_argument("--keep_galvo_return", action="store_true",
                    help="Keep the galvo return signal (default=%(default)s)")
-
+    p.add_argument("--data_type", type = str, default='OCT',choices=['OCT', 'PSOCT'],
+                   help="Type of the data to process (default=%(default)s)")
+    p.add_argument('--polarization', type = int, default = 1, choices = [1,2],
+                   help="Polarization index to process (In case of PSOCT data type)")
+    p.add_argument('--angle_index', type = int, default = 0,
+                   help="Angle index to process (In case of PSOCT data type)")
+    p.add_argument('--return_complex', type = bool, default = False,
+                   help="Return Complex64 or Float32 data type (In case of PSOCT data type)")
     return p
 
 
@@ -48,22 +56,31 @@ def process_tile(params: dict):
     crop = params["crop"]
     tile_size = params["tile_size"]
     mosaic = params["mosaic"]
-
+    data_type = params["data_type"]
+    pol_index = params["pol_index"]
+    return_complex = params["return_complex"]
     # Load the tile
-    oct = OCT(f)
-    vol = oct.load_image(crop=crop)
-    vol = preprocess_volume(vol)
-
+    if data_type == 'OCT':
+        oct = OCT(f)
+        vol = oct.load_image(crop=crop)
+        vol = preprocess_volume(vol)
+    elif data_type == 'PSOCT':
+        oct = ThorOCT(f)
+        if pol_index == 0:
+            oct.load(erase_polarization_2=True, return_complex = return_complex)
+            vol = oct.polarization1
+        else:
+            oct.load(erase_polarization_1=True, return_complex = return_complex)
+            vol = oct.polarization2
+        vol = ThorOCT.preprocess_volume_PSOCT(vol)
     # Rescale the volume
     vol = resize(vol, tile_size, anti_aliasing=True, order=1, preserve_range=True)
-
     # Compute the tile position
     rmin = mx * vol.shape[1]
     cmin = my * vol.shape[2]
     rmax = rmin + vol.shape[1]
     cmax = cmin + vol.shape[2]
     mosaic[:, rmin:rmax, cmin:cmax] = vol
-
 
 def main():
     # Parse arguments
@@ -77,9 +94,17 @@ def main():
     output_resolution = args.resolution
     crop = not args.keep_galvo_return
     n_cpus = multiprocessing.cpu_count() - 1
+    data_type = args.data_type
+    pol_index = args.polarization
+    angle_index = args.angle_index
+    return_complex = args.return_complex
 
     # Analyze the tiles
-    tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
+    if data_type == 'OCT':
+        tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
+    elif data_type == 'PSOCT':
+        tiles, tiles_pos = ThorOCT.get_PSOCT_tiles_ids(tiles_directory)
+        tiles = tiles[angle_index]
     mx = [tiles_pos[i][0] for i in range(len(tiles_pos))]
     my = [tiles_pos[i][1] for i in range(len(tiles_pos))]
     mx_min = min(mx)
@@ -90,22 +115,40 @@ def main():
     n_my = my_max - my_min + 1
 
     # Prepare the mosaic_grid
-    oct = OCT(tiles[0])
-    vol = oct.load_image(crop=crop)
-    vol = preprocess_volume(vol)
-    resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
+    if data_type == 'OCT':
+        oct = OCT(tiles[0])
+        vol = oct.load_image(crop=crop)
+        vol = preprocess_volume(vol)
+        resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
+    elif data_type == 'PSOCT':
+        oct = ThorOCT(tiles[0])
+        if pol_index == 0:
+            oct.load(erase_polarization_2=True, return_complex = return_complex)
+            vol = oct.polarization1
+        else:
+            oct.load(erase_polarization_1=True, return_complex = return_complex)
+            vol = oct.polarization2
+        vol = ThorOCT.preprocess_volume_PSOCT(vol)
+        resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
+        print(f"Resolutoin: z = {resolution[0]} , x = {resolution[1]} , y = {resolution[2]} ") 
+    
 
     # Compute the rescaled tile size based on the minimum target output resolution
     if output_resolution == -1:
         tile_size = vol.shape
     else:
-        tile_size = [int(vol.shape[i] * resolution[i] * 1000 / output_resolution) for i in range(3)]
+        tile_size = [int(vol.shape[i] * resolution[i] * 1000 / output_resolution) for i in range(3)]     
     mosaic_shape = [tile_size[0], n_mx * tile_size[1], n_my * tile_size[2]]
-
+    print("Tile size:", tile_size)
+    
     # Create the zarr persistent array
     process_sync_file = str(zarr_file).replace(".zarr", ".sync")
     synchronizer = zarr.ProcessSynchronizer(process_sync_file)
-    mosaic = zarr.open(zarr_file, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=tile_size,
+    if return_complex == True:
+        mosaic = zarr.open(zarr_file, mode="w", shape=mosaic_shape, dtype=np.complex64, chunks=tile_size,
+                       synchronizer=synchronizer)
+    else:
+        mosaic = zarr.open(zarr_file, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=tile_size,
                        synchronizer=synchronizer)
 
     # Create a params dictionary for every tile
@@ -116,7 +159,10 @@ def main():
             "tile_pos": tiles_pos[i],
             "crop": crop,
             "tile_size": tile_size,
-            "mosaic": mosaic
+            "mosaic": mosaic,
+            "data_type": data_type,
+            "pol_index": pol_index,
+            "return_complex": return_complex
         })
 
     # Process the tiles in parallel
