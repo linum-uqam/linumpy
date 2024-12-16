@@ -8,6 +8,8 @@ from skimage.filters import threshold_li
 from skimage.morphology import disk
 
 
+# TODO: Fine-tune default values for 10x microscope or give heuristic
+# for fixing them.
 def extract_psfParametersFromMosaic(
     vol, f=0.01, nProfiles=10, zr_0=610.0, res=6.5, nIterations=15
 ):
