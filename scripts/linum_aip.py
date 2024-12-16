@@ -1,14 +1,15 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """Compute the average intensity projection of a 3D zarr volume."""
 
 import argparse
 from pathlib import Path
+import dask.array as da
 
 import numpy as np
 import zarr
-
+from linumpy.io.zarr import save_zarr, read_omezarr
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
@@ -31,11 +32,13 @@ def main():
     output_file = Path(args.output_image)
 
     # Open the zarr volume
-    vol = zarr.open(input_file, mode="r")
+    vol, resolution = read_omezarr(input_file, level=0)
 
     # Prepare the output
     shape = vol.shape[1:3]
-    aip = zarr.open(output_file, mode="w", shape=shape, dtype=np.float32, chunks=vol.chunks[1:3])
+    zarr_store = zarr.TempStore(suffix='.zarr')
+    aip = zarr.open(zarr_store, mode="w", shape=shape,
+                    dtype=np.float32, chunks=vol.chunks[1:3])
 
     # Process every tile
     tile_shape = vol.chunks
@@ -49,6 +52,9 @@ def main():
             cmax = (j + 1) * tile_shape[2]
             tile = vol[:, rmin:rmax, cmin:cmax].mean(axis=0)
             aip[rmin:rmax, cmin:cmax] = tile
+
+    out_dask = da.from_zarr(aip)
+    save_zarr(out_dask, output_file, resolution[1:], tile_shape[1:])
 
 
 if __name__ == "__main__":
