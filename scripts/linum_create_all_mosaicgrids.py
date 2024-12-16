@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """Convert all 3D OCT tiles in a directory to 2D mosaic grids"""

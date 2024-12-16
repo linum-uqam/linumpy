@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """Estimate the affine transform used to compute the tile position given a 2D mosaic grid."""
@@ -63,8 +63,6 @@ def main():
     elif input_images[0].rstrip('/').endswith(".zarr"):
         img = zarr.open(input_images[0], mode="r")
         tile_shape = img.chunks
-
-    print(tile_shape)
 
     # Check the output filename extensions
     assert output_transform.name.endswith(".npy"), "output_transform must be a .npy file"
