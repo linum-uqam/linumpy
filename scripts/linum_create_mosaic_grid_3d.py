@@ -19,6 +19,9 @@ from linumpy import reconstruction
 from linumpy.microscope.oct import OCT
 from tqdm.auto import tqdm
 
+# Default number of processes is the number of cores minus 1
+DEFAULT_N_CPUS = multiprocessing.cpu_count() - 1
+
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
@@ -35,6 +38,8 @@ def _build_arg_parser():
                    help="Keep the galvo return signal (default=%(default)s)")
     p.add_argument('--n_levels', type=int, default=5,
                    help='Number of levels in pyramid representation.')
+    p.add_argument('--n_processes', type=int,
+                   help=f'Number of processes to launch [{DEFAULT_N_CPUS}].')
 
     return p
 
@@ -81,7 +86,7 @@ def main():
     z = args.slice
     output_resolution = args.resolution
     crop = not args.keep_galvo_return
-    n_cpus = multiprocessing.cpu_count() - 1
+    n_cpus = DEFAULT_N_CPUS if args.n_processes is None else args.n_processes
 
     # Analyze the tiles
     tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
