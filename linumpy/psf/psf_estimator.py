@@ -7,6 +7,7 @@ from scipy.stats import zscore
 from skimage.filters import threshold_li
 from skimage.morphology import disk
 
+
 def extract_psfParametersFromMosaic(
     vol, f=0.01, nProfiles=10, zr_0=610.0, res=6.5, nIterations=15
 ):
@@ -63,14 +64,15 @@ def extract_psfParametersFromMosaic(
     )
     profile_mask = np.abs(zscore(iProfile_gradient, axis=1)) <= 1.0
     for ii in range(nProfiles):
-        profile_mask[ii, 0 : int(zmin + ii)] = 0
+        profile_mask[ii, 0:int(zmin + ii)] = 0
 
     z = np.linspace(0, nz * res, nz)
     zf_list = list()
     zr_list = list()
     total_err = list()
     for z0 in range(nProfiles):
-        # Find the coarse alignment of the focus based on pre-established Rayleigh length from thorlab)
+        # Find the coarse alignment of the focus based on
+        # pre-established Rayleigh length from thorlab
         errList = list()
         for zf in range(nz):
             a = profilePerInterfaceDepth[z0, zf]
