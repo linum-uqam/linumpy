@@ -22,6 +22,7 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
     'sphinxarg.ext',
+    'sphinx.ext.napoleon',
 ]
 autosummary_generate = True  # Turn on sphinx.ext.autosummary
 
