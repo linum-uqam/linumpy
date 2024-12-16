@@ -14,6 +14,11 @@ To install the tool for development, clone the repository and then install them 
 pip install -e .
 ```
 
+To use the Napari viewer, you will need to install the following dependencies:
+
+```
+pip install napari[all]
+``` 
 
 We highly recommend working in a [Python Virtual Environment].
 

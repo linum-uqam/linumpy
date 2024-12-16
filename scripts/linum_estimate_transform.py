@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """Estimate the affine transform used to compute the tile position given a 2D mosaic grid."""
