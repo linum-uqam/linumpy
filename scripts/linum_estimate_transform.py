@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """Estimate the affine transform used to compute the tile position given a 2D mosaic grid."""
@@ -13,6 +13,7 @@ from skimage.exposure import match_histograms
 from pathlib import Path
 import random
 import zarr
+from linumpy.io.zarr import read_omezarr
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
@@ -55,7 +56,11 @@ def main():
         tile_shape = [tile_shape[0]] * 2
     elif len(tile_shape) > 2:
         tile_shape = tile_shape[0:2]
-    if input_images[0].endswith(".zarr"):
+
+    if input_images[0].rstrip('/').endswith('.ome.zarr'):
+        img, _ = read_omezarr(input_images[0], level=0)
+        tile_shape = img.chunks
+    elif input_images[0].rstrip('/').endswith(".zarr"):
         img = zarr.open(input_images[0], mode="r")
         tile_shape = img.chunks
 
@@ -66,7 +71,10 @@ def main():
     mosaics = []
     thresholds = []
     for file in input_images:
-        if file.endswith(".zarr"):
+        if file.rstrip('/').endswith(".ome.zarr"):
+            img, _ = read_omezarr(str(file), level=0)
+            image = img[:]
+        elif file.rstrip('/').endswith(".zarr"):
             img = zarr.open(str(file), mode="r")
             image = img[:]
         else:

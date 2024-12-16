@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """Convert 3D OCT tiles to a 3D mosaic grid"""
@@ -7,14 +7,20 @@ import argparse
 import multiprocessing
 import shutil
 from pathlib import Path
+from os.path import join as pjoin
 
 import numpy as np
+import dask.array as da
 import zarr
 from skimage.transform import resize
 
+from linumpy.io.zarr import save_zarr
 from linumpy import reconstruction
 from linumpy.microscope.oct import OCT
 from tqdm.auto import tqdm
+
+# Default number of processes is the number of cores minus 1
+DEFAULT_N_CPUS = multiprocessing.cpu_count() - 1
 
 
 def _build_arg_parser():
@@ -30,6 +36,10 @@ def _build_arg_parser():
                    help="Slice to process (default=%(default)s)")
     p.add_argument("--keep_galvo_return", action="store_true",
                    help="Keep the galvo return signal (default=%(default)s)")
+    p.add_argument('--n_levels', type=int, default=5,
+                   help='Number of levels in pyramid representation.')
+    p.add_argument('--n_processes', type=int,
+                   help=f'Number of processes to launch [{DEFAULT_N_CPUS}].')
 
     return p
 
@@ -48,6 +58,7 @@ def process_tile(params: dict):
     crop = params["crop"]
     tile_size = params["tile_size"]
     mosaic = params["mosaic"]
+    mx_min, my_min = params["mxy_min"]
 
     # Load the tile
     oct = OCT(f)
@@ -58,8 +69,8 @@ def process_tile(params: dict):
     vol = resize(vol, tile_size, anti_aliasing=True, order=1, preserve_range=True)
 
     # Compute the tile position
-    rmin = mx * vol.shape[1]
-    cmin = my * vol.shape[2]
+    rmin = (mx - mx_min) * vol.shape[1]
+    cmin = (my - my_min) * vol.shape[2]
     rmax = rmin + vol.shape[1]
     cmax = cmin + vol.shape[2]
     mosaic[:, rmin:rmax, cmin:cmax] = vol
@@ -72,11 +83,10 @@ def main():
 
     # Parameters
     tiles_directory = Path(args.tiles_directory)
-    zarr_file = Path(args.output_zarr)
     z = args.slice
     output_resolution = args.resolution
     crop = not args.keep_galvo_return
-    n_cpus = multiprocessing.cpu_count() - 1
+    n_cpus = DEFAULT_N_CPUS if args.n_processes is None else args.n_processes
 
     # Analyze the tiles
     tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
@@ -98,15 +108,18 @@ def main():
     # Compute the rescaled tile size based on the minimum target output resolution
     if output_resolution == -1:
         tile_size = vol.shape
+        output_resolution = resolution
     else:
         tile_size = [int(vol.shape[i] * resolution[i] * 1000 / output_resolution) for i in range(3)]
+        output_resolution = [output_resolution / 1000.0] * 3
     mosaic_shape = [tile_size[0], n_mx * tile_size[1], n_my * tile_size[2]]
 
     # Create the zarr persistent array
-    process_sync_file = str(zarr_file).replace(".zarr", ".sync")
+    zarr_store = zarr.TempStore(suffix=".zarr")
+    process_sync_file = zarr_store.path.replace(".zarr", ".sync")
     synchronizer = zarr.ProcessSynchronizer(process_sync_file)
-    mosaic = zarr.open(zarr_file, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=tile_size,
-                       synchronizer=synchronizer)
+    mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape, dtype=np.float32,
+                       chunks=tile_size, synchronizer=synchronizer)
 
     # Create a params dictionary for every tile
     params = []
@@ -116,13 +129,19 @@ def main():
             "tile_pos": tiles_pos[i],
             "crop": crop,
             "tile_size": tile_size,
-            "mosaic": mosaic
+            "mosaic": mosaic,
+            "mxy_min": (mx_min, my_min)
         })
 
     # Process the tiles in parallel
     with multiprocessing.Pool(n_cpus) as pool:
         results = tqdm(pool.imap(process_tile, params), total=len(params))
         tuple(results)
+
+    # Convert to ome-zarr
+    mosaic_dask = da.from_zarr(mosaic)
+    save_zarr(mosaic_dask, args.output_zarr, scales=output_resolution,
+              chunks=tile_size, n_levels=args.n_levels)
 
     # Remove the process sync file
     shutil.rmtree(process_sync_file)
