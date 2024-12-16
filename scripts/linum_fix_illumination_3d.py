@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """Detect and fix the lateral illumination inhomogeneities for each 3D tiles of a mosaic grid"""
