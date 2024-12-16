@@ -1,3 +1,8 @@
+.. _script-linum-aip:
+
+linum_aip
+=========
+
 .. argparse::
    :filename: ../scripts/linum_aip.py
    :func: _build_arg_parser
