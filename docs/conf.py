@@ -5,7 +5,7 @@
 
 import os
 import sys
-sys.path.insert(0, os.path.abspath("../linumpy"))
+sys.path.insert(0, os.path.abspath("../"))
 sys.path.insert(1, os.path.abspath("../scripts"))
 
 # -- Project information -----------------------------------------------------
@@ -23,6 +23,7 @@ extensions = [
     'sphinx.ext.autosummary',
     'sphinxarg.ext',
 ]
+autosummary_generate = True  # Turn on sphinx.ext.autosummary
 
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
