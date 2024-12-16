@@ -171,4 +171,6 @@ workflows/work/
 # Macos
 .DS_Store
 
-
+# files
+*.zarr
+*.nii.gz

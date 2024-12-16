@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """Detect and fix the lateral illumination inhomogeneities for each 3D tiles of a mosaic grid"""
@@ -12,6 +12,9 @@ import multiprocessing
 import shutil
 import tempfile
 from pathlib import Path
+from os.path import join as pjoin
+
+import dask.array as da
 
 import zarr
 from pybasic.shading_correction import BaSiC
@@ -19,7 +22,7 @@ from tqdm.auto import tqdm
 import imageio as io
 import numpy as np
 from pqdm.processes import pqdm
-
+from linumpy.io.zarr import save_zarr, read_omezarr
 
 # TODO: add option to export the flatfields and darkfields
 
@@ -94,7 +97,7 @@ def main():
     n_cpus = multiprocessing.cpu_count() - 1
 
     # Prepare the data for the parallel processing
-    vol = zarr.open(input_zarr, mode="r")
+    vol, resolution = read_omezarr(input_zarr, level=0)
     n_slices = vol.shape[0]
     tmp_dir = tempfile.TemporaryDirectory(suffix="_linum_fix_illumination_3d_slices", dir=output_zarr.parent)
     params_list = []
@@ -113,13 +116,19 @@ def main():
     corrected_files = pqdm(params_list, process_tile, n_jobs=n_cpus, desc="Processing tiles")
 
     # Retrieve the results and fix the volume
-    process_sync_file = str(output_zarr).replace(".zarr", ".sync")
+    temp_store = zarr.TempStore(suffix=".zarr")
+    process_sync_file = temp_store.path.replace(".zarr", ".sync")
+    print(process_sync_file)
     synchronizer = zarr.ProcessSynchronizer(process_sync_file)
-    vol_output = zarr.open(output_zarr, mode="w", shape=vol.shape, dtype=vol.dtype, chunks=vol.chunks,
-                           synchronizer=synchronizer)
+    vol_output = zarr.open(temp_store, mode="w", shape=vol.shape, dtype=vol.dtype,
+                           chunks=vol.chunks, synchronizer=synchronizer)
     for z, f in tqdm(corrected_files, "Rebuilding volume"):
         slice_vol = io.v3.imread(str(f))
         vol_output[z] = slice_vol[:]
+
+    out_dask = da.from_zarr(vol_output)
+    save_zarr(out_dask, output_zarr, scales=resolution,
+              chunks=vol.chunks)
 
     # Remove the process sync file
     shutil.rmtree(process_sync_file)
