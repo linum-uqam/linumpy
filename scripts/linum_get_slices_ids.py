@@ -41,7 +41,7 @@ def main():
     z_list = list(set(z_list))
 
     # Save the ids to a csv file
-    data = np.array([z_list,]).T
+    data = np.array([z_list, ]).T
     with open(output_file, "w") as csv_file:
         writer = csv.writer(csv_file, delimiter=",")
         writer.writerow(["slice_id"])
