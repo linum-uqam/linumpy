@@ -1,4 +1,7 @@
 API
 ===
 
-.. automodule:: linumpy
+.. autosummary::
+   :toctree: generated
+
+   linumpy
