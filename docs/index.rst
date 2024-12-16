@@ -7,7 +7,7 @@ LINUMPY is a collection of tools to work with serial blockface histology data. T
    :maxdepth: 1
    :caption: Contents:
 
-    scripts
+   scripts
 
 Indices and tables
 ==================
