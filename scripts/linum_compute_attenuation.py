@@ -47,7 +47,7 @@ def main():
     # resolution is expected to be in microns
     res_axial_microns = res[0] * 1000
 
-    mask=None
+    mask = None
     if args.mask is not None:
         mask_zarr, _ = read_omezarr(args.mask, level=0)
         mask = np.moveaxis(mask_zarr, (0, 1, 2), (2, 1, 0)).astype(bool)
