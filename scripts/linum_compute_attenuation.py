@@ -42,6 +42,9 @@ def main():
 
     # Loading the data
     zarr_vol, res = read_omezarr(args.input, level=0)
+
+    # TODO: Change behaviour of attenuation estimation method
+    # to avoid having to swap the axes
     vol = np.moveaxis(zarr_vol, (0, 1, 2), (2, 1, 0))
 
     # resolution is expected to be in microns

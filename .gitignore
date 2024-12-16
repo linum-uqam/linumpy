@@ -171,7 +171,7 @@ workflows/work/
 # Macos
 .DS_Store
 
-# Image files
+# Data files
 *.zarr
 *.nii.gz
 *.sif
