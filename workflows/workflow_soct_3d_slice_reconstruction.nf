@@ -11,6 +11,7 @@ params.inputDir = "/Users/jlefebvre/Downloads/tiles_lowestImmersion";
 params.outputDir = "/Users/jlefebvre/Downloads/tiles_lowestImmersion_reconstruction";
 params.resolution = 10; // Resolution of the reconstruction in micron/pixel
 params.slice = 28; // Slice to process
+params.processes = 8; // Maximum number of python processes per nextflow process
 
 // Processes
 process create_mosaic_grid {
@@ -21,7 +22,7 @@ process create_mosaic_grid {
     //publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
-    linum_create_mosaic_grid_3d.py ${inputDir} mosaic_grid_3d_${params.resolution}um.ome.zarr --slice ${params.slice} --resolution ${params.resolution}
+    linum_create_mosaic_grid_3d.py ${inputDir} mosaic_grid_3d_${params.resolution}um.ome.zarr --slice ${params.slice} --resolution ${params.resolution} --n_processes ${params.processes}
     """
 }
 
@@ -142,8 +143,6 @@ workflow{
 
     // Compensate for XY illumination inhomogeneity
     fix_illumination(fix_focal_curvature.out)
-
-    // TODO: Apply attenuation compensation (BASIC)
 
     // Generate AIP mosaic grid
     generate_aip(fix_illumination.out)
