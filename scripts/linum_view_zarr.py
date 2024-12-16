@@ -14,7 +14,7 @@ def _build_arg_parser():
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_zarr",
                    help="Full path to the Zarr file.")
-    p.add_argument("-r", "--resolution",  nargs=3, type=float, default=[1.0]*3, metavar=('res_z', 'res_x', 'res_y'),
+    p.add_argument("-r", "--resolution",  nargs=3, type=float, default=[1.0]*3, metavar=('z', 'x', 'y'),
                    help="Resolution in micrometer in the Z, X, Y order. For an isotropic resolution, provide a single value. (default=%(default)s)")
 
     return p
