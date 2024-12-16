@@ -7,8 +7,12 @@ LINUMPY is a collection of tools to work with serial blockface histology data. T
    :maxdepth: 1
    :caption: Contents:
 
-   api
-   scripts
+   .. autosummary::
+   :toctree: generated
+   :recursive:
+
+   linumpy
+
 
 Indices and tables
 ==================
