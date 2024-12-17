@@ -1,0 +1,4 @@
+sphinx
+sphinx-autoapi
+sphinx-argparse
+furo

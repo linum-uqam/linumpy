@@ -1,20 +1,19 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
-""" This module uses graph theory to describe and interact with the mosaic topology.
-
-.. moduleauthor:: Joël Lefebvre <joel.lefebvre@polymtl.ca>
-
+"""
+This module uses graph theory to describe and interact with the mosaic topology.
 """
 
-import sys
-
+import SimpleITK as sitk
 import networkx as nx
 import numpy as np
-import SimpleITK as sitk
 
 
 def generate_default(nX, nY):
-    """Generates a default topology where all tiles in mosaic are nodes and all neighbor relation is an edge.
+    """
+    Generates a default topology where all tiles in mosaic are nodes and all
+    neighbor relation is an edge.
+
     Parameters
     ----------
     nX: int
@@ -58,7 +57,7 @@ def generate_default(nX, nY):
     outX = np.tile(np.arange(1, nX), (nY,))
     y = np.zeros(inX.shape, dtype=np.int)
     for iY in range(nY):
-        y[iY * (nX - 1) : iY * (nX - 1) + nX - 1] = iY
+        y[iY * (nX - 1): iY * (nX - 1) + nX - 1] = iY
     inX += nX * y
     outX += nX * y
 
@@ -82,11 +81,20 @@ def generate_default(nX, nY):
 
 
 def generate_graphFromEdges(sources, targets):
-    """Generates a graph for a list of source and target nodes
+    """
+    Generates a graph for a list of source and target nodes
 
-    :param sources: List of source node position.
-    :param targets: List of target node position.
-    :returns: topo : NetworkX graph object describing the mosaic topology
+    Parameters
+    ----------
+    sources:
+        List of source node position.
+    targets:
+        List of target node position.
+
+    Returns
+    -------
+    topo :
+        NetworkX graph object describing the mosaic topology
 
     """
     topo = nx.DiGraph()
@@ -104,11 +112,21 @@ def generate_graphFromEdges(sources, targets):
 
 
 def remove_agarose(topo, tissueMask):
-    """Remove agarose nodes from the mosaic topology
+    """
+    Remove agarose nodes from the mosaic topology
 
-    :param topo: NetworkX graph object describing the mosaic topology
-    :param tissueMask: (m, n) bool ndarray of the tissue mask for this slice.
-    :returns: topo: Updated mosaic topology (without the agarose nodes)
+    Parameters
+    ----------
+    topo:
+        NetworkX graph object describing the mosaic topology
+
+    tissueMask:
+        (m, n) bool ndarray of the tissue mask for this slice.
+
+    Returns
+    -------
+    topo:
+        Updated mosaic topology (without the agarose nodes)
 
     """
     agarosePos = np.where(tissueMask == 0)

@@ -46,7 +46,7 @@ process fix_illumination {
     //publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
-    linum_fix_illumination_3d.py ${mosaic_grid} mosaic_grid_3d_${params.resolution}um_illuminationFix.ome.zarr
+    linum_fix_lateral_illumination_3d.py ${mosaic_grid} mosaic_grid_3d_${params.resolution}um_illuminationFix.ome.zarr
     """
 }
 

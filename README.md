@@ -4,11 +4,7 @@
 
 **Linumpy** contains tools and utilities to quickly work with serial histology and microscopy data. Those tools implement the recommended workflows and parameters used in the lab. The library and scripts can be installed locally by using:
 
-```
-pip install linumpy
-```
-
-To install the tool for development, clone the repository and then install them with
+To install the tool, clone the repository and then install them with
 
 ```
 pip install -e .

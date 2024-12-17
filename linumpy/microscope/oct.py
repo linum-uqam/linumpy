@@ -10,7 +10,13 @@ from scipy.ndimage import convolve1d
 
 class OCT:
     def __init__(self, directory: str):
-        """ Spectral-domain OCT class to reconstruct the data"""
+        """Class to work with our custom Spectral OCT data format
+
+        Attributes
+        ----------
+        directory : str
+
+        """
         self.directory = Path(directory)
         self.info_filename = self.directory / "info.txt"
         self.info = {}
@@ -20,9 +26,10 @@ class OCT:
 
     def read_scan_info(self, filename: str):
         """ Read the scan information file
+
         Parameters
         ----------
-        filename
+        filename:
             Path to the scan_file written by the OCT (.txt)
         """
         with open(filename, "r") as f:

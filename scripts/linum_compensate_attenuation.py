@@ -6,7 +6,6 @@ bias field.
 """
 
 import argparse
-from pathlib import Path
 import dask.array as da
 
 from linumpy.io.zarr import save_zarr, read_omezarr

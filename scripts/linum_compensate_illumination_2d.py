@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Uses the BaSiC algorithm to estimate and compensate illumination inhomogeneities in a mosaic grid"""
+"""
+Estimate and compensate illumination inhomogeneities in a 2D mosaic grid with BaSiC
+"""
+
 
 import argparse
 from pathlib import Path
@@ -40,9 +43,9 @@ def main():
 
     # Parameters
     input_file = Path(args.input_image)
-    if args.output_image is not None :
+    if args.output_image is not None:
         output_file = Path(args.output_image)
-    else :
+    else:
         output_file = input_file.parent / Path(input_file.stem + "_compensated" + input_file.suffix)
     flatfield_file = Path(args.flatfield)
     darkfield_file = Path(args.darkfield)
@@ -91,6 +94,7 @@ def main():
     # Save the output
     output_file.parent.mkdir(exist_ok=True, parents=True)
     sitk.WriteImage(sitk.GetImageFromArray(fixed_image), str(output_file))
+
 
 if __name__ == "__main__":
     main()

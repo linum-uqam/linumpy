@@ -1,11 +1,31 @@
-from pathlib import Path
-from tqdm.auto import tqdm
 import re
-from linumpy.microscope.oct import OCT
-import numpy as np
+from pathlib import Path
+from typing import Tuple, List
 
-def get_tiles_ids(directory, z: int = None):
-    """Analyzes a directory and detects all the tiles in contains"""
+import numpy as np
+from tqdm.auto import tqdm
+
+from linumpy.microscope.oct import OCT
+
+
+def get_tiles_ids(directory, z: int = None) -> Tuple[List, List]:
+    """
+    Analyzes a directory and detects all the tiles in contains
+
+    Parameters
+    ----------
+    directory : str
+        Full path to the directory containing the raw mosaic tiles
+    z : int, optional
+        Slice to process
+
+    Returns
+    -------
+    tiles: List(str)
+        List of tiles path
+    tile_ids : List(Tuple(int, int))
+        List of mosaic position IDS for each tile
+    """
     input_directory = Path(directory)
 
     # Get a list of the input tiles
@@ -30,7 +50,29 @@ def get_tiles_ids(directory, z: int = None):
 
     return tiles, tile_ids
 
-def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_positions: bool = False):
+
+def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2,
+                    use_stage_positions: bool = False) -> dict:
+    """
+    Reads the mosaic info from a directory
+
+    Parameters
+    ----------
+    directory : str
+        Full path to a directory containing the raw mosaic tiles
+    z :
+        Slice to process
+    overlap_fraction :
+        Approximate overlap fraction between tiles (from 0 to 1)
+    use_stage_positions:
+        Use the recorded stage positions instead of the overlap fraction
+        to compute the tile positions.
+
+    Returns
+    -------
+    dict
+        Mosaic information dictionary
+    """
     input_directory = Path(directory)
 
     # Get a list of the input tiles
@@ -81,7 +123,7 @@ def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_
     ymin_mm = np.min([p[1] for p in tiles_positions_mm]) - oct.dimension[1] / 2
     xmax_mm = np.max([p[0] for p in tiles_positions_mm]) + oct.dimension[0] / 2
     ymax_mm = np.max([p[1] for p in tiles_positions_mm]) + oct.dimension[1] / 2
-    mosaic_center_mm = ((xmin_mm+xmax_mm)/2, (ymin_mm+ymax_mm)/2)
+    mosaic_center_mm = ((xmin_mm + xmax_mm) / 2, (ymin_mm + ymax_mm) / 2)
     mosaic_width_mm = xmax_mm - xmin_mm
     mosaic_height_mm = ymax_mm - ymin_mm
 
