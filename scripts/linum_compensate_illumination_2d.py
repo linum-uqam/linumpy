@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Uses the BaSiC algorithm to estimate and compensate illumination inhomogeneities in a mosaic grid"""
+"""Uses the BaSiC algorithm to estimate and compensate illumination inhomogeneities in a 2D mosaic grid"""
 
 import argparse
 from pathlib import Path
