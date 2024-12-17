@@ -8,6 +8,7 @@ from scipy.ndimage.morphology import binary_erosion, binary_fill_holes
 
 def segmentOCT3D(vol: np.ndarray, k:int=5, useLog:bool=True, thresholdMethod:str="otsu") -> np.ndarray:
     """To segment an S-OCT brain in 3D using thresholding and morphological watershed
+
     Parameters
     ----------
     vol
@@ -18,6 +19,7 @@ def segmentOCT3D(vol: np.ndarray, k:int=5, useLog:bool=True, thresholdMethod:str
         Transform the pixel intensity with a log before computing mask
     thresholdMethod
         'ostu', 'triangle'
+
     Returns
     -------
     ndarray
@@ -53,10 +55,12 @@ def segmentOCT3D(vol: np.ndarray, k:int=5, useLog:bool=True, thresholdMethod:str
 
 def fillHoles_2Dand3D(mask: np.ndarray) -> np.ndarray:
     """Fill holes in a 2D or 3D mask
+
     Parameters
     ----------
     mask
         The mask to fill
+
     Returns
     -------
     ndarray
@@ -81,6 +85,7 @@ def fillHoles_2Dand3D(mask: np.ndarray) -> np.ndarray:
 
 def removeBottom(mask: np.ndarray, k:int=10, axis:int=2, inverse:bool=False, fillHoles:bool=False) -> np.ndarray:
     """Remove the bottom side of the mask.
+
     Parameters
     ----------
     mask
@@ -93,6 +98,7 @@ def removeBottom(mask: np.ndarray, k:int=10, axis:int=2, inverse:bool=False, fil
         Inverse the operation
     fillHoles
         Fill holes in the mask
+
     Returns
     -------
     ndarray

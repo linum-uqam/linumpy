@@ -23,7 +23,7 @@ class MosaicGrid():
 
     .. note::
         This class can only deal with 2D mosaic grids for now. To generate a 2D mosaic grid from a collection of volumetric
-        tiles for a given slice, you can use the :ref:`script-linum-create-mosaic-grid` script.
+        tiles for a given slice, you can use the `linum_create_mosaic_grid_3d.py` script.
 
     """
 
