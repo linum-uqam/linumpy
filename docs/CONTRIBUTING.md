@@ -4,4 +4,5 @@
 * OME-Zarr format extension should be `ome.zarr`, as shown in the NGFF documentation ([URL](https://ngff.openmicroscopy.org/0.4/index.html#bf2raw-layout))
 * All scripts/methods should explicitly document the expected resolutions and dimensions units
 * We use Numpy style docstrings: https://numpydoc.readthedocs.io/en/latest/format.html
+* The axis order should be Z, Y, X
 
