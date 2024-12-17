@@ -11,7 +11,8 @@ import numpy as np
 
 def generate_default(nX, nY):
     """
-    Generates a default topology where all tiles in mosaic are nodes and all neighbor relation is an edge.
+    Generates a default topology where all tiles in mosaic are nodes and all
+    neighbor relation is an edge.
 
     Parameters
     ----------

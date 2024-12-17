@@ -51,7 +51,8 @@ def get_tiles_ids(directory, z: int = None) -> Tuple[List, List]:
     return tiles, tile_ids
 
 
-def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_positions: bool = False) -> dict:
+def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2,
+                    use_stage_positions: bool = False) -> dict:
     """
     Reads the mosaic info from a directory
 
@@ -64,7 +65,8 @@ def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_
     overlap_fraction :
         Approximate overlap fraction between tiles (from 0 to 1)
     use_stage_positions:
-        USe the recorded stage positions instead of the overlap fraction to compute the tile positions.
+        Use the recorded stage positions instead of the overlap fraction
+        to compute the tile positions.
 
     Returns
     -------

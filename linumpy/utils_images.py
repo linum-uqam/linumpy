@@ -81,7 +81,7 @@ def match_shape(img1: np.ndarray, img2: np.ndarray) -> Tuple[np.ndarray, np.ndar
     return padded_images
 
 
-def display_overlap(img1: np.ndarray, img2: np.ndarray, title: str = None, do_normalization: bool = False) -> None:
+def display_overlap(img1: np.ndarray, img2: np.ndarray, title: str = None, normalize: bool = False) -> None:
     """Display the overlap of two images.
 
     Parameters
@@ -92,10 +92,10 @@ def display_overlap(img1: np.ndarray, img2: np.ndarray, title: str = None, do_no
         The second image.
     title
         The title of the plot.
-    do_normalization
+    normalize
         Whether to normalize the images.
     """
-    if do_normalization:
+    if normalize:
         img1 = normalize(img1)
         img2 = normalize(img2)
     img1, img2 = match_shape(img1, img2)
