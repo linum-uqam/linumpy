@@ -7,11 +7,11 @@ nextflow.enable.dsl=2
 // Output: 3D mosaic grid tiff at an isotropic resolution of 25um
 
 // Parameters
-params.inputDir = "/Users/jlefebvre/Downloads/tiles_lowestImmersion";
-params.outputDir = "/Users/jlefebvre/Downloads/tiles_lowestImmersion_reconstruction";
+params.inputDir = "";
+params.outputDir = "";
 params.resolution = 10; // Resolution of the reconstruction in micron/pixel
-params.slice = 28; // Slice to process
-params.processes = 8; // Maximum number of python processes per nextflow process
+params.slice = 0; // Slice to process
+params.processes = 1; // Maximum number of python processes per nextflow process
 
 // Processes
 process create_mosaic_grid {
@@ -46,7 +46,7 @@ process fix_illumination {
     //publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
-    linum_fix_illumination_3d.py ${mosaic_grid} mosaic_grid_3d_${params.resolution}um_illuminationFix.ome.zarr
+    linum_fix_illumination_3d.py ${mosaic_grid} mosaic_grid_3d_${params.resolution}um_illuminationFix.ome.zarr --n_processes ${params.processes}
     """
 }
 
@@ -67,7 +67,7 @@ process estimate_xy_transformation {
         path aip
     output:
         path "transform_xy.npy"
-    //ublishDir path: "${params.outputDir}", mode: 'copy'
+    //publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
     linum_estimate_transform.py ${aip} transform_xy.npy

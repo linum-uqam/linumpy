@@ -9,10 +9,8 @@ environ["OMP_NUM_THREADS"] = "1"
 
 import argparse
 import multiprocessing
-import shutil
 import tempfile
 from pathlib import Path
-from os.path import join as pjoin
 
 import dask.array as da
 
@@ -23,6 +21,7 @@ import imageio as io
 import numpy as np
 from pqdm.processes import pqdm
 from linumpy.io.zarr import save_zarr, read_omezarr
+from linumpy.utils.io import add_processes_arg, parse_processes_arg
 
 # TODO: add option to export the flatfields and darkfields
 
@@ -33,7 +32,7 @@ def _build_arg_parser():
                    help="Full path to the input zarr file")
     p.add_argument("output_zarr",
                    help="Full path to the output zarr file")
-
+    add_processes_arg(p)
     return p
 
 
@@ -94,7 +93,7 @@ def main():
     # Parameters
     input_zarr = Path(args.input_zarr)
     output_zarr = Path(args.output_zarr)
-    n_cpus = multiprocessing.cpu_count() - 1
+    n_cpus = parse_processes_arg(args.n_processes)
 
     # Prepare the data for the parallel processing
     vol, resolution = read_omezarr(input_zarr, level=0)
@@ -117,10 +116,8 @@ def main():
 
     # Retrieve the results and fix the volume
     temp_store = zarr.TempStore(suffix=".zarr")
-    process_sync_file = temp_store.path.replace(".zarr", ".sync")
-    synchronizer = zarr.ProcessSynchronizer(process_sync_file)
     vol_output = zarr.open(temp_store, mode="w", shape=vol.shape, dtype=vol.dtype,
-                           chunks=vol.chunks, synchronizer=synchronizer)
+                           chunks=vol.chunks)
 
     # TODO: Rebuilding volume step could be faster
     for z, f in tqdm(corrected_files, "Rebuilding volume"):
@@ -130,9 +127,6 @@ def main():
     out_dask = da.from_zarr(vol_output)
     save_zarr(out_dask, output_zarr, scales=resolution,
               chunks=vol.chunks)
-
-    # Remove the process sync file
-    shutil.rmtree(process_sync_file)
 
     # Remove the temporary slice files used by the parallel processes
     tmp_dir.cleanup()
