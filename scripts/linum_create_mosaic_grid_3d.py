@@ -129,10 +129,9 @@ def main():
             "mxy_min": (mx_min, my_min)
         })
 
-    # Process the tiles in parallel
-    with multiprocessing.Pool(n_cpus) as pool:
-        results = tqdm(pool.imap(process_tile, params), total=len(params))
-        tuple(results)
+    # Process the tiles sequentially
+    for p in tqdm(params):
+        process_tile(p)
 
     # Convert to ome-zarr
     mosaic_dask = da.from_zarr(mosaic)
