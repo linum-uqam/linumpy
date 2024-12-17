@@ -8,12 +8,14 @@ from matplotlib import pyplot as plt
 
 def normalize(img: np.ndarray, saturation: float = 99.7) -> np.ndarray:
     """Normalize an image between 0 and 1.
+
     Parameters
     ----------
     img : np.ndarray
         The image to normalize.
     saturation : float, optional
         The saturation value for the normalization
+
     Returns
     -------
     np.ndarray
