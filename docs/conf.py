@@ -19,13 +19,19 @@ author = 'LINUM'
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-    'sphinx.ext.autodoc',
-    'sphinx.ext.autosummary',
-    'sphinxarg.ext',
-    'sphinx.ext.napoleon',
+   'autoapi.extension',
+   "sphinx.ext.viewcode",
+   "sphinx.ext.napoleon",
+   'sphinx.ext.autodoc',
+   'sphinx.ext.autosummary',
+   'autoapi.extension',
+   'sphinxarg.ext',
 ]
-autosummary_generate = True  # Turn on sphinx.ext.autosummary
 
+autoapi_dirs = ['../linumpy']
+autoapi_root = "api"
+autodoc_typehints = 'description'
+autoapi_ignore = ['*dev*']
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
@@ -33,8 +39,8 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = 'sphinx_rtd_theme'
-html_static_path = []
+html_theme = 'furo'
+pygments_style = 'sphinx'
 
 
 # Napoleon settings

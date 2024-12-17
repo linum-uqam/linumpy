@@ -1,3 +1,4 @@
 sphinx
+sphinx-autoapi
 sphinx-argparse
-sphinx-rtd-theme
+furo
