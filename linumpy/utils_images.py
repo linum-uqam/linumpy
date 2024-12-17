@@ -30,12 +30,14 @@ def normalize(img: np.ndarray, saturation: float = 99.7) -> np.ndarray:
 
 def get_overlay_as_rgb(img1: np.ndarray, img2: np.ndarray) -> np.ndarray:
     """Combine the two images into a single RGB image.
+
     Parameters
     ----------
     img1 : np.ndarray
         The first image.
     img2 : np.ndarray
         The second image.
+
     Returns
     -------
     np.ndarray
@@ -50,12 +52,14 @@ def get_overlay_as_rgb(img1: np.ndarray, img2: np.ndarray) -> np.ndarray:
 
 def match_shape(img1: np.ndarray, img2: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Match the shape of two images by padding the smallest one.
+
     Parameters
     ----------
     img1 : np.ndarray
         The first image.
     img2 : np.ndarray
         The second image.
+
     Returns
     -------
     Tuple[np.ndarray, np.ndarray]
@@ -77,7 +81,20 @@ def match_shape(img1: np.ndarray, img2: np.ndarray) -> Tuple[np.ndarray, np.ndar
     return padded_images
 
 
-def display_overlap(img1, img2, title=None, do_normalization=False):
+def display_overlap(img1: np.ndarray, img2: np.ndarray, title:str=None, do_normalization:bool=False) -> None:
+    """Display the overlap of two images.
+
+    Parameters
+    ----------
+    img1
+        The first image.
+    img2
+        The second image.
+    title
+        The title of the plot.
+    do_normalization
+        Whether to normalize the images.
+    """
     if do_normalization:
         img1 = normalize(img1)
         img2 = normalize(img2)
@@ -93,6 +110,7 @@ def display_overlap(img1, img2, title=None, do_normalization=False):
 
 def apply_xy_shift(img: np.ndarray, reference: np.ndarray, dx: int, dy: int) -> np.ndarray:
     """Apply a shift to the image in the xy plane.
+
     Parameters
     ----------
     img : np.ndarray
@@ -103,6 +121,11 @@ def apply_xy_shift(img: np.ndarray, reference: np.ndarray, dx: int, dy: int) -> 
         The shift in x.
     dy : int
         The shift in y.
+
+    Returns
+    -------
+    np.ndarray
+        The shifted image
     """
     fixed = sitk.GetImageFromArray(reference)
     moving = sitk.GetImageFromArray(img)
@@ -119,4 +142,5 @@ def apply_xy_shift(img: np.ndarray, reference: np.ndarray, dx: int, dy: int) -> 
     resampler.SetTransform(transform)
     warped_moving_image = resampler.Execute(moving)
     img_warped = sitk.GetArrayFromImage(warped_moving_image)
+
     return img_warped
