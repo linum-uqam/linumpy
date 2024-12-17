@@ -13,13 +13,6 @@ linum_aip
    :func: _build_arg_parser
    :prog: linum_aip.py
 
-linum_axis_XYZ_to_ZYX
----------------------
-.. argparse::
-   :filename: ../scripts/linum_axis_XYZ_to_ZYX.py
-   :func: _build_arg_parser
-   :prog: linum_axis_XYZ_to_ZYX.py
-
 linum_compensate_attenuation
 ----------------------------
 .. argparse::
@@ -34,12 +27,12 @@ linum_compensate_for_psf
    :func: _build_arg_parser
    :prog: linum_compensate_for_psf.py
 
-linum_compensate_illumination
------------------------------
+linum_compensate_illumination_2d
+--------------------------------
 .. argparse::
-   :filename: ../scripts/linum_compensate_illumination.py
+   :filename: ../scripts/linum_compensate_illumination_2d.py
    :func: _build_arg_parser
-   :prog: linum_compensate_illumination.py
+   :prog: linum_compensate_illumination_2d.py
 
 linum_compute_attenuation
 -------------------------
@@ -62,12 +55,19 @@ linum_convert_bin_to_nii
    :func: _build_arg_parser
    :prog: linum_convert_bin_to_nii.py
 
-linum_convert_tiff_to_nifti
+linum_convert_nifti_to_zarr
 ---------------------------
 .. argparse::
-   :filename: ../scripts/linum_convert_tiff_to_nifti.py
+   :filename: ../scripts/linum_convert_nifti_to_zarr.py
    :func: _build_arg_parser
-   :prog: linum_convert_tiff_to_nifti.py
+   :prog: linum_convert_nifti_to_zarr.py
+
+linum_convert_omezarr_to_nifti
+------------------------------
+.. argparse::
+   :filename: ../scripts/linum_convert_omezarr_to_nifti.py
+   :func: _build_arg_parser
+   :prog: linum_convert_omezarr_to_nifti.py
 
 linum_convert_zarr_to_omezarr
 -----------------------------
@@ -76,12 +76,19 @@ linum_convert_zarr_to_omezarr
    :func: _build_arg_parser
    :prog: linum_convert_zarr_to_omezarr.py
 
-linum_create_mosaic_grid
-------------------------
+linum_create_all_mosaicgrids_2d
+-------------------------------
 .. argparse::
-   :filename: ../scripts/linum_create_mosaic_grid.py
+   :filename: ../scripts/linum_create_all_mosaicgrids_2d.py
    :func: _build_arg_parser
-   :prog: linum_create_mosaic_grid.py
+   :prog: linum_create_all_mosaicgrids_2d.py
+
+linum_create_mosaic_grid_2d
+---------------------------
+.. argparse::
+   :filename: ../scripts/linum_create_mosaic_grid_2d.py
+   :func: _build_arg_parser
+   :prog: linum_create_mosaic_grid_2d.py
 
 linum_create_mosaic_grid_3d
 ---------------------------
@@ -90,12 +97,12 @@ linum_create_mosaic_grid_3d
    :func: _build_arg_parser
    :prog: linum_create_mosaic_grid_3d.py
 
-linum_crop_tiles
-----------------
+linum_crop_tiles_2d
+-------------------
 .. argparse::
-   :filename: ../scripts/linum_crop_tiles.py
+   :filename: ../scripts/linum_crop_tiles_2d.py
    :func: _build_arg_parser
-   :prog: linum_crop_tiles.py
+   :prog: linum_crop_tiles_2d.py
 
 linum_detect_focal_curvature
 ----------------------------
@@ -111,19 +118,19 @@ linum_download_allen
    :func: _build_arg_parser
    :prog: linum_download_allen.py
 
-linum_estimate_illumination
+linum_estimate_illumination_2d
+------------------------------
+.. argparse::
+   :filename: ../scripts/linum_estimate_illumination_2d.py
+   :func: _build_arg_parser
+   :prog: linum_estimate_illumination_2d.py
+
+linum_estimate_transform_2d
 ---------------------------
 .. argparse::
-   :filename: ../scripts/linum_estimate_illumination.py
+   :filename: ../scripts/linum_estimate_transform_2d.py
    :func: _build_arg_parser
-   :prog: linum_estimate_illumination.py
-
-linum_estimate_transform
-------------------------
-.. argparse::
-   :filename: ../scripts/linum_estimate_transform.py
-   :func: _build_arg_parser
-   :prog: linum_estimate_transform.py
+   :prog: linum_estimate_transform_2d.py
 
 linum_estimate_xyShift_fromMetadata
 -----------------------------------
@@ -132,20 +139,6 @@ linum_estimate_xyShift_fromMetadata
    :func: _build_arg_parser
    :prog: linum_estimate_xyShift_fromMetadata.py
 
-linum_fix_illumination_3d
--------------------------
-.. argparse::
-   :filename: ../scripts/linum_fix_illumination_3d.py
-   :func: _build_arg_parser
-   :prog: linum_fix_illumination_3d.py
-
-linum_intensity_normalization
------------------------------
-.. argparse::
-   :filename: ../scripts/linum_intensity_normalization.py
-   :func: _build_arg_parser
-   :prog: linum_intensity_normalization.py
-
 linum_reorient_to_ras
 ---------------------
 .. argparse::
@@ -153,19 +146,12 @@ linum_reorient_to_ras
    :func: _build_arg_parser
    :prog: linum_reorient_to_ras.py
 
-linum_resample
---------------
+linum_resample_nifti
+--------------------
 .. argparse::
-   :filename: ../scripts/linum_resample.py
+   :filename: ../scripts/linum_resample_nifti.py
    :func: _build_arg_parser
-   :prog: linum_resample.py
-
-linum_segment_brain_3d
-----------------------
-.. argparse::
-   :filename: ../scripts/linum_segment_brain_3d.py
-   :func: _build_arg_parser
-   :prog: linum_segment_brain_3d.py
+   :prog: linum_resample_nifti.py
 
 linum_stack_slices
 ------------------
