@@ -5,6 +5,7 @@
 
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath("../"))
 sys.path.insert(1, os.path.abspath("../scripts"))
 
@@ -19,13 +20,13 @@ author = 'LINUM'
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-   'autoapi.extension',
-   "sphinx.ext.viewcode",
-   "sphinx.ext.napoleon",
-   'sphinx.ext.autodoc',
-   'sphinx.ext.autosummary',
-   'autoapi.extension',
-   'sphinxarg.ext',
+    'autoapi.extension',
+    "sphinx.ext.viewcode",
+    "sphinx.ext.napoleon",
+    'sphinx.ext.autodoc',
+    'sphinx.ext.autosummary',
+    'autoapi.extension',
+    'sphinxarg.ext',
 ]
 
 autoapi_dirs = ['../linumpy']
@@ -35,13 +36,11 @@ autoapi_ignore = ['*dev*']
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
-
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = 'furo'
 pygments_style = 'sphinx'
-
 
 # Napoleon settings
 napoleon_google_docstring = True

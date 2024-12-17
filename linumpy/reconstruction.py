@@ -1,9 +1,12 @@
-from pathlib import Path
-from tqdm.auto import tqdm
 import re
-from linumpy.microscope.oct import OCT
-import numpy as np
+from pathlib import Path
 from typing import Tuple, List
+
+import numpy as np
+from tqdm.auto import tqdm
+
+from linumpy.microscope.oct import OCT
+
 
 def get_tiles_ids(directory, z: int = None) -> Tuple[List, List]:
     """
@@ -46,6 +49,7 @@ def get_tiles_ids(directory, z: int = None) -> Tuple[List, List]:
         tile_ids.append((mx, my, mz))
 
     return tiles, tile_ids
+
 
 def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_positions: bool = False) -> dict:
     """
@@ -117,7 +121,7 @@ def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_
     ymin_mm = np.min([p[1] for p in tiles_positions_mm]) - oct.dimension[1] / 2
     xmax_mm = np.max([p[0] for p in tiles_positions_mm]) + oct.dimension[0] / 2
     ymax_mm = np.max([p[1] for p in tiles_positions_mm]) + oct.dimension[1] / 2
-    mosaic_center_mm = ((xmin_mm+xmax_mm)/2, (ymin_mm+ymax_mm)/2)
+    mosaic_center_mm = ((xmin_mm + xmax_mm) / 2, (ymin_mm + ymax_mm) / 2)
     mosaic_width_mm = xmax_mm - xmin_mm
     mosaic_height_mm = ymax_mm - ymin_mm
 

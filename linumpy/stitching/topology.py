@@ -4,11 +4,9 @@
 This module uses graph theory to describe and interact with the mosaic topology.
 """
 
-import sys
-
+import SimpleITK as sitk
 import networkx as nx
 import numpy as np
-import SimpleITK as sitk
 
 
 def generate_default(nX, nY):
@@ -58,7 +56,7 @@ def generate_default(nX, nY):
     outX = np.tile(np.arange(1, nX), (nY,))
     y = np.zeros(inX.shape, dtype=np.int)
     for iY in range(nY):
-        y[iY * (nX - 1) : iY * (nX - 1) + nX - 1] = iY
+        y[iY * (nX - 1): iY * (nX - 1) + nX - 1] = iY
     inX += nX * y
     outX += nX * y
 
