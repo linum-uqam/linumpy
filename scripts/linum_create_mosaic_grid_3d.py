@@ -71,7 +71,7 @@ def process_tile(params: dict):
     cmin = (my - my_min) * vol.shape[2]
     rmax = rmin + vol.shape[1]
     cmax = cmin + vol.shape[2]
-    mosaic[:, rmin:rmax, cmin:cmax] = vol
+    mosaic[0:tile_size[0], rmin:rmax, cmin:cmax] = vol
 
 
 def main():
@@ -114,8 +114,8 @@ def main():
 
     # Create the zarr persistent array
     zarr_store = zarr.TempStore(dir=args.zarr_root, suffix=".zarr")
-    mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape, dtype=np.float32,
-                       chunks=tile_size)
+    mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape,
+                       dtype=np.float32, chunks=tile_size)
 
     # Create a params dictionary for every tile
     params = []
