@@ -12,7 +12,6 @@ import multiprocessing
 import shutil
 import tempfile
 from pathlib import Path
-from os.path import join as pjoin
 
 import dask.array as da
 
@@ -23,6 +22,7 @@ import imageio as io
 import numpy as np
 from pqdm.processes import pqdm
 from linumpy.io.zarr import save_zarr, read_omezarr
+
 
 # TODO: add option to export the flatfields and darkfields
 

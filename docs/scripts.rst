@@ -139,6 +139,13 @@ linum_estimate_xyShift_fromMetadata
    :func: _build_arg_parser
    :prog: linum_estimate_xyShift_fromMetadata.py
 
+linum_fix_lateral_illumination_3d
+-----------------------------------
+.. argparse::
+   :filename: ../scripts/linum_fix_lateral_illumination_3d.py
+   :func: _build_arg_parser
+   :prog: linum_fix_lateral_illumination_3d.py
+
 linum_reorient_to_ras
 ---------------------
 .. argparse::
