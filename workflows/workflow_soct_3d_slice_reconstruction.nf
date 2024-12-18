@@ -2,9 +2,9 @@
 nextflow.enable.dsl=2
 
 // Workflow Description
-// Creates 3D mosaic grid tiff at an isotropic resolution of 25um from raw data set tiles
+// Creates a 3D volume from raw S-OCT tiles for a given slice index
 // Input: Directory containing raw data set tiles
-// Output: 3D mosaic grid tiff at an isotropic resolution of 25um
+// Output: 3D reconstruction for a given slice index
 
 // Parameters
 params.inputDir = "";
@@ -34,7 +34,7 @@ process fix_focal_curvature {
     //publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
-    linum_detect_focalCurvature.py ${mosaic_grid} mosaic_grid_3d_${params.resolution}um_focalFix.ome.zarr
+    linum_detect_focal_curvature.py ${mosaic_grid} mosaic_grid_3d_${params.resolution}um_focalFix.ome.zarr
     """
 }
 
@@ -118,7 +118,7 @@ process compute_attenuation_bias {
     publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
-    linum_compute_attenuationBiasField.py ${slice_attn} "slice_z${params.slice}_${params.resolution}um_bias.ome.zarr"
+    linum_compute_attenuation_bias_field.py ${slice_attn} "slice_z${params.slice}_${params.resolution}um_bias.ome.zarr" --isInCM
     """
 }
 
