@@ -118,6 +118,7 @@ process compute_attenuation_bias {
     publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
+    # NOTE: --isInCM argument is required, else we get data overflow
     linum_compute_attenuation_bias_field.py ${slice_attn} "slice_z${params.slice}_${params.resolution}um_bias.ome.zarr" --isInCM
     """
 }
