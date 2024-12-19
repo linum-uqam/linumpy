@@ -1,5 +1,5 @@
 #!/usr/bin/env nextflow
-nextflow.enable.dsl=2
+nextflow.enable.dsl = 2
 
 // Workflow Description
 // Creates a 3D volume from raw S-OCT tiles for a given slice index
@@ -19,7 +19,6 @@ process create_mosaic_grid {
         path inputDir
     output:
         path "*.ome.zarr"
-    //publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
     linum_create_mosaic_grid_3d.py ${inputDir} mosaic_grid_3d_${params.resolution}um.ome.zarr --slice ${params.slice} --resolution ${params.resolution} --n_processes ${params.processes}
@@ -31,7 +30,6 @@ process fix_focal_curvature {
         path mosaic_grid
     output:
         path "*_focalFix.ome.zarr"
-    //publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
     linum_detect_focal_curvature.py ${mosaic_grid} mosaic_grid_3d_${params.resolution}um_focalFix.ome.zarr
@@ -43,7 +41,6 @@ process fix_illumination {
         path mosaic_grid
     output:
         path "*_illuminationFix.ome.zarr"
-    //publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
     linum_fix_illumination_3d.py ${mosaic_grid} mosaic_grid_3d_${params.resolution}um_illuminationFix.ome.zarr --n_processes ${params.processes}
@@ -55,7 +52,6 @@ process generate_aip {
         path mosaic_grid
     output:
         path "aip.ome.zarr"
-    //publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
     linum_aip.py ${mosaic_grid} aip.ome.zarr
@@ -67,7 +63,6 @@ process estimate_xy_transformation {
         path aip
     output:
         path "transform_xy.npy"
-    //publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
     linum_estimate_transform.py ${aip} transform_xy.npy
