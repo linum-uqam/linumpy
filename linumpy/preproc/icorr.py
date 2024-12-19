@@ -833,6 +833,61 @@ def _splitAlinesWorker(param):
     return splitAline(param[0], param[1])
 
 
+def getAlineAttenuation(vol, k=1, mask=None):
+    """Compute the attenuation coefficient for each A-lines.
+
+    Parameters
+    ----------
+    vol : ndarray
+        Volume to analyze of size NxMxL
+
+    k : int
+        Number of points to compute
+
+    mask : ndarray
+        Tissue mask to limit the region where the fit is done.
+
+    Returns
+    -------
+    ndarray
+        Estimated attenuation of size NxMxk
+
+    """
+
+    # Computing the shape of this volume
+    nx, ny, nz = vol.shape
+    z = np.arange(nz)
+    zList = np.array_split(z, k)
+    attn_vol = np.zeros((nx, ny, k))
+
+    for z, ik in zip(zList, list(range(k))):
+        # Selecting a subsample
+        this_vol = vol[:, :, z[0] : z[-1]]
+        if mask is not None:
+            this_mask = mask[:, :, z[0] : z[-1]]
+
+        # Transforming this volume into a list
+        Alines = np.split(this_vol.flatten(), nx * ny)
+        if mask is not None:
+            mask_Alines = np.split(this_mask.flatten(), nx * ny)
+            for A, M, ii in zip(Alines, mask_Alines, list(range(nx * ny))):
+                Alines[ii] = A[M]
+
+        # Process each Alines in parallel
+        nproc = multiprocessing.cpu_count()
+        p = multiprocessing.Pool(nproc)
+        result = p.map(_AlineFit, Alines)
+        p.close()
+        p.join()
+
+        # Reshaping the output
+        attn_vol[:, :, ik] = np.reshape(result, (nx, ny))
+    # Removing background
+    attn_vol[vol.mean(axis=2) == 0] = 0
+
+    return np.squeeze(attn_vol)
+
+
 def get_gradientAttenuation(
     vol,
     mask=None,
@@ -948,6 +1003,97 @@ def findInterfaceFromGradient(vol, f=0.005, removeSmooth=False):
         depths += k + 1
 
     return depths
+
+
+def getHeterogeneousAttenuation(
+    vol, mask=None, fillHoles=False
+):  # TODO: adapt multiproc to available proc given by mpi4py
+    nx, ny, nz = vol.shape
+    nproc = multiprocessing.cpu_count()
+    if mask is None:  # Compute the mask
+        mask = getInterfaceMask(vol)
+
+    # Split the volume into Alines and Alines portions.
+    print(("Splitting volume into Alines portions (using %d processors)" % (nproc)))
+    Alines = np.split(vol.flatten(), nx * ny)
+    Alines_mask = np.split(mask.flatten(), nx * ny)
+    Alines_to_Split = list(zip(Alines, Alines_mask))
+    nAlines = len(Alines)
+
+    # Process each Alines in parallel
+    p = multiprocessing.Pool(nproc)
+    result = p.map(_splitAlinesWorker, Alines_to_Split)
+    p.close()
+    p.join()
+
+    # Debug
+    print(("Number of Alines : ", len(Alines_to_Split)))
+    pCount = 0
+    for portion in result:
+        pCount += len(portion[0])
+    print(("Number of Alines portions : ", pCount))
+
+    # Compute the attenuation for each aline portions
+    print(
+        ("Computing attenuation for each Aline portion (using %d processors)" % (nproc))
+    )
+    aline_portions = list()
+    z_portions = list()
+    portion_idx = list()
+    for foo, idx in zip(result, list(range(nAlines))):
+        aline_portions.extend(foo[0])
+        z_portions.extend(foo[1])
+        portion_idx.extend([idx] * len(foo[0]))
+
+    p = multiprocessing.Pool(nproc)
+    result = p.map(_AlineFit, aline_portions)
+    p.close()
+    p.join()
+
+    # Reshape attenuation as an Aline list # TODO : Paralléliser cette boucle.
+    print("Reshape attenuation as an Aline list")
+    aline_attn = [np.zeros((nz,)) for i in range(nAlines)]
+    for idx, z, mu in zip(portion_idx, z_portions, result):
+        aline_attn[idx][z] = mu
+
+    # portion_idx = np.array(portion_idx)
+    # for idx in range(nAlines):
+    #    this_Aline = list(np.where(portion_idx == idx)[0])
+    #    this_muAline = np.zeros((nz,))
+    #     for this_id in this_Aline:
+    #        z = z_portions[this_id]
+    #       mu = result[this_id]
+    #      this_muAline[z] = mu
+    # aline_attn.append(this_muAline)
+
+    # Combine local attenuations into a single volume
+    attn_vol = np.reshape(aline_attn, (nx, ny, nz))
+
+    # Fill attenuation holes (using 1d-linear interpolation) # TODO: User inverve distance weighted interpolation instead ?
+    if fillHoles:
+        print("Filling attenuation holes using 1D-linear interpolation")
+        attn_fill = np.zeros_like(attn_vol)
+        for x in range(nx):
+            for y in range(ny):
+                idx = attn_vol[x, y, :] > 0
+                this_z = np.array(np.where(idx)[0])
+                this_mu = attn_vol[x, y, :]
+                this_mu = this_mu[idx]
+                if np.sum(idx) == 1:
+                    attn_fill[x, y, :] = attn_vol[x, y, :]
+                elif np.sum(idx) > 1:
+                    f = interp1d(
+                        this_z, this_mu, kind="linear", bounds_error=False, fill_value=0
+                    )
+                    new_z = np.arange(nz)
+                    new_mu = f(new_z)
+                    attn_fill[
+                        x, y, :
+                    ] = new_mu  # Debug, should replace the original volume
+
+        return attn_fill
+    else:
+        return attn_vol
 
 
 def getFlatAgaroseProfile(vol, returnMaskAndProfile=False):
