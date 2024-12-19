@@ -5,9 +5,7 @@
 
 import argparse
 import multiprocessing
-import shutil
 from pathlib import Path
-from os.path import join as pjoin
 
 import numpy as np
 import dask.array as da
@@ -19,8 +17,7 @@ from linumpy import reconstruction
 from linumpy.microscope.oct import OCT
 from tqdm.auto import tqdm
 
-# Default number of processes is the number of cores minus 1
-DEFAULT_N_CPUS = multiprocessing.cpu_count() - 1
+from linumpy.utils.io import parse_processes_arg, add_processes_arg
 
 
 def _build_arg_parser():
@@ -38,9 +35,10 @@ def _build_arg_parser():
                    help="Keep the galvo return signal (default=%(default)s)")
     p.add_argument('--n_levels', type=int, default=5,
                    help='Number of levels in pyramid representation.')
-    p.add_argument('--n_processes', type=int,
-                   help=f'Number of processes to launch [{DEFAULT_N_CPUS}].')
-
+    p.add_argument('--zarr_root',
+                   help='Path to parent directory under which the zarr'
+                        ' temporary directory will be created [/tmp/].')
+    add_processes_arg(p)
     return p
 
 
@@ -73,7 +71,7 @@ def process_tile(params: dict):
     cmin = (my - my_min) * vol.shape[2]
     rmax = rmin + vol.shape[1]
     cmax = cmin + vol.shape[2]
-    mosaic[:, rmin:rmax, cmin:cmax] = vol
+    mosaic[0:tile_size[0], rmin:rmax, cmin:cmax] = vol
 
 
 def main():
@@ -86,7 +84,7 @@ def main():
     z = args.slice
     output_resolution = args.resolution
     crop = not args.keep_galvo_return
-    n_cpus = DEFAULT_N_CPUS if args.n_processes is None else args.n_processes
+    n_cpus = parse_processes_arg(args.n_processes)
 
     # Analyze the tiles
     tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
@@ -115,11 +113,9 @@ def main():
     mosaic_shape = [tile_size[0], n_mx * tile_size[1], n_my * tile_size[2]]
 
     # Create the zarr persistent array
-    zarr_store = zarr.TempStore(suffix=".zarr")
-    process_sync_file = zarr_store.path.replace(".zarr", ".sync")
-    synchronizer = zarr.ProcessSynchronizer(process_sync_file)
-    mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape, dtype=np.float32,
-                       chunks=tile_size, synchronizer=synchronizer)
+    zarr_store = zarr.TempStore(dir=args.zarr_root, suffix=".zarr")
+    mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape,
+                       dtype=np.float32, chunks=tile_size)
 
     # Create a params dictionary for every tile
     params = []
@@ -133,18 +129,18 @@ def main():
             "mxy_min": (mx_min, my_min)
         })
 
-    # Process the tiles in parallel
-    with multiprocessing.Pool(n_cpus) as pool:
-        results = tqdm(pool.imap(process_tile, params), total=len(params))
-        tuple(results)
+    if n_cpus > 1:  # process in parallel
+        with multiprocessing.Pool(n_cpus) as pool:
+            results = tqdm(pool.imap(process_tile, params), total=len(params))
+            tuple(results)
+    else:  # Process the tiles sequentially
+        for p in tqdm(params):
+            process_tile(p)
 
     # Convert to ome-zarr
     mosaic_dask = da.from_zarr(mosaic)
     save_zarr(mosaic_dask, args.output_zarr, scales=output_resolution,
               chunks=tile_size, n_levels=args.n_levels)
-
-    # Remove the process sync file
-    shutil.rmtree(process_sync_file)
 
 
 if __name__ == "__main__":
