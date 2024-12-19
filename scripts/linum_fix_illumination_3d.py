@@ -111,8 +111,13 @@ def main():
         }
         params_list.append(params)
 
-    # Process the tiles in parallel
-    corrected_files = pqdm(params_list, process_tile, n_jobs=n_cpus, desc="Processing tiles")
+    if n_cpus > 1:
+        # Process the tiles in parallel
+        corrected_files = pqdm(params_list, process_tile, n_jobs=n_cpus, desc="Processing tiles")
+    else:  # process sequentially
+        corrected_files = []
+        for param in tqdm(params_list):
+            corrected_files.append(process_tile(param))
 
     # Retrieve the results and fix the volume
     temp_store = zarr.TempStore(suffix=".zarr")
