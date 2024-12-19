@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Detect and fix the lateral illumination inhomogeneities for each 3D tiles of a mosaic grid"""
+"""
+Detect and fix the lateral illumination inhomogeneities for each
+3D tiles of a mosaic grid.
+"""
 
 from os import environ
 
@@ -42,7 +45,8 @@ def process_tile(params: dict):
     z = params["z"]
     tile_shape = params["tile_shape"]
     vol = io.v3.imread(str(file))
-    file_output = Path(file).parent / file.name.replace(".tiff", "_corrected.tiff")
+    file_output = Path(file).parent / file.name.replace(".tiff",
+                                                        "_corrected.tiff")
 
     # Get the number of tiles
     nx = vol.shape[0] // tile_shape[0]
@@ -98,7 +102,8 @@ def main():
     # Prepare the data for the parallel processing
     vol, resolution = read_omezarr(input_zarr, level=0)
     n_slices = vol.shape[0]
-    tmp_dir = tempfile.TemporaryDirectory(suffix="_linum_fix_illumination_3d_slices", dir=output_zarr.parent)
+    tmp_dir = tempfile.TemporaryDirectory(
+        suffix="_linum_fix_illumination_3d_slices", dir=output_zarr.parent)
     params_list = []
     for z in tqdm(range(n_slices), "Preprocessing slices"):
         slice_file = Path(tmp_dir.name) / f"slice_{z:03d}.tiff"
@@ -113,7 +118,8 @@ def main():
 
     if n_cpus > 1:
         # Process the tiles in parallel
-        corrected_files = pqdm(params_list, process_tile, n_jobs=n_cpus, desc="Processing tiles")
+        corrected_files = pqdm(params_list, process_tile, n_jobs=n_cpus,
+                               desc="Processing tiles")
     else:  # process sequentially
         corrected_files = []
         for param in tqdm(params_list):
@@ -121,8 +127,8 @@ def main():
 
     # Retrieve the results and fix the volume
     temp_store = zarr.TempStore(suffix=".zarr")
-    vol_output = zarr.open(temp_store, mode="w", shape=vol.shape, dtype=vol.dtype,
-                           chunks=vol.chunks)
+    vol_output = zarr.open(temp_store, mode="w", shape=vol.shape,
+                           dtype=vol.dtype, chunks=vol.chunks)
 
     # TODO: Rebuilding volume step could be faster
     for z, f in tqdm(corrected_files, "Rebuilding volume"):
