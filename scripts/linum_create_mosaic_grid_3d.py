@@ -130,12 +130,10 @@ def main():
         })
 
     if n_cpus > 1:  # process in parallel
-        print(f"Executing in parallel {n_cpus} cpus")
         with multiprocessing.Pool(n_cpus) as pool:
             results = tqdm(pool.imap(process_tile, params), total=len(params))
             tuple(results)
     else:  # Process the tiles sequentially
-        print(f"Executing sequentially")
         for p in tqdm(params):
             process_tile(p)
 
