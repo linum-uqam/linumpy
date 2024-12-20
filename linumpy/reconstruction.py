@@ -4,6 +4,7 @@ import re
 from linumpy.microscope.oct import OCT
 import numpy as np
 
+
 def get_tiles_ids(directory, z: int = None):
     """Analyzes a directory and detects all the tiles in contains"""
     input_directory = Path(directory)
@@ -14,13 +15,20 @@ def get_tiles_ids(directory, z: int = None):
     else:
         tiles_to_process = f"tile_*"
     tiles = list(input_directory.glob(tiles_to_process))
-    tiles.sort()
+    tile_ids = get_tiles_ids_from_list(tiles)
 
-    # Get the tile positions (in pixel and mm)
+    return tiles, tile_ids
+
+
+def get_tiles_ids_from_list(tiles_list):
+    tiles_list.sort()
+
+    # Get the tile positions
     file_pattern = r"tile_x(?P<x>\d+)_y(?P<y>\d+)_z(?P<z>\d+)"
     tile_ids = []
-    n_tiles = len(tiles)
-    for t in tqdm(tiles, desc="Extracting tile ids", total=n_tiles, leave=False):
+    n_tiles = len(tiles_list)
+    for t in tqdm(tiles_list, desc="Extracting tile ids",
+                  total=n_tiles, leave=False):
         # Extract the tile's mosaic position.
         match = re.match(file_pattern, t.name)
         mx = int(match.group("x"))
@@ -28,7 +36,8 @@ def get_tiles_ids(directory, z: int = None):
         mz = int(match.group("z"))
         tile_ids.append((mx, my, mz))
 
-    return tiles, tile_ids
+    return tile_ids
+
 
 def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_positions: bool = False):
     input_directory = Path(directory)

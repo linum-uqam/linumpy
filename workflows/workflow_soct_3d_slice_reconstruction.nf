@@ -2,34 +2,33 @@
 nextflow.enable.dsl = 2
 
 // Workflow Description
-// Creates a 3D volume from raw S-OCT tiles for a given slice index
+// Creates a 3D volume from raw S-OCT tiles
 // Input: Directory containing raw data set tiles
-// Output: 3D reconstruction for a given slice index
+// Output: 3D reconstruction
 
 // Parameters
 params.inputDir = "";
 params.outputDir = "";
 params.resolution = 10; // Resolution of the reconstruction in micron/pixel
-params.slice = 0; // Slice to process
 params.processes = 1; // Maximum number of python processes per nextflow process
 
 // Processes
 process create_mosaic_grid {
     input:
-        path inputDir
+        tuple val(slice_id), path(tiles)
     output:
-        path "*.ome.zarr"
+        tuple val(slice_id), path("*.ome.zarr")
     script:
     """
-    linum_create_mosaic_grid_3d.py ${inputDir} mosaic_grid_3d_${params.resolution}um.ome.zarr --slice ${params.slice} --resolution ${params.resolution} --n_processes ${params.processes}
+    linum_create_mosaic_grid_3d.py mosaic_grid_3d_${params.resolution}um.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes}
     """
 }
 
 process fix_focal_curvature {
     input:
-        path mosaic_grid
+        tuple val(slice_id), path(mosaic_grid)
     output:
-        path "*_focalFix.ome.zarr"
+        tuple val(slice_id), path("*_focalFix.ome.zarr")
     script:
     """
     linum_detect_focal_curvature.py ${mosaic_grid} mosaic_grid_3d_${params.resolution}um_focalFix.ome.zarr
@@ -38,9 +37,9 @@ process fix_focal_curvature {
 
 process fix_illumination {
     input:
-        path mosaic_grid
+        tuple val(slice_id), path(mosaic_grid)
     output:
-        path "*_illuminationFix.ome.zarr"
+        tuple val(slice_id), path("*_illuminationFix.ome.zarr")
     script:
     """
     linum_fix_illumination_3d.py ${mosaic_grid} mosaic_grid_3d_${params.resolution}um_illuminationFix.ome.zarr --n_processes ${params.processes}
@@ -49,9 +48,9 @@ process fix_illumination {
 
 process generate_aip {
     input:
-        path mosaic_grid
+        tuple val(slice_id), path(mosaic_grid)
     output:
-        path "aip.ome.zarr"
+        tuple val(slice_id), path("aip.ome.zarr")
     script:
     """
     linum_aip.py ${mosaic_grid} aip.ome.zarr
@@ -60,9 +59,9 @@ process generate_aip {
 
 process estimate_xy_transformation {
     input:
-        path aip
+        tuple val(slice_id), path(aip)
     output:
-        path "transform_xy.npy"
+        tuple val(slice_id), path("transform_xy.npy")
     script:
     """
     linum_estimate_transform.py ${aip} transform_xy.npy
@@ -71,68 +70,67 @@ process estimate_xy_transformation {
 
 process stitch_3d {
     input:
-        tuple path(mosaic_grid), path(transform_xy)
+        tuple val(slice_id), path(mosaic_grid), path(transform_xy)
     output:
-        path "slice_z${params.slice}_${params.resolution}um.ome.zarr"
-    publishDir path: "${params.outputDir}", mode: 'copy'
+        tuple val(slice_id), path("slice_z${slice_id}_${params.resolution}um.ome.zarr")
     script:
     """
-    linum_stitch_3d.py ${mosaic_grid} ${transform_xy} slice_z${params.slice}_${params.resolution}um.ome.zarr
+    linum_stitch_3d.py ${mosaic_grid} ${transform_xy} slice_z${slice_id}_${params.resolution}um.ome.zarr
     """
 }
 
 process compensate_psf {
     input:
-        path slice_3d
+        tuple val(slice_id), path(slice_3d)
     output:
-        path "slice_z${params.slice}_${params.resolution}um_fixPSF.ome.zarr"
-    publishDir path: "${params.outputDir}", mode: 'copy'
+        tuple val(slice_id), path("slice_z${slice_id}_${params.resolution}um_fixPSF.ome.zarr")
     script:
     """
-    linum_compensate_for_psf.py ${slice_3d} "slice_z${params.slice}_${params.resolution}um_fixPSF.ome.zarr"
+    linum_compensate_for_psf.py ${slice_3d} "slice_z${slice_id}_${params.resolution}um_fixPSF.ome.zarr"
     """
 }
 
 process estimate_attenuation {
     input:
-        path slice_3d
+        tuple val(slice_id), path(slice_3d)
     output:
-        path "slice_z${params.slice}_${params.resolution}um_attn.ome.zarr"
-    publishDir path: "${params.outputDir}", mode: 'copy'
+        tuple val(slice_id), path("slice_z${slice_id}_${params.resolution}um_attn.ome.zarr")
     script:
     """
-    linum_compute_attenuation.py ${slice_3d} "slice_z${params.slice}_${params.resolution}um_attn.ome.zarr"
+    linum_compute_attenuation.py ${slice_3d} "slice_z${slice_id}_${params.resolution}um_attn.ome.zarr"
     """
 }
 
 process compute_attenuation_bias {
     input:
-        path slice_attn
+        tuple val(slice_id), path(slice_attn)
     output:
-        path "slice_z${params.slice}_${params.resolution}um_bias.ome.zarr"
-    publishDir path: "${params.outputDir}", mode: 'copy'
+        tuple val(slice_id), path("slice_z${slice_id}_${params.resolution}um_bias.ome.zarr")
     script:
     """
     # NOTE: --isInCM argument is required, else we get data overflow
-    linum_compute_attenuation_bias_field.py ${slice_attn} "slice_z${params.slice}_${params.resolution}um_bias.ome.zarr" --isInCM
+    linum_compute_attenuation_bias_field.py ${slice_attn} "slice_z${slice_id}_${params.resolution}um_bias.ome.zarr" --isInCM
     """
 }
 
 process compensate_attenuation {
     input:
-        tuple path(slice_3d), path(bias)
+        tuple val(slice_id), path(slice_3d), path(bias)
     output:
-        path "slice_z${params.slice}_${params.resolution}um_fixAttn.ome.zarr"
-    publishDir path: "${params.outputDir}", mode: 'copy'
+        tuple val(slice_id), path("slice_z${slice_id}_${params.resolution}um_fixAttn.ome.zarr")
     script:
     """
-    linum_compensate_attenuation.py ${slice_3d} ${bias} "slice_z${params.slice}_${params.resolution}um_fixAttn.ome.zarr"
+    linum_compensate_attenuation.py ${slice_3d} ${bias} "slice_z${slice_id}_${params.resolution}um_fixAttn.ome.zarr"
     """
 }
 
-workflow{
+workflow {
+    inputSlices = Channel.fromPath("$params.inputDir/tile_x*_y*_z*/", type: 'dir')
+                         .map{path -> tuple(path.toString().substring(path.toString().length() - 2), path)}
+                         .groupTuple()
+
     // Generate a 3D mosaic grid.
-    create_mosaic_grid(params.inputDir)
+    create_mosaic_grid(inputSlices)
 
     // Focal plane curvature compensation
     fix_focal_curvature(create_mosaic_grid.out)
@@ -147,7 +145,7 @@ workflow{
     estimate_xy_transformation(generate_aip.out)
 
     // Stitch the tile in 3D
-    stitch_3d(fix_illumination.out.combine(estimate_xy_transformation.out))
+    stitch_3d(fix_illumination.out.combine(estimate_xy_transformation.out, by:0))
 
     // Compensate for PSF
     compensate_psf(stitch_3d.out)
@@ -159,5 +157,7 @@ workflow{
     compute_attenuation_bias(estimate_attenuation.out)
 
     // Compensate attenuation
-    compensate_attenuation(compensate_psf.out.combine(compute_attenuation_bias.out))
+    compensate_attenuation(compensate_psf.out.combine(compute_attenuation_bias.out, by:0))
+
+    // TODO: Stitch 3D slices together
 }
