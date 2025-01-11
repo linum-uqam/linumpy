@@ -1,0 +1,15 @@
+numpy
+scipy
+scikit-image
+scikit-learn
+matplotlib
+pandas
+nibabel
+dipy
+dask>=2024.10.0
+SimpleITK
+tqdm
+pqdm
+pybasic-illumination-correction
+zarr<=2.18.2
+ome-zarr>=0.9.0
