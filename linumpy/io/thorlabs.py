@@ -18,7 +18,7 @@ class ThorOCT:
         self.header = None
         self.resolution = []
         
-    def load(self, erase_raw_data = True, erase_polarization_1 = False, erase_polarization_2 = True, return_complex = False):
+    def load(self, erase_raw_data = True, erase_polarization_1 = False, erase_polarization_2 = True, return_complex = True):
         if not self.compressed_data:
             raise ValueError("No valid data source provided.")
         self._extract_oct_header()
@@ -130,11 +130,11 @@ class ThorOCT:
 
         return cropped_data
         
-    def _convert_to_numpy(self, file, return_complex = True) -> np.ndarray:
+    def _convert_to_numpy(self, file, return_complex) -> np.ndarray:
         with self.compressed_data.open(file) as f:
             complex_data = np.frombuffer(f.read(), dtype=np.complex64).reshape((self.size_x, self.size_y, self.size_z), order='C')
             complex_data = self._fix_data_redundancy(complex_data)
-            complex_data = self._manual_crop(complex_data, 330, 750)
+            complex_data = self._manual_crop(complex_data, 330, 750) # Change the hard coded values later.
             if return_complex:
                 return complex_data
             # Return the magnitude of complexe
