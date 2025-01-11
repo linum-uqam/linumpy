@@ -19,5 +19,5 @@ RUN pip install --upgrade pip setuptools wheel build
 # Install with verbose output
 COPY linumpy ./linumpy
 COPY scripts ./scripts
-COPY pyproject.toml .
+COPY pyproject.toml requirements.txt README.md setup.py ./
 RUN pip install --no-cache-dir -v -e .
