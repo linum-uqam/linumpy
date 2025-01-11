@@ -1,7 +1,6 @@
 import zipfile
 from xml.dom.minidom import parse
 import numpy as np
-from imageio import volwrite
 import gc  # For garbage collection
 from pathlib import Path
 
@@ -19,12 +18,12 @@ class ThorOCT:
         self.header = None
         self.resolution = []
         
-    def load(self, erase_raw_data = True, erase_polarization_1 = False, erase_polarization_2 = False, return_complex = False):
+    def load(self, erase_raw_data = True, erase_polarization_1 = False, erase_polarization_2 = True, return_complex = False):
         if not self.compressed_data:
             raise ValueError("No valid data source provided.")
         self._extract_oct_header()
         self._extract_complex_dimensions()
-        self._load_polarized_data(erase_polarization_1, erase_polarization_2, return_complex)
+        self._load_polarized_data(erase_polarization_1 = erase_polarization_1, erase_polarization_2 = erase_polarization_2, return_complex= return_complex)
         
         # If requested, erase the raw data source (compressed_data) itself
         if erase_raw_data:
@@ -60,8 +59,8 @@ class ThorOCT:
             # Check for specific file paths
             if file_content == "data\\Complex.data":
                 complex_data_file = data_file
-
-        # Optionally, access attributes of the found elements
+                break
+            
         if complex_data_file:
             self.size_z = int(complex_data_file.getAttribute('SizeZ'))
             self.size_x = int(complex_data_file.getAttribute('SizeX'))
@@ -70,12 +69,12 @@ class ThorOCT:
             range_y = float(complex_data_file.getAttribute('RangeY'))
             range_x = float(complex_data_file.getAttribute('RangeX'))
             self.resolution = [
-                range_x / self.size_x,
+                range_x / self.size_y, # using the y size as a temporary fix for the redundancy issue along the x axis
                 range_y / self.size_y,
                 range_z / self.size_z
             ]
 
-    def _load_polarized_data(self, erase_polarization_1, erase_polarization_2, return_complex) -> None:
+    def _load_polarized_data(self, return_complex, erase_polarization_2, erase_polarization_1) -> None:
         """
         Loads the polarization data from the zip file.
         """
@@ -91,18 +90,60 @@ class ThorOCT:
         except KeyError as e:
             raise Exception(f"Error loading polarization data: {e}")
 
-    def _convert_to_numpy(self, file, return_complex = False) -> np.ndarray:
+    def _fix_data_redundancy(self, data: np.ndarray) -> np.ndarray:
+        """
+        Removes every other image along the first axis (SizeX), starting with the first one.
+
+        Parameters:
+            data (np.ndarray): The input 3D array (SizeZ, SizeX, SizeY).
+
+        Returns:
+            np.ndarray: The 3D array with redundant images removed along the first axis.
+        """
+        print("Original data shape:", data.shape)  # Debug: Show original data shape
+        
+        # Remove every other image starting with the first one
+        fixed_data = data[1::2, :, :]
+        self.size_x = data.shape[0]//2
+        print("Fixed data shape:", fixed_data.shape)  # Debug: Show new data shape
+        return fixed_data
+
+    def _manual_crop(self, data: np.ndarray, index1: int, index2: int) -> np.ndarray:
+        """
+        Crops the 3D volume along the Z-axis and keeps the data between the specified indices.
+
+        Parameters:
+            data (np.ndarray): The input 3D array (SizeX, SizeY, SizeZ).
+            index1 (int): The starting Z index for cropping (inclusive).
+            index2 (int): The ending Z index for cropping (exclusive).
+
+        Returns:
+            np.ndarray: The cropped 3D array.
+        """
+        # Ensure valid indices
+        if index1 < 0 or index2 > data.shape[2] or index1 >= index2:
+            raise ValueError(f"Invalid indices: index1={index1}, index2={index2}, data shape={data.shape}")
+
+        # Perform the crop
+        cropped_data = data[:, :, index1:index2]
+        self.size_z = cropped_data.shape[2]
+
+        return cropped_data
+        
+    def _convert_to_numpy(self, file, return_complex = True) -> np.ndarray:
         with self.compressed_data.open(file) as f:
             complex_data = np.frombuffer(f.read(), dtype=np.complex64).reshape((self.size_x, self.size_y, self.size_z), order='C')
+            complex_data = self._fix_data_redundancy(complex_data)
+            complex_data = self._manual_crop(complex_data, 330, 750)
             if return_complex:
                 return complex_data
-            # Return the magnitude of complexe by default
-            return np.abs(complex_data).astype(np.float32)
+            # Return the magnitude of complexe
+            return np.abs(complex_data).astype(np.float64)
         
     @staticmethod
-    def extract_positions_from_scan(scan_file_path: str):
+    def extract_positions_from_scan(scan_file_path: str = None):
         """
-        Extracts the x, y positions from the .scan file.
+        Extracts the raw and index x, y positions from the .scan file.
 
         Parameters:
         - scan_file_path: Path to the .scan file.
@@ -114,28 +155,29 @@ class ThorOCT:
         raw_positions = []
         position_indexes = []
         
-        with open(scan_file_path, 'r') as file:
-            lines = file.readlines()
+        if scan_file_path:
+            with open(scan_file_path, 'r') as file:
+                lines = file.readlines()
 
-            # Find the start of the positions section
-            positions_section = False
-            for line in lines:
-                line = line.strip()
+                # Find the start of the positions section
+                positions_section = False
+                for line in lines:
+                    line = line.strip()
 
-                # Mark the start of the positions section
-                if line == "------Positions------":
-                    positions_section = True
-                    continue
+                    # Mark the start of the positions section
+                    if line == "------Positions------":
+                        positions_section = True
+                        continue
 
-                # If in the positions section, extract x, y values
-                if positions_section:
-                    if line:  # Ignore empty lines
-                        # Split by comma and convert to float
-                        x, y = map(float, line.split(','))
-                        raw_positions.append((x, y, 0))
+                    # If in the positions section, extract x, y values
+                    if positions_section:
+                        if line:  # Ignore empty lines
+                            # Split by comma and convert to float
+                            x, y = map(float, line.split(','))
+                            raw_positions.append((x, y, 0))
         
-        # hold the index locations for the tile placements in the Zarr file. The PSOCT acquisition (in its current state) is traversing from top right to bottom left.               
-        for x in range(3, -1, -1): #range(4): 
+        # hold the index locations for the tile placements in the Zarr file. This follows the current order of acquisition for the PSOCT microscope.              
+        for x in range(3, -1, -1):
             for y in range(4):
                 position_indexes.append((x, y, 0))
         return position_indexes, raw_positions
@@ -191,14 +233,6 @@ class ThorOCT:
         return grouped_files, positions
     
     def preprocess_volume_PSOCT(vol: np.ndarray) -> np.ndarray:
-        """Preprocess the volume by rotating and flipping it."""
+        """Transforms the volume to RAS orientation"""
         vol = vol.transpose(2, 0, 1)
         return vol
-
-            
-input_file = "C:\\Users\\Mohamad Hawchar\\Concordia University - Canada\\NeuralABC as-psOCT Samples - data\\2024_07_25_mouse_CB_1slice_2anglesliceIdx1_SUCCESS\\2024_07_25_mouse_CB_1slice_4anglesliceIdx1_0017_ModePolarization3D.oct"
-oct = ThorOCT(path = input_file)
-oct.load()
-pol1 = oct.polarization2
-tiff_file = "C:\\Users\\Mohamad Hawchar\\School\\UQAM\\LINUM\\PS-OCT\\m17_polarization2.tiff"
-volwrite(tiff_file, np.abs(pol1))
