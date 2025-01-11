@@ -33,12 +33,13 @@ def _build_arg_parser():
                    help="Keep the galvo return signal (default=%(default)s)")
     p.add_argument("--data_type", type = str, default='OCT',choices=['OCT', 'PSOCT'],
                    help="Type of the data to process (default=%(default)s)")
-    p.add_argument('--polarization', type = int, default = 1, choices = [1,2],
-                   help="Polarization index to process (In case of PSOCT data type)")
-    p.add_argument('--angle_index', type = int, default = 0,
-                   help="Angle index to process (In case of PSOCT data type)")
-    p.add_argument('--return_complex', type = bool, default = False,
-                   help="Return Complex64 or Float32 data type (In case of PSOCT data type)")
+    g = p.add_argument_group("PS-OCT options")  
+    g.add_argument('--polarization', type = int, default = 1, choices = [0,1],
+                   help="Polarization index to process")
+    g.add_argument('--angle_index', type = int, default = 0,
+                   help="Angle index to process")
+    g.add_argument('--return_complex', type = bool, default = False,
+                   help="Return Complex64 or Float32 data type")
     return p
 
 
@@ -67,10 +68,10 @@ def process_tile(params: dict):
     elif data_type == 'PSOCT':
         oct = ThorOCT(f)
         if pol_index == 0:
-            oct.load(erase_polarization_2=True, return_complex = return_complex)
+            oct.load(erase_polarization_2=True, return_complex=return_complex)
             vol = oct.polarization1
         else:
-            oct.load(erase_polarization_1=True, return_complex = return_complex)
+            oct.load(erase_polarization_1=True, return_complex=return_complex)
             vol = oct.polarization2
         vol = ThorOCT.preprocess_volume_PSOCT(vol)
     # Rescale the volume
@@ -137,10 +138,8 @@ def main():
     if output_resolution == -1:
         tile_size = vol.shape
     else:
-        tile_size = [int(vol.shape[i] * resolution[i] * 1000 / output_resolution) for i in range(3)]     
+        tile_size = [int(vol.shape[i] * resolution[i] * 1000 / output_resolution) for i in range(3)]
     mosaic_shape = [tile_size[0], n_mx * tile_size[1], n_my * tile_size[2]]
-    print("Tile size:", tile_size)
-    
     # Create the zarr persistent array
     process_sync_file = str(zarr_file).replace(".zarr", ".sync")
     synchronizer = zarr.ProcessSynchronizer(process_sync_file)
