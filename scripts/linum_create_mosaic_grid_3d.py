@@ -13,12 +13,12 @@ import numpy as np
 import dask.array as da
 import zarr
 from skimage.transform import resize
-
+from tqdm.auto import tqdm
 from linumpy.io.zarr import save_zarr
 from linumpy import reconstruction
 from linumpy.microscope.oct import OCT
 from linumpy.io.thorlabs import ThorOCT
-from tqdm.auto import tqdm
+
 
 # Default number of processes is the number of cores minus 1
 DEFAULT_N_CPUS = multiprocessing.cpu_count() - 1
@@ -86,7 +86,7 @@ def process_tile(params: dict):
         else:
             oct.load(erase_polarization_1=True, return_complex=return_complex)
             vol = oct.polarization2
-        vol = ThorOCT.preprocess_volume_PSOCT(vol)
+        vol = ThorOCT.preprocess_volume_psoct(vol)
     # Rescale the volume
     vol = resize(vol, tile_size, anti_aliasing=True, order=1, preserve_range=True)
     # Compute the tile position
@@ -116,7 +116,7 @@ def main():
     if data_type == 'OCT':
         tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
     elif data_type == 'PSOCT':
-        tiles, tiles_pos = ThorOCT.get_PSOCT_tiles_ids(tiles_directory)
+        tiles, tiles_pos = ThorOCT.get_psoct_tiles_ids(tiles_directory)
         tiles = tiles[angle_index]
     mx = [tiles_pos[i][0] for i in range(len(tiles_pos))]
     my = [tiles_pos[i][1] for i in range(len(tiles_pos))]
@@ -141,10 +141,9 @@ def main():
         else:
             oct.load(erase_polarization_1=True, return_complex = return_complex)
             vol = oct.polarization2
-        vol = ThorOCT.preprocess_volume_PSOCT(vol)
+        vol = ThorOCT.preprocess_volume_psoct(vol)
         resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
-        print(f"Resolutoin: z = {resolution[0]} , x = {resolution[1]} , y = {resolution[2]} ") 
-    
+        print(f"Resolutoin: z = {resolution[0]} , x = {resolution[1]} , y = {resolution[2]} ")   
 
     # Compute the rescaled tile size based on the minimum target output resolution
     if output_resolution == -1:
@@ -158,9 +157,9 @@ def main():
     zarr_store = zarr.TempStore(suffix=".zarr")
     process_sync_file = zarr_store.path.replace(".zarr", ".sync")
     synchronizer = zarr.ProcessSynchronizer(process_sync_file)
-    if return_complex == True:
-        mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape, dtype=np.complex64, chunks=tile_size,
-                       synchronizer=synchronizer)
+    if return_complex:
+        mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape, dtype=np.complex64, 
+                           chunks=tile_size,synchronizer=synchronizer)
     else:
         mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape, dtype=np.float32,
                             chunks=tile_size, synchronizer=synchronizer)
