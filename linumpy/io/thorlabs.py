@@ -179,7 +179,8 @@ class ThorOCT:
         """
         Stacks x tiles on top of each other along the y-axis according to the ascan_averaging_value.
 
-        eg. If ascan_averaging_value = 3, the first 3 tiles will be stacked on top of each other, then the next 3, and so on.
+        eg. If ascan_averaging_value = 3, 
+        the first 3 tiles will be stacked on top of each other, then the next 3, and so on.
         [0, 1, 2] -> [0] = |2|
                            |1|
                            |0|
@@ -192,7 +193,8 @@ class ThorOCT:
         # Ensure the number of tiles is divisible by ascan_averaging_value
         if data.shape[0] % self.ascan_averaging_value != 0:
             raise ValueError(
-                f"The number of tiles ({data.shape[0]}) must be divisible by ascan_averaging_value ({self.ascan_averaging_value})."
+                f"The number of tiles ({data.shape[0]}) 
+                must be divisible by ascan_averaging_value ({self.ascan_averaging_value})."
             )
 
         stacked_data = []
