@@ -92,9 +92,9 @@ def create_transformation_dict(nlevels, voxel_size, ndims=3):
     """
     def _get_scale(level, ndims):
         scale_def = [1.0,
+                     (voxel_size[0]*2.0**level),
                      (voxel_size[1]*2.0**level),
-                     (voxel_size[2]*2.0**level),
-                     (voxel_size[3]*2.0**level)]
+                     (voxel_size[2]*2.0**level)]
         offset = len(scale_def) - ndims
         return scale_def[offset:]
 
