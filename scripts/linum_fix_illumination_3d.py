@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Detect and fix the lateral illumination inhomogeneities for each 3D tiles of a mosaic grid"""
+"""
+Detect and fix the lateral illumination inhomogeneities
+for each 3D tiles of a mosaic grid
+"""
 
 from os import environ
 
@@ -12,7 +15,6 @@ import multiprocessing
 import shutil
 import tempfile
 from pathlib import Path
-from os.path import join as pjoin
 
 import dask.array as da
 
@@ -25,6 +27,7 @@ from pqdm.processes import pqdm
 from linumpy.io.zarr import save_zarr, read_omezarr
 
 # TODO: add option to export the flatfields and darkfields
+
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
@@ -128,7 +131,7 @@ def main():
         vol_output[z] = slice_vol[:]
 
     out_dask = da.from_zarr(vol_output)
-    save_zarr(out_dask, output_zarr, scales=resolution,
+    save_zarr(out_dask, output_zarr, voxel_size=resolution,
               chunks=vol.chunks)
 
     # Remove the process sync file
