@@ -1,8 +1,9 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 
-""" Computes the tissue apparent attenuation coefficient map and then use the average
-attenuation to compensate its effect in the OCT reflectivity data.
+""" Computes the tissue apparent attenuation coefficient map
+and then use the average attenuation to compensate its effect in
+the OCT reflectivity data.
 """
 # TODO: Keep the OCT pixel format (which is float32 ?)
 import argparse
@@ -69,7 +70,7 @@ def main():
     # Saving the attenuation
     attn = np.moveaxis(attn, (0, 1, 2), (2, 1, 0))
     save_zarr(attn.astype(np.float32), args.output,
-              scales=res, chunks=zarr_vol.chunks)
+              voxel_size=res, chunks=zarr_vol.chunks)
 
 
 if __name__ == "__main__":

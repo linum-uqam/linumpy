@@ -7,7 +7,6 @@ import argparse
 import multiprocessing
 import shutil
 from pathlib import Path
-from os.path import join as pjoin
 
 import numpy as np
 import dask.array as da
@@ -27,11 +26,13 @@ def _build_arg_parser():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("tiles_directory",
-                   help="Full path to a directory containing the tiles to process")
+                   help="Full path to a directory "
+                        "containing the tiles to process")
     p.add_argument("output_zarr",
                    help="Full path to the output zarr file")
     p.add_argument("-r", "--resolution", type=float, default=10.0,
-                   help="Output isotropic resolution in micron per pixel. (default=%(default)s)")
+                   help="Output isotropic resolution "
+                        "in micron per pixel. (default=%(default)s)")
     p.add_argument("-z", "--slice", type=int, default=0,
                    help="Slice to process (default=%(default)s)")
     p.add_argument("--keep_galvo_return", action="store_true",
@@ -66,7 +67,11 @@ def process_tile(params: dict):
     vol = preprocess_volume(vol)
 
     # Rescale the volume
-    vol = resize(vol, tile_size, anti_aliasing=True, order=1, preserve_range=True)
+    vol = resize(vol,
+                 tile_size,
+                 anti_aliasing=True,
+                 order=1,
+                 preserve_range=True)
 
     # Compute the tile position
     rmin = (mx - mx_min) * vol.shape[1]
@@ -105,7 +110,8 @@ def main():
     vol = preprocess_volume(vol)
     resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
 
-    # Compute the rescaled tile size based on the minimum target output resolution
+    # Compute the rescaled tile size based on
+    # the minimum target output resolution
     if output_resolution == -1:
         tile_size = vol.shape
         output_resolution = resolution
@@ -118,7 +124,9 @@ def main():
     zarr_store = zarr.TempStore(suffix=".zarr")
     process_sync_file = zarr_store.path.replace(".zarr", ".sync")
     synchronizer = zarr.ProcessSynchronizer(process_sync_file)
-    mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape, dtype=np.float32,
+    mosaic = zarr.open(zarr_store, mode="w",
+                       shape=mosaic_shape,
+                       dtype=np.float32,
                        chunks=tile_size, synchronizer=synchronizer)
 
     # Create a params dictionary for every tile
@@ -140,7 +148,7 @@ def main():
 
     # Convert to ome-zarr
     mosaic_dask = da.from_zarr(mosaic)
-    save_zarr(mosaic_dask, args.output_zarr, scales=output_resolution,
+    save_zarr(mosaic_dask, args.output_zarr, voxel_size=output_resolution,
               chunks=tile_size, n_levels=args.n_levels)
 
     # Remove the process sync file
