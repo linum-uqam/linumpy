@@ -191,7 +191,7 @@ def save_zarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3),
     # the base transformation is applied to all levels of the pyramid
     # and describes the original voxel size of the dataset
     base_coord_transformation = [
-        {"type": "scale", "scale": list(voxel_size)}
+        {"type": "scale", "scale": [1, 1, 1]}
     ]
     write_image(data, zarr_group, storage_options=dict(chunks=chunks),
                 scaler=CustomScaler(**pyramid_kw),
