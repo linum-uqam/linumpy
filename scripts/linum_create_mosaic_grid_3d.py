@@ -23,22 +23,28 @@ from linumpy.utils.io import parse_processes_arg, add_processes_arg
 def _build_arg_parser():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("tiles_directory",
-                   help="Full path to a directory containing the tiles to process")
     p.add_argument("output_zarr",
                    help="Full path to the output zarr file")
-    p.add_argument("-r", "--resolution", type=float, default=10.0,
-                   help="Output isotropic resolution in micron per pixel. (default=%(default)s)")
-    p.add_argument("-z", "--slice", type=int, default=0,
-                   help="Slice to process (default=%(default)s)")
-    p.add_argument("--keep_galvo_return", action="store_true",
-                   help="Keep the galvo return signal (default=%(default)s)")
-    p.add_argument('--n_levels', type=int, default=5,
-                   help='Number of levels in pyramid representation.')
-    p.add_argument('--zarr_root',
-                   help='Path to parent directory under which the zarr'
+
+    input_g = p.add_argument_group("input")
+    input_mutex_g = input_g.add_mutually_exclusive_group(required=True)
+    input_mutex_g.add_argument("--from_root_directory",
+                               help="Full path to a directory containing the tiles to process.")
+    input_mutex_g.add_argument("--from_tiles_list", nargs='+',
+                               help='List of tiles to assemble (argument --slice is ignored).')
+    options_g = p.add_argument_group("other options")
+    options_g.add_argument("-r", "--resolution", type=float, default=10.0,
+                           help="Output isotropic resolution in micron per pixel. [%(default)s]")
+    options_g.add_argument("-z", "--slice", type=int,
+                           help="Slice to process [%(default)s]")
+    options_g.add_argument("--keep_galvo_return", action="store_true",
+                           help="Keep the galvo return signal [%(default)s]")
+    options_g.add_argument('--n_levels', type=int, default=5,
+                           help='Number of levels in pyramid representation.')
+    options_g.add_argument('--zarr_root',
+                           help='Path to parent directory under which the zarr'
                         ' temporary directory will be created [/tmp/].')
-    add_processes_arg(p)
+    add_processes_arg(options_g)
     return p
 
 
@@ -76,18 +82,24 @@ def process_tile(params: dict):
 
 def main():
     # Parse arguments
-    p = _build_arg_parser()
-    args = p.parse_args()
+    parser = _build_arg_parser()
+    args = parser.parse_args()
 
     # Parameters
-    tiles_directory = Path(args.tiles_directory)
-    z = args.slice
+    if args.from_root_directory:
+        z = args.slice
+        tiles_directory = args.from_root_directory
+        tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
+    else:
+        if args.slice is not None:
+            parser.error('Argument --slice is incompatible with --from_tiles_list.')
+        tiles = [Path(d) for d in args.from_tiles_list]
+        tiles_pos = reconstruction.get_tiles_ids_from_list(tiles)
+
     output_resolution = args.resolution
     crop = not args.keep_galvo_return
     n_cpus = parse_processes_arg(args.n_processes)
 
-    # Analyze the tiles
-    tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
     mx = [tiles_pos[i][0] for i in range(len(tiles_pos))]
     my = [tiles_pos[i][1] for i in range(len(tiles_pos))]
     mx_min = min(mx)
