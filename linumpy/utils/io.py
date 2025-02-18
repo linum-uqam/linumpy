@@ -18,3 +18,20 @@ def add_processes_arg(parser):
                             help='Number of processes to use. -1 to use \n'
                                  'all cores [%(default)s].')
     return a
+
+def add_overwrite_arg(parser, will_delete_dirs=False):
+    if will_delete_dirs:
+        _help = ('Force overwriting of the output files.\n'
+                 'CAREFUL. The whole output directory will be deleted if it '
+                 'exists.')
+    else:
+        _help = 'Force overwriting of the output files.'
+    parser.add_argument(
+        '-f', dest='overwrite', action='store_true', help=_help)
+
+def add_verbose_arg(parser):
+    parser.add_argument('-v', default="WARNING", const='INFO', nargs='?',
+                        choices=['DEBUG', 'INFO', 'WARNING'], dest='verbose',
+                        help='Produces verbose output depending on '
+                             'the provided level. \nDefault level is warning, '
+                             'default when using -v is info.')
