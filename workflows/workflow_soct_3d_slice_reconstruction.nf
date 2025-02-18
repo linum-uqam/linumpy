@@ -1,17 +1,17 @@
 #!/usr/bin/env nextflow
-nextflow.enable.dsl=2
+nextflow.enable.dsl = 2
 
 // Workflow Description
-// Creates 3D mosaic grid tiff at an isotropic resolution of 25um from raw data set tiles
+// Creates a 3D volume from raw S-OCT tiles for a given slice index
 // Input: Directory containing raw data set tiles
-// Output: 3D mosaic grid tiff at an isotropic resolution of 25um
+// Output: 3D reconstruction for a given slice index
 
 // Parameters
-params.inputDir = "/Users/jlefebvre/Downloads/tiles_lowestImmersion";
-params.outputDir = "/Users/jlefebvre/Downloads/tiles_lowestImmersion_reconstruction";
+params.inputDir = "";
+params.outputDir = "";
 params.resolution = 10; // Resolution of the reconstruction in micron/pixel
-params.slice = 28; // Slice to process
-params.processes = 8; // Maximum number of python processes per nextflow process
+params.slice = 0; // Slice to process
+params.processes = 1; // Maximum number of python processes per nextflow process
 
 // Processes
 process create_mosaic_grid {
@@ -19,7 +19,6 @@ process create_mosaic_grid {
         path inputDir
     output:
         path "*.ome.zarr"
-    //publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
     linum_create_mosaic_grid_3d.py ${inputDir} mosaic_grid_3d_${params.resolution}um.ome.zarr --slice ${params.slice} --resolution ${params.resolution} --n_processes ${params.processes}
@@ -31,10 +30,9 @@ process fix_focal_curvature {
         path mosaic_grid
     output:
         path "*_focalFix.ome.zarr"
-    //publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
-    linum_detect_focalCurvature.py ${mosaic_grid} mosaic_grid_3d_${params.resolution}um_focalFix.ome.zarr
+    linum_detect_focal_curvature.py ${mosaic_grid} mosaic_grid_3d_${params.resolution}um_focalFix.ome.zarr
     """
 }
 
@@ -43,10 +41,9 @@ process fix_illumination {
         path mosaic_grid
     output:
         path "*_illuminationFix.ome.zarr"
-    //publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
-    linum_fix_illumination_3d.py ${mosaic_grid} mosaic_grid_3d_${params.resolution}um_illuminationFix.ome.zarr
+    linum_fix_illumination_3d.py ${mosaic_grid} mosaic_grid_3d_${params.resolution}um_illuminationFix.ome.zarr --n_processes ${params.processes}
     """
 }
 
@@ -55,7 +52,6 @@ process generate_aip {
         path mosaic_grid
     output:
         path "aip.ome.zarr"
-    //publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
     linum_aip.py ${mosaic_grid} aip.ome.zarr
@@ -67,7 +63,6 @@ process estimate_xy_transformation {
         path aip
     output:
         path "transform_xy.npy"
-    //ublishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
     linum_estimate_transform.py ${aip} transform_xy.npy
@@ -118,7 +113,8 @@ process compute_attenuation_bias {
     publishDir path: "${params.outputDir}", mode: 'copy'
     script:
     """
-    linum_compute_attenuationBiasField.py ${slice_attn} "slice_z${params.slice}_${params.resolution}um_bias.ome.zarr"
+    # NOTE: --isInCM argument is required, else we get data overflow
+    linum_compute_attenuation_bias_field.py ${slice_attn} "slice_z${params.slice}_${params.resolution}um_bias.ome.zarr" --isInCM
     """
 }
 
