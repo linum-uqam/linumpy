@@ -147,17 +147,5 @@ workflow {
     // Stitch the tile in 3D
     stitch_3d(fix_illumination.out.combine(estimate_xy_transformation.out, by:0))
 
-    // Compensate for PSF
-    compensate_psf(stitch_3d.out)
-
-    // Estimate attenuation
-    estimate_attenuation(compensate_psf.out)
-
-    // Compute attenuation bias
-    compute_attenuation_bias(estimate_attenuation.out)
-
-    // Compensate attenuation
-    compensate_attenuation(compensate_psf.out.combine(compute_attenuation_bias.out, by:0))
-
-    // TODO: Stitch 3D slices together
+    // TODO: PSF and depth correction and slices stitching
 }
