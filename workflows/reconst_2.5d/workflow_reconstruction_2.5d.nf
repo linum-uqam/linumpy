@@ -42,6 +42,9 @@ params.basic_working_size=128
 // Position Estimation options
 params.initial_overlap = 0.2
 
+// Nifti resampled resolution in microns
+params.resolution_nifti = 10.0
+
 /* Processes */
 // Crop each tile within the mosaic grid.
 process crop_tiles {
@@ -116,15 +119,16 @@ process stack_mosaic {
     """
 }
 
-// Resample the stack to 10, 25, 50, and 100 micron resolutions
+// Convert the stack to nifti
 process resample_stack {
     input:
         path stack
     output:
-        path "stack_10um.nii.gz"
+        tuple path("stack_10um.nii.gz"), path("stack_10um_iso.nii.gz")
     script:
     """
-    linum_convert_omezarr_to_nifti.py $stack stack_10um.nii.gz --resolution 10.0
+    linum_convert_omezarr_to_nifti.py $stack stack_10um.nii.gz --resolution ${params.resolution_nifti}
+    linum_convert_omezarr_to_nifti.py $stack stack_10um_iso.nii.gz --resolution ${params.resolution_nifti} -i
     """
 }
 
@@ -184,6 +188,6 @@ workflow{
     convert_to_omezarr(stack_mosaic.out)
 
     // Resample the stack to 10 micron resolution
-    // resample_stack(convert_to_omezarr.out)
+    resample_stack(convert_to_omezarr.out)
 
 }
