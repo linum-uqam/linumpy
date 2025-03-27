@@ -5,7 +5,9 @@
 **Linumpy** contains tools and utilities to quickly work with serial histology and microscopy data. Those tools implement the recommended workflows and parameters used in the lab. 
 
 ## Installation
-To install the tool, clone the repository and then install it with the following command:
+*Although a version of the library is available on PyPI, it has not been updated in a while. We highly discourage its use.*
+
+To install the library, clone the repository, change directory to the repository root and then install it with the command below:
 ```
 pip install .
 ```
@@ -41,5 +43,5 @@ To execute the scripts, you can use the following command:
 nextflow run workflow_soct_3d_slice_reconstruction.nf -resume
 ```
 
-[LINUM]:https://linum.info.uqam.ca
+[LINUM]:https://linum-lab.ca
 [Python Virtual Environment]:https://virtualenv.pypa.io/en/latest/
