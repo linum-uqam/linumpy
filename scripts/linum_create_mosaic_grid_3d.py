@@ -43,7 +43,7 @@ def _build_arg_parser():
                            help='Number of levels in pyramid representation.')
     options_g.add_argument('--zarr_root',
                            help='Path to parent directory under which the zarr'
-                                ' temporary directory will be created [/tmp/].')
+                           ' temporary directory will be created [/tmp/].')
     add_processes_arg(options_g)
     return p
 
