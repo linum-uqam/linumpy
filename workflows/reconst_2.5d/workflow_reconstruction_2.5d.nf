@@ -128,7 +128,6 @@ process resample_stack {
     script:
     """
     linum_convert_omezarr_to_nifti.py $stack stack_10um.nii.gz --resolution ${params.resolution_nifti}
-    linum_convert_omezarr_to_nifti.py $stack stack_10um_iso.nii.gz --resolution ${params.resolution_nifti} -i
     """
 }
 
