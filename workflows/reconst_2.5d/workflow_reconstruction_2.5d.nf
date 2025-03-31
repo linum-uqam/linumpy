@@ -15,7 +15,7 @@ Notes
 Add the -resume flag to resume the pipeline from the last successfully completed process.
 */
 
-params.directory = ""
+params.directory = "."
 params.input_directory = params.directory + "/mosaicgrids"
 params.xy_shift_file = params.directory + "/shifts_xy.csv"
 params.output_directory = params.directory
@@ -109,8 +109,8 @@ process stitch_mosaic {
 // Stack the stitched mosaic grids to get a 2.5D reconstruction, using the input xy_shift between images
 process stack_mosaic {
     input:
-        path images
-        path xy_shifts
+        path(images)
+        path(xy_shifts)
     output:
         path "stack.zarr"
     script:
@@ -159,6 +159,7 @@ process convert_to_omezarr {
 workflow{
     // Detect every tile directory
     slices = channel.fromPath(params.input_directory + "/mosaic_grid_z*.tiff")
+    shifts = channel.fromPath(params.xy_shift_file)
 
     // Remove compressed stripes caused by the raster scan
     crop_tiles(slices.flatten())
@@ -178,7 +179,7 @@ workflow{
     stitch_mosaic(mosaic_grids_compensated.combine(estimate_position.out))
 
     // Stack the mosaic to get an estimate of the 3D volume
-    stack_mosaic(stitch_mosaic.out.map{it[1]}.collect(), params.xy_shift_file)
+    stack_mosaic(stitch_mosaic.out.map{it[1]}.collect(), shifts)
 
     // Compress the stack to zip for transfer
     compress_stack(stack_mosaic.out)
