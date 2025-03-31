@@ -1,8 +1,11 @@
-from pathlib import Path
-from tqdm.auto import tqdm
 import re
-from linumpy.microscope.oct import OCT
+from pathlib import Path
+
 import numpy as np
+from tqdm.auto import tqdm
+
+from linumpy.microscope.oct import OCT
+
 
 def get_tiles_ids(directory, z: int = None):
     """Analyzes a directory and detects all the tiles in contains"""
@@ -20,7 +23,7 @@ def get_tiles_ids(directory, z: int = None):
     file_pattern = r"tile_x(?P<x>\d+)_y(?P<y>\d+)_z(?P<z>\d+)"
     tile_ids = []
     n_tiles = len(tiles)
-    for t in tqdm(tiles, desc="Extracting tile ids", total=n_tiles, leave=False):
+    for t in tqdm(tiles, desc="Extracting tile ids", total=n_tiles, leave=False, position=1):
         # Extract the tile's mosaic position.
         match = re.match(file_pattern, t.name)
         mx = int(match.group("x"))
@@ -29,6 +32,7 @@ def get_tiles_ids(directory, z: int = None):
         tile_ids.append((mx, my, mz))
 
     return tiles, tile_ids
+
 
 def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_positions: bool = False):
     input_directory = Path(directory)
@@ -42,7 +46,9 @@ def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_
     tiles_positions_px = []
     tiles_positions_mm = []
     mosaic_tile_pos = []
-    for t in tqdm(tiles, desc="Reading mosaic info", leave=False):
+    # Progress bars overlap as the position is the same in all threads. Position is 1 to avoid overlap with outer loop.
+    # No better solution has been found.
+    for t in tqdm(tiles, desc="Reading mosaic info", leave=False, position=1):
         oct = OCT(t)
 
         # Extract the tile's mosaic position.
@@ -81,7 +87,7 @@ def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_
     ymin_mm = np.min([p[1] for p in tiles_positions_mm]) - oct.dimension[1] / 2
     xmax_mm = np.max([p[0] for p in tiles_positions_mm]) + oct.dimension[0] / 2
     ymax_mm = np.max([p[1] for p in tiles_positions_mm]) + oct.dimension[1] / 2
-    mosaic_center_mm = ((xmin_mm+xmax_mm)/2, (ymin_mm+ymax_mm)/2)
+    mosaic_center_mm = ((xmin_mm + xmax_mm) / 2, (ymin_mm + ymax_mm) / 2)
     mosaic_width_mm = xmax_mm - xmin_mm
     mosaic_height_mm = ymax_mm - ymin_mm
 

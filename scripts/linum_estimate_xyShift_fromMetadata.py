@@ -8,9 +8,9 @@ import csv
 from pathlib import Path
 
 import numpy as np
-from tqdm import tqdm
+from tqdm.contrib.concurrent import process_map
 
-from linumpy import reconstruction
+from linumpy.reconstruction import get_mosaic_info, get_tiles_ids
 
 
 def _build_arg_parser():
@@ -23,6 +23,11 @@ def _build_arg_parser():
     return p
 
 
+def process_slice(z, tiles_directory):
+    mosaic_info = get_mosaic_info(tiles_directory, z, use_stage_positions=True)
+    return mosaic_info['mosaic_xmin_mm'], mosaic_info['mosaic_ymin_mm'], mosaic_info['tile_resolution']
+
+
 def main():
     # Parse arguments
     p = _build_arg_parser()
@@ -33,17 +38,18 @@ def main():
     output_file = Path(args.output_file)
 
     # Get slice ids
-    tiles, tile_ids = reconstruction.get_tiles_ids(tiles_directory)
+    tiles, tile_ids = get_tiles_ids(tiles_directory)
     z_values = np.unique([ids[2] for ids in tile_ids])
     n_slices = len(z_values)
 
+    # Prepare the parameters
+    tiles_directory_list = [tiles_directory] * n_slices
+
     # Extract the metadata
-    xmin_mm = []
-    ymin_mm = []
-    for z in tqdm(z_values, unit="slice"):
-        mosaic_info = reconstruction.get_mosaic_info(tiles_directory, z, use_stage_positions=True)
-        xmin_mm.append(mosaic_info['mosaic_xmin_mm'])
-        ymin_mm.append(mosaic_info['mosaic_ymin_mm'])
+    results = process_map(process_slice, z_values, tiles_directory_list, unit="slice", desc="Computing Mosaic Info",
+                          position=0, leave=True)
+
+    xmin_mm, ymin_mm, tile_resolutions = zip(*results)
 
     # Compute the shift between slices in mm
     x_shifts_mm = []
@@ -54,9 +60,10 @@ def main():
         x_shifts_mm.append(dx)
         y_shifts_mm.append(dy)
 
+    tile_resolution = tile_resolutions[0]
     # Convert the shifts in pixel, using the xy resolution
-    x_shift_px = np.array(x_shifts_mm) / mosaic_info["tile_resolution"][0]
-    y_shift_px = np.array(y_shifts_mm) / mosaic_info["tile_resolution"][1]
+    x_shift_px = np.array(x_shifts_mm) / tile_resolution[0]
+    y_shift_px = np.array(y_shifts_mm) / tile_resolution[1]
 
     # Save the shifts to a csv file
     shifts = np.array(
