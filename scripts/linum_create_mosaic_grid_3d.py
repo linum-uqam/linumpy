@@ -70,7 +70,12 @@ def process_tile(params: dict):
     vol = preprocess_volume(vol)
 
     # Rescale the volume
-    vol = resize(vol, tile_size, anti_aliasing=True, order=1, preserve_range=True)
+    vol = resize(
+        vol,
+        tile_size,
+        anti_aliasing=True,
+        order=1,
+        preserve_range=True)
 
     # Compute the tile position
     rmin = (mx - mx_min) * vol.shape[1]
@@ -92,7 +97,8 @@ def main():
         tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
     else:
         if args.slice is not None:
-            parser.error('Argument --slice is incompatible with --from_tiles_list.')
+            parser.error(
+                'Argument --slice is incompatible with --from_tiles_list.')
         tiles = [Path(d) for d in args.from_tiles_list]
         tiles_pos = reconstruction.get_tiles_ids_from_list(tiles)
 
@@ -115,12 +121,14 @@ def main():
     vol = preprocess_volume(vol)
     resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
 
-    # Compute the rescaled tile size based on the minimum target output resolution
+    # Compute the rescaled tile size based on the minimum target output
+    # resolution
     if output_resolution == -1:
         tile_size = vol.shape
         output_resolution = resolution
     else:
-        tile_size = [int(vol.shape[i] * resolution[i] * 1000 / output_resolution) for i in range(3)]
+        tile_size = [int(vol.shape[i] * resolution[i] * 1000 /
+                         output_resolution) for i in range(3)]
         output_resolution = [output_resolution / 1000.0] * 3
     mosaic_shape = [tile_size[0], n_mx * tile_size[1], n_my * tile_size[2]]
 
