@@ -74,6 +74,7 @@ class OCT:
             with open(file, "rb") as f:
                 foo = np.fromfile(f, dtype=np.float32)
             n_frames = int(len(foo) / (n_alines_per_bscan * n_z))
+            #foo = np.reshape(foo, (n_z, n_alines_per_bscan, n_frames), order='F')
             foo = np.reshape(foo, (n_z, n_alines_per_bscan, n_frames), order='F')
             if vol is None:
                 vol = foo
