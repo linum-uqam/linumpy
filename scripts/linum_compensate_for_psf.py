@@ -56,9 +56,9 @@ def main():
     if args.out_psf:
         psf_3d = np.moveaxis(psf_3d, (0, 1, 2), (2, 1, 0))
         # when there are too many levels it'll break the viewer for some reason
-        save_zarr(psf_3d.astype(np.float32), args.out_psf, scales=res, chunks=chunks)
+        save_zarr(psf_3d.astype(np.float32), args.out_psf, voxel_size=res, chunks=chunks)
 
-    save_zarr(output.astype(np.float32), args.out_zarr, scales=res, chunks=chunks)
+    save_zarr(output.astype(np.float32), args.out_zarr, voxel_size=res, chunks=chunks)
 
 
 if __name__ == '__main__':

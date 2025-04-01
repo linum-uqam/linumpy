@@ -11,7 +11,6 @@ from os import environ
 environ["OMP_NUM_THREADS"] = "1"
 
 import argparse
-import multiprocessing
 import tempfile
 from pathlib import Path
 
@@ -27,6 +26,7 @@ from linumpy.io.zarr import save_zarr, read_omezarr
 from linumpy.utils.io import add_processes_arg, parse_processes_arg
 
 # TODO: add option to export the flatfields and darkfields
+
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
@@ -136,7 +136,7 @@ def main():
         vol_output[z] = slice_vol[:]
 
     out_dask = da.from_zarr(vol_output)
-    save_zarr(out_dask, output_zarr, scales=resolution,
+    save_zarr(out_dask, output_zarr, voxel_size=resolution,
               chunks=vol.chunks)
 
     # Remove the temporary slice files used by the parallel processes
