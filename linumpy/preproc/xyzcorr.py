@@ -19,6 +19,9 @@ from scipy.signal import argrelmax
 from skimage.filters import threshold_li, threshold_otsu
 from skimage.morphology import dilation, disk
 
+from skimage.transform import resize
+from skimage.metrics import normalized_mutual_information as nmi
+
 
 def cropVolume(vol, xlim=[0, -1], ylim=[0, -1], zlim=[0, -1]):
     """Crops the given volume according to the range given as input
@@ -768,3 +771,33 @@ def estimateLHProfileParameters(vol, s=25):
             sigma[x, y] = this_sigma
 
     return z0, dz, I0, Ib, sigma
+
+def detect_galvo_shift(aip: np.ndarray, n_pixel_return: int=40) -> int:
+    """Detects the galvo shift in the AIP.
+    Parameters
+    ----------
+    aip : ndarray
+        AIP of the OCT volume containing both the image and the galvo return. This assumes that the first axis is the
+        A-line axis, and the second axis is the B-scan axis, and the average was taken over the depth axis.
+    n_pixel_return : int
+        Number of pixels used for the galvo returns.
+    Returns
+    -------
+    int
+        Shift in pixels
+    """
+    similarities = []
+
+    n_alines, n_bscans = aip.shape
+    for i in range(n_alines):
+        aip_shifted = np.roll(aip, i, axis=0)
+        img = aip_shifted[0:-n_pixel_return, :]
+        img_galvos_simulated = np.flipud(resize(img, (n_pixel_return, n_bscans)))
+        img_galvos = aip_shifted[-n_pixel_return:, :]
+
+        similarity = nmi(img_galvos_simulated, img_galvos)
+        similarities.append(similarity)
+
+    shift = np.argmax(similarities)
+    return shift
+
