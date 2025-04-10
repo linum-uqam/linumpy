@@ -19,7 +19,8 @@ def _build_arg_parser():
     p.add_argument("output",
                    help="Full path to the output ome-zarr file (.ome-zarr)")
     p.add_argument("-r", "--resolution", nargs="+", type=float, default=[1.0],
-                   help="Resolution of the image in microns. (default=%(default)s)")
+                   help="Resolution of the image in microns."
+                        " (default=%(default)s)")
 
     return p
 
@@ -44,7 +45,7 @@ def main():
         scales = [r * 1e-3 for r in resolution]
 
     foo = zarr.open(input_file, mode="r")
-    save_zarr(foo, output_file, scales=scales, overwrite=True)
+    save_zarr(foo, output_file, voxel_size=scales, overwrite=True)
 
 
 if __name__ == "__main__":
