@@ -8,12 +8,7 @@ from pathlib import Path
 
 import SimpleITK as sitk
 import numpy as np
-from ome_zarr.io import parse_url
-from ome_zarr.reader import Reader
 from linumpy.io.zarr import read_omezarr
-
-
-# TODO: Read the units (mm, micron, etc) from the zarr file metadata
 
 
 def _build_arg_parser():
@@ -36,7 +31,6 @@ def main():
     args = p.parse_args()
 
     # Load the ome-zarr volume and choose the scale
-    # reader = Reader(parse_url(args.input))
     vol, zarr_resolution = read_omezarr(args.input)
 
     # Set the scaling factor

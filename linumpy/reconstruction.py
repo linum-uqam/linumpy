@@ -5,6 +5,9 @@ from linumpy.microscope.oct import OCT
 import numpy as np
 
 
+DEFAULT_TILE_FILE_PATTERN = r"tile_x(?P<x>\d+)_y(?P<y>\d+)_z(?P<z>\d+)"
+
+
 def get_tiles_ids(directory, z: int = None):
     """Analyzes a directory and detects all the tiles in contains"""
     input_directory = Path(directory)
@@ -20,11 +23,11 @@ def get_tiles_ids(directory, z: int = None):
     return tiles, tile_ids
 
 
-def get_tiles_ids_from_list(tiles_list):
+def get_tiles_ids_from_list(tiles_list,
+                            file_pattern=DEFAULT_TILE_FILE_PATTERN):
     tiles_list.sort()
 
     # Get the tile positions
-    file_pattern = r"tile_x(?P<x>\d+)_y(?P<y>\d+)_z(?P<z>\d+)"
     tile_ids = []
     n_tiles = len(tiles_list)
     for t in tqdm(tiles_list, desc="Extracting tile ids",
