@@ -8,11 +8,7 @@ from pathlib import Path
 
 import SimpleITK as sitk
 import numpy as np
-from ome_zarr.io import parse_url
-from ome_zarr.reader import Reader
-
-
-# TODO: Read the units (mm, micron, etc) from the zarr file metadata
+from linumpy.io.zarr import read_omezarr
 
 
 def _build_arg_parser():
@@ -35,9 +31,7 @@ def main():
     args = p.parse_args()
 
     # Load the ome-zarr volume and choose the scale
-    reader = Reader(parse_url(args.input))
-    nodes = list(reader())
-    zarr_resolution = nodes[0].metadata['coordinateTransformations'][0][0]['scale']
+    vol, zarr_resolution = read_omezarr(args.input)
 
     # Set the scaling factor
     transform = np.eye(3)
@@ -47,7 +41,7 @@ def main():
         transform[2, 2] = args.resolution / (1000 * zarr_resolution[0])
 
     # Compute the output volume shape
-    old_shape = nodes[0].data[0].shape
+    old_shape = vol.shape
     new_shape = (int(old_shape[2] / transform[0, 0]),
                  int(old_shape[1] / transform[1, 1]),
                  int(old_shape[0] / transform[2, 2]))
@@ -57,7 +51,7 @@ def main():
         new_spacing = (args.resolution, args.resolution, zarr_resolution[0] * 1000)
 
     # Prepare the output
-    input_volume = sitk.GetImageFromArray(nodes[0].data[0])
+    input_volume = sitk.GetImageFromArray(vol[:])
     input_volume.SetSpacing((zarr_resolution[2] * 1000, zarr_resolution[1] * 1000, zarr_resolution[0] * 1000))
 
     # Create the sampler
