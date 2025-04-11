@@ -35,16 +35,12 @@ def _build_arg_parser():
 
 def main():
     # Parse arguments
-    p = _build_arg_parser()
-    args = p.parse_args()
+    parser = _build_arg_parser()
+    args = parser.parse_args()
 
     # Parameters
     input_volume = Path(args.input_volume)
     output_volume = Path(args.output_volume)
-
-    # Check the extension
-    assert input_volume.suffix in [".nii", ".nii.gz"], "The input volume must be a .nii or .nii.gz file."
-    assert output_volume.suffix in [".nii", ".nii.gz"], "The output volume must be a .nii or .nii.gz file."
 
     # Control points position in pixel (ex: from Fiji)
     pos_anterior = args.pos_anterior
