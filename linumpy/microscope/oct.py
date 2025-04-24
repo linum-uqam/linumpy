@@ -2,10 +2,12 @@ from pathlib import Path
 from typing import Union
 
 import numpy as np
-from scipy.ndimage import convolve1d
+
+from linumpy.preproc import xyzcorr
 
 
 # TODO: consider the 'n_repeat' parameter when loading the data
+# TODO: reorder the dimension, position, etc to be n_depths, n_alines and n_bscans
 
 
 class OCT:
@@ -41,22 +43,19 @@ class OCT:
                 val = int(val)
             self.info[key] = val
 
-    def load_image(self, crop: bool = True, galvo_shift: Union[bool, int] = False, camera_shift: bool = True) -> np.ndarray:
+    def load_image(self, crop: bool = True, fix_shift: Union[bool, int] = False) -> np.ndarray:
         """ Load an image dataset
         Parameters
         ----------
         crop
             If crop is True, the galvo returns will be cropped from the volume
-        galvo_shift
-            If galvo_shift is True, the galvo return position will be evaluated from the data. If a integer shift is
-            given, this value will be used to fix the galvo return position.
-        camera_shift
-            If camera_shift is True, the camera shift will be evaluated and compoensated from the data. This will detect
-            the first pixel of the scan that is always overexposed and shift the data to compensate for this.
+        fix_shift
+            If True, the shift caused by the galvo mirror return will be evaluated from the data. If an integer value
+            is given, this value will be used to fix the shift.
         Notes
         -----
-        * The returned volume is in this order : z, x (a-line), y (b-scan)
-        * This method doesn't consider repeated a-lines or b-scans
+        * The returned volume is in this order : z (depth), x (a-line), y (b-scan)
+        * This method doesn't consider repeated a-lines or b-scans yet.
         """
         # Create numpy array
         # n_avg = self.info['n_repeat']  # TODO: use the number of averages when loading the data
@@ -74,47 +73,24 @@ class OCT:
             with open(file, "rb") as f:
                 foo = np.fromfile(f, dtype=np.float32)
             n_frames = int(len(foo) / (n_alines_per_bscan * n_z))
-            #foo = np.reshape(foo, (n_z, n_alines_per_bscan, n_frames), order='F')
             foo = np.reshape(foo, (n_z, n_alines_per_bscan, n_frames), order='F')
             if vol is None:
                 vol = foo
             else:
                 vol = np.concatenate((vol, foo), axis=2)
 
-        # Compensate the camera shift
-        if camera_shift:
-            img = vol.mean(axis=0)
-            pix_max = np.where(img == img.max())
-            cam_shift = pix_max[0][0]
-            vol = np.roll(vol, -cam_shift, axis=1)
-
-            # Replace the saturated pixel value by its neighbor
-            vol[:, 0, 0] = vol[:, 1, 0]
-
-        # Compensate the galvo shift
-        if isinstance(galvo_shift, bool) and galvo_shift is True:
-            galvo_shift = self.detect_galvo_shift(vol)
-            vol = np.roll(vol, galvo_shift, axis=1)
-        elif isinstance(galvo_shift, int) and galvo_shift != 0:
-            vol = np.roll(vol, galvo_shift, axis=1)
+        # Estimate the galvo shift
+        if isinstance(fix_shift, bool) and fix_shift is True:
+            shift = xyzcorr.detect_galvo_shift(vol.mean(axis=0), n_pixel_return=n_extra)
+            vol = xyzcorr.fix_galvo_shift(vol, shift=shift)
+        elif isinstance(fix_shift, int):
+            vol = xyzcorr.fix_galvo_shift(vol, shift=fix_shift)
 
         # Crop the volume
         if crop:
             vol = vol[:, 0:n_alines, 0:n_bscans]
+
         return vol
-
-    def detect_galvo_shift(self, vol: np.ndarray = None) -> int:
-        """Detect the galvo shift necessary to place the galvo return at the end of the bscans stack"""
-        if vol is None:
-            vol = self.load_image(crop=False)
-        bscan = vol.mean(axis=(0, 2))
-        n_extra = self.info['n_extra']
-        kernel = np.ones([n_extra, ])
-        response = convolve1d(1 - bscan, kernel, mode="wrap")
-        pos = np.argmax(response) - n_extra // 2
-        galvo_shift = int(-pos - n_extra - 1)
-
-        return galvo_shift
 
     @property
     def position_available(self) -> bool:

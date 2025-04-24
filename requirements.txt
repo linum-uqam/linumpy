@@ -13,3 +13,4 @@ pqdm
 pybasic-illumination-correction
 zarr<=2.18.2
 ome-zarr>=0.9.0
+napari [visu]
