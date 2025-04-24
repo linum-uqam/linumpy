@@ -222,7 +222,7 @@ def quick_stitch(directory, z: int, overlap_fraction: float = 0.2, n_rot: int = 
 
         # Load the fringes
         if apply_shift:
-            img = oct.load_image(galvo_shift=galvo_shift)
+            img = oct.load_image(fix_shift=galvo_shift)
         else:
             img = oct.load_image()
 
@@ -257,7 +257,7 @@ def quick_stitch(directory, z: int, overlap_fraction: float = 0.2, n_rot: int = 
 
 
 def detect_mosaic(directory: str, z: int, margin: float = 0.5, display: bool = False, image_file: str = None,
-                  roi_file: str = None, keep_largest_island: bool = False):
+                  roi_file: str = None, keep_largest_island: bool = False, stitching_settings:dict = None):
     """Detect the tissue in the mosaic and compute the limits of the tissue.
     Parameters
     ----------
@@ -294,7 +294,7 @@ def detect_mosaic(directory: str, z: int, margin: float = 0.5, display: bool = F
     ymax = np.max([p[1] for p in info["tiles_pos_mm"]]) + info["tile_shape_mm"][1] / 2
 
     # Stitch the image using the tile position
-    img = quick_stitch(directory, z=z, use_stage_positions=True)
+    img = quick_stitch(directory, z=z, use_stage_positions=True, **stitching_settings)
 
     # Save the quick stitch image
     if image_file is not None:
