@@ -15,7 +15,7 @@ Notes
 Add the -resume flag to resume the pipeline from the last successfully completed process.
 */
 
-params.directory = "/home/linum/Data/2024-06-05-S34-Coronal/reconstruction_2-5d"
+params.directory = "."
 params.input_directory = params.directory + "/mosaicgrids"
 params.xy_shift_file = params.directory + "/shifts_xy.csv"
 params.output_directory = params.directory
@@ -27,9 +27,9 @@ params.spacing_xy = 1.875 // micron
 params.spacing_z = 200.0 // micron
 
 // Tile cropping options
-params.xmin = 0
-params.xmax = 400
-params.ymin = 0
+params.xmin = 10
+params.xmax = 390
+params.ymin = 10
 params.ymax = 390
 params.nx = params.xmax - params.xmin
 params.ny = params.ymax - params.ymin
@@ -42,16 +42,19 @@ params.basic_working_size=128
 // Position Estimation options
 params.initial_overlap = 0.2
 
+// Nifti resampled resolution in microns
+params.resolution_nifti = 10.0
+
 /* Processes */
 // Crop each tile within the mosaic grid.
 process crop_tiles {
     input:
         path(mosaic_directory)
     output:
-        tuple val(mosaic_directory.baseName), path("${mosaic_directory.baseName}_cropped.tif")
+        tuple val(mosaic_directory.baseName), path("${mosaic_directory.baseName}_cropped.tiff")
     script:
     """
-    linum_crop_tiles $mosaic_directory ${mosaic_directory.baseName}_cropped.tif --xmin ${params.xmin} --xmax ${params.xmax} --ymin ${params.ymin} --ymax ${params.ymax} --tile_shape ${params.tile_nx} ${params.tile_ny}
+    linum_crop_tiles.py $mosaic_directory ${mosaic_directory.baseName}_cropped.tiff --xmin ${params.xmin} --xmax ${params.xmax} --ymin ${params.ymin} --ymax ${params.ymax} --tile_shape ${params.tile_nx} ${params.tile_ny}
     """
 }
 
@@ -60,10 +63,10 @@ process estimate_illumination_bias {
     input:
         tuple val(key), path(mosaic_grid)
     output:
-        tuple val(key), path("${key}_flatfield.nii"), path("${key}_darkfield.nii")
+        tuple val(key), path("${key}_flatfield.nii.gz"), path("${key}_darkfield.nii.gz")
     script:
     """
-    linum_estimate_illumination $mosaic_grid ${key}_flatfield.nii --tile_shape ${params.nx} ${params.ny} --output_darkfield ${key}_darkfield.nii
+    linum_estimate_illumination.py $mosaic_grid ${key}_flatfield.nii.gz --tile_shape ${params.nx} ${params.ny} --output_darkfield ${key}_darkfield.nii.gz
     """
 }
 
@@ -74,9 +77,9 @@ process compensate_illumination_bias {
     output:
         tuple val(key), path("${key}_mosaic_grid_compensated.nii.gz")
     script:
-        """
-        linum_compensate_illumination $mosaic_grid ${key}_mosaic_grid_compensated.nii.gz  --flatfield $flatfield --darkfield $darkfield --tile_shape ${params.nx} ${params.ny}
-        """
+    """
+    linum_compensate_illumination.py $mosaic_grid ${key}_mosaic_grid_compensated.nii.gz  --flatfield $flatfield --darkfield $darkfield --tile_shape ${params.nx} ${params.ny}
+    """
 }
 
 // Estimate the tile positions within the mosaic grid.
@@ -86,9 +89,9 @@ process estimate_position {
     output:
         path "position_transform.npy"
     script:
-        """
-        linum_estimate_transform $mosaic_grids position_transform.npy --tile_shape ${params.nx} ${params.ny} --initial_overlap ${params.initial_overlap}
-        """
+    """
+    linum_estimate_transform.py $mosaic_grids position_transform.npy --tile_shape ${params.nx} ${params.ny} --initial_overlap ${params.initial_overlap}
+    """
 }
 
 // Stitch each mosaic grid using the estimated tile positions.
@@ -96,38 +99,36 @@ process stitch_mosaic {
     input:
         tuple val(key), path(image), path(transform)
     output:
-        tuple val(key), path("${key}_stitched.nii")
+        tuple val(key), path("${key}_stitched.nii.gz")
     script:
-        """
-        linum_stitch_2d $image $transform ${key}_stitched.nii --blending_method diffusion --tile_shape ${params.nx} ${params.ny}
-        """
+    """
+    linum_stitch_2d.py $image $transform ${key}_stitched.nii.gz --blending_method diffusion --tile_shape ${params.nx} ${params.ny}
+    """
 }
 
 // Stack the stitched mosaic grids to get a 2.5D reconstruction, using the input xy_shift between images
 process stack_mosaic {
     input:
-        path images
-        path xy_shifts
+        path(images)
+        path(xy_shifts)
     output:
         path "stack.zarr"
-    publishDir path: "${params.output_directory}", mode: 'copy'
     script:
     """
-    linum_stack_slices $images stack.zarr --xy_shifts $xy_shifts --resolution_xy ${params.spacing_xy} --resolution_z ${params.spacing_z}
+    linum_stack_slices.py $images stack.zarr --xy_shifts $xy_shifts --resolution_xy ${params.spacing_xy} --resolution_z ${params.spacing_z}
     """
 }
 
-// Resample the stack to 10, 25, 50, and 100 micron resolutions
+// Convert the stack to nifti
 process resample_stack {
     input:
         path stack
     output:
-        path "stack_10um.nii"
-    publishDir path: "${params.output_directory}", mode: 'copy'
+        tuple path("stack_10um.nii.gz"), path("stack_10um_iso.nii.gz")
     script:
-        """
-        linum_convert_omezarr_to_nifti $stack stack_10um.nii --resolution 10.0
-        """
+    """
+    linum_convert_omezarr_to_nifti.py $stack stack_10um.nii.gz --resolution ${params.resolution_nifti}
+    """
 }
 
 // Compress the zarr to zip for transfer
@@ -136,11 +137,10 @@ process compress_stack {
         path stack
     output:
         path "stack.zarr.zip"
-    publishDir path: "${params.output_directory}", mode: 'copy'
     script:
-        """
-        zip -r stack.zarr.zip $stack
-        """
+    """
+    zip -r stack.zarr.zip $stack
+    """
 }
 
 // Convert the stack to .zarr format for visualization
@@ -149,16 +149,16 @@ process convert_to_omezarr {
         path stack
     output:
         path "stack.ome_zarr"
-    publishDir path: "${params.output_directory}", mode: 'move'
     script:
-        """
-        linum_convert_zarr_to_omezarr $stack stack.ome_zarr -r ${params.spacing_z} ${params.spacing_xy} ${params.spacing_xy}
-        """
+    """
+    linum_convert_zarr_to_omezarr.py $stack stack.ome_zarr -r ${params.spacing_z} ${params.spacing_xy} ${params.spacing_xy}
+    """
 }
 
 workflow{
     // Detect every tile directory
     slices = channel.fromPath(params.input_directory + "/mosaic_grid_z*.tiff")
+    shifts = channel.fromPath(params.xy_shift_file)
 
     // Remove compressed stripes caused by the raster scan
     crop_tiles(slices.flatten())
@@ -178,7 +178,7 @@ workflow{
     stitch_mosaic(mosaic_grids_compensated.combine(estimate_position.out))
 
     // Stack the mosaic to get an estimate of the 3D volume
-    stack_mosaic(stitch_mosaic.out.map{it[1]}.collect(), params.xy_shift_file)
+    stack_mosaic(stitch_mosaic.out.map{it[1]}.collect(), shifts)
 
     // Compress the stack to zip for transfer
     compress_stack(stack_mosaic.out)
