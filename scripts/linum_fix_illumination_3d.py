@@ -44,7 +44,6 @@ def process_tile(params: dict):
     tile_shape = params["tile_shape"]
     vol = io.v3.imread(str(file))
     file_output = Path(file).parent / file.name.replace(".tiff", "_corrected.tiff")
-
     # Get the number of tiles
     nx = vol.shape[0] // tile_shape[0]
     ny = vol.shape[1] // tile_shape[1]
@@ -60,16 +59,43 @@ def process_tile(params: dict):
             tiles.append(vol[rmin:rmax, cmin:cmax])
 
     # Estimate the illumination bias
-    optimizer = BaSiC(tiles, estimate_darkfield=True)
-    optimizer.working_size = 64
-    optimizer.prepare()
-    optimizer.run()
+    # Check if tiles contain complex values
+    if np.iscomplexobj(tiles[0]):
+        # Separate real and imaginary parts
+        try:
+            tiles_real = [t.real for t in tiles]
+            tiles_imag = [t.imag for t in tiles]
 
-    # Apply the correction to all the tiles
-    tiles_corrected = []
-    for i in range(len(tiles)):
-        tile = tiles[i]
-        tiles_corrected.append(optimizer.normalize(tile))
+            # Store the original signs before applying BaSic as it reuqires positive values
+            sign_real = [np.sign(t) for t in tiles_real]
+            sign_imag = [np.sign(t) for t in tiles_imag]
+
+            # Run BaSiC
+            optimizer = BaSiC(np.abs(tiles).astype(np.float64), estimate_darkfield=True)
+            optimizer.working_size = 64
+            optimizer.prepare()
+            optimizer.run()
+            
+            # Apply correction and reconstruct complex result with original signs
+            tiles_corrected = [
+                (optimizer.normalize(t_real) * s_real)
+                + 1j * (optimizer.normalize(t_imag) * s_imag)
+                for t_real, t_imag, s_real, s_imag in zip(
+                    tiles_real, tiles_imag, sign_real, sign_imag
+                )
+            ]
+        except TypeError as e:
+            print(f"Error processing complex tiles: {e}")
+            
+    else:
+        # Process normally if tiles are real
+        optimizer = BaSiC(tiles, estimate_darkfield=True)
+        optimizer.working_size = 64
+        optimizer.prepare()
+        optimizer.run()
+
+        # Apply correction
+        tiles_corrected = [optimizer.normalize(t) for t in tiles]
 
     # Fill the output mosaic
     vol_output = np.zeros_like(vol)
