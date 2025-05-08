@@ -285,6 +285,10 @@ class ThorOCT:
         )
         # Perform stacking
         data = self._stack_tiles_vertically(data)
+        # Adjust the size_y to be divisible by ascan_averaging_value. Necessary for stacking.
+        data = data[:, : data.shape[1] - (data.shape[1] % self.ascan_averaging_value), :]
+        self.size_y = data.shape[1]
+
         # Return complex or magnitude data
         return data if self.config.return_complex else np.abs(data).astype(np.float64)
 
@@ -303,9 +307,7 @@ class ThorOCT:
         return processed_data
 
     @staticmethod
-    def extract_positions_from_scan(
-        scan_file_path: str = None, number_of_tiles: int = 0
-    ):
+    def extract_positions_from_scan(scan_file_path: str = None):
         """
         Extracts the raw and index x, y positions from the .scan file.
 
@@ -317,7 +319,6 @@ class ThorOCT:
         - tuple: A tuple containing two lists - index positions and raw positions.
         """
         raw_positions = []
-        position_indexes = []
 
         if scan_file_path:
             with open(file=scan_file_path, mode="r", encoding="utf-8") as file:
@@ -340,12 +341,22 @@ class ThorOCT:
                             x, y = map(float, line.split(","))
                             raw_positions.append((x, y, 0))
 
-        # hold the index locations for the tile placements in the Zarr file.
-        # This follows the current order of acquisition for the PSOCT microscope.
-        for x in range(int(np.ceil(np.sqrt(number_of_tiles))) - 1, -1, -1):
-            for y in range(int(np.ceil(np.sqrt(number_of_tiles))) - 1, -1, -1):
-                position_indexes.append((x, y, 0))
-        return position_indexes, raw_positions
+        # Remap x: sort unique x values in ascending order
+        unique_x = np.unique([pos[0] for pos in raw_positions])
+        sorted_x_asc = np.sort(unique_x)  # Change from descending to ascending
+        x_map = {val: idx for idx, val in enumerate(sorted_x_asc)}
+
+        # Remap y: sort unique y values in descending order
+        unique_y = np.unique([pos[1] for pos in raw_positions])
+        sorted_y_desc = np.sort(unique_y)[
+            ::-1
+        ]  # Flip order to preserve top-down layout
+        y_map = {val: idx for idx, val in enumerate(sorted_y_desc)}
+
+        # Create a new list of tuples with remapped x and y, z remains unchanged
+        new_data = [(x_map[x], y_map[y], z) for (x, y, z) in raw_positions]
+
+        return new_data, raw_positions
 
     @staticmethod
     def get_psoct_tiles_ids(tiles_directory: str, number_of_angles: int = 2):
@@ -384,7 +395,7 @@ class ThorOCT:
             # Collect .oct files
             elif file.suffix == ".oct":
                 oct_files.append(file)
-        positions, _ = ThorOCT.extract_positions_from_scan(scan_file, len(oct_files))
+        positions, _ = ThorOCT.extract_positions_from_scan(scan_file)
 
         # If no .oct files are found, raise a warning
         if not oct_files:

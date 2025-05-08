@@ -93,7 +93,13 @@ def process_tile(params: dict):
             vol = oct.second_polarization
         vol = ThorOCT.orient_volume_psoct(vol)
     # Rescale the volume
-    vol = resize(vol, tile_size, anti_aliasing=True, order=1, preserve_range=True)
+    if np.iscomplexobj(vol):
+        vol = (
+            resize(vol.real, tile_size, anti_aliasing=True, order=1, preserve_range=True) +
+            1j * resize(vol.imag, tile_size, anti_aliasing=True, order=1, preserve_range=True)
+            )
+    else:
+        vol = resize(vol, tile_size, anti_aliasing=True, order=1, preserve_range=True)
     # Compute the tile position
     rmin = (mx - mx_min) * vol.shape[1]
     cmin = (my - my_min) * vol.shape[2]
@@ -170,7 +176,7 @@ def main():
     process_sync_file = zarr_store.path.replace(".zarr", ".sync")
     synchronizer = zarr.ProcessSynchronizer(process_sync_file)
     if psoct_config.return_complex:
-        mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape, dtype=np.complex64, 
+        mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape, dtype=np.complex64,
                            chunks=tile_size,synchronizer=synchronizer)
     else:
         mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape, dtype=np.float32,
