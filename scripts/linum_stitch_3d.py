@@ -27,7 +27,7 @@ def _build_arg_parser():
     p.add_argument("--blending_method", type=str, default="diffusion", choices=["none", "average", "diffusion"],
                    help="Blending method. (default=%(default)s)")
     p.add_argument("--complex_input", default=False,
-                   help="Full path to the output zarr image")
+                   help="If the input is complex data (default=%(default)s)")
     return p
 
 
