@@ -132,7 +132,7 @@ def main():
         tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
     elif data_type == 'PSOCT':
         tiles, tiles_pos = ThorOCT.get_psoct_tiles_ids(
-            tiles_directory, 
+            tiles_directory,
             number_of_angles=args.number_of_angles
             )
         tiles = tiles[angle_index]
