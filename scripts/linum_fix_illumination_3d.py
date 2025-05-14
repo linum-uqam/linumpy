@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Detect and fix the lateral illumination inhomogeneities for each 3D tiles of a mosaic grid"""
+"""
+Detect and fix the lateral illumination inhomogeneities for each
+3D tiles of a mosaic grid.
+"""
 
 from os import environ
 
@@ -9,10 +12,8 @@ environ["OMP_NUM_THREADS"] = "1"
 
 import argparse
 import multiprocessing
-import shutil
 import tempfile
 from pathlib import Path
-from os.path import join as pjoin
 
 import dask.array as da
 
@@ -23,6 +24,7 @@ import imageio as io
 import numpy as np
 from pqdm.processes import pqdm
 from linumpy.io.zarr import save_zarr, read_omezarr
+from linumpy.utils.io import add_processes_arg, parse_processes_arg
 
 # TODO: add option to export the flatfields and darkfields
 
@@ -33,7 +35,7 @@ def _build_arg_parser():
                    help="Full path to the input zarr file")
     p.add_argument("output_zarr",
                    help="Full path to the output zarr file")
-
+    add_processes_arg(p)
     return p
 
 
@@ -44,6 +46,7 @@ def process_tile(params: dict):
     tile_shape = params["tile_shape"]
     vol = io.v3.imread(str(file))
     file_output = Path(file).parent / file.name.replace(".tiff", "_corrected.tiff")
+
     # Get the number of tiles
     nx = vol.shape[0] // tile_shape[0]
     ny = vol.shape[1] // tile_shape[1]
@@ -120,12 +123,13 @@ def main():
     # Parameters
     input_zarr = Path(args.input_zarr)
     output_zarr = Path(args.output_zarr)
-    n_cpus = multiprocessing.cpu_count() - 1
+    n_cpus = parse_processes_arg(args.n_processes)
 
     # Prepare the data for the parallel processing
     vol, resolution = read_omezarr(input_zarr, level=0)
     n_slices = vol.shape[0]
-    tmp_dir = tempfile.TemporaryDirectory(suffix="_linum_fix_illumination_3d_slices", dir=output_zarr.parent)
+    tmp_dir = tempfile.TemporaryDirectory(
+        suffix="_linum_fix_illumination_3d_slices", dir=output_zarr.parent)
     params_list = []
     for z in tqdm(range(n_slices), "Preprocessing slices"):
         slice_file = Path(tmp_dir.name) / f"slice_{z:03d}.tiff"
@@ -138,15 +142,19 @@ def main():
         }
         params_list.append(params)
 
-    # Process the tiles in parallel
-    corrected_files = pqdm(params_list, process_tile, n_jobs=n_cpus, desc="Processing tiles")
+    if n_cpus > 1:
+        # Process the tiles in parallel
+        corrected_files = pqdm(params_list, process_tile, n_jobs=n_cpus,
+                               desc="Processing tiles")
+    else:  # process sequentially
+        corrected_files = []
+        for param in tqdm(params_list):
+            corrected_files.append(process_tile(param))
 
     # Retrieve the results and fix the volume
     temp_store = zarr.TempStore(suffix=".zarr")
-    process_sync_file = temp_store.path.replace(".zarr", ".sync")
-    synchronizer = zarr.ProcessSynchronizer(process_sync_file)
-    vol_output = zarr.open(temp_store, mode="w", shape=vol.shape, dtype=vol.dtype,
-                           chunks=vol.chunks, synchronizer=synchronizer)
+    vol_output = zarr.open(temp_store, mode="w", shape=vol.shape,
+                           dtype=vol.dtype, chunks=vol.chunks)
 
     # TODO: Rebuilding volume step could be faster
     for z, f in tqdm(corrected_files, "Rebuilding volume"):
@@ -156,9 +164,6 @@ def main():
     out_dask = da.from_zarr(vol_output)
     save_zarr(out_dask, output_zarr, scales=resolution,
               chunks=vol.chunks)
-
-    # Remove the process sync file
-    shutil.rmtree(process_sync_file)
 
     # Remove the temporary slice files used by the parallel processes
     tmp_dir.cleanup()

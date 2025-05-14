@@ -5,9 +5,7 @@
 
 import argparse
 import multiprocessing
-import shutil
 from pathlib import Path
-from os.path import join as pjoin
 
 import numpy as np
 import dask.array as da
@@ -20,15 +18,12 @@ from linumpy.microscope.oct import OCT
 from linumpy.io.thorlabs import ThorOCT, PreprocessingConfig
 
 
-# Default number of processes is the number of cores minus 1
-DEFAULT_N_CPUS = multiprocessing.cpu_count() - 1
+from linumpy.utils.io import parse_processes_arg, add_processes_arg
 
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("tiles_directory",
-                   help="Full path to a directory containing the tiles to process")
     p.add_argument("output_zarr",
                    help="Full path to the output zarr file")
     p.add_argument("-r", "--resolution", type=float, default=10.0,
@@ -57,6 +52,25 @@ def _build_arg_parser():
     g.add_argument('--crop_second_index', type=int, default=750,
                    help="Second index for cropping on the z axis (default=%(default)s)")
 
+    input_g = p.add_argument_group("input")
+    input_mutex_g = input_g.add_mutually_exclusive_group(required=True)
+    input_mutex_g.add_argument("--from_root_directory",
+                               help="Full path to a directory containing the tiles to process.")
+    input_mutex_g.add_argument("--from_tiles_list", nargs='+',
+                               help='List of tiles to assemble (argument --slice is ignored).')
+    options_g = p.add_argument_group("other options")
+    options_g.add_argument("-r", "--resolution", type=float, default=10.0,
+                           help="Output isotropic resolution in micron per pixel. [%(default)s]")
+    options_g.add_argument("-z", "--slice", type=int,
+                           help="Slice to process [%(default)s]")
+    options_g.add_argument("--keep_galvo_return", action="store_true",
+                           help="Keep the galvo return signal [%(default)s]")
+    options_g.add_argument('--n_levels', type=int, default=5,
+                           help='Number of levels in pyramid representation.')
+    options_g.add_argument('--zarr_root',
+                           help='Path to parent directory under which the zarr'
+                                ' temporary directory will be created [/tmp/].')
+    add_processes_arg(options_g)
     return p
 
 
@@ -105,21 +119,30 @@ def process_tile(params: dict):
     cmin = (my - my_min) * vol.shape[2]
     rmax = rmin + vol.shape[1]
     cmax = cmin + vol.shape[2]
-    mosaic[:, rmin:rmax, cmin:cmax] = vol
+    mosaic[0:tile_size[0], rmin:rmax, cmin:cmax] = vol
 
 def main():
     # Parse arguments
-    p = _build_arg_parser()
-    args = p.parse_args()
+    parser = _build_arg_parser()
+    args = parser.parse_args()
 
     # Parameters
-    tiles_directory = Path(args.tiles_directory)
-    z = args.slice
+    if args.from_root_directory:
+        z = args.slice
+        tiles_directory = args.from_root_directory
+        tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
+    else:
+        if args.slice is not None:
+            parser.error('Argument --slice is incompatible with --from_tiles_list.')
+        tiles = [Path(d) for d in args.from_tiles_list]
+        tiles_pos = reconstruction.get_tiles_ids_from_list(tiles)
+
     output_resolution = args.resolution
     crop = not args.keep_galvo_return
+
     data_type = args.data_type
     angle_index = args.angle_index
-    n_cpus = DEFAULT_N_CPUS if args.n_processes is None else args.n_processes
+    n_cpus = parse_processes_arg(args.n_processes)
     psoct_config = PreprocessingConfig()
     psoct_config.crop_first_index = args.crop_first_index
     psoct_config.crop_second_index = args.crop_second_index
@@ -136,6 +159,7 @@ def main():
             number_of_angles=args.number_of_angles
             )
         tiles = tiles[angle_index]
+    
     mx = [tiles_pos[i][0] for i in range(len(tiles_pos))]
     my = [tiles_pos[i][1] for i in range(len(tiles_pos))]
     mx_min = min(mx)
@@ -171,13 +195,12 @@ def main():
         tile_size = [int(vol.shape[i] * resolution[i] * 1000 / output_resolution) for i in range(3)]
         output_resolution = [output_resolution / 1000.0] * 3
     mosaic_shape = [tile_size[0], n_mx * tile_size[1], n_my * tile_size[2]]
+    
     # Create the zarr persistent array
-    zarr_store = zarr.TempStore(suffix=".zarr")
-    process_sync_file = zarr_store.path.replace(".zarr", ".sync")
-    synchronizer = zarr.ProcessSynchronizer(process_sync_file)
+    zarr_store = zarr.TempStore(dir=args.zarr_root, suffix=".zarr")
     mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape,
                        dtype=np.complex64 if args.return_complex else np.float32,
-                       chunks=tile_size,synchronizer=synchronizer)
+                       chunks=tile_size)
 
     # Create a params dictionary for every tile
     params = []
@@ -193,18 +216,18 @@ def main():
             "mxy_min": (mx_min, my_min)
         })
 
-    # Process the tiles in parallel
-    with multiprocessing.Pool(n_cpus) as pool:
-        results = tqdm(pool.imap(process_tile, params), total=len(params))
-        tuple(results)
+    if n_cpus > 1:  # process in parallel
+        with multiprocessing.Pool(n_cpus) as pool:
+            results = tqdm(pool.imap(process_tile, params), total=len(params))
+            tuple(results)
+    else:  # Process the tiles sequentially
+        for p in tqdm(params):
+            process_tile(p)
 
     # Convert to ome-zarr
     mosaic_dask = da.from_zarr(mosaic)
     save_zarr(mosaic_dask, args.output_zarr, scales=output_resolution,
               chunks=tile_size, n_levels=args.n_levels)
-
-    # Remove the process sync file
-    shutil.rmtree(process_sync_file)
 
 
 if __name__ == "__main__":
