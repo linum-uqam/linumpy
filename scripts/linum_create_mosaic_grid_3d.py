@@ -175,12 +175,9 @@ def main():
     zarr_store = zarr.TempStore(suffix=".zarr")
     process_sync_file = zarr_store.path.replace(".zarr", ".sync")
     synchronizer = zarr.ProcessSynchronizer(process_sync_file)
-    if psoct_config.return_complex:
-        mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape, dtype=np.complex64,
-                           chunks=tile_size,synchronizer=synchronizer)
-    else:
-        mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape, dtype=np.float32,
-                            chunks=tile_size, synchronizer=synchronizer)
+    mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape,
+                       dtype=np.complex64 if args.return_complex else np.float32,
+                       chunks=tile_size,synchronizer=synchronizer)
 
     # Create a params dictionary for every tile
     params = []
