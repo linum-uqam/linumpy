@@ -38,7 +38,8 @@ def main():
     shape = vol.shape[1:3]
     zarr_store = zarr.TempStore(suffix='.zarr')
     aip = zarr.open(zarr_store, mode="w", shape=shape,
-                    dtype=np.float32, chunks=vol.chunks[1:3])
+                    dtype= np.float32,
+                    chunks=vol.chunks[1:3])
 
     # Process every tile
     tile_shape = vol.chunks

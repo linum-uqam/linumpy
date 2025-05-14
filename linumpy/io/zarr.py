@@ -47,9 +47,28 @@ class CustomScaler(Scaler):
         out_shape = tuple(new_shape)
 
         dtype = image.dtype
-        image = _resize(
-            image.astype(float), out_shape, order=1, mode="reflect", anti_aliasing=False
-        )
+        if np.iscomplexobj(image):
+            image = _resize(
+                image.real.astype(float),
+                out_shape,
+                order=1,
+                mode="reflect",
+                anti_aliasing=False,
+            ) + 1j * _resize(
+                image.imag.astype(float),
+                out_shape,
+                order=1,
+                mode="reflect",
+                anti_aliasing=False,
+            )
+        else:
+            image = _resize(
+                image.astype(float),
+                out_shape,
+                order=1,
+                mode="reflect",
+                anti_aliasing=False,
+            )
         return image.astype(dtype)
 
     def linear(self, base):
@@ -177,7 +196,6 @@ def save_zarr(data, store_path, scales=(1e-3, 1e-3, 1e-3),
 
     # create directory for zarr storage
     create_directory(store_path, overwrite)
-    
     store = parse_url(store_path, mode='w').store
     zarr_group = zarr.group(store=store)
 
