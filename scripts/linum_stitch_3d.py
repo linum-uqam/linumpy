@@ -26,6 +26,8 @@ def _build_arg_parser():
                    help="Stitched mosaic filename (zarr)")
     p.add_argument("--blending_method", type=str, default="diffusion", choices=["none", "average", "diffusion"],
                    help="Blending method. (default=%(default)s)")
+    p.add_argument("--complex_input", default=False,
+                   help="If the input is complex data (default=%(default)s)")
     return p
 
 
@@ -68,7 +70,13 @@ def main():
 
     # Stitch the mosaic
     temp_store = zarr.TempStore(suffix='.zarr')
-    mosaic = zarr.open(temp_store, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=(100, 100, 100))
+    mosaic = zarr.open(
+        temp_store,
+        mode="w",
+        shape=mosaic_shape,
+        dtype=np.complex64 if args.complex_input else np.float32,
+        chunks=(100, 100, 100),
+    )
     for i in range(nx):
         for j in range(ny):
             # Compute the tile position in the input
