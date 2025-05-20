@@ -26,32 +26,8 @@ def _build_arg_parser():
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("output_zarr",
                    help="Full path to the output zarr file")
-    p.add_argument("-r", "--resolution", type=float, default=10.0,
-                   help="Output isotropic resolution in micron per pixel. (default=%(default)s)")
-    p.add_argument("-z", "--slice", type=int, default=0,
-                   help="Slice to process (default=%(default)s)")
-    p.add_argument("--keep_galvo_return", action="store_true",
-                   help="Keep the galvo return signal (default=%(default)s)")
     p.add_argument("--data_type", type = str, default='OCT',choices=['OCT', 'PSOCT'],
                    help="Type of the data to process (default=%(default)s)")
-    p.add_argument('--n_levels', type=int, default=5,
-                   help='Number of levels in pyramid representation.')
-    p.add_argument('--n_processes', type=int,
-                   help=f'Number of processes to launch [{DEFAULT_N_CPUS}].')
-    g = p.add_argument_group("PS-OCT options")  
-    g.add_argument('--polarization', type = int, default = 1, choices = [0,1],
-                   help="Polarization index to process")
-    g.add_argument('--number_of_angles', type = int, default = 1,
-                   help="Angle index to process")
-    g.add_argument('--angle_index', type = int, default = 0,
-                   help="Angle index to process")
-    g.add_argument('--return_complex', type = bool, default = False,
-                   help="Return Complex64 or Float32 data type")
-    g.add_argument('--crop_first_index', type=int, default=320,
-                   help="First index for cropping on the z axis (default=%(default)s)")
-    g.add_argument('--crop_second_index', type=int, default=750,
-                   help="Second index for cropping on the z axis (default=%(default)s)")
-
     input_g = p.add_argument_group("input")
     input_mutex_g = input_g.add_mutually_exclusive_group(required=True)
     input_mutex_g.add_argument("--from_root_directory",
@@ -71,6 +47,19 @@ def _build_arg_parser():
                            help='Path to parent directory under which the zarr'
                                 ' temporary directory will be created [/tmp/].')
     add_processes_arg(options_g)
+    psoct_options_g = p.add_argument_group("PS-OCT options")  
+    psoct_options_g.add_argument('--polarization', type = int, default = 1, choices = [0,1],
+                   help="Polarization index to process")
+    psoct_options_g.add_argument('--number_of_angles', type = int, default = 1,
+                   help="Angle index to process")
+    psoct_options_g.add_argument('--angle_index', type = int, default = 0,
+                   help="Angle index to process")
+    psoct_options_g.add_argument('--return_complex', type = bool, default = False,
+                   help="Return Complex64 or Float32 data type")
+    psoct_options_g.add_argument('--crop_first_index', type=int, default=320,
+                   help="First index for cropping on the z axis (default=%(default)s)")
+    psoct_options_g.add_argument('--crop_second_index', type=int, default=750,
+                   help="Second index for cropping on the z axis (default=%(default)s)")
     return p
 
 

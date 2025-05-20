@@ -69,7 +69,7 @@ def process_tile(params: dict):
             tiles_real = [t.real for t in tiles]
             tiles_imag = [t.imag for t in tiles]
 
-            # Store the original signs before applying BaSic as it reuqires positive values
+            # Store the original signs before applying BaSic as it requires positive values
             sign_real = [np.sign(t) for t in tiles_real]
             sign_imag = [np.sign(t) for t in tiles_imag]
 
