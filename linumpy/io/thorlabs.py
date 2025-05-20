@@ -15,7 +15,22 @@ import numpy as np
 
 class PreprocessingConfig:
     """
-    Configuration class for preprocessing OCT data.
+    Configuration for preprocessing OCT data.
+
+    Attributes:
+        return_complex (bool):
+            If True, return the raw complex data.
+            If False, return its magnitude instead.
+        crop_first_index (int, default=320):
+            Index along the first dimension (depth) at which to start cropping.
+        crop_second_index (int, default=750):
+            Index along the first dimension (depth) at which to end cropping.
+        erase_raw_data (bool, default=True):
+            If True, discard the original raw data array after extracting the complex data.
+        erase_polarization_1 (bool, default=False):
+            If True, do not keep polarization-1 data in memory.
+        erase_polarization_2 (bool, default=True):
+            If True, do not keep polarization-2 data in memory.
     """
 
     return_complex: bool
@@ -31,16 +46,20 @@ class ThorOCT:
     A class for handling OCT data from ThorLabs PSOCT microscopes. It provides methods to load,
     process, and extract metadata and data from compressed files.
 
-    Attributes:
+    Parameters:
         path (str): Path to the compressed data file.
-        compressed_data (zipfile.ZipFile): ZipFile object for the compressed data.
-        polarization1 (np.ndarray): Data for the first polarization.
-        polarization2 (np.ndarray): Data for the second polarization.
+        compressed_data (zipfile.ZipFile): ZipFile object containing the data.
+        config (PreprocessingConfig): Configuration for preprocessing.
+            
+    Attributes:
+        first_polarization (np.ndarray): Data for the first polarization.
+        second_polarization (np.ndarray): Data for the second polarization.
         size_x (int): X-dimension size of the data.
         size_y (int): Y-dimension size of the data.
         size_z (int): Z-dimension size of the data.
         header (xml.dom.minidom.Document): Parsed header metadata.
         resolution (list): Resolution values for X, Y, and Z dimensions.
+        ascan_averaging_value (int): Number of A-scans for averaging.
     """
 
     def __init__(
@@ -52,9 +71,6 @@ class ThorOCT:
         """
         Initialize the ThorOCT object.
 
-        Parameters:
-            path (str): Path to the compressed data file.
-            compressed_data (zipfile.ZipFile): ZipFile object containing the data.
         """
         self.path = path
         self.compressed_data = compressed_data or (
@@ -73,13 +89,6 @@ class ThorOCT:
     def load(self) -> None:
         """
         Load the data from the compressed file and extract the header and the complex data.
-
-        Parameters:
-        - erase_raw_data: If True, the raw data will be erased after loading the complex data.
-        - erase_polarization_1: If True, the polarization 1 data will not be loaded to save space.
-        - erase_polarization_2: If True, the polarization 2 data will not be loaded to save space.
-        - return_complex: If True, the complex data will be returned.
-            Otherwise, the magnitude of the complex data will be returned.
 
         Raises:
             ValueError: If no valid data source is provided.
@@ -313,8 +322,6 @@ class ThorOCT:
 
         Parameters:
         - scan_file_path: Path to the .scan file.
-        - number_of_tiles: Number of tiles in the scan.
-
         Returns:
         - tuple: A tuple containing two lists - index positions and raw positions.
         """
@@ -330,7 +337,7 @@ class ThorOCT:
                     line = line.strip()
 
                     # Mark the start of the positions section
-                    if line == "------Positions------":
+                    if "Positions" in line:
                         positions_section = True
                         continue
 
