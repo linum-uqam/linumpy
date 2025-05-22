@@ -17,8 +17,8 @@ def _build_arg_parser():
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter
     )
 
-    p.add_argument("input", help="A single 3D slice (.zarr / ome.zarr) to process")
-    p.add_argument("output", help="Output 3D tissue mask (.zarr / ome.zarr)")
+    p.add_argument("input", help="A single 3D slice (.ome.zarr /.zarr) to process")
+    p.add_argument("output", help="Output 3D tissue mask (.ome.zarr /.zarr)")
     p.add_argument(
         "--s_xy",
         type=int,
@@ -65,9 +65,9 @@ def main():
 
     # Loading and smoothing the slice
     volc, res = read_omezarr(args.input, level=0)
-    resolution = float(res[0])
+    resolution = res[0] * 1000  # Convert to microns
 
-    # Reorient from Z, X, Y to X, Y, Z
+    # Reorient the volume so that axis 0 (depth) becomes the last axis
     vol = np.moveaxis(volc, 0, -1)
 
     # Computing AIP
@@ -81,7 +81,7 @@ def main():
     interface += int(np.ceil(args.s_z / 2.0))  # Compensate axial smoothing
 
     # Shift the interface by a predefined depth, to move away from the water/tissue interface
-    interface += int(args.depth / resolution)
+    interface += int(args.depth / float(resolution))
 
     # Filter out small structures in this map
     if args.morpho_size > 0:
@@ -116,7 +116,7 @@ def main():
     bottom_3d = np.tile(np.reshape(bottom, (nx, ny, 1)), (1, 1, nz))
     mask_interface[zz > bottom_3d] = False
 
-    # Switch to the original orientation Z, X, Y
+    # Flip the mask back to original orientation (depth as axis 0)
     mask_interface = np.moveaxis(mask_interface, -1, 0)
 
     # Saving output
