@@ -4,6 +4,7 @@
 Move slices from a flat directory into subdirectories based on their names.
 """
 import argparse
+import re
 import shutil
 from pathlib import Path
 
@@ -17,7 +18,7 @@ def _build_arg_parser():
     return p
 
 
-def get_file_list(tiles_directory: Path) -> list[Path]:
+def get_folder_list(tiles_directory: Path) -> list[Path]:
     """
     List all the tiles in a given directory.
 
@@ -28,6 +29,10 @@ def get_file_list(tiles_directory: Path) -> list[Path]:
     """
     # List all folders in the path
     folders = [f for f in tiles_directory.iterdir() if f.is_dir()]
+    # Filter folders that match the pattern "zxx"
+    pattern = re.compile(r"^z\d\d$")
+    new_folders = [f for f in folders if pattern.match(f.name)]
+    folders = [f for f in folders if f not in new_folders]
     return folders
 
 
@@ -115,7 +120,7 @@ def main():
         p.error(f"Directory {tiles_directory} does not exist.")
 
     # Get the list of folders in the source directory
-    old_folders = get_file_list(tiles_directory)
+    old_folders = get_folder_list(tiles_directory)
     # Copy files from the old folders to the new z slice folders
     copy_files(tiles_directory, old_folders)
     # Check if all files were moved correctly
