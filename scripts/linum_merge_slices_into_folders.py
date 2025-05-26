@@ -11,7 +11,7 @@ from tqdm.auto import tqdm
 def _build_arg_parser():
     p = argparse.ArgumentParser(
         description="Move slices from a flat directory into subdirectories based on their names.")
-    p.add_argument("dir", help="Directory containing the slices.")
+    p.add_argument("--dir", help="Directory containing the slices.")
     return p
 
 
@@ -107,18 +107,18 @@ def main():
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
-    source_dir = Path(args.dir)
+    tiles_directory = Path(args.dir)
 
-    if not source_dir.exists():
-        print(f"Source directory {source_dir} does not exist.")
+    if not tiles_directory.exists():
+        print(f"Source directory {tiles_directory} does not exist.")
         exit(1)
 
     # Get the list of folders in the source directory
-    old_folders = get_file_list(source_dir)
+    old_folders = get_file_list(tiles_directory)
     # Copy files from the old folders to the new z slice folders
-    copy_files(source_dir, old_folders)
+    copy_files(tiles_directory, old_folders)
     # Check if all files were moved correctly
-    check_files(source_dir, old_folders)
+    check_files(tiles_directory, old_folders)
     # Remove the old folders
     remove_old_folders(old_folders)
 
