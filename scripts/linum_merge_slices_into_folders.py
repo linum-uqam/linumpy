@@ -15,7 +15,7 @@ from tqdm.auto import tqdm
 def _build_arg_parser():
     p = argparse.ArgumentParser(
         description=__doc__)
-    p.add_argument("--dir", help="Directory containing the slices.")
+    p.add_argument("--dir", help="Directory containing the slices.", required=True)
     return p
 
 
