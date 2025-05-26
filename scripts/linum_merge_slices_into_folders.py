@@ -107,7 +107,7 @@ def main():
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
-    source_dir = Path(args.source_dir)
+    source_dir = Path(args.dir)
 
     if not source_dir.exists():
         print(f"Source directory {source_dir} does not exist.")
