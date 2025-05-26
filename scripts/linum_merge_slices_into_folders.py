@@ -64,7 +64,7 @@ def check_files(tiles_directory: Path, old_folders: list) -> None:
     """
     print("Checking if all files were moved correctly...")
     equal = True
-    for folder in old_folders:
+    for folder in tqdm(old_folders, desc="Checking folders", unit="folder"):
         z_slice = folder.name.split("_")[-1]
         new_folder = tiles_directory / f"{z_slice}"
         new_sub_folder = new_folder / folder.name
