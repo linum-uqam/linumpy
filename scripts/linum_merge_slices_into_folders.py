@@ -4,6 +4,7 @@
 Move slices from a flat directory into subdirectories based on their names.
 """
 import argparse
+import filecmp
 import re
 import shutil
 from pathlib import Path
@@ -52,7 +53,7 @@ def copy_files(tiles_directory: Path, folders: list) -> None:
         z_slice = folder.name.split("_")[-1]
         new_folder = tiles_directory / f"{z_slice}"
         new_folder.mkdir(exist_ok=True)
-        # Copy all contents from the old folder to the new folder, keeping the structure but removing the z slice from the folder name
+        # Copy all contents from the old folder to the new folder
         for item in folder.iterdir():
             if item.is_file():
                 new_sub_folder = new_folder / folder.name
@@ -71,7 +72,7 @@ def check_files(tiles_directory: Path, old_folders: list) -> None:
     """
     print("Checking if all files were moved correctly...")
     equal = True
-    for folder in tqdm(old_folders, desc="Checking folders", unit="folder"):
+    for folder in (pbar := tqdm(old_folders, desc="Checking folders", unit="folder")):
         z_slice = folder.name.split("_")[-1]
         new_folder = tiles_directory / f"{z_slice}"
         new_sub_folder = new_folder / folder.name
@@ -82,10 +83,16 @@ def check_files(tiles_directory: Path, old_folders: list) -> None:
             continue
         # Check if the files in the old folder are in the new sub folder
         for item in folder.iterdir():
+            pbar.set_postfix({"Checking": f"{folder.name}/{item.name}"})
             if item.is_file():
                 if not (new_sub_folder / item.name).exists():
                     print(f"File {item.name} from {folder} is not in {new_sub_folder}")
                     equal = False
+                else:
+                    # Compare the files
+                    if not filecmp.cmp(item, new_sub_folder / item.name, shallow=False):
+                        print(f"File {item.name} from {folder} is different in {new_sub_folder}")
+                        equal = False
 
     if not equal:
         print("Not all files were moved correctly, check the output above.")
