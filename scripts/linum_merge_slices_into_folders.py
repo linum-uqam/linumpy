@@ -112,8 +112,7 @@ def main():
     tiles_directory = Path(args.dir)
 
     if not tiles_directory.exists():
-        print(f"Source directory {tiles_directory} does not exist.")
-        exit(1)
+        p.error(f"Directory {tiles_directory} does not exist.")
 
     # Get the list of folders in the source directory
     old_folders = get_file_list(tiles_directory)
