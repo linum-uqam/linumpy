@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
-        description="Move slices from a flat directory into subdirectories based on their names.")
+        description=__doc__)
     p.add_argument("--dir", help="Directory containing the slices.")
     return p
 
