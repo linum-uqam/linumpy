@@ -52,11 +52,12 @@ def copy_files(tiles_directory: Path, folders: list) -> None:
         z_slice = folder.name.split("_")[-1]
         new_folder = tiles_directory / f"{z_slice}"
         new_folder.mkdir(exist_ok=True)
+        # Create the sub-folder for the current folder
+        new_sub_folder = new_folder / folder.name
+        new_sub_folder.mkdir(exist_ok=True)
         # Copy all contents from the old folder to the new folder
         for item in folder.iterdir():
             if item.is_file():
-                new_sub_folder = new_folder / folder.name
-                new_sub_folder.mkdir(exist_ok=True)
                 shutil.copy(item, new_sub_folder / item.name)
 
 
