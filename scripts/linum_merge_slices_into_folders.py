@@ -30,7 +30,7 @@ def get_folder_list(tiles_directory: Path) -> list[Path]:
     """
     # List all folders in the path
     folders = [f for f in tiles_directory.iterdir() if f.is_dir()]
-    # Filter folders that match the pattern "zxx"
+    # Exclude folders that match the pattern "^z\d\d$" (e.g., "z12", "z34")
     pattern = re.compile(r"^z\d\d$")
     folders = [f for f in folders if not pattern.match(f.name)]
     return folders
