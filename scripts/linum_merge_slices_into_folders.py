@@ -129,8 +129,7 @@ def main():
     old_folders = get_folder_list(tiles_directory)
 
     if not old_folders:
-        print("No old tile folders found in the directory.")
-        exit()
+        p.error("No old tile folders found in the directory.")
 
     # Copy files from the old folders to the new z slice folders
     copy_files(tiles_directory, old_folders)
