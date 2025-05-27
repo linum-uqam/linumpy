@@ -57,7 +57,7 @@ def copy_files(tiles_directory: Path, folders: list) -> None:
         # Copy all contents from the old folder to the new folder
         for item in folder.iterdir():
             if item.is_file():
-                shutil.copy(item, new_sub_folder / item.name)
+                shutil.copyfile(item, new_sub_folder / item.name)
 
 
 def check_files(tiles_directory: Path, old_folders: list) -> None:
