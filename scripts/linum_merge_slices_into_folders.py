@@ -21,11 +21,11 @@ def _build_arg_parser():
 
 def get_folder_list(tiles_directory: Path) -> list[Path]:
     """
-    List all the tiles in a given directory.
+    List all subdirectories in a given directory, excluding those that match the "zxx" pattern.
 
     :param tiles_directory: Path to the directory containing the tiles.
     :type tiles_directory: Path
-    :return: List of tile file paths.
+    :return: List of subdirectory paths (excluding "zxx" directories).
     :rtype: list[Path]
     """
     # List all folders in the path
