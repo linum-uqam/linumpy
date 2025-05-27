@@ -44,7 +44,6 @@ def copy_files(tiles_directory: Path, folders: list) -> None:
     :type tiles_directory: Path
     :param folders: List of folders containing the tiles.
     :type folders: list[Path]
-
     :return: None
     """
     # Create new folders per z slice
@@ -128,6 +127,11 @@ def main():
 
     # Get the list of folders in the source directory
     old_folders = get_folder_list(tiles_directory)
+
+    if not old_folders:
+        print("No old tile folders found in the directory.")
+        exit()
+
     # Copy files from the old folders to the new z slice folders
     copy_files(tiles_directory, old_folders)
     # Check if all files were moved correctly
