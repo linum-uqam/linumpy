@@ -506,7 +506,7 @@ def removeZ0Outliers(z0map):
     MAD = np.median(np.abs(data - med))
 
     if MAD != 0:  # Only if MAD is not 0.
-        Zscore = np.abs(0.6745 * (data - med) / MAD)
+        dZscore = np.abs(0.6745 * (data - med) / MAD)
         outliers = dZscore > 3.0  # was 3.5
 
         # Replacing outliers by median depth
