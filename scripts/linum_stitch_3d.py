@@ -11,7 +11,7 @@ import numpy as np
 import zarr
 import dask.array as da
 
-from linumpy.io.zarr import read_omezarr, save_zarr
+from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.utils.mosaic_grid import addVolumeToMosaic
 
 
@@ -93,7 +93,7 @@ def main():
                                        blendingMethod=blending_method)
 
     out_dask = da.from_zarr(mosaic)
-    save_zarr(out_dask, output_file, voxel_size=resolution)
+    save_omezarr(out_dask, output_file, voxel_size=resolution)
 
 
 if __name__ == "__main__":

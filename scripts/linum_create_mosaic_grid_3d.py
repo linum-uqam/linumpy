@@ -12,7 +12,7 @@ import dask.array as da
 import zarr
 from skimage.transform import resize
 
-from linumpy.io.zarr import save_zarr
+from linumpy.io.zarr import save_omezarr
 from linumpy import reconstruction
 from linumpy.microscope.oct import OCT
 from tqdm.auto import tqdm
@@ -156,7 +156,7 @@ def main():
 
     # Convert to ome-zarr
     mosaic_dask = da.from_zarr(mosaic)
-    save_zarr(mosaic_dask, args.output_zarr, voxel_size=output_resolution,
+    save_omezarr(mosaic_dask, args.output_zarr, voxel_size=output_resolution,
               chunks=tile_size, n_levels=args.n_levels)
 
 

@@ -10,7 +10,7 @@ import dask.array as da
 from pybasic.shading_correction import BaSiC
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
-from linumpy.io.zarr import save_zarr, read_omezarr
+from linumpy.io.zarr import save_omezarr, read_omezarr
 import zarr
 
 
@@ -112,7 +112,7 @@ def main():
 
     # save to ome-zarr
     dask_arr = da.from_zarr(vol_corr)
-    save_zarr(dask_arr, output_zarr, voxel_size=res, chunks=tile_shape,
+    save_omezarr(dask_arr, output_zarr, voxel_size=res, chunks=tile_shape,
               n_levels=args.n_levels)
 
 

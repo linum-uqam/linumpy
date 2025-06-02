@@ -12,7 +12,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 
 from linumpy.preproc.icorr import get_extendedAttenuation_Vermeer2013
-from linumpy.io.zarr import read_omezarr, save_zarr
+from linumpy.io.zarr import read_omezarr, save_omezarr
 
 
 def _build_arg_parser():
@@ -69,7 +69,7 @@ def main():
 
     # Saving the attenuation
     attn = np.moveaxis(attn, (0, 1, 2), (2, 1, 0))
-    save_zarr(attn.astype(np.float32), args.output,
+    save_omezarr(attn.astype(np.float32), args.output,
               voxel_size=res, chunks=zarr_vol.chunks)
 
 

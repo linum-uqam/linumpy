@@ -22,7 +22,7 @@ from tqdm.auto import tqdm
 import imageio as io
 import numpy as np
 from pqdm.processes import pqdm
-from linumpy.io.zarr import save_zarr, read_omezarr
+from linumpy.io.zarr import save_omezarr, read_omezarr
 from linumpy.utils.io import add_processes_arg, parse_processes_arg
 
 # TODO: add option to export the flatfields and darkfields
@@ -136,7 +136,7 @@ def main():
         vol_output[z] = slice_vol[:]
 
     out_dask = da.from_zarr(vol_output)
-    save_zarr(out_dask, output_zarr, voxel_size=resolution,
+    save_omezarr(out_dask, output_zarr, voxel_size=resolution,
               chunks=vol.chunks)
 
     # Remove the temporary slice files used by the parallel processes

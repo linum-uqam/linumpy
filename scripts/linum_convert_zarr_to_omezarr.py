@@ -7,7 +7,7 @@ import argparse
 
 import zarr
 
-from linumpy.io.zarr import save_zarr
+from linumpy.io.zarr import save_omezarr
 from pathlib import Path
 
 import dask.array as da
@@ -50,7 +50,7 @@ def main():
 
     foo = zarr.open(input_file, mode="r")
     out_dask = da.from_zarr(foo)
-    save_zarr(out_dask, output_file, voxel_size=scales,
+    save_omezarr(out_dask, output_file, voxel_size=scales,
               overwrite=True, n_levels=args.n_levels)
 
 
