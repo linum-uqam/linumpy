@@ -9,7 +9,7 @@ import dask.array as da
 import nibabel as nib
 import numpy as np
 
-from linumpy.io.zarr import save_zarr
+from linumpy.io.zarr import save_omezarr
 
 
 def _build_arg_parser():
@@ -22,9 +22,10 @@ def _build_arg_parser():
     p.add_argument("--chunk_size", type=int, default=128,
                    help="Chunk size in pixel (default=%(default)s)")
     p.add_argument("--n_levels", type=int, default=5,
-                   help="Number of levels in the pyramid (default=%(default)s)")
+                   help="Number of levels in the pyramid. "
+                        " (default=%(default)s)")
     p.add_argument("--normalize", action="store_true",
-                     help="Normalize the data (default=%(default)s)")
+                   help="Normalize the data (default=%(default)s)")
     return p
 
 
@@ -36,10 +37,13 @@ def main():
     # Prepare the zarr information
     chunks = tuple([args.chunk_size] * 3)
     img = nib.load(str(args.input))
-    resolution = np.array(img.header['pixdim'][1:4]) # Resolution in mm
+
+    # Resolution in mm
+    resolution = np.array(img.header['pixdim'][1:4])
 
     # Load the data
-    vol = img.get_fdata(dtype=np.float32) # Neuroglancer doesn't support float64
+    # Neuroglancer doesn't support float64
+    vol = img.get_fdata(dtype=np.float32)
 
     # Normalize the data
     if args.normalize:
@@ -52,7 +56,9 @@ def main():
     resolution = resolution[::-1]
 
     # Save the zarr
-    save_zarr(vol, args.zarr_directory, scales=resolution, chunks=chunks, n_levels=args.n_levels)
+    save_omezarr(vol, args.zarr_directory,
+              voxel_size=resolution,
+              chunks=chunks, n_levels=args.n_levels)
 
 
 if __name__ == "__main__":
