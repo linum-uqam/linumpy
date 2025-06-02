@@ -22,7 +22,8 @@ def _build_arg_parser():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_zarr",
-                   help="Path to file (.ome.zarr) containing the 3D mosaic grid.")
+                   help="Path to file (.ome.zarr) "
+                        "containing the 3D mosaic grid.")
     p.add_argument("output_zarr",
                    help="Corrected 3D mosaic grid file path (.ome.zarr).")
     p.add_argument('--n_levels', type=int, default=5,
@@ -111,7 +112,7 @@ def main():
 
     # save to ome-zarr
     dask_arr = da.from_zarr(vol_corr)
-    save_zarr(dask_arr, output_zarr, scales=res, chunks=tile_shape,
+    save_zarr(dask_arr, output_zarr, voxel_size=res, chunks=tile_shape,
               n_levels=args.n_levels)
 
 

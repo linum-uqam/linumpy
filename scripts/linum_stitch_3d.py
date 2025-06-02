@@ -24,7 +24,9 @@ def _build_arg_parser():
                    help="Transform file (.npy format)")
     p.add_argument("output_volume",
                    help="Stitched mosaic filename (zarr)")
-    p.add_argument("--blending_method", type=str, default="diffusion", choices=["none", "average", "diffusion"],
+    p.add_argument("--blending_method", type=str,
+                   default="diffusion",
+                   choices=["none", "average", "diffusion"],
                    help="Blending method. (default=%(default)s)")
     return p
 
@@ -68,7 +70,10 @@ def main():
 
     # Stitch the mosaic
     temp_store = zarr.TempStore(suffix='.zarr')
-    mosaic = zarr.open(temp_store, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=(100, 100, 100))
+    mosaic = zarr.open(temp_store, mode="w",
+                       shape=mosaic_shape,
+                       dtype=np.float32,
+                       chunks=(100, 100, 100))
     for i in range(nx):
         for j in range(ny):
             # Compute the tile position in the input
@@ -82,10 +87,13 @@ def main():
             pos = positions[i * ny + j]
             pos[0] -= posx_min
             pos[1] -= posy_min
-            mosaic = addVolumeToMosaic(tile, pos, mosaic, blendingMethod=blending_method)
-    
+            mosaic = addVolumeToMosaic(tile,
+                                       pos,
+                                       mosaic,
+                                       blendingMethod=blending_method)
+
     out_dask = da.from_zarr(mosaic)
-    save_zarr(out_dask, output_file, resolution)
+    save_zarr(out_dask, output_file, voxel_size=resolution)
 
 
 if __name__ == "__main__":

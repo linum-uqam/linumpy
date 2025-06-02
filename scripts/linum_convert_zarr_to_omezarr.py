@@ -21,7 +21,8 @@ def _build_arg_parser():
     p.add_argument("output",
                    help="Full path to the output ome-zarr file (.ome-zarr)")
     p.add_argument("-r", "--resolution", nargs="+", type=float, default=[1.0],
-                   help="Resolution of the image in microns. (default=%(default)s)")
+                   help="Resolution of the image in microns."
+                        " (default=%(default)s)")
     p.add_argument('--n_levels', type=int, default=5,
                    help='Number of levels in pyramidal decomposition. [%(default)s]')
 
@@ -49,7 +50,7 @@ def main():
 
     foo = zarr.open(input_file, mode="r")
     out_dask = da.from_zarr(foo)
-    save_zarr(out_dask, output_file, scales=scales,
+    save_zarr(out_dask, output_file, voxel_size=scales,
               overwrite=True, n_levels=args.n_levels)
 
 
