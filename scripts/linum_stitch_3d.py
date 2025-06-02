@@ -11,7 +11,7 @@ import numpy as np
 import zarr
 import dask.array as da
 
-from linumpy.io.zarr import read_omezarr, save_zarr
+from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.utils.mosaic_grid import addVolumeToMosaic
 
 
@@ -24,7 +24,9 @@ def _build_arg_parser():
                    help="Transform file (.npy format)")
     p.add_argument("output_volume",
                    help="Stitched mosaic filename (zarr)")
-    p.add_argument("--blending_method", type=str, default="diffusion", choices=["none", "average", "diffusion"],
+    p.add_argument("--blending_method", type=str,
+                   default="diffusion",
+                   choices=["none", "average", "diffusion"],
                    help="Blending method. (default=%(default)s)")
     p.add_argument("--complex_input", default=False,
                    help="If the input is complex data (default=%(default)s)")
@@ -90,10 +92,13 @@ def main():
             pos = positions[i * ny + j]
             pos[0] -= posx_min
             pos[1] -= posy_min
-            mosaic = addVolumeToMosaic(tile, pos, mosaic, blendingMethod=blending_method)
-    
+            mosaic = addVolumeToMosaic(tile,
+                                       pos,
+                                       mosaic,
+                                       blendingMethod=blending_method)
+
     out_dask = da.from_zarr(mosaic)
-    save_zarr(out_dask, output_file, resolution)
+    save_omezarr(out_dask, output_file, voxel_size=resolution)
 
 
 if __name__ == "__main__":
