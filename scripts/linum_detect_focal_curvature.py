@@ -56,9 +56,9 @@ def main():
 
     # Load ome-zarr data
     vol, res = read_omezarr(input_zarr, level=0)
-
+    dtype = vol.dtype
     # Estimate the water-tissue interface
-    z0 = findTissueInterface(vol, sigma=2, useLog=True)
+    z0 = findTissueInterface(np.abs(vol), sigma=2, useLog=True)
 
     # Extract the tile shape from the filename
     tile_shape = vol.chunks
@@ -92,7 +92,7 @@ def main():
 
     temp_store = zarr.TempStore()
     vol_corr = zarr.open(temp_store, mode="w", shape=vol.shape,
-                         dtype=np.float32, chunks=tile_shape)
+                         dtype=dtype, chunks=tile_shape)
 
     for i in range(nx):
         for j in range(ny):
