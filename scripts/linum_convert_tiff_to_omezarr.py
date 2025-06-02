@@ -1,6 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Convert folder of tiff files to omezarr. Expected file structure is:
+    in_folder/
+    ├── z0.tif
+    ├── z1.tif
+    └── ...
 
+If there are more than one channel, file structure should be
+    in_folder/
+    ├── channel_00/
+    │   ├── z0.tif
+    │   ├── z1.tif
+    │   └── ...
+    ├── channel_01/
+    │   └── ...
+    └── ...
+"""
 import argparse
 from glob import glob
 import logging
@@ -16,11 +32,6 @@ from linumpy.io.zarr import save_zarr
 from linumpy.utils.io import add_overwrite_arg, add_verbose_arg
 
 
-"""
-
-"""
-
-
 def _build_arg_parser():
     p = argparse.ArgumentParser(
         description=__doc__,
@@ -30,17 +41,13 @@ def _build_arg_parser():
                    help="Folder with tiff files."
                         "If you have multiple channels, images have to "
                         "be split into different subfolders within in_folder.")
-    p.add_argument('in_dimensions',
-                   nargs=3,
-                   type=float,
+    p.add_argument('in_dimensions', nargs=3, type=float,
                    help='Dimensions of the input data (X,Y,Z).')
     p.add_argument("--resolution", type=float, default=None,
                    help="Output isotropic resolution "
                         "in micron per pixel. (default=%(default)s)")
-    p.add_argument('--chunks',
-                   nargs=3,
-                   type=int,
-                   help="Chuncks of the output zarr file.")
+    p.add_argument('--chunks', nargs=3, type=int,
+                   help="Chunks of the output zarr file.")
     p.add_argument('--n_levels', type=int, default=5,
                    help="Number of levels in the pyramid."
                         " (default=%(default)s)")
