@@ -143,8 +143,8 @@ def create_directory(store_path, overwrite=False):
     return directory
 
 
-def save_zarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3),
-              chunks=(128, 128, 128), n_levels=5, overwrite=True):
+def save_omezarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3),
+                 chunks=(128, 128, 128), n_levels=5, overwrite=True):
     """
     Save numpy array to disk in zarr format following OME-NGFF file specifications.
     Expected ordering for axes in `data` and `scales` is `(c, z, y, x)`. Does not

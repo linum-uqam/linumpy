@@ -7,7 +7,7 @@ import argparse
 
 import numpy as np
 from scipy.integrate import cumulative_trapezoid
-from linumpy.io.zarr import read_omezarr, save_zarr
+from linumpy.io.zarr import read_omezarr, save_omezarr
 
 
 def _build_arg_parser():
@@ -51,7 +51,7 @@ def main():
 
     # Saving this bias field
     bias_field = np.moveaxis(bias_field, (0, 1, 2), (2, 1, 0))
-    save_zarr(bias_field.astype(np.float32), args.output,
+    save_omezarr(bias_field.astype(np.float32), args.output,
               voxel_size=res, chunks=vol.chunks)
 
 

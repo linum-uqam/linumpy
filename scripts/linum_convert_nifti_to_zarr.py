@@ -9,7 +9,7 @@ import dask.array as da
 import nibabel as nib
 import numpy as np
 
-from linumpy.io.zarr import save_zarr
+from linumpy.io.zarr import save_omezarr
 
 
 def _build_arg_parser():
@@ -56,7 +56,7 @@ def main():
     resolution = resolution[::-1]
 
     # Save the zarr
-    save_zarr(vol, args.zarr_directory,
+    save_omezarr(vol, args.zarr_directory,
               voxel_size=resolution,
               chunks=chunks, n_levels=args.n_levels)
 

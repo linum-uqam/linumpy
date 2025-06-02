@@ -28,7 +28,7 @@ import zarr
 from tifffile import imread
 from skimage.transform import resize
 
-from linumpy.io.zarr import save_zarr
+from linumpy.io.zarr import save_omezarr
 from linumpy.utils.io import add_overwrite_arg, add_verbose_arg
 
 
@@ -187,7 +187,7 @@ def main():
                        index_z, [1, 1] + mosaic_shape[2:])
 
     mosaic_dask = da.from_zarr(mosaic)
-    save_zarr(mosaic_dask, args.out_zarr,
+    save_omezarr(mosaic_dask, args.out_zarr,
               voxel_size=resolution,
               chunks=args.chunks,
               n_levels=args.n_levels)
