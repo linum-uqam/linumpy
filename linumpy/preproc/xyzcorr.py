@@ -6,14 +6,14 @@ import itertools
 import numpy as np
 import SimpleITK as sitk
 from scipy.interpolate import interp1d
-from scipy.ndimage.filters import (
+from scipy.ndimage import (
     gaussian_filter,
     gaussian_filter1d,
     gaussian_gradient_magnitude,
     uniform_filter,
 )
-from scipy.ndimage.measurements import label
-from scipy.ndimage.morphology import binary_closing, binary_fill_holes
+from scipy.ndimage import label
+from scipy.ndimage import binary_closing, binary_fill_holes
 from scipy.optimize import curve_fit
 from scipy.signal import argrelmax
 from skimage.filters import threshold_li, threshold_otsu
