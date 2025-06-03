@@ -9,7 +9,7 @@ import dask.array as da
 
 import numpy as np
 import zarr
-from linumpy.io.zarr import save_zarr, read_omezarr
+from linumpy.io.zarr import save_omezarr, read_omezarr
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
@@ -55,7 +55,7 @@ def main():
             aip[rmin:rmax, cmin:cmax] = tile
 
     out_dask = da.from_zarr(aip)
-    save_zarr(out_dask, output_file, resolution[1:], tile_shape[1:])
+    save_omezarr(out_dask, output_file, resolution[1:], tile_shape[1:])
 
 
 if __name__ == "__main__":

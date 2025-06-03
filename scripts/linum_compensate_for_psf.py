@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import argparse
 import numpy as np
-from linumpy.io.zarr import read_omezarr, save_zarr
+from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.psf.psf_estimator import extract_psfParametersFromMosaic, get_3dPSF
 
 
@@ -56,9 +56,9 @@ def main():
     if args.out_psf:
         psf_3d = np.moveaxis(psf_3d, (0, 1, 2), (2, 1, 0))
         # when there are too many levels it'll break the viewer for some reason
-        save_zarr(psf_3d.astype(np.float32), args.out_psf, scales=res, chunks=chunks)
+        save_omezarr(psf_3d.astype(np.float32), args.out_psf, voxel_size=res, chunks=chunks)
 
-    save_zarr(output.astype(np.float32), args.out_zarr, scales=res, chunks=chunks)
+    save_omezarr(output.astype(np.float32), args.out_zarr, voxel_size=res, chunks=chunks)
 
 
 if __name__ == '__main__':

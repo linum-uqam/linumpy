@@ -4,11 +4,10 @@
 """Compute the tissue attenuation compensation bias field"""
 
 import argparse
-from pathlib import Path
 
 import numpy as np
 from scipy.integrate import cumulative_trapezoid
-from linumpy.io.zarr import read_omezarr, save_zarr
+from linumpy.io.zarr import read_omezarr, save_omezarr
 
 
 def _build_arg_parser():
@@ -43,14 +42,17 @@ def main():
         attn = attn * 100 * 1.0e-6  # This is now in 1 / micron
         attn = attn * res_axial_microns  # This is now in 1 / voxel
 
-    # Compute the attenuation bias field by integrating over 0 -> z for each A-Lines
-    bias_field = cumulative_trapezoid(attn, axis=2, initial=0)
+    # Compute the attenuation bias field
+    # by integrating over 0 -> z for each A-Lines
+    bias_field = cumulative_trapezoid(attn,
+                                      axis=2,
+                                      initial=0)
     bias_field = np.exp(-2 * bias_field)
 
     # Saving this bias field
     bias_field = np.moveaxis(bias_field, (0, 1, 2), (2, 1, 0))
-    save_zarr(bias_field.astype(np.float32), args.output,
-              scales=res, chunks=vol.chunks)
+    save_omezarr(bias_field.astype(np.float32), args.output,
+              voxel_size=res, chunks=vol.chunks)
 
 
 if __name__ == "__main__":
