@@ -12,7 +12,7 @@ import argparse
 from pathlib import Path
 import numpy as np
 import dask.array as da
-from linumpy.io.zarr import read_omezarr, save_zarr
+from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.preproc import xyzcorr
 
 def _build_arg_parser():
@@ -103,7 +103,7 @@ def main():
 
     crop_dask = da.from_array(vol_crop, chunks=vol.chunks)
     # Save cropped volume as OME-Zarr
-    save_zarr(
+    save_omezarr(
         crop_dask,
         output_path,
         scales=res,

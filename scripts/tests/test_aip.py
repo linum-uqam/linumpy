@@ -1,22 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
-from linumpy.io.zarr import save_omezarr
-import dask.array as da
-import numpy as np
-
-OMEZARR_PATH = "data.ome.zarr"
+from linumpy.io.test_data import get_data
 
 
 def test_help(script_runner):
-    ret = script_runner.run('linum_aip.py', '--help')
+    ret = script_runner.run(['linum_aip.py', '--help'])
     assert ret.success
 
 
 def test_execution(script_runner, tmp_path):
-    d = tmp_path / "input"
-    d.mkdir()
-    in_file = str(d / OMEZARR_PATH)
+    input = get_data('mosaic_3d_omezarr')
+    output = tmp_path / 'output.ome.zarr'
 
-    data = np.random.randn(400, 100, 100)
-    dask_array = da.from_array(data)
-    save_omezarr(dask_array, in_file, chunks=(400, 100, 100))
+    ret = script_runner.run(['linum_aip.py', input, output])
+    assert ret.success
+
