@@ -3,7 +3,7 @@
 
 import SimpleITK as sitk
 import numpy as np
-from scipy.ndimage.morphology import binary_erosion, binary_fill_holes
+from scipy.ndimage import binary_erosion, binary_fill_holes
 
 
 def segmentOCT3D(vol: np.ndarray, k:int=5, useLog:bool=True, thresholdMethod:str="otsu") -> np.ndarray:
