@@ -12,7 +12,7 @@ import dask.array as da
 import zarr
 from skimage.transform import resize
 from tqdm.auto import tqdm
-from linumpy.io.zarr import save_zarr
+from linumpy.io.zarr import save_omezarr
 from linumpy import reconstruction
 from linumpy.microscope.oct import OCT
 from linumpy.io.thorlabs import ThorOCT, PreprocessingConfig
@@ -176,7 +176,8 @@ def main():
         resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
         print(f"Resolutoin: z = {resolution[0]} , x = {resolution[1]} , y = {resolution[2]} ")   
 
-    # Compute the rescaled tile size based on the minimum target output resolution
+    # Compute the rescaled tile size based on
+    # the minimum target output resolution
     if output_resolution == -1:
         tile_size = vol.shape
         output_resolution = resolution
@@ -215,7 +216,7 @@ def main():
 
     # Convert to ome-zarr
     mosaic_dask = da.from_zarr(mosaic)
-    save_zarr(mosaic_dask, args.output_zarr, scales=output_resolution,
+    save_omezarr(mosaic_dask, args.output_zarr, voxel_size=output_resolution,
               chunks=tile_size, n_levels=args.n_levels)
 
 
