@@ -106,19 +106,16 @@ def create_transformation_dict(nlevels, voxel_size, ndims=3):
     :type coord_transforms: list of Dict
     :return coord_transforms: List of coordinate transformations
     """
-    def _get_scale(level, ndims):
-        scale_def = [1.0,
-                     (voxel_size[0]*2.0**level),
-                     (voxel_size[1]*2.0**level),
-                     (voxel_size[2]*2.0**level)]
-        offset = len(scale_def) - ndims
-        return scale_def[offset:]
+    def _get_scale(i):
+        scale = np.zeros(ndims)
+        scale[:-len(voxel_size)-1:-1] = np.asarray(voxel_size)[::-1] * 2.0**i
+        return scale.tolist()
 
     coord_transforms = []
     for i in range(nlevels):
         transform_dict = [{
             "type": "scale",
-            "scale": _get_scale(i, ndims)
+            "scale": _get_scale(i)
         }]
         coord_transforms.append(transform_dict)
     return coord_transforms
