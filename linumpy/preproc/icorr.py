@@ -9,13 +9,13 @@ import numpy as np
 import SimpleITK as sitk
 from dipy.segment.mask import median_otsu
 from scipy.interpolate import interp1d, interpn
-from scipy.ndimage.filters import (
+from scipy.ndimage import (
     gaussian_filter,
     gaussian_filter1d,
     median_filter,
     uniform_filter,
 )
-from scipy.ndimage.morphology import binary_erosion, binary_fill_holes
+from scipy.ndimage import binary_erosion, binary_fill_holes
 from scipy.optimize import curve_fit, minimize
 from skimage.filters import threshold_li
 from sklearn import linear_model

@@ -38,7 +38,7 @@ def _build_arg_parser():
     options_g.add_argument("-r", "--resolution", type=float, default=10.0,
                            help="Output isotropic resolution in micron per pixel. [%(default)s]")
     options_g.add_argument("-z", "--slice", type=int,
-                           help="Slice to process [%(default)s]")
+                           help="Slice to process.")
     options_g.add_argument("--keep_galvo_return", action="store_true",
                            help="Keep the galvo return signal [%(default)s]")
     options_g.add_argument('--n_levels', type=int, default=5,
@@ -116,16 +116,6 @@ def main():
     args = parser.parse_args()
 
     # Parameters
-    if args.from_root_directory:
-        z = args.slice
-        tiles_directory = args.from_root_directory
-        tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
-    else:
-        if args.slice is not None:
-            parser.error('Argument --slice is incompatible with --from_tiles_list.')
-        tiles = [Path(d) for d in args.from_tiles_list]
-        tiles_pos = reconstruction.get_tiles_ids_from_list(tiles)
-
     output_resolution = args.resolution
     crop = not args.keep_galvo_return
 
@@ -141,7 +131,15 @@ def main():
 
     # Analyze the tiles
     if data_type == 'OCT':
-        tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
+        if args.from_root_directory:
+            z = args.slice
+            tiles_directory = args.from_root_directory
+            tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
+        else:
+            if args.slice is not None:
+                parser.error('Argument --slice is incompatible with --from_tiles_list.')
+            tiles = [Path(d) for d in args.from_tiles_list]
+            tiles_pos = reconstruction.get_tiles_ids_from_list(tiles)
     elif data_type == 'PSOCT':
         tiles, tiles_pos = ThorOCT.get_psoct_tiles_ids(
             tiles_directory,
