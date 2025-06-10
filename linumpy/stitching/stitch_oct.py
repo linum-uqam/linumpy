@@ -740,7 +740,8 @@ def addSliceToVolume(
         maskMoving = (maskMoving > 0) # Converting to integer array
         this_mask = maskMoving
 
-    maskMoving = (maskMoving > 0)
+    if maskMoving is not None:
+        maskMoving = (maskMoving > 0)
     # Compute alpha weights
     fixedMask = fixedVolume[:, :, z: z + nz] > 0
     if np.any(fixedMask):
