@@ -65,9 +65,10 @@ def main():
 
     # Get the pos min and max
     posx_min = min([pos[0] for pos in positions])
-    posx_max = max([pos[0] + tile_shape[0] for pos in positions])
+    # tile_shape[1] corresponds to nx and tile_shape[2] corresponds to ny
+    posx_max = max([pos[0] + tile_shape[1] for pos in positions])
     posy_min = min([pos[1] for pos in positions])
-    posy_max = max([pos[1] + tile_shape[1] for pos in positions])
+    posy_max = max([pos[1] + tile_shape[2] for pos in positions])
     mosaic_shape = [volume.shape[0], posx_max - posx_min, posy_max - posy_min]
 
     # Stitch the mosaic

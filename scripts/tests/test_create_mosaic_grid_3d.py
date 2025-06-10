@@ -27,3 +27,4 @@ def test_execution_from_list(script_runner, tmp_path):
                              os.path.join(input, 'tile_x00_y01_z00'),
                              os.path.join(input, 'tile_x01_y01_z00'),
                              '-r', 2])
+    assert ret.success
