@@ -49,7 +49,8 @@ def get_tiles_ids(directory, z: int = None):
         tiles_to_process = f"*z{z:02d}"
     else:
         tiles_to_process = f"tile_*"
-    tiles = list(input_directory.glob(tiles_to_process))
+    tiles = list(input_directory.rglob(tiles_to_process))
+    tiles = [t for t in tiles if t.name.startswith('tile_')]
     tile_ids = get_tiles_ids_from_list(tiles)
 
     return tiles, tile_ids

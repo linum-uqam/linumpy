@@ -224,12 +224,23 @@ def applyHanningWindow(im, padshape):
     return im
 
 
+def command_iteration(method):
+    """ Callback invoked when the optimization has an iteration """
+    if method.GetOptimizerIteration() == 0:
+        print("Estimated Scales: ", method.GetOptimizerScales())
+    print(
+        f"{method.GetOptimizerIteration():3} "
+        + f"= {method.GetMetricValue():7.9f} "
+        + f": {method.GetOptimizerPosition()}"
+    )
+
+
 def ITKRegistration(
     vol1,
     vol2,
     offset=(0, 0, 0),
     metric="MSQ",
-    verbose=False,
+    verbose=True,
     matchHistograms=False,
     maskFixed=None,
     maskMoving=None,
@@ -242,7 +253,7 @@ def ITKRegistration(
         Fixed image / volume
     vol2 : ndarray
         Moving image / volume
-    offset : (3,) tuple
+    offset : tuple
         Offset position relating the two volumes
     metric : str
         Similarity metric to use for registration. Available metrics are : MSQ, JHMI, MMI, ANTsCorr, corr (default)
@@ -251,7 +262,7 @@ def ITKRegistration(
 
     Returns
     -------
-    (3,) tuple
+    tuple
         Estimated deltas between these two volumes
     float
         Similarity metric
@@ -275,8 +286,6 @@ def ITKRegistration(
 
     # Image Registration Filter
     reg = sitk.ImageRegistrationMethod()
-    reg.SetInitialTransform(sitk.TranslationTransform(fixed_vol.GetDimension()))
-    reg.SetInterpolator(sitk.sitkLinear)
 
     if metric == "MSQ":
         reg.SetMetricAsMeanSquares()
@@ -291,16 +300,21 @@ def ITKRegistration(
     else:  # Correlation
         reg.SetMetricAsCorrelation()
 
-    learningRate = 1.0
-    minStep = 1
-    nIterations = 500
     # reg.SetOptimizerAsConjugateGradientLineSearch(learningRate, nIterations)
     # reg.SetOptimizerAsGradientDescentLineSearch(learningRate, minStep)
-    reg.SetOptimizerAsRegularStepGradientDescent(learningRate, minStep, nIterations)
-    #reg.SetOptimizerScalesFromPhysicalShift()
-    reg.SetShrinkFactorsPerLevel(shrinkFactors=[1])
-    # reg.SetSmoothingSigmasPerLevel(smoothingSigmas=[3,2,1])
-    reg.SmoothingSigmasAreSpecifiedInPhysicalUnitsOn()
+    reg.SetOptimizerAsRegularStepGradientDescent(
+        learningRate=2.0,
+        minStep=1e-6,
+        numberOfIterations=500,
+        gradientMagnitudeTolerance=1e-12,
+    )
+    reg.SetOptimizerScalesFromIndexShift()
+    reg.SetShrinkFactorsPerLevel([16, 4, 1])
+    reg.SetSmoothingSigmasPerLevel([16, 4, 1])
+
+    tx = sitk.CenteredTransformInitializer(fixed_vol, moving_vol,
+                                           sitk.Similarity2DTransform())
+    reg.SetInitialTransform(tx)
 
     # Adding fixed and moving mask if defined
     if maskFixed is not None:
@@ -310,24 +324,29 @@ def ITKRegistration(
         print("Add moving mask")
         reg.SetMetricMovingMask(sitk.GetImageFromArray(maskMoving.astype(int)))
 
-    finalTransform = reg.Execute(fixed_vol, moving_vol)
+    # callback
+    if verbose:
+        reg.AddCommand(sitk.sitkIterationEvent, lambda: command_iteration(reg))
+
+    outTx = reg.Execute(fixed_vol, moving_vol)
 
     if verbose:
-        print(reg, finalTransform)
+        print("-------")
+        print(outTx)
+        print(f"Optimizer stop condition: {reg.GetOptimizerStopConditionDescription()}")
+        print(f" Iteration: {reg.GetOptimizerIteration()}")
+        print(f" Metric value: {reg.GetMetricValue()}")
 
-    if vol1.ndim == 3:
-        dx = finalTransform.GetParameters()[0]
-        dy = finalTransform.GetParameters()[1]
-        dz = finalTransform.GetParameters()[2]
-        deltas = [dx, dy, dz]
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetReferenceImage(fixed_vol)
+    resampler.SetInterpolator(sitk.sitkLinear)
+    resampler.SetTransform(outTx)
 
-    elif vol1.ndim == 2:
-        dx = -finalTransform.GetParameters()[1]
-        dy = -finalTransform.GetParameters()[0]
-        deltas = [dx, dy]
+    out = resampler.Execute(moving_vol)
 
     MI = reg.GetMetricValue()
-    return deltas, MI
+    return out, MI, outTx
+
 
 def align_images_sitk(im1, im2):
     #plt.subplot(121)
@@ -382,3 +401,51 @@ def align_images_sitk(im1, im2):
     deltas = [dx, dy]
     m = R.GetMetricValue()
     return deltas, m
+
+
+def register_consecutive_3d_mosaics(prev_mosaic_bottom_slice, current_mosaic):
+    current_mosaic_top_slice = current_mosaic[0, :, :]
+
+    # Type cast everything to float32
+    prev_mosaic_bottom_slice = prev_mosaic_bottom_slice.astype(np.float32)
+    current_mosaic_top_slice = current_mosaic_top_slice.astype(np.float32)
+
+    fixed_sitk_image = sitk.GetImageFromArray(prev_mosaic_bottom_slice)
+    moving_sitk_image = sitk.GetImageFromArray(current_mosaic_top_slice)
+
+    R = sitk.ImageRegistrationMethod()
+
+    R.SetMetricAsCorrelation()
+
+    R.SetOptimizerAsRegularStepGradientDescent(
+        learningRate=2.0,
+        minStep=1e-6,
+        numberOfIterations=500,
+        gradientMagnitudeTolerance=1e-8,
+    )
+    R.SetOptimizerScalesFromIndexShift()
+
+    tx = sitk.CenteredTransformInitializer(fixed_sitk_image, moving_sitk_image,
+                                           sitk.Euler2DTransform())
+    R.SetInitialTransform(tx)
+
+    R.SetInterpolator(sitk.sitkLinear)
+
+    out_transform = R.Execute(fixed_sitk_image, moving_sitk_image)
+
+    output_volume = np.zeros_like(current_mosaic)
+    for i, moving in enumerate(current_mosaic):
+        moving_sitk_image = sitk.GetImageFromArray(moving)
+
+        resampler = sitk.ResampleImageFilter()
+        resampler.SetReferenceImage(fixed_sitk_image)
+        resampler.SetInterpolator(sitk.sitkLinear)
+        resampler.SetDefaultPixelValue(0)
+        resampler.SetTransform(out_transform)
+
+        out = resampler.Execute(moving_sitk_image)
+        out = sitk.GetArrayFromImage(out)
+
+        output_volume[i, :, :] = out
+
+    return output_volume, R.GetMetricValue()

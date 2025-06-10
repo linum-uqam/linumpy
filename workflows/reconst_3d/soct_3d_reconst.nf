@@ -7,10 +7,16 @@ nextflow.enable.dsl = 2
 // Output: 3D reconstruction
 
 // Parameters
-params.inputDir = "";
-params.outputDir = "";
-params.resolution = 10; // Resolution of the reconstruction in micron/pixel
-params.processes = 1; // Maximum number of python processes per nextflow process
+params.inputDir = ""
+params.outputDir = ""
+params.resolution = 10 // Resolution of the reconstruction in micron/pixel
+params.processes = 1 // Maximum number of python processes per nextflow process
+params.depth_offset = 10 // Skip this many voxels from the top of the 3d mosaic
+params.initial_search = 47 // Initial search index for mosaics stacking
+params.max_allowed_overlap = 10 // Slices are allowed to shift up to this many voxels from the initial search index
+params.axial_resolution = 3.5 // Axial resolution of imaging system in microns
+params.crop_interface_out_depth = 60 // Minimum depth of the cropped image in voxels
+params.stack_mosaics_registration_method = 'sitk_affine_2d' // Method used for registering stitched mosaics together
 
 // Processes
 process create_mosaic_grid {
@@ -20,7 +26,7 @@ process create_mosaic_grid {
         tuple val(slice_id), path("*.ome.zarr")
     script:
     """
-    linum_create_mosaic_grid_3d.py mosaic_grid_3d_${params.resolution}um.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes}
+    linum_create_mosaic_grid_3d.py mosaic_grid_3d_${params.resolution}um.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution}
     """
 }
 
@@ -124,13 +130,52 @@ process compensate_attenuation {
     """
 }
 
+process estimate_xy_shifts_from_metadata {
+    publishDir "$params.outputDir/$task.process"
+    input:
+        path(input_dir)
+    output:
+        path("shifts_xy.csv")
+    script:
+    """
+    linum_estimate_xyShift_fromMetadata.py ${input_dir} shifts_xy.csv
+    """
+}
+
+process stack_mosaics_into_3d_volume {
+    publishDir "$params.outputDir/$task.process"
+    input:
+        tuple path("inputs/*"), path("shifts_xy.csv")
+    output:
+        path("3d_volume.ome.zarr")
+    script:
+    """
+    linum_stack_mosaics_into_3d_volume.py inputs shifts_xy.csv 3d_volume.ome.zarr --initial_search $params.initial_search --depth_offset $params.depth_offset --max_allowed_overlap $params.max_allowed_overlap --method $params.stack_mosaics_registration_method
+    """
+}
+
+process crop_interface {
+    input:
+        tuple val(slice_id), path(image)
+    output:
+        tuple val(slice_id), path("slice_z${slice_id}_${params.resolution}um_crop.ome.zarr")
+    script:
+    """
+    linum_crop_mosaic_3d_at_interface.py $image "slice_z${slice_id}_${params.resolution}um_crop.ome.zarr" --out_depth $params.crop_interface_out_depth
+    """
+}
+
 workflow {
     inputSlices = Channel.fromPath("$params.inputDir/tile_x*_y*_z*/", type: 'dir')
                          .map{path -> tuple(path.toString().substring(path.toString().length() - 2), path)}
                          .groupTuple()
+    input_dir_channel = Channel.fromPath("$params.inputDir", type: 'dir')
 
     // Generate a 3D mosaic grid.
     create_mosaic_grid(inputSlices)
+
+    // Estimate XY shifts from metadata
+    estimate_xy_shifts_from_metadata(input_dir_channel)
 
     // Focal plane curvature compensation
     fix_focal_curvature(create_mosaic_grid.out)
@@ -147,5 +192,19 @@ workflow {
     // Stitch the tile in 3D
     stitch_3d(fix_illumination.out.combine(estimate_xy_transformation.out, by:0))
 
-    // TODO: PSF and depth correction and slices stitching
+    // TODO: PSF and depth correction
+
+    // Crop at interface
+    crop_interface(stitch_3d.out)
+
+    // Slices stitching
+    stack_in_channel = crop_interface.out
+        .toSortedList{a, b -> a[0] <=> b[0]}
+        .flatten()
+        .collate(2)
+        .map{_meta, filename -> filename}
+        .collect()
+        .merge(estimate_xy_shifts_from_metadata.out){a, b -> tuple(a, b)}
+
+    stack_mosaics_into_3d_volume(stack_in_channel)
 }
