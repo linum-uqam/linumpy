@@ -11,12 +11,11 @@ params.inputDir = ""
 params.outputDir = ""
 params.resolution = 10 // Resolution of the reconstruction in micron/pixel
 params.processes = 1 // Maximum number of python processes per nextflow process
-params.depth_offset = 10 // Skip this many voxels from the top of the 3d mosaic
-params.initial_search = 47 // Initial search index for mosaics stacking
+params.depth_offset = 4 // Skip this many voxels from the top of the 3d mosaic
+params.initial_search = 25 // Initial search index for mosaics stacking
 params.max_allowed_overlap = 10 // Slices are allowed to shift up to this many voxels from the initial search index
-params.axial_resolution = 3.5 // Axial resolution of imaging system in microns
-params.crop_interface_out_depth = 60 // Minimum depth of the cropped image in voxels
-params.stack_mosaics_registration_method = 'sitk_affine_2d' // Method used for registering stitched mosaics together
+params.axial_resolution = 1.5 // Axial resolution of imaging system in microns
+params.crop_interface_out_depth = 400 // Minimum depth of the cropped image in microns
 
 // Processes
 process create_mosaic_grid {
@@ -150,7 +149,7 @@ process stack_mosaics_into_3d_volume {
         path("3d_volume.ome.zarr")
     script:
     """
-    linum_stack_mosaics_into_3d_volume.py inputs shifts_xy.csv 3d_volume.ome.zarr --initial_search $params.initial_search --depth_offset $params.depth_offset --max_allowed_overlap $params.max_allowed_overlap --method $params.stack_mosaics_registration_method
+    linum_stack_mosaics_into_3d_volume.py inputs shifts_xy.csv 3d_volume.ome.zarr --initial_search $params.initial_search --depth_offset $params.depth_offset --max_allowed_overlap $params.max_allowed_overlap  --out_offsets 3d_volume_offsets.npy
     """
 }
 
@@ -161,7 +160,7 @@ process crop_interface {
         tuple val(slice_id), path("slice_z${slice_id}_${params.resolution}um_crop.ome.zarr")
     script:
     """
-    linum_crop_mosaic_3d_at_interface.py $image "slice_z${slice_id}_${params.resolution}um_crop.ome.zarr" --out_depth $params.crop_interface_out_depth
+    linum_crop_3d_mosaic_below_interface.py $image "slice_z${slice_id}_${params.resolution}um_crop.ome.zarr" --depth $params.crop_interface_out_depth --crop_before_interface --pad_after
     """
 }
 
