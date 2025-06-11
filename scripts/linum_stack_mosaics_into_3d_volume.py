@@ -177,7 +177,7 @@ def main():
             # Add the overlapping slice to the volume
             zmax = min(len(img), mosaic.shape[0] - current_z_offset)
             mosaic[current_z_offset - best_offset:
-                   current_z_offset + len(img) - best_offset] = img[:zmax]
+                   current_z_offset + zmax - best_offset] = img[:zmax]
 
             current_z_offset += mosaics_depth - best_offset
 
