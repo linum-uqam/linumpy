@@ -43,7 +43,7 @@ def main():
 
     for z in tqdm(slices, desc="Creating mosaic grids", unit="slice", leave=True):
         output_file = f"{output_directory}/mosaic_grid_z{z:02d}{extension}"
-        cmd = f"linum_create_mosaic_grid.py {input_directory} {output_file} --slice {z} --resolution {resolution} --n_cpus {n_cpus}"
+        cmd = f"linum_create_mosaic_grid_2d.py {input_directory} {output_file} --slice {z} --resolution {resolution} --n_cpus {n_cpus}"
         subprocess.run(cmd, shell=True)
 
 if __name__ == "__main__":
