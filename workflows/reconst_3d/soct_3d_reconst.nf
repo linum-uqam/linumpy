@@ -84,14 +84,14 @@ process stitch_3d {
     """
 }
 
-process compensate_psf {
+process beam_profile_correction {
     input:
         tuple val(slice_id), path(slice_3d)
     output:
-        tuple val(slice_id), path("slice_z${slice_id}_${params.resolution}um_fixPSF.ome.zarr")
+        tuple val(slice_id), path("slice_z${slice_id}_${params.resolution}um_axial_corr.ome.zarr")
     script:
     """
-    linum_compensate_for_psf.py ${slice_3d} "slice_z${slice_id}_${params.resolution}um_fixPSF.ome.zarr"
+    linum_compensate_for_psf.py ${slice_3d} "slice_z${slice_id}_${params.resolution}um_axial_corr.ome.zarr"
     """
 }
 
@@ -191,13 +191,14 @@ workflow {
     // Stitch the tile in 3D
     stitch_3d(fix_illumination.out.combine(estimate_xy_transformation.out, by:0))
 
-    // TODO: PSF and depth correction
-
     // Crop at interface
     crop_interface(stitch_3d.out)
 
+    // TODO: PSF and depth correction
+    beam_profile_correction(crop_interface.out)
+
     // Slices stitching
-    stack_in_channel = crop_interface.out
+    stack_in_channel = beam_profile_correction.out
         .toSortedList{a, b -> a[0] <=> b[0]}
         .flatten()
         .collate(2)
