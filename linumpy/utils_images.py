@@ -91,6 +91,7 @@ def display_overlap(img1, img2, title=None, do_normalization=False):
 
 def apply_xy_shift(img: np.ndarray, reference: np.ndarray, dx: int, dy: int) -> np.ndarray:
     """Apply a shift to the image in the xy plane.
+
     Parameters
     ----------
     img : np.ndarray
@@ -105,9 +106,14 @@ def apply_xy_shift(img: np.ndarray, reference: np.ndarray, dx: int, dy: int) -> 
     fixed = sitk.GetImageFromArray(reference)
     moving = sitk.GetImageFromArray(img)
 
+    translation = [0.] * fixed.GetDimension()
+    # Set the translation
+    translation[0] = dx
+    translation[1] = dy
+
     # Set the transform
     transform = sitk.TranslationTransform(fixed.GetDimension())
-    transform.SetParameters((dx, dy))
+    transform.SetParameters(translation)
 
     """Apply a shift to the image in the xy plane."""
     resampler = sitk.ResampleImageFilter()

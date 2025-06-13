@@ -329,6 +329,7 @@ def ITKRegistration(
     MI = reg.GetMetricValue()
     return deltas, MI
 
+
 def align_images_sitk(im1, im2):
     #plt.subplot(121)
     #plt.imshow(im1)
@@ -382,3 +383,51 @@ def align_images_sitk(im1, im2):
     deltas = [dx, dy]
     m = R.GetMetricValue()
     return deltas, m
+
+
+def register_consecutive_3d_mosaics(prev_mosaic_bottom_slice, current_mosaic):
+    current_mosaic_top_slice = current_mosaic[0, :, :]
+
+    # Type cast everything to float32
+    prev_mosaic_bottom_slice = prev_mosaic_bottom_slice.astype(np.float32)
+    current_mosaic_top_slice = current_mosaic_top_slice.astype(np.float32)
+
+    fixed_sitk_image = sitk.GetImageFromArray(prev_mosaic_bottom_slice)
+    moving_sitk_image = sitk.GetImageFromArray(current_mosaic_top_slice)
+
+    R = sitk.ImageRegistrationMethod()
+
+    R.SetMetricAsCorrelation()
+
+    R.SetOptimizerAsRegularStepGradientDescent(
+        learningRate=2.0,
+        minStep=1e-6,
+        numberOfIterations=500,
+        gradientMagnitudeTolerance=1e-8,
+    )
+    R.SetOptimizerScalesFromIndexShift()
+
+    tx = sitk.CenteredTransformInitializer(fixed_sitk_image, moving_sitk_image,
+                                           sitk.Euler2DTransform())
+    R.SetInitialTransform(tx)
+
+    R.SetInterpolator(sitk.sitkLinear)
+
+    out_transform = R.Execute(fixed_sitk_image, moving_sitk_image)
+
+    output_volume = np.zeros_like(current_mosaic)
+    for i, moving in enumerate(current_mosaic):
+        moving_sitk_image = sitk.GetImageFromArray(moving)
+
+        resampler = sitk.ResampleImageFilter()
+        resampler.SetReferenceImage(fixed_sitk_image)
+        resampler.SetInterpolator(sitk.sitkLinear)
+        resampler.SetDefaultPixelValue(0)
+        resampler.SetTransform(out_transform)
+
+        out = resampler.Execute(moving_sitk_image)
+        out = sitk.GetArrayFromImage(out)
+
+        output_volume[i, :, :] = out
+
+    return output_volume, R.GetMetricValue()
