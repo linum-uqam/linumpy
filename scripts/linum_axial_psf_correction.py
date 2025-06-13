@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
-"""Model-free axial PSF correction."""
+"""
+Axial beam profile correction. The script estimates the beam profile
+from agarose voxels and then applies the inverse profile to each a-line.
+"""
 
 import argparse
 
 import numpy as np
 import dask.array as da
-from scipy.ndimage import convolve
 from skimage.filters import threshold_otsu
-from skimage.restoration import richardson_lucy
 from linumpy.io.zarr import save_omezarr, read_omezarr
 from linumpy.preproc.xyzcorr import findTissueInterface, maskUnderInterface
-import zarr
 
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 
@@ -24,10 +25,12 @@ def _build_arg_parser():
                    help="Path to file (.ome.zarr) containing the 3D mosaic grid.")
     p.add_argument("output_zarr",
                    help="Corrected 3D mosaic grid file path (.ome.zarr).")
-    p.add_argument('--dont_mask_output', action='store_true',
-                   help='Option for disabling masking of the corrected output.')
     p.add_argument('--n_levels', type=int, default=5,
                    help='Number of levels in pyramid representation.')
+    p.add_argument('--fit_gaussian', action='store_true',
+                   help='Fit a gaussian on the beam profile.')
+    p.add_argument('--output_plot',
+                   help='Optional output plot filename.')
     return p
 
 
@@ -43,8 +46,6 @@ def main():
     agarose_mask = aip < otsu
 
     interface = findTissueInterface(vol[:])
-
-    # Generate mask Under interface
     mask = maskUnderInterface(vol[:], interface, returnMask=True)
 
     # Exclude out of bounds columns
@@ -52,73 +53,48 @@ def main():
     agarose_mask = np.logical_and(agarose_mask, ~mask_all)
 
     vol_data = vol[:]
+
     profile = np.reshape(vol_data, (len(vol_data), -1))
     profile = np.array([profile[i] for i in range(len(profile)) if agarose_mask.reshape(-1)[i]])
-    print(profile.shape)
     profile = np.mean(profile, axis=-1)
-    z = np.polyfit(np.arange(len(profile)), profile, deg=16)
-    p = np.poly1d(z)
-    xp = np.linspace(0, len(profile) - 1, 4*len(profile))
-    profile_fit = p(xp)
+    profile = np.clip(profile, np.min(profile[profile > 0.0]), None)
 
-    psf_max = np.max(profile_fit)
-    psf_mu = np.argmax(profile_fit)
-    half_max = psf_max / 2
-    half_max_left = None
-    half_max_right = None
-    for i in range(psf_mu, 0, -1):
-        if profile_fit[i] < half_max:
-            half_max_left = xp[i]
-            break
-    for i in range(psf_mu, len(profile_fit)):
-        if profile_fit[i] < half_max:
-            half_max_right = xp[i]
-            break
-    if half_max_left is None or half_max_right is None:
-        raise ValueError("Could not find half maximum in the PSF profile.")
-    fwhm = half_max_right - half_max_left
-    sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))
-    psf = 1.0/(sigma*np.sqrt(2.0*np.pi))*np.exp(-((np.arange(len(profile)) - xp[psf_mu]) ** 2) / (2 * sigma ** 2))
-    background = np.mean(profile)
-    corr = convolve(vol_data, 1.0/psf.reshape((-1, 1, 1)), mode='constant')
+    background = np.min(profile)
+    psf = (profile - background) / background
 
-    save_omezarr(da.from_array(corr), args.output_zarr, voxel_size=res,
-                 chunks=vol.chunks, n_levels=args.n_levels)
-    return
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(1, 2)
+    if args.fit_gaussian:
+        psf_max = np.max(psf)
+        psf_mu = np.argmax(psf)
+        half_max = psf_max / 2
+        half_max_right = psf_mu
+        for i in range(psf_mu, len(profile)):
+            if psf[i] < half_max:
+                half_max_right = i
+                break
+        fwhm = (half_max_right - psf_mu) * 2.0
+        sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))
+        psf = psf_max*np.exp(-((np.arange(len(profile)) - psf_mu) ** 2) / (2 * sigma ** 2))
 
-    ax[0].imshow(agarose_mask, cmap='gray')
-    ax[0].set_title('Agarose mask')
-    ax[1].plot(np.arange(len(profile)), profile)
-    ax[1].plot(xp, profile_fit)
-    ax[1].plot(x_psf, psf)
-    ax[1].set_title('Agarose profile')
-    plt.show()
-    exit()
+    if args.output_plot is not None:
+        fig, ax = plt.subplots(1, 3)
 
-    # Extract the tile shape from the filename
-    tile_shape = vol.chunks
+        ax[0].imshow(agarose_mask, cmap='gray')
+        ax[0].set_title('Agarose mask')
+        ax[1].plot(np.arange(len(profile)), profile)
+        ax[1].plot(np.repeat(background, len(profile)))
+        ax[1].set_title('Agarose profile')
+        ax[2].plot(np.arange(len(profile)), psf)
+        ax[2].set_title('Estimated PSF')
+        fig.set_size_inches(12, 5)
+        fig.savefig(args.output_plot)
 
-    # otsu threshold for identifying agarose voxels
-    bg = vol[:]
-    bg = np.ma.masked_array(bg, mask[:] > 0)
-    bg_curve = np.mean(bg, axis=(1, 2))
-
-    temp_store = zarr.TempStore()
-    vol_corr = zarr.open(temp_store, mode="w", shape=vol.shape,
-                         dtype=np.float32, chunks=tile_shape)
-
-    vol_corr[:] = vol[:]
-    vol_corr[:] /= (np.reshape(bg_curve, (-1, 1, 1)))
-    vol_corr[:] *= np.mean(bg_curve)
-    if not args.dont_mask_output:
-        vol_corr[:] = vol_corr[:] * mask[:]
+    # apply correction
+    vol_corr = vol_data / (1.0 + psf.reshape((-1, 1, 1)))
 
     # save to ome-zarr
-    dask_arr = da.from_zarr(vol_corr)
-    save_omezarr(dask_arr, args.output_zarr, scales=res, chunks=tile_shape,
-                 n_levels=args.n_levels)
+    dask_arr = da.from_array(vol_corr)
+    save_omezarr(dask_arr, args.output_zarr, voxel_size=res,
+                 chunks=vol.chunks, n_levels=args.n_levels)
 
 
 if __name__ == "__main__":

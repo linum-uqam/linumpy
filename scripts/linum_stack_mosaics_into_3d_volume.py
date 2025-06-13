@@ -30,6 +30,8 @@ def _build_arg_parser():
                    help='Path to the output stack.')
     p.add_argument('--out_offsets',
                    help='Optional output offsets file.')
+    p.add_argument('--equalize', action='store_true',
+                   help='Normalize slices between 0th and 99.9th percentile of intensities.')
     p.add_argument('--initial_search', type=int, default=20,
                    help='Initial depth for depth matching (in voxels). [%(default)s]')
     p.add_argument('--depth_offset', type=int, default=10,
@@ -161,13 +163,14 @@ def main():
         # dy and dx are inverted here to match the image coordinates
         img = apply_xy_shift(img, mosaic[:len(img), :, :], dy, dx)
 
-        # Equalize intensities
-        clip_ubound = np.percentile(img, 99.9, axis=(1, 2), keepdims=True)
-        img = np.clip(img, a_min=None, a_max=clip_ubound)
-        if img.max() - img.min() > 0.0:
-            img /= np.max(img, axis=(1, 2), keepdims=True)
-            img[np.isnan(img)] = 0.0
-            img[np.isinf(img)] = 0.0
+        # Optionally equalize slice intensities
+        if args.equalize:
+            clip_ubound = np.percentile(img, 99.9, axis=(1, 2), keepdims=True)
+            img = np.clip(img, a_min=None, a_max=clip_ubound)
+            if img.max() - img.min() > 0.0:
+                img /= np.max(img, axis=(1, 2), keepdims=True)
+                img[np.isnan(img)] = 0.0
+                img[np.isinf(img)] = 0.0
 
         if i > 0:
             prev_mosaic = mosaic[:current_z_offset]
