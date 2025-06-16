@@ -7,8 +7,8 @@ nextflow.enable.dsl = 2
 // Output: 3D reconstruction
 
 // Parameters
-params.inputDir = ""
-params.outputDir = ""
+params.input = ""
+params.output = ""
 params.resolution = 10 // Resolution of the reconstruction in micron/pixel
 params.processes = 1 // Maximum number of python processes per nextflow process
 params.depth_offset = 4 // Skip this many voxels from the top of the 3d mosaic
@@ -16,6 +16,8 @@ params.initial_search = 25 // Initial search index for mosaics stacking
 params.max_allowed_overlap = 10 // Slices are allowed to shift up to this many voxels from the initial search index
 params.axial_resolution = 1.5 // Axial resolution of imaging system in microns
 params.crop_interface_out_depth = 400 // Minimum depth of the cropped image in microns
+params.use_old_folder_structure = false // Use the old folder structure where tiles are not stored in subfolders based on their Z
+params.method = "euler" // Method for stitching, can be 'euler' or 'affine'
 
 // Processes
 process create_mosaic_grid {
@@ -80,6 +82,7 @@ process stitch_3d {
         tuple val(slice_id), path("slice_z${slice_id}_${params.resolution}um.ome.zarr")
     script:
     """
+    echo "I need to rerun this process"
     linum_stitch_3d.py ${mosaic_grid} ${transform_xy} slice_z${slice_id}_${params.resolution}um.ome.zarr
     """
 }
@@ -91,7 +94,7 @@ process beam_profile_correction {
         tuple val(slice_id), path("slice_z${slice_id}_${params.resolution}um_axial_corr.ome.zarr")
     script:
     """
-    linum_compensate_for_psf.py ${slice_3d} "slice_z${slice_id}_${params.resolution}um_axial_corr.ome.zarr"
+    linum_axial_psf_correction.py ${slice_3d} "slice_z${slice_id}_${params.resolution}um_axial_corr.ome.zarr"
     """
 }
 
@@ -130,7 +133,7 @@ process compensate_attenuation {
 }
 
 process estimate_xy_shifts_from_metadata {
-    publishDir "$params.outputDir/$task.process"
+    publishDir "$params.output/$task.process"
     input:
         path(input_dir)
     output:
@@ -142,14 +145,14 @@ process estimate_xy_shifts_from_metadata {
 }
 
 process stack_mosaics_into_3d_volume {
-    publishDir "$params.outputDir/$task.process"
+    publishDir "$params.output/$task.process"
     input:
         tuple path("inputs/*"), path("shifts_xy.csv")
     output:
         path("3d_volume.ome.zarr")
     script:
     """
-    linum_stack_mosaics_into_3d_volume.py inputs shifts_xy.csv 3d_volume.ome.zarr --initial_search $params.initial_search --depth_offset $params.depth_offset --max_allowed_overlap $params.max_allowed_overlap  --out_offsets 3d_volume_offsets.npy
+    linum_stack_mosaics_into_3d_volume.py inputs shifts_xy.csv 3d_volume.ome.zarr --initial_search $params.initial_search --depth_offset $params.depth_offset --max_allowed_overlap $params.max_allowed_overlap  --out_offsets 3d_volume_offsets.npy --method ${params.method}
     """
 }
 
@@ -165,10 +168,19 @@ process crop_interface {
 }
 
 workflow {
-    inputSlices = Channel.fromPath("$params.inputDir/tile_x*_y*_z*/", type: 'dir')
-                         .map{path -> tuple(path.toString().substring(path.toString().length() - 2), path)}
-                         .groupTuple()
-    input_dir_channel = Channel.fromPath("$params.inputDir", type: 'dir')
+    if (params.use_old_folder_structure)
+    {
+        inputSlices = Channel.fromPath("$params.input/tile_x*_y*_z*/", type: 'dir')
+                            .map{path -> tuple(path.toString().substring(path.toString().length() - 2), path)}
+                            .groupTuple()
+    }
+    else
+    {
+        inputSlices = Channel.fromPath("$params.input/**/tile_x*_y*_z*/", type: 'dir')
+                            .map{path -> tuple(path.toString().substring(path.toString().length() - 2), path)}
+                            .groupTuple()
+    }
+    input_dir_channel = Channel.fromPath("$params.input", type: 'dir')
 
     // Generate a 3D mosaic grid.
     create_mosaic_grid(inputSlices)

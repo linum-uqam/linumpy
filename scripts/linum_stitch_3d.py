@@ -88,6 +88,8 @@ def main():
             cmin = j * tile_shape[2]
             cmax = (j + 1) * tile_shape[2]
             tile = volume[:, rmin:rmax, cmin:cmax]
+            if np.any(tile < 0.0):
+                tile -= tile.min()  # Ensure no negative values in the tile
 
             # Get the position within the mosaic
             pos = positions[i * ny + j]
