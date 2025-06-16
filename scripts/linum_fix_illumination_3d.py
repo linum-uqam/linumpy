@@ -108,7 +108,11 @@ def process_tile(params: dict):
             rmax = (i + 1) * tile_shape[0]
             cmin = j * tile_shape[1]
             cmax = (j + 1) * tile_shape[1]
-            vol_output[rmin:rmax, cmin:cmax] = tiles_corrected[i * ny + j]
+            t = tiles_corrected[i * ny + j]
+            if np.isnan(t).any():
+                print(f"NaN values found in tile {i}, {j} at z={z}. Replacing with zeros.")
+                t = np.nan_to_num(t, nan=0.0, posinf=0.0, neginf=0.0)
+            vol_output[rmin:rmax, cmin:cmax] = t
 
     io.imsave(str(file_output), vol_output)
 
@@ -145,7 +149,7 @@ def main():
     if n_cpus > 1:
         # Process the tiles in parallel
         corrected_files = pqdm(params_list, process_tile, n_jobs=n_cpus,
-                               desc="Processing tiles")
+                               desc="Processing tiles", exception_behaviour='immediate')
     else:  # process sequentially
         corrected_files = []
         for param in tqdm(params_list):

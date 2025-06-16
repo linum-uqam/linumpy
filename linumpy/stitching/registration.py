@@ -385,7 +385,7 @@ def align_images_sitk(im1, im2):
     return deltas, m
 
 
-def register_consecutive_3d_mosaics(prev_mosaic_bottom_slice, current_mosaic):
+def register_consecutive_3d_mosaics(prev_mosaic_bottom_slice, current_mosaic, method='euler'):
     current_mosaic_top_slice = current_mosaic[0, :, :]
 
     # Type cast everything to float32
@@ -407,8 +407,15 @@ def register_consecutive_3d_mosaics(prev_mosaic_bottom_slice, current_mosaic):
     )
     R.SetOptimizerScalesFromIndexShift()
 
+    if method == 'euler':
+        sitkTransform = sitk.Euler2DTransform()
+    elif method == 'affine':
+        sitkTransform = sitk.AffineTransform(2)
+    else:
+        raise ValueError("Unknown method: {}".format(method))
+
     tx = sitk.CenteredTransformInitializer(fixed_sitk_image, moving_sitk_image,
-                                           sitk.Euler2DTransform())
+                                           sitkTransform)
     R.SetInitialTransform(tx)
 
     R.SetInterpolator(sitk.sitkLinear)

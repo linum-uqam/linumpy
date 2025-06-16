@@ -38,6 +38,9 @@ def _build_arg_parser():
                    help='Offset from interface for each volume. [%(default)s]')
     p.add_argument('--max_allowed_overlap', type=int, default=5,
                    help='Maximum allowed overlap for the alignment. [%(default)s]')
+    p.add_argument('--method', type=str, default='euler',
+                   choices=['euler', 'affine'],
+                   help='Method for the alignment. [%(default)s]')
     return p
 
 
@@ -85,12 +88,12 @@ def compute_volume_shape(mosaics_files, mosaics_depth,
     return volume_shape, x0, y0
 
 
-def align_sitk_2d(prev_mosaic, img, max_allowed_overlap):
+def align_sitk_2d(prev_mosaic, img, max_allowed_overlap, method):
     best_offset = 0
     min_error = np.inf
     best_warp = np.zeros(img.shape)
     for i in range(1, max_allowed_overlap + 1):
-        warped_img, error = register_consecutive_3d_mosaics(prev_mosaic[-i, :, :], img)
+        warped_img, error = register_consecutive_3d_mosaics(prev_mosaic[-i, :, :], img, method)
         if error < min_error:
             min_error = error
             best_offset = i
@@ -175,7 +178,9 @@ def main():
         if i > 0:
             prev_mosaic = mosaic[:current_z_offset]
             best_offset = 1
-            img, best_offset = align_sitk_2d(prev_mosaic, img, args.max_allowed_overlap)
+            img, best_offset = align_sitk_2d(prev_mosaic, img,
+                                             args.max_allowed_overlap,
+                                             args.method)
 
             # Add the overlapping slice to the volume
             zmax = min(len(img), mosaic.shape[0] - current_z_offset)
