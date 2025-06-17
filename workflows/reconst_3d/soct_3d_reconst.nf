@@ -82,7 +82,6 @@ process stitch_3d {
         tuple val(slice_id), path("slice_z${slice_id}_${params.resolution}um.ome.zarr")
     script:
     """
-    echo "I need to rerun this process"
     linum_stitch_3d.py ${mosaic_grid} ${transform_xy} slice_z${slice_id}_${params.resolution}um.ome.zarr
     """
 }
@@ -95,40 +94,6 @@ process beam_profile_correction {
     script:
     """
     linum_axial_psf_correction.py ${slice_3d} "slice_z${slice_id}_${params.resolution}um_axial_corr.ome.zarr"
-    """
-}
-
-process estimate_attenuation {
-    input:
-        tuple val(slice_id), path(slice_3d)
-    output:
-        tuple val(slice_id), path("slice_z${slice_id}_${params.resolution}um_attn.ome.zarr")
-    script:
-    """
-    linum_compute_attenuation.py ${slice_3d} "slice_z${slice_id}_${params.resolution}um_attn.ome.zarr"
-    """
-}
-
-process compute_attenuation_bias {
-    input:
-        tuple val(slice_id), path(slice_attn)
-    output:
-        tuple val(slice_id), path("slice_z${slice_id}_${params.resolution}um_bias.ome.zarr")
-    script:
-    """
-    # NOTE: --isInCM argument is required, else we get data overflow
-    linum_compute_attenuation_bias_field.py ${slice_attn} "slice_z${slice_id}_${params.resolution}um_bias.ome.zarr" --isInCM
-    """
-}
-
-process compensate_attenuation {
-    input:
-        tuple val(slice_id), path(slice_3d), path(bias)
-    output:
-        tuple val(slice_id), path("slice_z${slice_id}_${params.resolution}um_fixAttn.ome.zarr")
-    script:
-    """
-    linum_compensate_attenuation.py ${slice_3d} ${bias} "slice_z${slice_id}_${params.resolution}um_fixAttn.ome.zarr"
     """
 }
 
