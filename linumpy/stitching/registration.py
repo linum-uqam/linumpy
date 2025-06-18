@@ -385,14 +385,19 @@ def align_images_sitk(im1, im2):
     return deltas, m
 
 
-def register_consecutive_3d_mosaics(prev_mosaic_bottom_slice, current_mosaic, method='euler'):
+def register_consecutive_3d_mosaics(ref_image, current_mosaic, method='euler',
+                                    learning_rate=2.0, min_step=1e-6,
+                                    n_iterations=500, grad_mag_tolerance=1e-8):
+    """
+    2D register the top slice of `current_mosaic` to `ref_image` using SimpleITK.
+    """
     current_mosaic_top_slice = current_mosaic[0, :, :]
 
     # Type cast everything to float32
-    prev_mosaic_bottom_slice = prev_mosaic_bottom_slice.astype(np.float32)
+    ref_image = ref_image.astype(np.float32)
     current_mosaic_top_slice = current_mosaic_top_slice.astype(np.float32)
 
-    fixed_sitk_image = sitk.GetImageFromArray(prev_mosaic_bottom_slice)
+    fixed_sitk_image = sitk.GetImageFromArray(ref_image)
     moving_sitk_image = sitk.GetImageFromArray(current_mosaic_top_slice)
 
     R = sitk.ImageRegistrationMethod()
@@ -400,10 +405,10 @@ def register_consecutive_3d_mosaics(prev_mosaic_bottom_slice, current_mosaic, me
     R.SetMetricAsCorrelation()
 
     R.SetOptimizerAsRegularStepGradientDescent(
-        learningRate=2.0,
-        minStep=1e-6,
-        numberOfIterations=500,
-        gradientMagnitudeTolerance=1e-8,
+        learningRate=learning_rate,
+        minStep=min_step,
+        numberOfIterations=n_iterations,
+        gradientMagnitudeTolerance=grad_mag_tolerance,
     )
     R.SetOptimizerScalesFromIndexShift()
 
