@@ -166,8 +166,13 @@ def main():
         vol_output[z] = slice_vol[:]
 
     out_dask = da.from_zarr(vol_output)
+    min_value = out_dask.min().compute()
+    if min_value < 0:
+        print(f"Minimum value in the output volume is {min_value}. Rescaling so minimum is 0.")
+        out_dask = out_dask - min_value
+
     save_omezarr(out_dask, output_zarr, voxel_size=resolution,
-              chunks=vol.chunks)
+                 chunks=vol.chunks)
 
     # Remove the temporary slice files used by the parallel processes
     tmp_dir.cleanup()
