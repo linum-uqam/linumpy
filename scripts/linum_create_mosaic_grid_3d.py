@@ -217,7 +217,7 @@ def main():
     # Convert to ome-zarr
     mosaic_dask = da.from_zarr(mosaic)
     save_omezarr(mosaic_dask, args.output_zarr, voxel_size=output_resolution,
-              chunks=tile_size, n_levels=args.n_levels)
+                 chunks=tile_size, n_levels=args.n_levels)
 
 
 if __name__ == "__main__":
