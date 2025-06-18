@@ -38,9 +38,16 @@ def _build_arg_parser():
                    help='Offset from interface for each volume. [%(default)s]')
     p.add_argument('--max_allowed_overlap', type=int, default=5,
                    help='Maximum allowed overlap for the alignment. [%(default)s]')
-    p.add_argument('--method', type=str, default='euler',
-                   choices=['euler', 'affine'],
+    p.add_argument('--method', type=str, default='euler', choices=['euler', 'affine'],
                    help='Method for the alignment. [%(default)s]')
+    p.add_argument('--learning_rate', type=float, default=2.0,
+                   help='Learning rate for the registration. [%(default)s]')
+    p.add_argument('--min_step', type=float, default=1e-6,
+                   help='Minimum step for the registration. [%(default)s]')
+    p.add_argument('--n_iterations', type=int, default=500,
+                   help='Number of iterations for the registration. [%(default)s]')
+    p.add_argument('--grad_mag_tolerance', type=float, default=1e-8,
+                   help='Gradient magnitude tolerance for the registration. [%(default)s]')
     return p
 
 
@@ -88,12 +95,16 @@ def compute_volume_shape(mosaics_files, mosaics_depth,
     return volume_shape, x0, y0
 
 
-def align_sitk_2d(prev_mosaic, img, max_allowed_overlap, method):
+def align_sitk_2d(prev_mosaic, img, max_allowed_overlap,
+                  method, learning_rate, min_step,
+                  n_iterations, grad_mag_tolerance):
     best_offset = 0
     min_error = np.inf
     best_warp = np.zeros(img.shape)
     for i in range(1, max_allowed_overlap + 1):
-        warped_img, error = register_consecutive_3d_mosaics(prev_mosaic[-i, :, :], img, method)
+        warped_img, error = register_consecutive_3d_mosaics(
+            prev_mosaic[-i, :, :], img, method, learning_rate,
+            min_step, n_iterations, grad_mag_tolerance)
         if error < min_error:
             min_error = error
             best_offset = i
@@ -180,7 +191,9 @@ def main():
             best_offset = 1
             img, best_offset = align_sitk_2d(prev_mosaic, img,
                                              args.max_allowed_overlap,
-                                             args.method)
+                                             args.method, args.learning_rate,
+                                             args.min_step, args.n_iterations,
+                                             args.grad_mag_tolerance)
 
             # Add the overlapping slice to the volume
             zmax = min(len(img), mosaic.shape[0] - current_z_offset)
