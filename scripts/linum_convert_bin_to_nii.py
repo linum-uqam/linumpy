@@ -41,8 +41,8 @@ def main():
     output.parent.mkdir(exist_ok=True, parents=True)
 
     # Load the oct data
-    oct = OCT()
-    vol = oct.load_image(args.input)
+    oct = OCT(args.input)
+    vol = oct.load_image()
 
     # Swap axes to have XYZ instead of ZXY
     vol = np.moveaxis(vol, (0, 1, 2), (2, 0, 1))

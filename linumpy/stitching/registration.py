@@ -5,8 +5,13 @@ import SimpleITK as sitk
 import numpy as np
 from skimage.feature import peak_local_max
 
+from dipy.align.imaffine import AffineRegistration, VerbosityLevels
+from dipy.align.metrics import CCMetric
+from dipy.align.transforms import AffineTransform2D, RigidTransform2D
+
 from linumpy.preproc import icorr
 from linumpy.stitching.stitch_utils import getOverlap
+
 
 
 def pairWisePhaseCorrelation(
@@ -329,6 +334,7 @@ def ITKRegistration(
     MI = reg.GetMetricValue()
     return deltas, MI
 
+
 def align_images_sitk(im1, im2):
     #plt.subplot(121)
     #plt.imshow(im1)
@@ -382,3 +388,97 @@ def align_images_sitk(im1, im2):
     deltas = [dx, dy]
     m = R.GetMetricValue()
     return deltas, m
+
+
+def register_consecutive_3d_mosaics(ref_image, current_mosaic, method='euler',
+                                    learning_rate=2.0, min_step=1e-6,
+                                    n_iterations=500, grad_mag_tolerance=1e-8):
+    """
+    2D register the top slice of `current_mosaic` to `ref_image` using SimpleITK.
+    """
+    current_mosaic_top_slice = current_mosaic[0, :, :]
+
+    # Type cast everything to float32
+    ref_image = ref_image.astype(np.float32)
+    current_mosaic_top_slice = current_mosaic_top_slice.astype(np.float32)
+
+    fixed_sitk_image = sitk.GetImageFromArray(ref_image)
+    moving_sitk_image = sitk.GetImageFromArray(current_mosaic_top_slice)
+
+    R = sitk.ImageRegistrationMethod()
+
+    R.SetMetricAsMeanSquares()
+
+    R.SetOptimizerAsRegularStepGradientDescent(
+        learningRate=learning_rate,
+        minStep=min_step,
+        numberOfIterations=n_iterations,
+        gradientMagnitudeTolerance=grad_mag_tolerance,
+    )
+    R.SetShrinkFactorsPerLevel([4, 2, 1])
+    R.SetSmoothingSigmasPerLevel([3, 1, 0])
+    R.SetOptimizerScalesFromIndexShift()
+
+    if method == 'euler':
+        sitkTransform = sitk.Euler2DTransform()
+    elif method == 'affine':
+        sitkTransform = sitk.AffineTransform(2)
+    else:
+        raise ValueError("Unknown method: {}".format(method))
+
+    tx = sitk.CenteredTransformInitializer(fixed_sitk_image,
+                                           moving_sitk_image,
+                                           sitkTransform)
+    R.SetInitialTransform(tx)
+
+    R.SetInterpolator(sitk.sitkLinear)
+
+    out_transform = R.Execute(fixed_sitk_image, moving_sitk_image)
+
+    output_volume = np.zeros((len(current_mosaic), ref_image.shape[0], ref_image.shape[1]))
+    for i, moving in enumerate(current_mosaic):
+        moving_sitk_image = sitk.GetImageFromArray(moving)
+
+        resampler = sitk.ResampleImageFilter()
+        resampler.SetReferenceImage(fixed_sitk_image)
+        resampler.SetInterpolator(sitk.sitkLinear)
+        resampler.SetDefaultPixelValue(0)
+        resampler.SetTransform(out_transform)
+
+        out = resampler.Execute(moving_sitk_image)
+        out = sitk.GetArrayFromImage(out)
+
+        output_volume[i, :, :] = out
+
+    return output_volume, R.GetMetricValue()
+
+
+def register_slices_dipy(fixed, moving, level_iters=[10000, 1000, 100],
+                         sigmas=[3, 1, 0], factors=[4, 2, 1], method='affine'):
+    """Register slices using Dipy's registration module."""
+    metric = CCMetric(2)
+    registration = AffineRegistration(metric=metric, level_iters=level_iters, sigmas=sigmas,
+                                      factors=factors, verbosity=VerbosityLevels.NONE)
+
+    if method == 'affine':
+        transform = AffineTransform2D()
+    elif method == 'euler':
+        transform = RigidTransform2D()
+    else:
+        raise ValueError(f'Unknown method {method} for registration.')
+
+    affine_map, _, fopt = registration.optimize(
+        fixed, moving, transform, None, ret_metric=True)
+
+    return affine_map, fopt
+
+
+def apply_2d_transform_to_volume(affine_map, volume):
+    """Apply a 2D transform to each slice of a 3D volume."""
+    transformed_volume = np.zeros_like(volume)
+    for i in range(volume.shape[0]):
+        slice_2d = volume[i, :, :]
+        transformed_slice = affine_map.transform(slice_2d)
+        transformed_volume[i, :, :] = transformed_slice
+
+    return transformed_volume

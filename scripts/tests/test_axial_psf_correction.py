@@ -3,5 +3,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(['linum_create_all_mosaicgrids.py', '--help'])
+    ret = script_runner.run(['linum_axial_psf_correction.py', '--help'])
     assert ret.success

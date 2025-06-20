@@ -124,7 +124,7 @@ process resample_stack {
     input:
         path stack
     output:
-        tuple path("stack_10um.nii.gz"), path("stack_10um_iso.nii.gz")
+        tuple path("stack_10um.nii.gz")
     script:
     """
     linum_convert_omezarr_to_nifti.py $stack stack_10um.nii.gz --resolution ${params.resolution_nifti}

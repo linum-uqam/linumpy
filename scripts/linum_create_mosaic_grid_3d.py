@@ -37,6 +37,8 @@ def _build_arg_parser():
     options_g = p.add_argument_group("other options")
     options_g.add_argument("-r", "--resolution", type=float, default=10.0,
                            help="Output isotropic resolution in micron per pixel. [%(default)s]")
+    options_g.add_argument("--axial_resolution", type=float, default=3.5,
+                           help='Axial resolution of the raw data in microns.')
     options_g.add_argument("-z", "--slice", type=int,
                            help="Slice to process.")
     options_g.add_argument("--keep_galvo_return", action="store_true",
@@ -158,7 +160,7 @@ def main():
 
     # Prepare the mosaic_grid
     if data_type == 'OCT':
-        oct = OCT(tiles[0])
+        oct = OCT(tiles[0], args.axial_resolution)
         vol = oct.load_image(crop=crop)
         vol = preprocess_volume(vol)
         resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
@@ -215,7 +217,7 @@ def main():
     # Convert to ome-zarr
     mosaic_dask = da.from_zarr(mosaic)
     save_omezarr(mosaic_dask, args.output_zarr, voxel_size=output_resolution,
-              chunks=tile_size, n_levels=args.n_levels)
+                 chunks=tile_size, n_levels=args.n_levels)
 
 
 if __name__ == "__main__":
