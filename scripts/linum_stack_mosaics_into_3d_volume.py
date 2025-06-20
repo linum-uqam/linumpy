@@ -28,6 +28,8 @@ def _build_arg_parser():
                    help='Path to the file containing the XY shifts.')
     p.add_argument('out_stack',
                    help='Path to the output stack.')
+    p.add_argument('--exclude', nargs='+', type=int,
+                   help='Slices to excludes from reconstruction.')
     p.add_argument('--out_offsets',
                    help='Optional output offsets file.')
     p.add_argument('--equalize', action='store_true',
@@ -100,7 +102,7 @@ def align_sitk_2d(prev_mosaic, img, max_allowed_overlap,
                   n_iterations, grad_mag_tolerance):
     best_offset = 0
     min_error = np.inf
-    best_warp = np.zeros(img.shape)
+    best_warp = np.zeros((len(img), prev_mosaic.shape[1], prev_mosaic.shape[2]))
     for i in range(1, max_allowed_overlap + 1):
         warped_img, error = register_consecutive_3d_mosaics(
             prev_mosaic[-i, :, :], img, method, learning_rate,
@@ -122,18 +124,23 @@ def main():
     mosaics_files.sort()
     pattern = r".*z(\d+)_.*"
     slice_ids = []
+    cleaned_mosaics_files = []
     for f in mosaics_files:
         foo = re.match(pattern, f.name)
-        slice_ids.append(int(foo.groups()[0]))
-    slice_ids = np.array(slice_ids)
+        id = int(foo.groups()[0])
+        if id not in args.exclude:
+            slice_ids.append(id)
+            cleaned_mosaics_files.append(f)
 
-    # when indexing does not start from 0, we need to shift the slice ids
-    slice_ids -= np.min(slice_ids)
+    slice_ids = np.array(slice_ids)
+    slice_skip = slice_ids[1:] - slice_ids[:-1]
+    print(slice_skip)
 
     # Load cvs containing the shift values for each slice
     df = pd.read_csv(args.in_xy_shifts)
 
     # We load the shifts in mm, but we need to convert them to pixels
+    # The shifts are only useful for computing the out shape
     dx_list = np.array(df["x_shift_mm"].tolist())
     dy_list = np.array(df["y_shift_mm"].tolist())
 
@@ -158,24 +165,13 @@ def main():
     z_offsets = [0]
 
     # Loop over the slices
-    for i in tqdm(range(len(mosaics_files)), unit="slice", desc="Stacking slices"):
+    for i in tqdm(range(len(cleaned_mosaics_files)), unit="slice", desc="Stacking slices"):
         # Load the slice
-        f = mosaics_files[i]
+        f = cleaned_mosaics_files[i]
         current_z_offset = z_offsets[-1]
 
         img, res = read_omezarr(f)
         img = img[start_index:]
-
-        # Get the shift values for the slice
-        dx = x0
-        dy = y0
-        if i > 0:
-            dx += np.cumsum(dx_list)[i - 1]
-            dy += np.cumsum(dy_list)[i - 1]
-
-        # Apply the shift as an initial alignment
-        # dy and dx are inverted here to match the image coordinates
-        img = apply_xy_shift(img, mosaic[:len(img), :, :], dy, dx)
 
         # Optionally equalize slice intensities
         if args.equalize:
@@ -190,7 +186,7 @@ def main():
             prev_mosaic = mosaic[:current_z_offset]
             best_offset = 1
             img, best_offset = align_sitk_2d(prev_mosaic, img,
-                                             args.max_allowed_overlap,
+                                             args.max_allowed_overlap*slice_skip[i - 1],
                                              args.method, args.learning_rate,
                                              args.min_step, args.n_iterations,
                                              args.grad_mag_tolerance)
@@ -200,13 +196,16 @@ def main():
             mosaic[current_z_offset - best_offset:
                    current_z_offset + zmax - best_offset] = img[:zmax]
 
-            current_z_offset += mosaics_depth - best_offset
-
         else:  # only true at very first iteration
+            # this step only to resample to output volume dimensions
+            img = apply_xy_shift(img, mosaic[:len(img), :, :], y0, x0)
             mosaic[:len(img), :, :] = img
-            current_z_offset += mosaics_depth
+            best_offset = 0
 
-        z_offsets.append(current_z_offset)
+        if i < len(slice_skip):
+            n_skips = slice_skip[i]
+            current_z_offset += n_skips*mosaics_depth - best_offset
+            z_offsets.append(current_z_offset)
 
     # save the z offsets in npz
     if args.out_offsets is not None:
