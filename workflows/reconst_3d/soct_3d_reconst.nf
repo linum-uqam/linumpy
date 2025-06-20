@@ -15,13 +15,13 @@ params.depth_offset = 4 // Skip this many voxels from the top of the 3d mosaic
 params.initial_search = 25 // Initial search index for mosaics stacking
 params.max_allowed_overlap = 10 // Slices are allowed to shift up to this many voxels from the initial search index
 params.axial_resolution = 1.5 // Axial resolution of imaging system in microns
-params.crop_interface_out_depth = 400 // Minimum depth of the cropped image in microns
+params.crop_interface_out_depth = 600 // Minimum depth of the cropped image in microns
 params.use_old_folder_structure = false // Use the old folder structure where tiles are not stored in subfolders based on their Z
 params.method = "euler" // Method for stitching, can be 'euler' or 'affine'
 params.learning_rate = 2.0 // Learning rate for the 3D stacking algorithm
-params.min_step = 1e-6 // Minimum step size for the 3D stacking algorithm
-params.n_iterations = 500 // Number of iterations for the 3D stacking algorithm
-params.grad_mag_tolerance = 1e-8 // Gradient magnitude tolerance for the 3D stacking algorithm
+params.min_step = 1e-12 // Minimum step size for the 3D stacking algorithm
+params.n_iterations = 10000 // Number of iterations for the 3D stacking algorithm
+params.grad_mag_tolerance = 1e-12 // Gradient magnitude tolerance for the 3D stacking algorithm
 
 // Processes
 process create_mosaic_grid {
@@ -169,7 +169,7 @@ workflow {
     // Extract tile position (XY) from AIP mosaic grid
     estimate_xy_transformation(generate_aip.out)
 
-    // Stitch the tile in 3D
+    // Stitch the tiles in 3D mosaics
     stitch_3d(fix_illumination.out.combine(estimate_xy_transformation.out, by:0))
 
     // Crop at interface

@@ -5,8 +5,13 @@ import SimpleITK as sitk
 import numpy as np
 from skimage.feature import peak_local_max
 
+from dipy.align.imaffine import AffineRegistration, VerbosityLevels
+from dipy.align.metrics import CCMetric
+from dipy.align.transforms import AffineTransform2D, RigidTransform2D
+
 from linumpy.preproc import icorr
 from linumpy.stitching.stitch_utils import getOverlap
+
 
 
 def pairWisePhaseCorrelation(
@@ -402,7 +407,7 @@ def register_consecutive_3d_mosaics(ref_image, current_mosaic, method='euler',
 
     R = sitk.ImageRegistrationMethod()
 
-    R.SetMetricAsCorrelation()
+    R.SetMetricAsMeanSquares()
 
     R.SetOptimizerAsRegularStepGradientDescent(
         learningRate=learning_rate,
@@ -410,6 +415,8 @@ def register_consecutive_3d_mosaics(ref_image, current_mosaic, method='euler',
         numberOfIterations=n_iterations,
         gradientMagnitudeTolerance=grad_mag_tolerance,
     )
+    R.SetShrinkFactorsPerLevel([4, 2, 1])
+    R.SetSmoothingSigmasPerLevel([3, 1, 0])
     R.SetOptimizerScalesFromIndexShift()
 
     if method == 'euler':
@@ -419,7 +426,8 @@ def register_consecutive_3d_mosaics(ref_image, current_mosaic, method='euler',
     else:
         raise ValueError("Unknown method: {}".format(method))
 
-    tx = sitk.CenteredTransformInitializer(fixed_sitk_image, moving_sitk_image,
+    tx = sitk.CenteredTransformInitializer(fixed_sitk_image,
+                                           moving_sitk_image,
                                            sitkTransform)
     R.SetInitialTransform(tx)
 
@@ -427,7 +435,7 @@ def register_consecutive_3d_mosaics(ref_image, current_mosaic, method='euler',
 
     out_transform = R.Execute(fixed_sitk_image, moving_sitk_image)
 
-    output_volume = np.zeros_like(current_mosaic)
+    output_volume = np.zeros((len(current_mosaic), ref_image.shape[0], ref_image.shape[1]))
     for i, moving in enumerate(current_mosaic):
         moving_sitk_image = sitk.GetImageFromArray(moving)
 
@@ -443,3 +451,34 @@ def register_consecutive_3d_mosaics(ref_image, current_mosaic, method='euler',
         output_volume[i, :, :] = out
 
     return output_volume, R.GetMetricValue()
+
+
+def register_slices_dipy(fixed, moving, level_iters=[10000, 1000, 100],
+                         sigmas=[3, 1, 0], factors=[4, 2, 1], method='affine'):
+    """Register slices using Dipy's registration module."""
+    metric = CCMetric(2)
+    registration = AffineRegistration(metric=metric, level_iters=level_iters, sigmas=sigmas,
+                                      factors=factors, verbosity=VerbosityLevels.NONE)
+
+    if method == 'affine':
+        transform = AffineTransform2D()
+    elif method == 'euler':
+        transform = RigidTransform2D()
+    else:
+        raise ValueError(f'Unknown method {method} for registration.')
+
+    affine_map, _, fopt = registration.optimize(
+        fixed, moving, transform, None, ret_metric=True)
+
+    return affine_map, fopt
+
+
+def apply_2d_transform_to_volume(affine_map, volume):
+    """Apply a 2D transform to each slice of a 3D volume."""
+    transformed_volume = np.zeros_like(volume)
+    for i in range(volume.shape[0]):
+        slice_2d = volume[i, :, :]
+        transformed_slice = affine_map.transform(slice_2d)
+        transformed_volume[i, :, :] = transformed_slice
+
+    return transformed_volume
