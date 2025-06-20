@@ -28,7 +28,7 @@ def _build_arg_parser():
                    help='Path to the file containing the XY shifts.')
     p.add_argument('out_stack',
                    help='Path to the output stack.')
-    p.add_argument('--exclude', nargs='+', type=int,
+    p.add_argument('--exclude', nargs='+', type=int, default=[],
                    help='Slices to excludes from reconstruction.')
     p.add_argument('--out_offsets',
                    help='Optional output offsets file.')
