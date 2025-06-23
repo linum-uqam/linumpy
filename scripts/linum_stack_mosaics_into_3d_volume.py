@@ -89,8 +89,6 @@ def compute_volume_shape(mosaics_files, mosaics_depth,
     nx = int((x1 - x0))
     ny = int((y1 - y0))
 
-    # TODO: Handle the case where resolution does not perfectly
-    # divides the slicing interval
     # Important!!! The +1 is to make sure that the last mosaic
     # fits in the volume for the case where the best offset is always 1
     volume_shape = (mosaics_depth*len(mosaics_files) + 1, nx, ny)
