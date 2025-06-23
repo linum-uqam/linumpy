@@ -17,6 +17,9 @@ from linumpy.io.zarr import read_omezarr
 from linumpy.feature.orientation import\
     _make_xfilter, _make_yfilter, _make_zfilter
 
+import zarr
+import dask.array as da
+
 
 EPILOG="""
 [1] Schilling et al, "Comparison of 3D orientation distribution functions
@@ -68,42 +71,16 @@ def gaussian_derivative(sigma):
     return ret
 
 
-def convolve_zarr(volume, kernel, output):
-    """
-    Convolve a zarr array with a kernel.
-    """
-    chunk_size = volume.chunks
-
-    padding = np.array(kernel.shape) // 2
-    n_chunks_z = int(np.ceil(volume.shape[0] / chunk_size[0]))
-    n_chunks_x = int(np.ceil(volume.shape[1] / chunk_size[1]))
-    n_chunks_y = int(np.ceil(volume.shape[2] / chunk_size[2]))
-    for i in range(n_chunks_z):
-        for i in range(n_chunks_x):
-            for j in range(n_chunks_y):
-                x_lb = i * chunk_size[1]
-                x_ub = min((i + 1) * chunk_size[1], volume.shape[1])
-                y_lb = j * chunk_size[2]
-                y_ub = min((j + 1) * chunk_size[2], volume.shape[2])
-                chunk = volume[:, x_lb:x_ub, y_lb:y_ub]
-                filtered_chunk = convolve(chunk, kernel, mode='wrap')
-                output[:, x_lb:x_ub, y_lb:y_ub] = filtered_chunk
-
-
 def main():
     parser = _build_arg_parser()
     args = parser.parse_args()
 
     if '.ome.zarr' in args.in_image:
         data, res = read_omezarr(args.in_image, level=args.level)
-        data = np.moveaxis(data, (0, 1, 2), (2, 1, 0))
-        data = np.swapaxes(data, 0, 1)
-    elif '.nii' in args.in_image:
-        nifti_img = nib.load(args.in_image)
-        data = nifti_img.get_fdata()
-        res = nifti_img.header.get_zooms()[:3]
+        # data = np.moveaxis(data, (0, 1, 2), (2, 1, 0))
+        # data = np.swapaxes(data, 0, 1)
     else:
-        raise ValueError("Input image must be in .ome.zarr or .nii format.")
+        parser.error("Input image must be .ome.zarr.")
 
     data = normalize(data, 1, 99.99)
 
@@ -112,9 +89,25 @@ def main():
 
     # 1. Estimate derivatives f_x, f_y, f_z
     # For estimating derivatives (function of sigma)
-    dx = _make_xfilter(gaussian_derivative(sigma_to_vox[0]))
-    dy = _make_yfilter(gaussian_derivative(sigma_to_vox[1]))
-    dz = _make_zfilter(gaussian_derivative(sigma_to_vox[2]))
+    dx_filter = _make_xfilter(gaussian_derivative(sigma_to_vox[0]))
+    dy_filter = _make_yfilter(gaussian_derivative(sigma_to_vox[1]))
+    dz_filter = _make_zfilter(gaussian_derivative(sigma_to_vox[2]))
+
+    derivatives = []
+    # TODO: Use zarr to store derivatives
+    # TODO: Use dask for computing derivatives
+    dx = da.from_zarr(data, chunks=data.chunks)
+    dy = da.from_zarr(data, chunks=data.chunks)
+    dz = da.from_zarr(data, chunks=data.chunks)
+    dx = dx.map_overlap(lambda x: convolve(x, dx_filter),
+                        depth=dx_filter.size//2)
+    dy = dy.map_overlap(lambda x: convolve(x, dy_filter),
+                        depth=dy_filter.size//2)
+    dz = dz.map_overlap(lambda x: convolve(x, dz_filter),
+                        depth=dz_filter.size//2)
+    derivatives.append(dx)
+    derivatives.append(dy)
+    derivatives.append(dz)
 
     # Windowing function (function of rho)
     gaussian_filters = []
@@ -122,13 +115,7 @@ def main():
     gaussian_filters.append(_make_yfilter(gaussian(rho_to_vox[1])))
     gaussian_filters.append(_make_zfilter(gaussian(rho_to_vox[2])))
 
-    derivatives = []
-    # TODO: Use zarr to store derivatives
-    # TODO: Use dask for computing derivatives
-    derivatives.append(convolve(data, dx, mode='wrap'))
-    derivatives.append(convolve(data, dy, mode='wrap'))
-    derivatives.append(convolve(data, dz, mode='wrap'))
-
+    # TODO: Chain dask operations to get to the principal eigen vector
     # 2. Build structure tensor
     ST = np.zeros(data.shape + (3, 3))
     for i in range(3):
@@ -157,6 +144,7 @@ def main():
     n_chunks_per_axis = np.ceil(np.asarray(data.shape) / np.asarray(new_voxel_size_to_vox)).astype(int)
 
     # 4. Create histogram for each new voxel
+    # TODO: Support uneven division of image
     sphere = HemiSphere.from_sphere(get_sphere(name='repulsion100'))
     b_mat, b_inv = sh_to_sf_matrix(sphere, sh_order_max=8)
     sh = np.zeros(np.append(n_chunks_per_axis, b_mat.shape[0]))
