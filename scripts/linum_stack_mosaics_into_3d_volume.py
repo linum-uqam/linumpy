@@ -134,7 +134,6 @@ def main():
 
     slice_ids = np.array(slice_ids)
     slice_skip = slice_ids[1:] - slice_ids[:-1]
-    print(slice_skip)
 
     # Load cvs containing the shift values for each slice
     df = pd.read_csv(args.in_xy_shifts)
@@ -145,7 +144,7 @@ def main():
     dy_list = np.array(df["y_shift_mm"].tolist())
 
     # assume that the resolution is the same for all slices
-    img, res = read_omezarr(mosaics_files[0])
+    img, res = read_omezarr(mosaics_files[slice_ids[0]])
     dx_list /= res[-2]
     dy_list /= res[-1]
 
