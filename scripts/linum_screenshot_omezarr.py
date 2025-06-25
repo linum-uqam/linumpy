@@ -31,11 +31,11 @@ def main():
     parser = _build_arg_parser()
     args = parser.parse_args()
 
-    image, res = read_omezarr(args.in_zarr)
+    image, _ = read_omezarr(args.in_zarr)
 
-    z_slice = args.z_slice or image.shape[0]//2
-    x_slice = args.x_slice or image.shape[1]//2
-    y_slice = args.y_slice or image.shape[2]//2
+    z_slice = args.z_slice if args.z_slice is not None else image.shape[0]//2
+    x_slice = args.x_slice if args.x_slice is not None else image.shape[1]//2
+    y_slice = args.y_slice if args.y_slice is not None else image.shape[2]//2
 
     image_z = image[z_slice, :, :].T
     image_x = image[:, x_slice, :]
