@@ -429,9 +429,9 @@ def register_mosaic_3d_to_reference_2d(ref_image, current_mosaic, method='euler'
 
     R = sitk.ImageRegistrationMethod()
 
-    if method == 'MSE':
+    if metric == 'MSE':
         R.SetMetricAsMeanSquares()
-    elif method == 'CC':
+    elif metric == 'CC':
         R.SetMetricAsCorrelation()
     else:
         raise ValueError("Unknown metric: {}".format(metric))
