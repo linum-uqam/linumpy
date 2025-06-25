@@ -9,12 +9,13 @@ import dask.array as da
 
 def get_data(name):
     data = {
-        'mosaic_3d_omezarr': _get_mosaic_3d_omezarr(),
-        'raw_tiles': _get_raw_tiles()
+        'mosaic_3d_omezarr': _get_mosaic_3d_omezarr,
+        'raw_tiles': _get_raw_tiles,
+        'aip': _get_aip
     }
     if name not in data.keys():
         raise ValueError(f'Unknown key for data: {name}')
-    return data[name]
+    return data[name]()
 
 
 def _create_linumpy_home_if_not_exists():
@@ -27,35 +28,46 @@ def _get_mosaic_3d_omezarr():
     filename = os.path.join(LINUMPY_HOME, 'mosaic_3d.ome.zarr')
     if not os.path.exists(filename):
         # create test data
-        data = np.random.randn(128, 128, 128)
-        dask_array = da.from_array(data)
-        save_omezarr(dask_array, filename, chunks=(16, 16, 16),
-                     n_levels=5, overwrite=False)
+        data = np.mean(cells3d(), axis=1)  # (60, 256, 256)
 
+        dask_array = da.from_array(data)
+        save_omezarr(dask_array, filename, chunks=(60, 32, 32),
+                     n_levels=5, overwrite=False)
+    return filename
+
+
+def _get_aip():
+    _create_linumpy_home_if_not_exists()
+    filename = os.path.join(LINUMPY_HOME, 'aip.ome.zarr')
+    if not os.path.exists(filename):
+        # create test data
+        data = np.mean(cells3d(), axis=(0, 1))  # (256, 256)
+
+        dask_array = da.from_array(data)
+        save_omezarr(dask_array, filename, voxel_size=(0.001, 0.001),
+                     chunks=(32, 32), n_levels=3, overwrite=False)
     return filename
 
 
 def _get_scan_info(nx, ny, top_z, bottom_z, width_mm,
                    height_mm, x_pos_mm, y_pos_mm, z_pos_mm):
     focus_z = int((top_z + bottom_z) / 2)
-    scan_info = \
-f"""Scan info
-nx: {nx}
-ny: {ny}
-n_repeat: 1
-width: {width_mm}
-height: {height_mm}
-n_extra: 0
-line_rate: 80
-exposure: 23
-alinerepeat: 1
-top_z: {top_z}
-bottom_z: {bottom_z}
-focus_z: {focus_z}
-stage_x_pos_mm: {x_pos_mm}
-stage_y_pos_mm: {y_pos_mm}
-stage_z_pos_mm: {z_pos_mm}
-"""
+    scan_info = "Scan info\n"
+    scan_info += f"nx: {nx}\n"
+    scan_info += f"ny: {ny}\n"
+    scan_info += f"n_repeat: 1\n"
+    scan_info += f"width: {width_mm}\n"
+    scan_info += f"height: {height_mm}\n"
+    scan_info += f"n_extra: 0\n"
+    scan_info += f"line_rate: 80\n"
+    scan_info += f"exposure: 23\n"
+    scan_info += f"alinerepeat: 1\n"
+    scan_info += f"top_z: {top_z}\n"
+    scan_info += f"bottom_z: {bottom_z}\n"
+    scan_info += f"focus_z: {focus_z}\n"
+    scan_info += f"stage_x_pos_mm: {x_pos_mm}\n"
+    scan_info += f"stage_y_pos_mm: {y_pos_mm}\n"
+    scan_info += f"stage_z_pos_mm: {z_pos_mm}\n"
     return scan_info
 
 
