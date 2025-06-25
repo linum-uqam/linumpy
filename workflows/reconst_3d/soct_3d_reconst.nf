@@ -22,6 +22,7 @@ params.learning_rate = 2.0 // Learning rate for the 3D stacking algorithm
 params.min_step = 1e-12 // Minimum step size for the 3D stacking algorithm
 params.n_iterations = 10000 // Number of iterations for the 3D stacking algorithm
 params.grad_mag_tolerance = 1e-12 // Gradient magnitude tolerance for the 3D stacking algorithm
+params.metric = "MSE" // Metric for the 3D stacking algorithm, can be 'MSE' or 'CC'
 
 // Processes
 process create_mosaic_grid {
@@ -121,7 +122,7 @@ process stack_mosaics_into_3d_volume {
         path("3d_volume.ome.zarr")
     script:
     """
-    linum_stack_mosaics_into_3d_volume.py inputs shifts_xy.csv 3d_volume.ome.zarr --initial_search $params.initial_search --depth_offset $params.depth_offset --max_allowed_overlap $params.max_allowed_overlap  --out_offsets 3d_volume_offsets.npy --method ${params.method} --learning_rate ${params.learning_rate} --min_step ${params.min_step} --n_iterations ${params.n_iterations} --grad_mag_tolerance ${params.grad_mag_tolerance}
+    linum_stack_mosaics_into_3d_volume.py inputs shifts_xy.csv 3d_volume.ome.zarr --initial_search $params.initial_search --depth_offset $params.depth_offset --max_allowed_overlap $params.max_allowed_overlap  --out_offsets 3d_volume_offsets.npy --method ${params.method} --metric ${params.metric} --learning_rate ${params.learning_rate} --min_step ${params.min_step} --n_iterations ${params.n_iterations} --grad_mag_tolerance ${params.grad_mag_tolerance}
     """
 }
 
