@@ -55,7 +55,7 @@ def main():
     vol_data = vol[:]
 
     profile = np.reshape(vol_data, (len(vol_data), -1))
-    profile = np.array([profile[i] for i in range(len(profile)) if agarose_mask.reshape(-1)[i]])
+    profile = np.array([profile[:, i] for i in range(profile.shape[-1]) if agarose_mask.reshape(-1)[i]]).T
     profile = np.mean(profile, axis=-1)
     profile = np.clip(profile, np.min(profile[profile > 0.0]), None)
 
