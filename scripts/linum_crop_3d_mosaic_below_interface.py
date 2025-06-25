@@ -55,7 +55,7 @@ def main():
         resolution = args.resolution
     else:
         resolution = (
-            res[2] * 1000
+            res[0] * 1000
         )  # Extract the Z resolution in um from the zarr metadata
     # vol is (Z, X, Y); reorient to (X, Y, Z) for xyzcorr functions
     vol_f = np.abs(vol) if np.iscomplexobj(vol) else vol

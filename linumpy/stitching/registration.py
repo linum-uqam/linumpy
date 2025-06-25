@@ -385,11 +385,38 @@ def align_images_sitk(im1, im2):
     return deltas, m
 
 
-def register_consecutive_3d_mosaics(ref_image, current_mosaic, method='euler',
-                                    learning_rate=2.0, min_step=1e-6,
-                                    n_iterations=500, grad_mag_tolerance=1e-8):
+def register_mosaic_3d_to_reference_2d(ref_image, current_mosaic, method='euler',
+                                       metric='MSE', learning_rate=2.0, min_step=1e-6,
+                                       n_iterations=500, grad_mag_tolerance=1e-8):
     """
     2D register the top slice of `current_mosaic` to `ref_image` using SimpleITK.
+
+    Parameters
+    ----------
+    ref_image: ndarray (nx, ny)
+        Reference image to which the top slice of `current_mosaic` will be registered.
+    current_mosaic: ndarray (nz, nx, ny)
+        3D mosaic to register to ref_image.
+    method: str
+        Registration method to use. Options are 'euler' or 'affine'.
+    metric: str
+        Similarity metric to use for registration. Options are 'MSE'
+        (mean squared error) or 'CC' (cross-correlation).
+    learning_rate: float
+        Learning rate for the registration optimizer.
+    min_step: float
+        Minimum step size for the registration optimizer.
+    n_iterations: int
+        Number of iterations for the registration optimizer.
+    grad_mag_tolerance: float
+        Gradient magnitude tolerance for the registration optimizer.
+
+    Returns
+    -------
+    output_volume: ndarray (nz, nx, ny)
+        Registered 3D volume where each slice is aligned to `ref_image`.
+    metric_value: float
+        Metric value of the registration (e.g., mean squares).
     """
     current_mosaic_top_slice = current_mosaic[0, :, :]
 
@@ -402,7 +429,12 @@ def register_consecutive_3d_mosaics(ref_image, current_mosaic, method='euler',
 
     R = sitk.ImageRegistrationMethod()
 
-    R.SetMetricAsMeanSquares()
+    if method == 'MSE':
+        R.SetMetricAsMeanSquares()
+    elif method == 'CC':
+        R.SetMetricAsCorrelation()
+    else:
+        raise ValueError("Unknown metric: {}".format(metric))
 
     R.SetOptimizerAsRegularStepGradientDescent(
         learningRate=learning_rate,
