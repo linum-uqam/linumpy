@@ -84,7 +84,7 @@ def _get_raw_tiles():
                 for xi, (xmin, xmax) in enumerate(bounds_xy):
                     tile_folder = os.path.join(folder, f'tile_x0{xi}_y0{yi}_z0{zi}')
                     os.makedirs(tile_folder)
-                    tile_xyz = data[zmin:zmax + 1, ymin:ymax, xmin:xmax]
+                    tile_xyz = data[zmin:zmax, ymin:ymax, xmin:xmax]
                     tile_xyz = tile_xyz[:, ::-1, ::-1]
                     tile_xyz[:, 0, 0] = 2.0*np.max(tile_xyz)
                     tile_xyz.astype(np.float32).reshape(-1, order='F').tofile(
@@ -92,7 +92,7 @@ def _get_raw_tiles():
                     nx = width = xmax - xmin
                     ny = height = ymax - ymin
                     top_z = zmin
-                    bottom_z = zmax
+                    bottom_z = zmax - 1
                     stage_x_pos = xmin
                     stage_y_pos = ymin
                     stage_z_pos = zmin
