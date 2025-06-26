@@ -6,7 +6,7 @@
 import argparse
 import numpy as np
 import SimpleITK as sitk
-from linumpy.utils.registration import pairWisePhaseCorrelation
+from linumpy.stitching.registration import pairWisePhaseCorrelation
 from linumpy.utils import mosaic_grid
 from skimage.filters import threshold_otsu
 from skimage.exposure import match_histograms
