@@ -67,7 +67,7 @@ def main():
 
     # Save the shifts to a csv file
     shifts = np.array(
-        [list(range(n_slices - 1)), list(range(1, n_slices)), x_shift_px, y_shift_px, x_shifts_mm, y_shifts_mm]).T
+        [z_values[:-1], z_values[1:], x_shift_px, y_shift_px, x_shifts_mm, y_shifts_mm]).T
     with open(output_file, "w") as csv_file:
         writer = csv.writer(csv_file, delimiter=",")
         writer.writerow(["fixed_id", "moving_id", "x_shift", "y_shift", "x_shift_mm", "y_shift_mm"])

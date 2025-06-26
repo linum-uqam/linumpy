@@ -9,11 +9,21 @@ from scipy.ndimage import convolve1d
 
 
 class OCT:
-    def __init__(self, directory: str):
-        """ Spectral-domain OCT class to reconstruct the data"""
+    """
+    Spectral-domain OCT class to reconstruct the data.
+    
+    Parameters
+    ==========
+    directory: string
+        Path to the directory containing the raw tiles and info file.
+    axial_res: float, optional
+        Axial resolution of the data in microns.
+    """
+    def __init__(self, directory: str, axial_res=3.5):
         self.directory = Path(directory)
         self.info_filename = self.directory / "info.txt"
         self.info = {}
+        self.rz = axial_res
 
         # Read the scan info
         self.read_scan_info(self.info_filename)
@@ -144,11 +154,14 @@ class OCT:
 
     @property
     def resolution(self) -> tuple[float, float, float]:
-        """OCT physical resolution in mm from the info.txt file. Will be (1, 1, 1) if not found"""
+        """
+        OCT physical resolution in mm from the info.txt file.
+        Will be (1, 1, 1) if not found.
+        """
         try:
             rx = self.info['width'] / self.info['nx'] / 1000.0
             ry = self.info['height'] / self.info['ny'] / 1000.0
-            rz = 3.5 / 1000.0  # TODO: add this info to the info.txt file
+            rz = self.rz / 1000.0  # TODO: add this info to the info.txt file
             return rx, ry, rz
         except KeyError:
             return 1, 1, 1
