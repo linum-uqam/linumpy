@@ -241,14 +241,14 @@ def read_omezarr(zarr_path, level=0):
         base_coord_transform = multiscales_attrs["coordinateTransformations"]
         for transform in base_coord_transform:
             if "scale" in transform:
-                resolution *= np.asarray(transform["scale"])[-3:]
+                resolution *= np.asarray(transform["scale"])[-len(resolution):]
 
     vol_header = multiscales_attrs['datasets'][level]
     if "coordinateTransformations" in vol_header:
         level_transform = vol_header["coordinateTransformations"]
         for transform in level_transform:
             if "scale" in transform:
-                resolution *= np.asarray(transform["scale"])[-3:]
+                resolution *= np.asarray(transform["scale"])[-len(resolution):]
     else:
         raise ValueError(f'Mandatory "coordinateTransformations" field missing for level {level}.')
 

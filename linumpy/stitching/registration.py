@@ -5,8 +5,8 @@ import SimpleITK as sitk
 import numpy as np
 from skimage.feature import peak_local_max
 
-from linumpy.preproc import icorr
 from linumpy.stitching.stitch_utils import getOverlap
+
 
 
 def pairWisePhaseCorrelation(
@@ -329,6 +329,7 @@ def ITKRegistration(
     MI = reg.GetMetricValue()
     return deltas, MI
 
+
 def align_images_sitk(im1, im2):
     #plt.subplot(121)
     #plt.imshow(im1)
@@ -382,3 +383,98 @@ def align_images_sitk(im1, im2):
     deltas = [dx, dy]
     m = R.GetMetricValue()
     return deltas, m
+
+
+def register_mosaic_3d_to_reference_2d(ref_image, current_mosaic, method='euler',
+                                       metric='MSE', learning_rate=2.0, min_step=1e-6,
+                                       n_iterations=500, grad_mag_tolerance=1e-8):
+    """
+    2D register the top slice of `current_mosaic` to `ref_image` using SimpleITK.
+
+    Parameters
+    ----------
+    ref_image: ndarray (nx, ny)
+        Reference image to which the top slice of `current_mosaic` will be registered.
+    current_mosaic: ndarray (nz, nx, ny)
+        3D mosaic to register to ref_image.
+    method: str
+        Registration method to use. Options are 'euler' or 'affine'.
+    metric: str
+        Similarity metric to use for registration. Options are 'MSE'
+        (mean squared error) or 'CC' (cross-correlation).
+    learning_rate: float
+        Learning rate for the registration optimizer.
+    min_step: float
+        Minimum step size for the registration optimizer.
+    n_iterations: int
+        Number of iterations for the registration optimizer.
+    grad_mag_tolerance: float
+        Gradient magnitude tolerance for the registration optimizer.
+
+    Returns
+    -------
+    output_volume: ndarray (nz, nx, ny)
+        Registered 3D volume where each slice is aligned to `ref_image`.
+    metric_value: float
+        Metric value of the registration (e.g., mean squares).
+    """
+    current_mosaic_top_slice = current_mosaic[0, :, :]
+
+    # Type cast everything to float32
+    ref_image = ref_image.astype(np.float32)
+    current_mosaic_top_slice = current_mosaic_top_slice.astype(np.float32)
+
+    fixed_sitk_image = sitk.GetImageFromArray(ref_image)
+    moving_sitk_image = sitk.GetImageFromArray(current_mosaic_top_slice)
+
+    R = sitk.ImageRegistrationMethod()
+
+    if metric == 'MSE':
+        R.SetMetricAsMeanSquares()
+    elif metric == 'CC':
+        R.SetMetricAsCorrelation()
+    else:
+        raise ValueError("Unknown metric: {}".format(metric))
+
+    R.SetOptimizerAsRegularStepGradientDescent(
+        learningRate=learning_rate,
+        minStep=min_step,
+        numberOfIterations=n_iterations,
+        gradientMagnitudeTolerance=grad_mag_tolerance,
+    )
+    R.SetShrinkFactorsPerLevel([4, 2, 1])
+    R.SetSmoothingSigmasPerLevel([3, 1, 0])
+    R.SetOptimizerScalesFromIndexShift()
+
+    if method == 'euler':
+        sitkTransform = sitk.Euler2DTransform()
+    elif method == 'affine':
+        sitkTransform = sitk.AffineTransform(2)
+    else:
+        raise ValueError("Unknown method: {}".format(method))
+
+    tx = sitk.CenteredTransformInitializer(fixed_sitk_image,
+                                           moving_sitk_image,
+                                           sitkTransform)
+    R.SetInitialTransform(tx)
+
+    R.SetInterpolator(sitk.sitkLinear)
+
+    out_transform = R.Execute(fixed_sitk_image, moving_sitk_image)
+
+    output_volume = np.zeros((len(current_mosaic), ref_image.shape[0], ref_image.shape[1]))
+    for i, moving in enumerate(current_mosaic):
+        moving_sitk_image = sitk.GetImageFromArray(moving)
+
+        resampler = sitk.ResampleImageFilter()
+        resampler.SetReferenceImage(fixed_sitk_image)
+        resampler.SetInterpolator(sitk.sitkLinear)
+        resampler.SetDefaultPixelValue(0)
+        resampler.SetTransform(out_transform)
+
+        out = resampler.Execute(moving_sitk_image)
+        out = sitk.GetArrayFromImage(out)
+
+        output_volume[i, :, :] = out
+
+    return output_volume, R.GetMetricValue()
