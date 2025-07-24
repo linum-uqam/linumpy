@@ -49,6 +49,5 @@ def main():
     nrrd.write(str(args.output), vol)
 
 
-
 if __name__ == "__main__":
     main()
