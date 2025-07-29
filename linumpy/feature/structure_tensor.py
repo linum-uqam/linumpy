@@ -1,3 +1,4 @@
+# -*- coding:utf-8 -*-
 from linumpy.feature.kernel import make_xfilter, make_yfilter, make_zfilter, gaussian, gaussian_derivative
 
 import numpy as np
@@ -18,8 +19,24 @@ from pqdm.processes import pqdm
 
 def dask_to_zarr(array, shape, chunks, dtype='float32'):
     """
-    Save a dask array to a temporary zarr store. Dask chained operations
+    Save a dask array to a temporary zarr store. Any delayed dask task
     will be computed and saved to the zarr store.
+
+    Parameters
+    ----------
+    array: dask.array
+        Dask array to store to zarr.
+    shape: tuple
+        Shape of array.
+    chunks: tuple
+        Shape of chunks in zarr array.
+    dtype: str or numpy.dtype
+        Datatype for stored data.
+
+    Returns
+    -------
+    zarr_array: zarr.core.array
+        Zarr array.
     """
     zarr_store = zarr.TempStore()
     zarr_array = zarr.open(zarr_store, mode='w', shape=shape, chunks=chunks, dtype=dtype)
@@ -28,6 +45,31 @@ def dask_to_zarr(array, shape, chunks, dtype='float32'):
 
 
 def compute_sh(data, peak, coherence, new_voxel_size_to_vox, sh_order_max, reg_factor):
+    """
+    Compute the spherical harmonics (SH) representation of the input data
+    using the peak directions and coherence from the structure tensor.
+
+    Parameters
+    ----------
+    data: zarr.core.Array
+        Input data array (3D).
+    peak: zarr.core.Array
+        Peak directions array (3D, shape (3, z, y, x)).
+    coherence: zarr.core.Array
+        Coherence array (3D).
+    new_voxel_size_to_vox: np.ndarray
+        New voxel size in voxels (shape (3,)).
+    sh_order_max: int
+        Maximum order of spherical harmonics to compute.
+    reg_factor: float
+        Regularization factor to apply to the coherence.
+
+    Returns
+    -------
+    sh: np.ndarray
+        Spherical harmonics representation of the input data (shape (z, y, x, n_sh)).
+        Where n_sh is the number of spherical harmonics coefficients.
+    """
     new_shape = np.ceil(np.asarray(data.shape) / new_voxel_size_to_vox).astype(int)
     sh_chunk_shape = (np.asarray(data.chunks) / new_voxel_size_to_vox).astype(int)
     data_chunk_shape = (sh_chunk_shape * new_voxel_size_to_vox).astype(int)
@@ -41,7 +83,7 @@ def compute_sh(data, peak, coherence, new_voxel_size_to_vox, sh_order_max, reg_f
     sh = np.zeros(np.append(new_shape, b_mat.shape[0]), dtype=np.float32)
 
     for chunk in tqdm(chunks, desc='Computing SH inside voxel'):
-        sf = compute_sh_for_chunk(chunk, new_voxel_size_to_vox,
+        sf = compute_sf_for_chunk(chunk, new_voxel_size_to_vox,
                                   data_chunk_shape, data, peak, coherence,
                                   reg_factor, sphere)
         sh_chunk = sf.dot(b_inv)
@@ -52,9 +94,35 @@ def compute_sh(data, peak, coherence, new_voxel_size_to_vox, sh_order_max, reg_f
     return sh
 
 
-def compute_sh_for_chunk(chunk_id, new_voxel_size_to_vox,
-                         chunk_shape, data, peak,
-                         coherence, reg, sphere):
+def compute_sf_for_chunk(chunk_id, new_voxel_size_to_vox, chunk_shape,
+                         data, peak, coherence, reg, sphere):
+    """
+    Compute the spherical function representation for a chunk of data.
+
+    Parameters
+    ----------
+    chunk_id: tuple
+        Tuple of integers representing the chunk coordinates.
+    new_voxel_size_to_vox: np.ndarray
+        New voxel size in voxels (shape (3,)).
+    chunk_shape: tuple
+        Shape of the chunk in voxels.
+    data: zarr.core.Array
+        Input data array (3D).
+    peak: zarr.core.Array
+        Peak directions array (4D, shape (3, z, y, x)).
+    coherence: zarr.core.Array
+        Coherence array (3D).
+    reg: float
+        Regularization factor to apply to the coherence.
+    sphere: dipy.core.sphere.HemiSphere
+        Sphere object containing the sphere vertices.
+
+    Returns
+    -------
+    sf: np.ndarray
+        Spherical harmonics representation for the chunk (shape (nx, ny, nz, n_dirs)).
+    """
     chunk_x, chunk_y, chunk_z = chunk_id
     xmin = chunk_x * chunk_shape[0]
     xmax = min(data.shape[0], (chunk_x + 1) * chunk_shape[0])
@@ -93,6 +161,34 @@ def compute_principal_direction(st_xx, st_xy, st_xz, st_yy, st_yz, st_zz,
                                 data, damp_factor, n_jobs=12):
     """
     Compute the principal direction and coherence from the structure tensor components.
+
+    Parameters
+    ----------
+    st_xx: zarr.core.Array
+        Structure tensor component xx (3D).
+    st_xy: zarr.core.Array
+        Structure tensor component xy (3D).
+    st_xz: zarr.core.Array
+        Structure tensor component xz (3D).
+    st_yy: zarr.core.Array
+        Structure tensor component yy (3D).
+    st_yz: zarr.core.Array
+        Structure tensor component yz (3D).
+    st_zz: zarr.core.Array
+        Structure tensor component zz (3D).
+    data: zarr.core.Array
+        Input data array (3D).
+    damp_factor: float
+        Dampening factor for the coherence computation.
+    n_jobs: int
+        Number of parallel jobs to use for computation.
+
+    Returns
+    -------
+    peak: zarr.core.Array
+        Peak directions array (4D, shape (3, z, y, x)).
+    coherence: zarr.core.Array
+        Coherence array (3D).
     """
     coherence = zarr.open(zarr.TempStore(), mode='w', shape=data.shape,
                           chunks=data.chunks, dtype=data.dtype)
@@ -126,6 +222,38 @@ def compute_principal_direction(st_xx, st_xy, st_xz, st_yy, st_yz, st_zz,
 def compute_peak_direction_and_coherence_for_chunk(chunk, coherence, peak, chunk_shape,
                                                    st_xx, st_yy, st_zz, st_xy, st_xz, st_yz,
                                                    damp):
+    """
+    Compute the principal direction and coherence from the structure tensor components.
+
+    Parameters
+    ----------
+    chunk: tuple
+        Tuple of integers representing the chunk coordinates.
+    coherence: zarr.core.Array
+        Coherence array (3D). Filled inplace.
+    peak: zarr.core.Array
+        Peak directions array (4D, shape (3, z, y, x)). Filled inplace.
+    chunk_shape: tuple
+        Shape of the chunk in voxels.
+    st_xx: zarr.core.Array
+        Structure tensor component xx (3D).
+    st_xy: zarr.core.Array
+        Structure tensor component xy (3D).
+    st_xz: zarr.core.Array
+        Structure tensor component xz (3D).
+    st_yy: zarr.core.Array
+        Structure tensor component yy (3D).
+    st_yz: zarr.core.Array
+        Structure tensor component yz (3D).
+    st_zz: zarr.core.Array
+        Structure tensor component zz (3D).
+    data: zarr.core.Array
+        Input data array (3D).
+    damp_factor: float
+        Dampening factor for the coherence computation.
+    n_jobs: int
+        Number of parallel jobs to use for computation.
+    """
     chunk_x, chunk_y, chunk_z = chunk
     xmin = chunk_x * chunk_shape[0]
     xmax = min(coherence.shape[0], (chunk_x + 1) * chunk_shape[0])
@@ -159,7 +287,22 @@ def compute_peak_direction_and_coherence_for_chunk(chunk, coherence, peak, chunk
 def compute_structure_tensor(data, sigma_to_vox, rho_to_vox, n_threads=12):
     """
     Compute the structure tensor components from the input data.
-    The input data is expected to be a 3D image with shape (z, y, x).
+    
+    Parameters
+    ----------
+    data: zarr.core.Array
+        Input data array (3D).
+    sigma_to_vox: np.ndarray
+        Standard deviation of the Gaussian derivative in voxels (shape (3,)).
+    rho_to_vox: np.ndarray
+        Standard deviation of the Gaussian window in voxels (shape (3,)).
+    n_threads: int
+        Number of threads to use for parallel computation.
+
+    Returns
+    -------
+    st_xx, st_xy, st_xz, st_yy, st_yz, st_zz: zarr.core.Array
+        Structure tensor components (3D zarr arrays).
     """
     # Set number of threads for dask
     dask.config.set(pool=ThreadPool(n_threads))
