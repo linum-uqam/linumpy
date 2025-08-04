@@ -44,7 +44,6 @@ def main():
 
     # Invert the x and z axis
     vol = np.moveaxis(vol, (0, 1, 2), (2, 1, 0))
-    vol = da.from_array(vol, chunks=chunks)
 
     nrrd.write(str(args.output), vol)
 
