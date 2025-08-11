@@ -32,9 +32,6 @@ def main():
 
     img = nib.load(args.input)
 
-    # Resolution in mm
-    resolution = np.array(img.header["pixdim"][1:4])
-
     # Load the data
     # Neuroglancer doesn't support float64
     vol = img.get_fdata(dtype=np.float32)
