@@ -13,13 +13,15 @@ import nrrd
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input",
-                   help="Full path to a 3D .nii file")
-    p.add_argument("output",
-                   help="Full path to the .nrrd file")
-    p.add_argument("--normalize", action="store_true",
-                   help="Normalize the data (default=%(default)s)")
+        description=__doc__, formatter_class=argparse.RawTextHelpFormatter
+    )
+    p.add_argument("input", help="Full path to a 3D .nii file")
+    p.add_argument("output", help="Full path to the .nrrd file")
+    p.add_argument(
+        "--normalize",
+        action="store_true",
+        help="Normalize the data (default=%(default)s)",
+    )
     return p
 
 
@@ -28,10 +30,10 @@ def main():
     p = _build_arg_parser()
     args = p.parse_args()
 
-    img = nib.load(str(args.input))
+    img = nib.load(args.input)
 
     # Resolution in mm
-    resolution = np.array(img.header['pixdim'][1:4])
+    resolution = np.array(img.header["pixdim"][1:4])
 
     # Load the data
     # Neuroglancer doesn't support float64
@@ -45,7 +47,7 @@ def main():
     # Invert the x and z axis
     vol = np.moveaxis(vol, (0, 1, 2), (2, 1, 0))
 
-    nrrd.write(str(args.output), vol)
+    nrrd.write(args.output, vol)
 
 
 if __name__ == "__main__":
