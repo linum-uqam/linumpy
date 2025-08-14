@@ -27,7 +27,7 @@ def _create_linumpy_home_if_not_exists():
 
 def _get_mosaic_3d_nifti():
     _create_linumpy_home_if_not_exists()
-    filename = os.path.join(LINUMPY_HOME, "mosaic_3d.nii")
+    filename = os.path.join(LINUMPY_HOME, "mosaic_3d.nii.gz")
     if not os.path.exists(filename):
         # create test data
         data = np.mean(cells3d(), axis=1)  # (60, 256, 256)
