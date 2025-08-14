@@ -32,7 +32,7 @@ def _get_mosaic_3d_nifti():
         # create test data
         data = np.mean(cells3d(), axis=1)  # (60, 256, 256)
 
-        img = nib.Nifti1Image(data)
+        img = nib.Nifti1Image(data, np.eye(4))
         img.header.set_xyzt_units(xyz="micron")
         nib.save(img, filename)
 
