@@ -15,9 +15,15 @@ from scipy.ndimage import convolve
 
 from multiprocessing.pool import ThreadPool
 from pqdm.processes import pqdm
+from enum import Enum
 
 
-def dask_to_zarr(array, shape, chunks, dtype='float32'):
+class StoreMode(Enum):
+    MEMORY = 1
+    TEMPSTORE = 2
+
+
+def dask_to_zarr(array, shape, chunks, zarr_store=None, dtype='float32'):
     """
     Save a dask array to a temporary zarr store. Any delayed dask task
     will be computed and saved to the zarr store.
@@ -32,13 +38,16 @@ def dask_to_zarr(array, shape, chunks, dtype='float32'):
         Shape of chunks in zarr array.
     dtype: str or numpy.dtype
         Datatype for stored data.
+    zarr_store: zarr.Store, optional
+        The type of store to use for zarr. Default: TempStore.
 
     Returns
     -------
     zarr_array: zarr.core.array
         Zarr array.
     """
-    zarr_store = zarr.TempStore()
+    if zarr_store is None:
+        zarr_store = zarr.TempStore()
     zarr_array = zarr.open(zarr_store, mode='w', shape=shape, chunks=chunks, dtype=dtype)
     da.to_zarr(array, zarr_array, shape=shape, chunks=chunks, dtype=dtype)
     return zarr_array
@@ -158,7 +167,8 @@ def compute_sf_for_chunk(chunk_id, new_voxel_size_to_vox, chunk_shape,
 
 
 def compute_principal_direction(st_xx, st_xy, st_xz, st_yy, st_yz, st_zz,
-                                data, damp_factor, n_jobs=12):
+                                data, damp_factor, n_jobs=12,
+                                store_mode=StoreMode.TEMPSTORE):
     """
     Compute the principal direction and coherence from the structure tensor components.
 
@@ -190,9 +200,16 @@ def compute_principal_direction(st_xx, st_xy, st_xz, st_yy, st_yz, st_zz,
     coherence: zarr.core.Array
         Coherence array (3D).
     """
-    coherence = zarr.open(zarr.TempStore(), mode='w', shape=data.shape,
+    if store_mode == StoreMode.TEMPSTORE:
+        store_class = zarr.TempStore
+    elif store_mode == StoreMode.MEMORY:
+        store_class = zarr.MemoryStore
+    else:
+        raise ValueError("store_mode must be StoreMode.TEMPSTORE or StoreMode.MEMORY")
+
+    coherence = zarr.open(store_class(), mode='w', shape=data.shape,
                           chunks=data.chunks, dtype=data.dtype)
-    peak = zarr.open(zarr.TempStore(), mode='w',
+    peak = zarr.open(store_class(), mode='w',
                      shape=(3,) + data.shape,
                      chunks=(3,) + data.chunks,
                      dtype=data.dtype)
@@ -284,7 +301,8 @@ def compute_peak_direction_and_coherence_for_chunk(chunk, coherence, peak, chunk
     peak[:, slice_x, slice_y, slice_z] = p0
 
 
-def compute_structure_tensor(data, sigma_to_vox, rho_to_vox, n_threads=12):
+def compute_structure_tensor(data, sigma_to_vox, rho_to_vox, n_jobs=12,
+                             store_mode=StoreMode.TEMPSTORE):
     """
     Compute the structure tensor components from the input data.
     
@@ -296,16 +314,25 @@ def compute_structure_tensor(data, sigma_to_vox, rho_to_vox, n_threads=12):
         Standard deviation of the Gaussian derivative in voxels (shape (3,)).
     rho_to_vox: np.ndarray
         Standard deviation of the Gaussian window in voxels (shape (3,)).
-    n_threads: int
+    n_jobs: int
         Number of threads to use for parallel computation.
+    store_mode: StoreMode
+        Store mode for the temporary files used during the computation.
 
     Returns
     -------
     st_xx, st_xy, st_xz, st_yy, st_yz, st_zz: zarr.core.Array
         Structure tensor components (3D zarr arrays).
     """
+    if store_mode == StoreMode.TEMPSTORE:
+        store_class = zarr.TempStore
+    elif store_mode == StoreMode.MEMORY:
+        store_class = zarr.MemoryStore
+    else:
+        raise ValueError("store_mode must be StoreMode.TEMPSTORE or StoreMode.MEMORY")
+
     # Set number of threads for dask
-    dask.config.set(pool=ThreadPool(n_threads))
+    dask.config.set(pool=ThreadPool(n_jobs))
 
     # Derivatives (function of sigma)
     dx_filter = make_xfilter(gaussian_derivative(sigma_to_vox[0]))
@@ -328,31 +355,31 @@ def compute_structure_tensor(data, sigma_to_vox, rho_to_vox, n_threads=12):
     st_xx = dx * dx
     st_xx = st_xx.map_overlap(lambda x: convolve(convolve(convolve(x, xfilter), yfilter), zfilter),
                               depth=xfilter.size//2)
-    st_xx = dask_to_zarr(st_xx, data.shape, data.chunks)
+    st_xx = dask_to_zarr(st_xx, data.shape, data.chunks, store_class())
 
     st_xy = dx * dy
     st_xy = st_xy.map_overlap(lambda x: convolve(convolve(convolve(x, xfilter), yfilter), zfilter),
                               depth=xfilter.size//2)
-    st_xy = dask_to_zarr(st_xy, data.shape, data.chunks)
+    st_xy = dask_to_zarr(st_xy, data.shape, data.chunks, store_class())
 
     st_xz = dx * dz
     st_xz = st_xz.map_overlap(lambda x: convolve(convolve(convolve(x, xfilter), yfilter), zfilter),
                               depth=xfilter.size//2)
-    st_xz = dask_to_zarr(st_xz, data.shape, data.chunks)
+    st_xz = dask_to_zarr(st_xz, data.shape, data.chunks, store_class())
 
     st_yy = dy * dy
     st_yy = st_yy.map_overlap(lambda x: convolve(convolve(convolve(x, xfilter), yfilter), zfilter),
                               depth=xfilter.size//2)
-    st_yy = dask_to_zarr(st_yy, data.shape, data.chunks)
+    st_yy = dask_to_zarr(st_yy, data.shape, data.chunks, store_class())
 
     st_yz = dy * dz
     st_yz = st_yz.map_overlap(lambda x: convolve(convolve(convolve(x, xfilter), yfilter), zfilter),
                               depth=xfilter.size//2)
-    st_yz = dask_to_zarr(st_yz, data.shape, data.chunks)
+    st_yz = dask_to_zarr(st_yz, data.shape, data.chunks, store_class())
 
     st_zz = dz * dz
     st_zz = st_zz.map_overlap(lambda x: convolve(convolve(convolve(x, xfilter), yfilter), zfilter),
                               depth=xfilter.size//2)
-    st_zz = dask_to_zarr(st_zz, data.shape, data.chunks)
+    st_zz = dask_to_zarr(st_zz, data.shape, data.chunks, store_class())
 
     return st_xx, st_xy, st_xz, st_yy, st_yz, st_zz

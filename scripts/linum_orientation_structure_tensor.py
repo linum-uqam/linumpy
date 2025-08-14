@@ -9,8 +9,9 @@ import numpy as np
 import nibabel as nib
 import dask.array as da
 
-from linumpy.feature.structure_tensor import compute_structure_tensor, compute_principal_direction, compute_sh
+from linumpy.feature.structure_tensor import compute_structure_tensor, compute_principal_direction, compute_sh, StoreMode
 from linumpy.io.zarr import read_omezarr, save_omezarr
+from linumpy.utils.io import add_processes_arg, parse_processes_arg
 
 
 EPILOG="""
@@ -42,12 +43,17 @@ def _build_arg_parser():
                    help='Size of voxels for histological-FOD (mm). [%(default)s]')
     p.add_argument('--damp', default=1.0, type=float,
                    help='Dampening factor for weighting structure tensor directions '
-                        'based on the certainty measure `c_p`. Each tensor direction'
+                        'based on the certainty measure `c_p`.\nEach tensor direction'
                         ' will be weighted by `c_p**damp` prior to binning. [%(default)s]')
     p.add_argument('--reg', type=float, default=0.0,
                    help='Regularize by OCT intensity. [%(default)s]')
     p.add_argument('--sh_order', type=int, default=8,
                    help='Spherical harmonics maximum order [%(default)s].')
+    p.add_argument('--store_mode', default='TEMPSTORE',
+                   choices=[member.name for member in StoreMode],
+                   help='Store mode for the temporary files used '
+                        'during the computation. [%(default)s]')
+    add_processes_arg(p)
     return p
 
 
@@ -60,19 +66,25 @@ def main():
     else:
         parser.error("Input image must be .ome.zarr.")
 
+    n_jobs = parse_processes_arg(args.n_processes)
+    store_mode = StoreMode[args.store_mode]
+
     # Axis order is (z, y, x)
     sigma_to_vox = np.array([args.sigma]) / np.asarray(res)
     rho_to_vox = np.array([args.rho]) / np.asarray(res)
 
     # Compute the structure tensor
+    # /!\ disk space required will be 6 times the size of the input image
     st_xx, st_xy, st_xz, st_yy, st_yz, st_zz = compute_structure_tensor(
-        data, sigma_to_vox, rho_to_vox, n_threads=12)
+        data, sigma_to_vox, rho_to_vox, n_jobs=n_jobs, store_mode=store_mode)
 
     # Estimate principal direction and coherence from
     # structure tensor eigenvalues and eigenvectors
+    # /!\ disk space will be 3 times the size of the input image (peaks)
+    # and 1 time the size of the input image (coherence)
     peak, coherence = compute_principal_direction(
         st_xx, st_xy, st_xz, st_yy, st_yz, st_zz,
-        data, args.damp, n_jobs=12)
+        data, args.damp, n_jobs=n_jobs, store_mode=store_mode)
 
     # optionally save the coherence and peak images
     if args.out_coherence is not None:
