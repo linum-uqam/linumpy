@@ -10,7 +10,7 @@ import dask.array as da
 from pybasic.shading_correction import BaSiC
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
-from linumpy.io.zarr import save_zarr, read_omezarr
+from linumpy.io.zarr import save_omezarr, read_omezarr
 import zarr
 
 
@@ -22,7 +22,8 @@ def _build_arg_parser():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_zarr",
-                   help="Path to file (.ome.zarr) containing the 3D mosaic grid.")
+                   help="Path to file (.ome.zarr) "
+                        "containing the 3D mosaic grid.")
     p.add_argument("output_zarr",
                    help="Corrected 3D mosaic grid file path (.ome.zarr).")
     p.add_argument('--n_levels', type=int, default=5,
@@ -56,9 +57,9 @@ def main():
 
     # Load ome-zarr data
     vol, res = read_omezarr(input_zarr, level=0)
-
+    dtype = vol.dtype
     # Estimate the water-tissue interface
-    z0 = findTissueInterface(vol, sigma=2, useLog=True)
+    z0 = findTissueInterface(np.abs(vol), sigma=2, useLog=True)
 
     # Extract the tile shape from the filename
     tile_shape = vol.chunks
@@ -92,7 +93,7 @@ def main():
 
     temp_store = zarr.TempStore()
     vol_corr = zarr.open(temp_store, mode="w", shape=vol.shape,
-                         dtype=np.float32, chunks=tile_shape)
+                         dtype=dtype, chunks=tile_shape)
 
     for i in range(nx):
         for j in range(ny):
@@ -111,7 +112,7 @@ def main():
 
     # save to ome-zarr
     dask_arr = da.from_zarr(vol_corr)
-    save_zarr(dask_arr, output_zarr, scales=res, chunks=tile_shape,
+    save_omezarr(dask_arr, output_zarr, voxel_size=res, chunks=tile_shape,
               n_levels=args.n_levels)
 
 

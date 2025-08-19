@@ -11,7 +11,6 @@ from os import environ
 environ["OMP_NUM_THREADS"] = "1"
 
 import argparse
-import multiprocessing
 import tempfile
 from pathlib import Path
 
@@ -23,10 +22,11 @@ from tqdm.auto import tqdm
 import imageio as io
 import numpy as np
 from pqdm.processes import pqdm
-from linumpy.io.zarr import save_zarr, read_omezarr
+from linumpy.io.zarr import save_omezarr, read_omezarr
 from linumpy.utils.io import add_processes_arg, parse_processes_arg
 
 # TODO: add option to export the flatfields and darkfields
+
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
@@ -45,8 +45,7 @@ def process_tile(params: dict):
     z = params["z"]
     tile_shape = params["tile_shape"]
     vol = io.v3.imread(str(file))
-    file_output = Path(file).parent / file.name.replace(".tiff",
-                                                        "_corrected.tiff")
+    file_output = Path(file).parent / file.name.replace(".tiff", "_corrected.tiff")
 
     # Get the number of tiles
     nx = vol.shape[0] // tile_shape[0]
@@ -63,16 +62,43 @@ def process_tile(params: dict):
             tiles.append(vol[rmin:rmax, cmin:cmax])
 
     # Estimate the illumination bias
-    optimizer = BaSiC(tiles, estimate_darkfield=True)
-    optimizer.working_size = 64
-    optimizer.prepare()
-    optimizer.run()
+    # Check if tiles contain complex values
+    if np.iscomplexobj(tiles[0]):
+        # Separate real and imaginary parts
+        try:
+            tiles_real = [t.real for t in tiles]
+            tiles_imag = [t.imag for t in tiles]
 
-    # Apply the correction to all the tiles
-    tiles_corrected = []
-    for i in range(len(tiles)):
-        tile = tiles[i]
-        tiles_corrected.append(optimizer.normalize(tile))
+            # Store the original signs before applying BaSic as it requires positive values
+            sign_real = [np.sign(t) for t in tiles_real]
+            sign_imag = [np.sign(t) for t in tiles_imag]
+
+            # Run BaSiC
+            optimizer = BaSiC(np.abs(tiles).astype(np.float64), estimate_darkfield=True)
+            optimizer.working_size = 64
+            optimizer.prepare()
+            optimizer.run()
+            
+            # Apply correction and reconstruct complex result with original signs
+            tiles_corrected = [
+                (optimizer.normalize(t_real) * s_real)
+                + 1j * (optimizer.normalize(t_imag) * s_imag)
+                for t_real, t_imag, s_real, s_imag in zip(
+                    tiles_real, tiles_imag, sign_real, sign_imag
+                )
+            ]
+        except TypeError as e:
+            print(f"Error processing complex tiles: {e}")
+            
+    else:
+        # Process normally if tiles are real
+        optimizer = BaSiC(tiles, estimate_darkfield=True)
+        optimizer.working_size = 64
+        optimizer.prepare()
+        optimizer.run()
+
+        # Apply correction
+        tiles_corrected = [optimizer.normalize(t) for t in tiles]
 
     # Fill the output mosaic
     vol_output = np.zeros_like(vol)
@@ -82,7 +108,11 @@ def process_tile(params: dict):
             rmax = (i + 1) * tile_shape[0]
             cmin = j * tile_shape[1]
             cmax = (j + 1) * tile_shape[1]
-            vol_output[rmin:rmax, cmin:cmax] = tiles_corrected[i * ny + j]
+            t = tiles_corrected[i * ny + j]
+            if np.isnan(t).any():
+                print(f"NaN values found in tile {i}, {j} at z={z}. Replacing with zeros.")
+                t = np.nan_to_num(t, nan=0.0, posinf=0.0, neginf=0.0)
+            vol_output[rmin:rmax, cmin:cmax] = t
 
     io.imsave(str(file_output), vol_output)
 
@@ -119,7 +149,7 @@ def main():
     if n_cpus > 1:
         # Process the tiles in parallel
         corrected_files = pqdm(params_list, process_tile, n_jobs=n_cpus,
-                               desc="Processing tiles")
+                               desc="Processing tiles", exception_behaviour='immediate')
     else:  # process sequentially
         corrected_files = []
         for param in tqdm(params_list):
@@ -136,8 +166,13 @@ def main():
         vol_output[z] = slice_vol[:]
 
     out_dask = da.from_zarr(vol_output)
-    save_zarr(out_dask, output_zarr, scales=resolution,
-              chunks=vol.chunks)
+    min_value = out_dask.min().compute()
+    if min_value < 0:
+        print(f"Minimum value in the output volume is {min_value}. Rescaling so minimum is 0.")
+        out_dask = out_dask - min_value
+
+    save_omezarr(out_dask, output_zarr, voxel_size=resolution,
+                 chunks=vol.chunks)
 
     # Remove the temporary slice files used by the parallel processes
     tmp_dir.cleanup()

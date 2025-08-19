@@ -675,42 +675,6 @@ class SlicerData:
     def update_gridshape(self):
         self.gridshape = detect_gridshape(self.datadir, self.prototype, self.extension)
 
-    def detect_tissue(self):
-        nx, ny, nz = self.volshape
-        gx, gy, gz = self.gridshape
-
-        # Mosaic size
-        mx = gx * nx
-        my = gy * ny
-
-        # Computing AIP for each slice
-        slices_mean = np.zeros((mx, my, nz), dtype=float)
-        k = int(0.01 * 0.5 * (mx + my))
-        for z in range(nz):
-            m = stitch_oct.stitch2D(self, z=z)
-            slices_mean[:, :, z] = median_filter(m, k)
-
-        # Compute mask using Li thresholding method
-        thresh = threshold_li(slices_mean)
-        mask_tissue = slices_mean > thresh
-
-        # Convert this tissue mask into a grid data mask
-        grid_mask = np.zeros((gx, gy, gz), dtype=bool)
-        for z in range(nz):
-            dilated_mask = binary_dilation(mask_tissue[:, :, z], disk(2 * k))
-            for x in range(gx):
-                for y in range(gy):
-                    pos_x = x * nx
-                    pos_y = y * ny
-                    roi = dilated_mask[pos_x: pos_x + nx, pos_y: pos_y + ny]
-
-                    if np.sum(roi) / float(roi.size) > f:
-                        grid_mask[x, y, zrange[z]] = True
-
-        # Assign this mask
-        self.gridmask = grid_mask
-
-
 def detect_gridshape(
         datadir, prototype="volume_x%02.0f_y%02.0f_z%02.0f", extension=".bin"
 ):

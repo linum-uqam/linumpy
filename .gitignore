@@ -178,3 +178,6 @@ workflows/work/
 
 # Config files
 *.ini
+
+# visual studio code
+.vscode

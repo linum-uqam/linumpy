@@ -1,6 +1,5 @@
 import shutil
 from pathlib import Path
-from importlib.metadata import version
 import numpy as np
 
 import dask.array as da
@@ -47,9 +46,28 @@ class CustomScaler(Scaler):
         out_shape = tuple(new_shape)
 
         dtype = image.dtype
-        image = _resize(
-            image.astype(float), out_shape, order=1, mode="reflect", anti_aliasing=False
-        )
+        if np.iscomplexobj(image):
+            image = _resize(
+                image.real.astype(float),
+                out_shape,
+                order=1,
+                mode="reflect",
+                anti_aliasing=False,
+            ) + 1j * _resize(
+                image.imag.astype(float),
+                out_shape,
+                order=1,
+                mode="reflect",
+                anti_aliasing=False,
+            )
+        else:
+            image = _resize(
+                image.astype(float),
+                out_shape,
+                order=1,
+                mode="reflect",
+                anti_aliasing=False,
+            )
         return image.astype(dtype)
 
     def linear(self, base):
@@ -74,28 +92,30 @@ class CustomScaler(Scaler):
         raise NotImplementedError("_by_plane method not implemented for CustomScaler")
 
 
-def create_transformation_dict(nlevels, ndims=3):
+def create_transformation_dict(nlevels, voxel_size, ndims=3):
     """
     Create a dictionary with the transformation information for
     images up to 4 dimensions.
 
     :type nlevels: int
     :param nlevels: The number of levels in the pyramid.
+    :type voxel_size: tuple
+    :param voxel_size: The voxel size of the dataset.
     :type ndims: int
     :param ndims: The number of dimensions of the dataset.
     :type coord_transforms: list of Dict
     :return coord_transforms: List of coordinate transformations
     """
-    def _get_scale(level, ndims):
-        scale_def = [1.0, (2.0**level), (2.0**level), (2.0**level)]
-        offset = len(scale_def) - ndims
-        return scale_def[offset:]
+    def _get_scale(i):
+        scale = np.zeros(ndims)
+        scale[:-len(voxel_size)-1:-1] = np.asarray(voxel_size)[::-1] * 2.0**i
+        return scale.tolist()
 
     coord_transforms = []
     for i in range(nlevels):
         transform_dict = [{
             "type": "scale",
-            "scale": _get_scale(i, ndims)
+            "scale": _get_scale(i)
         }]
         coord_transforms.append(transform_dict)
     return coord_transforms
@@ -136,8 +156,8 @@ def create_directory(store_path, overwrite=False):
     return directory
 
 
-def save_zarr(data, store_path, scales=(1e-3, 1e-3, 1e-3),
-              chunks=(128, 128, 128), n_levels=5, overwrite=True):
+def save_omezarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3),
+                 chunks=(128, 128, 128), n_levels=5, overwrite=True):
     """
     Save numpy array to disk in zarr format following OME-NGFF file specifications.
     Expected ordering for axes in `data` and `scales` is `(c, z, y, x)`. Does not
@@ -147,8 +167,8 @@ def save_zarr(data, store_path, scales=(1e-3, 1e-3, 1e-3),
     :param data: numpy or dask array to save as zarr.
     :type store_path: str
     :param store_path: The path of the output zarr group.
-    :type scales: tuple of n `float`, with n the number of dimensions.
-    :param scales: Voxel size in mm.
+    :type voxel_size: tuple of n `float`, with n the number of dimensions.
+    :param voxel_size: Voxel size in mm.
     :type chunks: tuple of n `int`, with n the number of dimensions.
     :param chunks: Chunk size on disk.
     :type n_levels: int
@@ -168,23 +188,22 @@ def save_zarr(data, store_path, scales=(1e-3, 1e-3, 1e-3),
     # metadata describes the downsampling method used for generating
     # multiscale data representation (see also type in write_image)
     metadata = {"method": "ome_zarr.scale.Scaler",
-                "version":version("ome-zarr"),
+                "version": "0.5",
                 "args": pyramid_kw}
 
     # axes and coordinate transformations
     axes = generate_axes_dict(ndims)
-    coordinate_transformations = create_transformation_dict(n_levels+1, ndims)
+    coordinate_transformations = create_transformation_dict(n_levels+1, voxel_size=voxel_size, ndims=ndims)
 
     # create directory for zarr storage
     create_directory(store_path, overwrite)
-    
     store = parse_url(store_path, mode='w').store
     zarr_group = zarr.group(store=store)
 
     # the base transformation is applied to all levels of the pyramid
     # and describes the original voxel size of the dataset
     base_coord_transformation = [
-        {"type":"scale", "scale": list(scales)}
+        {"type": "scale", "scale": [1, 1, 1]}
     ]
     write_image(data, zarr_group, storage_options=dict(chunks=chunks),
                 scaler=CustomScaler(**pyramid_kw),
@@ -222,14 +241,14 @@ def read_omezarr(zarr_path, level=0):
         base_coord_transform = multiscales_attrs["coordinateTransformations"]
         for transform in base_coord_transform:
             if "scale" in transform:
-                resolution *= np.asarray(transform["scale"])[-3:]
+                resolution *= np.asarray(transform["scale"])[-len(resolution):]
 
     vol_header = multiscales_attrs['datasets'][level]
     if "coordinateTransformations" in vol_header:
         level_transform = vol_header["coordinateTransformations"]
         for transform in level_transform:
             if "scale" in transform:
-                resolution *= np.asarray(transform["scale"])[-3:]
+                resolution *= np.asarray(transform["scale"])[-len(resolution):]
     else:
         raise ValueError(f'Mandatory "coordinateTransformations" field missing for level {level}.')
 
