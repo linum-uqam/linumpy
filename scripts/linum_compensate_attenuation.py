@@ -6,10 +6,9 @@ bias field.
 """
 
 import argparse
-from pathlib import Path
 import dask.array as da
 
-from linumpy.io.zarr import save_zarr, read_omezarr
+from linumpy.io.zarr import save_omezarr, read_omezarr
 
 
 def _build_arg_parser():
@@ -41,7 +40,10 @@ def main():
     vol_dask /= bias_dask
 
     # Save the output
-    save_zarr(vol_dask.astype(da.float32), args.output, scales=res, chunks=chunks)
+    save_omezarr(vol_dask.astype(da.float32),
+              args.output,
+              voxel_size=res,
+              chunks=chunks)
 
 
 if __name__ == "__main__":

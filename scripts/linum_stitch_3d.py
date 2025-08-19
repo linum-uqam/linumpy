@@ -11,7 +11,7 @@ import numpy as np
 import zarr
 import dask.array as da
 
-from linumpy.io.zarr import read_omezarr, save_zarr
+from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.utils.mosaic_grid import addVolumeToMosaic
 
 
@@ -24,8 +24,12 @@ def _build_arg_parser():
                    help="Transform file (.npy format)")
     p.add_argument("output_volume",
                    help="Stitched mosaic filename (zarr)")
-    p.add_argument("--blending_method", type=str, default="diffusion", choices=["none", "average", "diffusion"],
+    p.add_argument("--blending_method", type=str,
+                   default="diffusion",
+                   choices=["none", "average", "diffusion"],
                    help="Blending method. (default=%(default)s)")
+    p.add_argument("--complex_input", default=False,
+                   help="If the input is complex data (default=%(default)s)")
     return p
 
 
@@ -61,14 +65,21 @@ def main():
 
     # Get the pos min and max
     posx_min = min([pos[0] for pos in positions])
-    posx_max = max([pos[0] + tile_shape[0] for pos in positions])
+    # tile_shape[1] corresponds to nx and tile_shape[2] corresponds to ny
+    posx_max = max([pos[0] + tile_shape[1] for pos in positions])
     posy_min = min([pos[1] for pos in positions])
-    posy_max = max([pos[1] + tile_shape[1] for pos in positions])
+    posy_max = max([pos[1] + tile_shape[2] for pos in positions])
     mosaic_shape = [volume.shape[0], posx_max - posx_min, posy_max - posy_min]
 
     # Stitch the mosaic
     temp_store = zarr.TempStore(suffix='.zarr')
-    mosaic = zarr.open(temp_store, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=(100, 100, 100))
+    mosaic = zarr.open(
+        temp_store,
+        mode="w",
+        shape=mosaic_shape,
+        dtype=np.complex64 if args.complex_input else np.float32,
+        chunks=(100, 100, 100),
+    )
     for i in range(nx):
         for j in range(ny):
             # Compute the tile position in the input
@@ -77,15 +88,20 @@ def main():
             cmin = j * tile_shape[2]
             cmax = (j + 1) * tile_shape[2]
             tile = volume[:, rmin:rmax, cmin:cmax]
+            if np.any(tile < 0.0):
+                tile -= tile.min()  # Ensure no negative values in the tile
 
             # Get the position within the mosaic
             pos = positions[i * ny + j]
             pos[0] -= posx_min
             pos[1] -= posy_min
-            mosaic = addVolumeToMosaic(tile, pos, mosaic, blendingMethod=blending_method)
-    
+            mosaic = addVolumeToMosaic(tile,
+                                       pos,
+                                       mosaic,
+                                       blendingMethod=blending_method)
+
     out_dask = da.from_zarr(mosaic)
-    save_zarr(out_dask, output_file, resolution)
+    save_omezarr(out_dask, output_file, voxel_size=resolution)
 
 
 if __name__ == "__main__":
