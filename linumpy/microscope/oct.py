@@ -53,7 +53,7 @@ class OCT:
                 val = int(val)
             self.info[key] = val
 
-    def load_image(self, crop: bool = True, fix_shift: Union[bool, int] = False) -> np.ndarray:
+    def load_image(self, crop: bool = True, fix_shift: Union[bool, int] = True) -> np.ndarray:
         """ Load an image dataset
         Parameters
         ----------
