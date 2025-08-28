@@ -67,8 +67,8 @@ def get_volume(filename: str, config: dict = None) -> np.ndarray:
     # Get the loading options
     if config is None:
         config = {}
-    crop = config.get("crop", False)
-    fix_shift = config.get("fix_shift", False)
+    crop = config.get("crop", True)
+    fix_shift = config.get("fix_shift", True)
     if fix_shift:
         fix_shift = config.get("shift",
                                True)  # Either a precomputed shift, or a True value to compute it during loading.
