@@ -9,7 +9,11 @@ import numpy as np
 import nibabel as nib
 import dask.array as da
 
-from linumpy.feature.structure_tensor import compute_structure_tensor, compute_principal_direction, compute_sh, StoreMode
+from linumpy.feature.structure_tensor import\
+    compute_structure_tensor,\
+    compute_principal_direction,\
+    compute_sh,\
+    StoreMode
 from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.utils.io import add_processes_arg, parse_processes_arg
 
@@ -47,7 +51,7 @@ def _build_arg_parser():
                         ' will be weighted by `c_p**damp` prior to binning. [%(default)s]')
     p.add_argument('--reg', type=float, default=0.0,
                    help='Regularize by OCT intensity. [%(default)s]')
-    p.add_argument('--sh_order', type=int, default=8,
+    p.add_argument('--sh_order', type=int, default=6,
                    help='Spherical harmonics maximum order [%(default)s].')
     p.add_argument('--store_mode', default='TEMPSTORE',
                    choices=[member.name for member in StoreMode],
