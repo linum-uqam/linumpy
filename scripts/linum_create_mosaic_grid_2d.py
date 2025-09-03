@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Convert 3D OCT tiles to a 2D mosaic grid."""
+"""Convert 3D OCT tiles to a 2D mosaic grid
+
+Notes
+-----
+- jpg output should only be used for visualization purposes due to loss of data from the 8bit conversion.
+"""
 
 import argparse
 import json
@@ -19,15 +24,13 @@ from linumpy import reconstruction
 from linumpy.microscope.oct import OCT
 
 
-# TODO: use either the config file or the command line options
-
 def _build_arg_parser():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("tiles_directory",
                    help="Full path to a directory containing the tiles to process")
     p.add_argument("output_file",
-                   help="Full path to the output file (tiff or zarr)")
+                   help="Full path to the output file (jpg, tiff, or zarr)")
     p.add_argument("-r", "--resolution", type=float, default=-1,
                    help="Output isotropic resolution in micron per pixel. (Use -1 to keep the original resolution). (default=%(default)s)")
     p.add_argument("-z", "--slice", type=int, default=0,
@@ -64,8 +67,8 @@ def get_volume(filename: str, config: dict = None) -> np.ndarray:
     # Get the loading options
     if config is None:
         config = {}
-    crop = config.get("crop", False)
-    fix_shift = config.get("fix_shift", False)
+    crop = config.get("crop", True)
+    fix_shift = config.get("fix_shift", True)
     if fix_shift:
         fix_shift = config.get("shift",
                                True)  # Either a precomputed shift, or a True value to compute it during loading.
@@ -123,7 +126,7 @@ def main():
     # Parameters
     tiles_directory = Path(args.tiles_directory)
     output_file = Path(args.output_file)
-    assert output_file.suffix in [".tiff", ".zarr"], "The output file must be a .tiff or .zarr file."
+    assert output_file.suffix in [".jpg", ".tiff", ".zarr"], "The output file must be .jpg, .tiff, or .zarr file."
     if output_file.suffix == ".zarr":
         zarr_file = output_file
     else:
@@ -209,6 +212,16 @@ def main():
         io.imsave(output_file, img)
         shutil.rmtree(zarr_file)
 
+    if output_file.suffix == ".jpg":
+        imin = np.min(mosaic)
+        imax = np.percentile(mosaic, args.saturation)
+        mosaic = (mosaic - imin) / (imax - imin)
+        mosaic[mosaic < 0] = 0
+        mosaic[mosaic > 1] = 1
+        mosaic = (mosaic * 255).astype(np.uint8)
+        img = mosaic[:]
+        io.imsave(output_file, img)
+        shutil.rmtree(zarr_file)
 
 if __name__ == "__main__":
     main()

@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 from typing import Union
 
@@ -53,7 +54,7 @@ class OCT:
                 val = int(val)
             self.info[key] = val
 
-    def load_image(self, crop: bool = True, fix_shift: Union[bool, int] = False) -> np.ndarray:
+    def load_image(self, crop: bool = True, fix_shift: Union[bool, int] = True) -> np.ndarray:
         """ Load an image dataset
         Parameters
         ----------
@@ -91,8 +92,11 @@ class OCT:
 
         # Estimate the galvo shift
         if isinstance(fix_shift, bool) and fix_shift is True:
-            shift = xyzcorr.detect_galvo_shift(vol.mean(axis=0), n_pixel_return=n_extra)
-            vol = xyzcorr.fix_galvo_shift(vol, shift=shift)
+            if n_extra == 0:
+                warnings.warn("Cannot estimate the shift correction as there are no extra a-lines in the file.")
+            else:
+                shift = xyzcorr.detect_galvo_shift(vol.mean(axis=0), n_pixel_return=n_extra)
+                vol = xyzcorr.fix_galvo_shift(vol, shift=shift)
         elif isinstance(fix_shift, int):
             vol = xyzcorr.fix_galvo_shift(vol, shift=fix_shift)
 
