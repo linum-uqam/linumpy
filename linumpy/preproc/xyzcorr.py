@@ -10,7 +10,7 @@ from scipy.ndimage import (
     gaussian_filter,
     gaussian_filter1d,
     gaussian_gradient_magnitude,
-    uniform_filter,
+    uniform_filter, median_filter,
 )
 from scipy.ndimage import label
 from scipy.ndimage import binary_closing, binary_fill_holes
@@ -19,8 +19,6 @@ from scipy.signal import argrelmax
 from skimage.filters import threshold_li, threshold_otsu
 from skimage.morphology import dilation, disk
 
-from skimage.transform import resize
-from skimage.metrics import normalized_mutual_information as nmi
 
 
 def cropVolume(vol, xlim=[0, -1], ylim=[0, -1], zlim=[0, -1]):
@@ -787,21 +785,26 @@ def detect_galvo_shift(aip: np.ndarray, n_pixel_return: int = 40) -> int:
     int
         Shift in pixels
     """
+    # Compute the average a-line
+    profile = aip.mean(axis=1)
+    profile = median_filter(profile, 9)
+
+    # Compute the intensity difference between the start and end of the a-line for various shifts.
+    # A wrong shift would result in values close to zero as they would be close by in the actual scan
+    differences = []
+    for s in range(len(profile)):
+        d = np.abs(profile[s] - profile[-1 + s])
+        differences.append(d)
+
+    # If we find the right shift, both the beginning and the end of galvo return will result in high differences
     similarities = []
-
-    n_alines, n_bscans = aip.shape
-    for i in range(n_alines):
-        aip_shifted = fix_galvo_shift(aip, shift=i, axis=0)
-
-        # Extract the image and galvo return parts
-        img = aip_shifted[0:-n_pixel_return, :]
-        img_galvos_simulated = np.flipud(resize(img, (n_pixel_return, n_bscans)))
-        img_galvos = aip_shifted[-n_pixel_return:, :]
-
-        similarity = nmi(img_galvos_simulated, img_galvos)
-        similarities.append(similarity)
+    for s in range(len(profile) - n_pixel_return):
+        foo = (differences[s] * differences[s + n_pixel_return])
+        similarities.append(foo)
 
     shift = np.argmax(similarities)
+    shift = len(profile) - shift - n_pixel_return
+
     return shift
 
 def fix_galvo_shift(vol: np.ndarray, shift: int=0, axis:int=1) -> np.ndarray:
