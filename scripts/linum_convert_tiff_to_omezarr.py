@@ -28,7 +28,7 @@ import zarr
 from tifffile import imread
 from skimage.transform import resize
 
-from linumpy.io.zarr import save_omezarr
+from linumpy.io.zarr import save_omezarr, create_tempstore
 from linumpy.utils.io import add_overwrite_arg, add_verbose_arg
 
 
