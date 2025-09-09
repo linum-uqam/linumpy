@@ -178,7 +178,7 @@ def main():
                         volume.shape[2],
                         volume.shape[3]]
 
-    zarr_store = zarr.TempStore(dir=args.zarr_root, suffix=".zarr")
+    zarr_store = create_tempstore(dir=args.zarr_root, suffix=".zarr")
     mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape,
                        dtype=np.float32, chunks=[1, 1, 128, 128])
 

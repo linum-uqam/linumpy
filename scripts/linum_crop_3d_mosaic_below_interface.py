@@ -91,7 +91,7 @@ def main():
             out_shape = (end_idx, vol.shape[1], vol.shape[2])
         else:
             out_shape = vol.shape
-        store = zarr.TempStore()
+        store = create_tempstore()
         out_vol = zarr.open(store, mode="w", shape=out_shape,
                             dtype=np.float32, chunks=vol.chunks)
         out_vol[:vol.shape[0]] = vol[:]

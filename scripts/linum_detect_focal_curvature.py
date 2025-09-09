@@ -10,7 +10,7 @@ import dask.array as da
 from pybasic.shading_correction import BaSiC
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
-from linumpy.io.zarr import save_omezarr, read_omezarr
+from linumpy.io.zarr import save_omezarr, read_omezarr, create_tempstore
 import zarr
 
 
@@ -91,7 +91,7 @@ def main():
     # Apply the correction to a tile
     corr = ((flatfield - 1) * z0.mean()).astype(int)
 
-    temp_store = zarr.TempStore()
+    temp_store = create_tempstore()
     vol_corr = zarr.open(temp_store, mode="w", shape=vol.shape,
                          dtype=dtype, chunks=tile_shape)
 
