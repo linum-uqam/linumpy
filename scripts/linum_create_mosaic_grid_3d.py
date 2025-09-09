@@ -12,7 +12,7 @@ import dask.array as da
 import zarr
 from skimage.transform import resize
 from tqdm.auto import tqdm
-from linumpy.io.zarr import save_omezarr
+from linumpy.io.zarr import save_omezarr, create_tempstore
 from linumpy import reconstruction
 from linumpy.microscope.oct import OCT
 from linumpy.io.thorlabs import ThorOCT, PreprocessingConfig
@@ -187,7 +187,7 @@ def main():
     mosaic_shape = [tile_size[0], n_mx * tile_size[1], n_my * tile_size[2]]
     
     # Create the zarr persistent array
-    zarr_store = zarr.TempStore(dir=args.zarr_root, suffix=".zarr")
+    zarr_store = create_tempstore(dir=args.zarr_root, suffix=".zarr")
     mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape,
                        dtype=np.complex64 if args.return_complex else np.float32,
                        chunks=tile_size)

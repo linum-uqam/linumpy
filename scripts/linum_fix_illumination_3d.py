@@ -22,7 +22,7 @@ from tqdm.auto import tqdm
 import imageio as io
 import numpy as np
 from pqdm.processes import pqdm
-from linumpy.io.zarr import save_omezarr, read_omezarr
+from linumpy.io.zarr import save_omezarr, read_omezarr, create_tempstore
 from linumpy.utils.io import add_processes_arg, parse_processes_arg
 
 # TODO: add option to export the flatfields and darkfields
@@ -156,7 +156,7 @@ def main():
             corrected_files.append(process_tile(param))
 
     # Retrieve the results and fix the volume
-    temp_store = zarr.TempStore(suffix=".zarr")
+    temp_store = create_tempstore(suffix=".zarr")
     vol_output = zarr.open(temp_store, mode="w", shape=vol.shape,
                            dtype=vol.dtype, chunks=vol.chunks)
 

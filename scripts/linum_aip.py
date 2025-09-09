@@ -9,7 +9,7 @@ import dask.array as da
 
 import numpy as np
 import zarr
-from linumpy.io.zarr import save_omezarr, read_omezarr
+from linumpy.io.zarr import save_omezarr, read_omezarr, create_tempstore
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
@@ -36,7 +36,7 @@ def main():
 
     # Prepare the output
     shape = vol.shape[1:3]
-    zarr_store = zarr.TempStore(suffix='.zarr')
+    zarr_store = create_tempstore(suffix='.zarr')
     aip = zarr.open(zarr_store, mode="w", shape=shape,
                     dtype= np.float32,
                     chunks=vol.chunks[1:3])

@@ -35,8 +35,7 @@ def _get_mosaic_3d_nifti():
         img = nib.Nifti1Image(data, np.eye(4))
         img.header.set_xyzt_units(xyz="micron")
         nib.save(img, filename)
-
-        return filename
+    return filename
 
 
 def _get_mosaic_3d_omezarr():
