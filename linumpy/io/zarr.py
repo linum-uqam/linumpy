@@ -211,12 +211,6 @@ def save_omezarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3),
                   "method": "linear",
                   "downscale": 2}
 
-    # # metadata describes the downsampling method used for generating
-    # # multiscale data representation (see also type in write_image)
-    metadata = {"method": "ome_zarr.scale.Scaler",
-                "version": CurrentFormat.version,
-                "args": pyramid_kw}
-
     # # axes and coordinate transformations
     ndims = len(data.shape)
     axes = generate_axes_dict(ndims)
