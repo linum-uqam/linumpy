@@ -275,8 +275,13 @@ def read_omezarr(zarr_path, level=0):
 
 
 class OmeZarrWriter:
-    def __init__(self, store_path, shape, chunk_shape, dtype, overwrite):
+    fmt: CurrentFormat
+    shape: tuple
     downscale_factor: int
+    root: zarr.Group
+    axes: list
+    zarray: zarr.Array
+
     def __init__(self, store_path: str | Path, shape: tuple, chunk_shape: tuple, dtype: np.dtype, overwrite: bool,
                  downscale_factor: int = 2, unit: str = 'millimeter'):
         self.fmt = CurrentFormat()
