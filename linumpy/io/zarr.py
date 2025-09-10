@@ -209,7 +209,7 @@ def save_omezarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3),
     n_levels = adjusted_n_levels
 
     # pyramidal decomposition (ome_zarr.scale.Scaler) keywords
-    pyramid_kw = {"max_layer": n_levels,
+    pyramid_kw = {"max_layer": int(n_levels),
                   "method": "linear",
                   "downscale": 2}
 
