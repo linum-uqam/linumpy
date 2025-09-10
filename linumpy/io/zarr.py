@@ -356,4 +356,14 @@ class OmeZarrWriter:
         for p, t in zip(paths, transformations):
             datasets.append({"path": p, "coordinateTransformations": t})
 
-        write_multiscales_metadata(self.root, datasets, axes=self.axes)
+        pyramid_kw = {"max_layer": n_levels,
+                      "method": "linear",
+                      "downscale": self.downscale_factor}
+
+        ome_zarr_version = version("ome-zarr")
+        metadata = {
+            "method": "ome_zarr.scale.Scaler",
+            "version": ome_zarr_version,
+            "args": pyramid_kw}
+
+        write_multiscales_metadata(self.root, datasets, axes=self.axes, metadata=metadata)
