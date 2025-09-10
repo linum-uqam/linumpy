@@ -12,7 +12,7 @@ import dask.array as da
 import zarr
 from skimage.transform import resize
 from tqdm.auto import tqdm
-from linumpy.io.zarr import save_omezarr, create_tempstore
+from linumpy.io.zarr import OmeZarrWriter
 from linumpy import reconstruction
 from linumpy.microscope.oct import OCT
 from linumpy.io.thorlabs import ThorOCT, PreprocessingConfig
@@ -187,10 +187,9 @@ def main():
     mosaic_shape = [tile_size[0], n_mx * tile_size[1], n_my * tile_size[2]]
     
     # Create the zarr persistent array
-    zarr_store = create_tempstore(dir=args.zarr_root, suffix=".zarr")
-    mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape,
-                       dtype=np.complex64 if args.return_complex else np.float32,
-                       chunks=tile_size)
+    writer = OmeZarrWriter(args.output_zarr, shape=mosaic_shape,
+                           dtype=np.complex64 if args.return_complex else np.float32,
+                           chunk_shape=tile_size, overwrite=True)
 
     # Create a params dictionary for every tile
     params = []
@@ -200,7 +199,7 @@ def main():
             "tile_pos": tiles_pos[i],
             "crop": crop,
             "tile_size": tile_size,
-            "mosaic": mosaic,
+            "mosaic": writer,
             "data_type": data_type,
             "psoct_config": psoct_config,
             "mxy_min": (mx_min, my_min)
@@ -215,9 +214,7 @@ def main():
             process_tile(p)
 
     # Convert to ome-zarr
-    mosaic_dask = da.from_zarr(mosaic)
-    save_omezarr(mosaic_dask, args.output_zarr, voxel_size=output_resolution,
-                 chunks=tile_size, n_levels=args.n_levels)
+    writer.finalize(output_resolution, args.n_levels)
 
 
 if __name__ == "__main__":
