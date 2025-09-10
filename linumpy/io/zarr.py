@@ -293,6 +293,28 @@ class OmeZarrWriter:
 
     def __init__(self, store_path: str | Path, shape: tuple, chunk_shape: tuple, dtype: np.dtype, overwrite: bool,
                  downscale_factor: int = 2, unit: str = 'millimeter'):
+        """
+        Class for writing ome-zarr files to disk in a pyramidal format.
+
+        :type store_path: str or Path
+        :param store_path: Path to the output zarr group.
+        :type shape: tuple of n `int`, with n the number of dimensions.
+        :param shape: Shape of the dataset.
+        :type chunk_shape: tuple of n `int`, with n the number of dimensions.
+        :param chunk_shape: Chunk size on disk.
+        :type dtype: np.dtype
+        :param dtype: Data type of the dataset.
+        :type overwrite: bool
+        :param overwrite: Overwrite `store_path` if it already exists.
+        :type downscale_factor: int
+        :param downscale_factor: Downscale factor between levels in the pyramid.
+        :type unit: str
+        :param unit: Unit of the spatial dimensions.
+        Notes
+        -----
+        * Expected ordering for axes in `shape` and `chunk_shape` is `(c,
+            z, y, x)`.
+        """
         self.fmt = CurrentFormat()
         self.shape = shape
         self.downscale_factor = downscale_factor
