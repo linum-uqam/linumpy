@@ -1,9 +1,8 @@
 import shutil
 from pathlib import Path
 import tempfile
-import numpy as np
-import os
 from importlib.metadata import version
+from pathlib import Path
 
 import dask.array as da
 import zarr
@@ -277,8 +276,12 @@ def read_omezarr(zarr_path, level=0):
 
 class OmeZarrWriter:
     def __init__(self, store_path, shape, chunk_shape, dtype, overwrite):
+    downscale_factor: int
+    def __init__(self, store_path: str | Path, shape: tuple, chunk_shape: tuple, dtype: np.dtype, overwrite: bool,
+                 downscale_factor: int = 2, unit: str = 'millimeter'):
         self.fmt = CurrentFormat()
         self.shape = shape
+        self.downscale_factor = downscale_factor
 
         if os.path.exists(store_path):
             if overwrite:
@@ -325,8 +328,10 @@ class OmeZarrWriter:
 
             # resize in X and Y
             dims = list(dask_image.shape)
-            dims[-1] = dims[-1] // 2
-            dims[-2] = dims[-2] // 2
+            dims[-1] = dims[-1] // self.downscale_factor
+            dims[-2] = dims[-2] // self.downscale_factor
+            if len(dims) > 2:
+                dims[-3] = dask_image.shape[-3] // self.downscale_factor
             output = da_resize(
                 dask_image, tuple(dims), preserve_range=True, anti_aliasing=False
             )
