@@ -8,7 +8,6 @@ import dask.array as da
 import numpy as np
 import zarr
 from ome_zarr.dask_utils import resize as da_resize
-from ome_zarr.dask_utils import resize as dask_resize
 from ome_zarr.format import CurrentFormat
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Reader, Multiscales
@@ -55,7 +54,7 @@ class CustomScaler(Scaler):
         if isinstance(image, da.Array):
 
             def _resize(image, out_shape, **kwargs):
-                return dask_resize(image, out_shape, **kwargs)
+                return da_resize(image, out_shape, **kwargs)
 
         else:
             _resize = resize
@@ -214,6 +213,13 @@ def save_omezarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3),
                   "method": "linear",
                   "downscale": 2}
 
+    ome_zarr_version = version("ome-zarr")
+    metadata = {
+        "method": "ome_zarr.scale.Scaler",
+        "version": ome_zarr_version,
+        "args": pyramid_kw
+    }
+
     # # axes and coordinate transformations
     ndims = len(data.shape)
     axes = generate_axes_dict(ndims)
@@ -228,7 +234,7 @@ def save_omezarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3),
                 scaler=CustomScaler(**pyramid_kw),
                 storage_options=dict(chunks=chunks),
                 coordinate_transformations=coordinate_transformations,
-                compute=True)
+                compute=True, metadata=metadata)
 
     # return zarr group containing saved data
     return zarr_group
@@ -378,6 +384,7 @@ class OmeZarrWriter:
         metadata = {
             "method": "ome_zarr.scale.Scaler",
             "version": ome_zarr_version,
-            "args": pyramid_kw}
+            "args": pyramid_kw
+        }
 
         write_multiscales_metadata(self.root, datasets, axes=self.axes, metadata=metadata)
