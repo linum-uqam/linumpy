@@ -3,6 +3,7 @@ from pathlib import Path
 import tempfile
 import numpy as np
 import os
+from importlib.metadata import version
 
 import dask.array as da
 import zarr
