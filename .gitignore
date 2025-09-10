@@ -181,3 +181,6 @@ workflows/work/
 
 # visual studio code
 .vscode
+
+# Temp code file
+draft.py
