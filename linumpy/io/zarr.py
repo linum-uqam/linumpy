@@ -1,18 +1,19 @@
+import os
 import shutil
-from pathlib import Path
 import tempfile
 from importlib.metadata import version
 from pathlib import Path
 
 import dask.array as da
+import numpy as np
 import zarr
-from ome_zarr.dask_utils import resize as dask_resize
-from ome_zarr.io import parse_url
-from ome_zarr.scale import Scaler
 from ome_zarr.dask_utils import resize as da_resize
-from ome_zarr.writer import write_image, write_multiscales_metadata
+from ome_zarr.dask_utils import resize as dask_resize
 from ome_zarr.format import CurrentFormat
+from ome_zarr.io import parse_url
 from ome_zarr.reader import Reader, Multiscales
+from ome_zarr.scale import Scaler
+from ome_zarr.writer import write_image, write_multiscales_metadata
 from skimage.transform import resize
 
 """
@@ -31,7 +32,7 @@ def create_tempstore(dir=None, suffix=None):
     :type zarr_store: zarr.storage.LocalStore
     :return zarr_store: Temporary ZarrStore.
     """
-    tempdir = Path(tempfile.TemporaryDirectory(dir=dir ,suffix=suffix).name)
+    tempdir = Path(tempfile.TemporaryDirectory(dir=dir, suffix=suffix).name)
     zarr_store = zarr.storage.LocalStore(tempdir)
     return zarr_store
 
@@ -43,6 +44,7 @@ class CustomScaler(Scaler):
     Only `resize_image` method is implemented. Interpolation is ALWAYS done
     using 1-st order (linear) interpolation.
     """
+
     def resize_image(self, image):
         """
         Resize a numpy array OR a dask array to a smaller array (not pyramid).
@@ -127,9 +129,10 @@ def create_transformation_dict(nlevels, voxel_size, ndims=3):
     :type coord_transforms: list of Dict
     :return coord_transforms: List of coordinate transformations
     """
+
     def _get_scale(i):
         scale = np.zeros(ndims)
-        scale[:-len(voxel_size)-1:-1] = np.asarray(voxel_size)[::-1] * 2.0**i
+        scale[:-len(voxel_size) - 1:-1] = np.asarray(voxel_size)[::-1] * 2.0 ** i
         return scale.tolist()
 
     coord_transforms = []
@@ -142,7 +145,7 @@ def create_transformation_dict(nlevels, voxel_size, ndims=3):
     return coord_transforms
 
 
-def generate_axes_dict(ndims=3):
+def generate_axes_dict(ndims=3, unit="millimeter"):
     """
     Generate the axes dictionary for up to 4 dimensions.
 
@@ -156,9 +159,9 @@ def generate_axes_dict(ndims=3):
     """
     axes = [
         {"name": "c", "type": "channel"},
-        {"name": "z", "type": "space", "unit": "millimeter"},
-        {"name": "y", "type": "space", "unit": "millimeter"},
-        {"name": "x", "type": "space", "unit": "millimeter"}
+        {"name": "z", "type": "space", "unit": unit},
+        {"name": "y", "type": "space", "unit": unit},
+        {"name": "x", "type": "space", "unit": unit}
     ]
     offset = len(axes) - ndims
     return axes[offset:]
@@ -214,7 +217,7 @@ def save_omezarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3),
     # # axes and coordinate transformations
     ndims = len(data.shape)
     axes = generate_axes_dict(ndims)
-    coordinate_transformations = create_transformation_dict(n_levels+1, voxel_size=voxel_size, ndims=ndims)
+    coordinate_transformations = create_transformation_dict(n_levels + 1, voxel_size=voxel_size, ndims=ndims)
 
     # create directory for zarr storage
     create_directory(store_path, overwrite)
@@ -302,7 +305,7 @@ class OmeZarrWriter:
 
         # create empty array at root of pyramid
         # This is the array we will fill on-the-fly
-        self.axes = generate_axes_dict(len(shape))
+        self.axes = generate_axes_dict(len(shape), unit=unit)
         self.zarray = self.root.require_array(
             "0",
             shape=shape,
@@ -310,13 +313,13 @@ class OmeZarrWriter:
             chunks=chunk_shape,
             dtype=dtype,
             chunk_key_encoding=self.fmt.chunk_key_encoding,
-            dimension_names=[axis["name"] for axis in self.axes], # omit for v0.4
+            dimension_names=[axis["name"] for axis in self.axes],  # omit for v0.4
         )
 
     def _downsample_pyramid_on_disk(self, parent, paths):
         """
         Takes a high-resolution Zarr array at paths[0] in the zarr group
-        and down-samples it by a factor of 2 for each of the other paths
+        and down-samples it by a given factor for each of the other paths
         """
         group_path = str(parent.store_path)
         img_path = parent.store_path / parent.path
