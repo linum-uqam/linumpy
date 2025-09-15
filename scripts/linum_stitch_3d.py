@@ -8,10 +8,8 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-import zarr
-import dask.array as da
 
-from linumpy.io.zarr import read_omezarr, save_omezarr, create_tempstore
+from linumpy.io.zarr import read_omezarr, OmeZarrWriter
 from linumpy.utils.mosaic_grid import addVolumeToMosaic
 
 
@@ -69,17 +67,12 @@ def main():
     posx_max = max([pos[0] + tile_shape[1] for pos in positions])
     posy_min = min([pos[1] for pos in positions])
     posy_max = max([pos[1] + tile_shape[2] for pos in positions])
-    mosaic_shape = [volume.shape[0], posx_max - posx_min, posy_max - posy_min]
+    mosaic_shape = [volume.shape[0], int(posx_max - posx_min), int(posy_max - posy_min)]
 
     # Stitch the mosaic
-    temp_store = create_tempstore(suffix='.zarr')
-    mosaic = zarr.open(
-        temp_store,
-        mode="w",
-        shape=mosaic_shape,
-        dtype=np.complex64 if args.complex_input else np.float32,
-        chunks=(100, 100, 100),
-    )
+    writer = OmeZarrWriter(output_file, mosaic_shape, chunk_shape=(100, 100, 100),
+                           dtype=np.complex64 if args.complex_input else np.float32,
+                           overwrite=True)
     for i in range(nx):
         for j in range(ny):
             # Compute the tile position in the input
@@ -95,13 +88,10 @@ def main():
             pos = positions[i * ny + j]
             pos[0] -= posx_min
             pos[1] -= posy_min
-            mosaic = addVolumeToMosaic(tile,
-                                       pos,
-                                       mosaic,
-                                       blendingMethod=blending_method)
+            addVolumeToMosaic(tile, pos, writer,
+                              blendingMethod=blending_method)
 
-    out_dask = da.from_zarr(mosaic)
-    save_omezarr(out_dask, output_file, voxel_size=resolution)
+    writer.finalize(resolution)
 
 
 if __name__ == "__main__":

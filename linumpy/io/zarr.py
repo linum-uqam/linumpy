@@ -390,6 +390,10 @@ class OmeZarrWriter:
     def __getitem__(self, index):
         return self.zarray[index]
 
+    @property
+    def ndim(self):
+        return len(self.shape)
+
     def finalize(self, res, n_levels=5):
         paths = [f"{i}" for i in range(n_levels + 1)]
         self._downsample_pyramid_on_disk(self.root, paths)
