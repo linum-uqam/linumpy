@@ -179,6 +179,14 @@ def create_directory(store_path, overwrite=False):
     return directory
 
 
+def validate_n_levels(n_levels, shape):
+    adjusted_n_levels = min(*np.log2(shape).astype(int), n_levels)
+    if n_levels > adjusted_n_levels:
+        print(f'WARNING: Requested n_levels {n_levels} too high for image dimensions: {shape}.\n'
+              f'Setting to {adjusted_n_levels}.')
+    return int(adjusted_n_levels)
+
+
 def save_omezarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3),
                  chunks=(128, 128, 128), n_levels=5, overwrite=True):
     """
@@ -202,11 +210,7 @@ def save_omezarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3),
     :type zarr_group: zarr.hierarchy.group
     :return zarr_group: Resulting zarr group saved to disk.
     """
-    adjusted_n_levels = min(*np.log2(data.shape).astype(int) - 1, n_levels)
-    if n_levels > adjusted_n_levels:
-        print(f'WARNING: Requested n_levels {n_levels} too high for image dimensions.\n'
-              f'Setting to {adjusted_n_levels}.')
-    n_levels = adjusted_n_levels
+    n_levels = validate_n_levels(n_levels, data.shape)
 
     # pyramidal decomposition (ome_zarr.scale.Scaler) keywords
     pyramid_kw = {"max_layer": int(n_levels),
@@ -395,6 +399,7 @@ class OmeZarrWriter:
         return len(self.shape)
 
     def finalize(self, res, n_levels=5):
+        n_levels = validate_n_levels(n_levels, self.shape)
         paths = [f"{i}" for i in range(n_levels + 1)]
         self._downsample_pyramid_on_disk(self.root, paths)
         transformations = create_transformation_dict(n_levels + 1, res, len(self.shape))
