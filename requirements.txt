@@ -10,7 +10,8 @@ dask>=2024.10.0
 SimpleITK
 tqdm
 pqdm
-pybasic-illumination-correction
+hyperactive<=4.8.0
+basicpy
 zarr>=3.0.10
 ome-zarr>=0.9.0
 napari[all]

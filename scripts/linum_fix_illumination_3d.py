@@ -13,11 +13,11 @@ environ["OMP_NUM_THREADS"] = "1"
 import argparse
 import tempfile
 from pathlib import Path
+from basicpy import BaSiC
 
 import dask.array as da
 
 import zarr
-from pybasic.shading_correction import BaSiC
 from tqdm.auto import tqdm
 import imageio as io
 import numpy as np
@@ -35,6 +35,8 @@ def _build_arg_parser():
                    help="Full path to the input zarr file")
     p.add_argument("output_zarr",
                    help="Full path to the output zarr file")
+    p.add_argument("--max_iterations", type=int, default=500,
+                   help='Maximum number of iterations for BaSiC. [%(default)s]')
     add_processes_arg(p)
     return p
 
@@ -44,6 +46,7 @@ def process_tile(params: dict):
     file = params["slice_file"]
     z = params["z"]
     tile_shape = params["tile_shape"]
+    max_iterations = params["max_iterations"]
     vol = io.v3.imread(str(file))
     file_output = Path(file).parent / file.name.replace(".tiff", "_corrected.tiff")
 
@@ -74,31 +77,30 @@ def process_tile(params: dict):
             sign_imag = [np.sign(t) for t in tiles_imag]
 
             # Run BaSiC
-            optimizer = BaSiC(np.abs(tiles).astype(np.float64), estimate_darkfield=True)
-            optimizer.working_size = 64
-            optimizer.prepare()
-            optimizer.run()
-            
+            # TODO: Validate with data
+            optimizer = BaSiC(get_darkfield=True, smoothness_flatfield=1,
+                              max_iterations=max_iterations)
+            optimizer.fit(np.abs(np.asarray(tiles)).astype(np.float64))
+            tiles_real_corr = optimizer.transform(np.asarray(tiles_real))
+            tiles_imag_corr = optimizer.transform(np.asarray(tiles_imag))
+
             # Apply correction and reconstruct complex result with original signs
             tiles_corrected = [
-                (optimizer.normalize(t_real) * s_real)
-                + 1j * (optimizer.normalize(t_imag) * s_imag)
+                (t_real * s_real) + 1j * (t_imag * s_imag)
                 for t_real, t_imag, s_real, s_imag in zip(
-                    tiles_real, tiles_imag, sign_real, sign_imag
-                )
+                    tiles_real_corr, tiles_imag_corr, sign_real, sign_imag)
             ]
         except TypeError as e:
             print(f"Error processing complex tiles: {e}")
             
     else:
         # Process normally if tiles are real
-        optimizer = BaSiC(tiles, estimate_darkfield=True)
-        optimizer.working_size = 64
-        optimizer.prepare()
-        optimizer.run()
+        optimizer = BaSiC(get_darkfield=True, smoothness_flatfield=1,
+                          max_iterations=max_iterations)
+        optimizer.fit(np.asarray(tiles))
 
         # Apply correction
-        tiles_corrected = [optimizer.normalize(t) for t in tiles]
+        tiles_corrected = optimizer.transform(np.asarray(tiles))
 
     # Fill the output mosaic
     vol_output = np.zeros_like(vol)
@@ -143,6 +145,7 @@ def main():
             "z": z,
             "slice_file": slice_file,
             "tile_shape": vol.chunks[1:],
+            "max_iterations": args.max_iterations
         }
         params_list.append(params)
 

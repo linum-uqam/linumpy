@@ -9,7 +9,7 @@ import random
 import SimpleITK as sitk
 from pathlib import Path
 from linumpy.utils.mosaic_grid import MosaicGrid
-from pybasic.shading_correction import BaSiC
+from basicpy import BaSiC
 import numpy as np
 
 
@@ -83,22 +83,20 @@ def main():
     estimate_darkfield = False
     if args.output_darkfield is not None:
         estimate_darkfield = True
-    optimizer = BaSiC(tiles_sample, estimate_darkfield=estimate_darkfield)
-    optimizer.working_size = args.working_size
-    optimizer.prepare()
-    optimizer.run()
+    optimizer = BaSiC(get_darkfield=estimate_darkfield, smoothness_flatfield=1)
+    optimizer.fit(np.asarray(tiles_sample))
 
     # Save the estimated fields (only if the profiles were estimated)
     flatfield_name = Path(args.output_flatfield).resolve()
     flatfield_name.parent.mkdir(parents=True, exist_ok=True)
-    flatfield = optimizer.flatfield_fullsize
+    flatfield = optimizer.flatfield
     flatfield = flatfield / flatfield.mean() # normalization
     sitk.WriteImage(sitk.GetImageFromArray(flatfield), str(flatfield_name))
 
     if args.output_darkfield is not None:
         darkfield_name = Path(args.output_darkfield).resolve()
         darkfield_name.parent.mkdir(parents=True, exist_ok=True)
-        darkfield = optimizer.darkfield_fullsize
+        darkfield = optimizer.darkfield
         sitk.WriteImage(sitk.GetImageFromArray(darkfield), str(darkfield_name))
 
 if __name__ == "__main__":
