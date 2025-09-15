@@ -25,14 +25,22 @@ params.grad_mag_tolerance = 1e-12 // Gradient magnitude tolerance for the 3D sta
 params.metric = "MSE" // Metric for the 3D stacking algorithm, can be 'MSE' or 'CC'
 
 // Processes
-process create_mosaic_grid {
+process resample_mosaic_grid {
     input:
-        tuple val(slice_id), path(tiles)
+        tuple val(slice_id), path(mosaic_grid)
     output:
-        tuple val(slice_id), path("*.ome.zarr")
+        tuple val(slice_id), path("mosaic_grid_3d_${params.resolution}um.ome.zarr")
     script:
     """
-    linum_create_mosaic_grid_3d.py mosaic_grid_3d_${params.resolution}um.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution}
+    tar -xvf $mosaic_grid
+
+    # safety measure to ensure we have the expected filename
+    mv *.ome.zarr dummy_name.ome.zarr
+    mv dummy_name.ome.zarr mosaic_grid_z${slice_id}.ome.zarr
+    linum_resample_mosaic_grid.py mosaic_grid_z${slice_id}.ome.zarr "mosaic_grid_3d_${params.resolution}um.ome.zarr" -r ${params.resolution}
+
+    # cleanup; we don't need these temp files in our working directory
+    rm -rf mosaic_grid_z${slice_id}.ome.zarr
     """
 }
 
@@ -138,28 +146,20 @@ process crop_interface {
 }
 
 workflow {
-    if (params.use_old_folder_structure)
-    {
-        inputSlices = Channel.fromPath("$params.input/tile_x*_y*_z*/", type: 'dir')
-                            .map{path -> tuple(path.toString().substring(path.toString().length() - 2), path)}
-                            .groupTuple()
-    }
-    else
-    {
-        inputSlices = Channel.fromPath("$params.input/**/tile_x*_y*_z*/", type: 'dir')
-                            .map{path -> tuple(path.toString().substring(path.toString().length() - 2), path)}
-                            .groupTuple()
-    }
-    input_dir_channel = Channel.fromPath("$params.input", type: 'dir')
+    inputSlices = Channel.fromFilePairs("$params.input/mosaic_grid_z*.ome.zarr.tar.gz", size: -1)
+        .map { id, files ->
+            // Extract the two digits after 'z' using regex
+            def matcher = id =~ /z(\d{2})/
+            def key = matcher ? matcher[0][1] : "unknown"
+            [key, files]
+        }
+    shifts_xy = Channel.fromPath("$params.shifts_xy")
 
     // Generate a 3D mosaic grid.
-    create_mosaic_grid(inputSlices)
-
-    // Estimate XY shifts from metadata
-    estimate_xy_shifts_from_metadata(input_dir_channel)
+    resample_mosaic_grid(inputSlices)
 
     // Focal plane curvature compensation
-    fix_focal_curvature(create_mosaic_grid.out)
+    fix_focal_curvature(resample_mosaic_grid.out)
 
     // Compensate for XY illumination inhomogeneity
     fix_illumination(fix_focal_curvature.out)
@@ -186,7 +186,7 @@ workflow {
         .collate(2)
         .map{_meta, filename -> filename}
         .collect()
-        .merge(estimate_xy_shifts_from_metadata.out){a, b -> tuple(a, b)}
+        .merge(shifts_xy){a, b -> tuple(a, b)}
 
     stack_mosaics_into_3d_volume(stack_in_channel)
 }
