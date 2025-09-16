@@ -20,6 +20,17 @@ from skimage.filters import threshold_li, threshold_otsu
 from skimage.morphology import dilation, disk
 
 
+def compensate_camera_shift(vol):
+    # Compensate the camera shift
+    img = vol.mean(axis=0)
+    pix_max = np.where(img == img.max())
+    cam_shift = pix_max[0][0]
+    vol = np.roll(vol, -cam_shift, axis=1)
+
+    # Replace the saturated pixel value by its neighbor
+    vol[:, 0, 0] = vol[:, 1, 0]
+    return vol
+
 
 def cropVolume(vol, xlim=[0, -1], ylim=[0, -1], zlim=[0, -1]):
     """Crops the given volume according to the range given as input

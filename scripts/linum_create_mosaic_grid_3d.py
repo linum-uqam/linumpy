@@ -48,6 +48,8 @@ def _build_arg_parser():
     options_g.add_argument('--zarr_root',
                            help='Path to parent directory under which the zarr'
                                 ' temporary directory will be created [/tmp/].')
+    options_g.add_argument('--fix_cam_shift', action='store_true',
+                           help='Compensate camera shift. [%(default)s]')
     add_processes_arg(options_g)
     psoct_options_g = p.add_argument_group("PS-OCT options")  
     psoct_options_g.add_argument('--polarization', type = int, default = 1, choices = [0,1],
@@ -77,6 +79,7 @@ def process_tile(params: dict):
     f = params["file"]
     mx, my, mz = params["tile_pos"]
     crop = params["crop"]
+    cam_shift = params["cam_shift"]
     tile_size = params["tile_size"]
     mosaic = params["mosaic"]
     data_type = params["data_type"]
@@ -86,7 +89,7 @@ def process_tile(params: dict):
     # Load the tile
     if data_type == 'OCT':
         oct = OCT(f)
-        vol = oct.load_image(crop=crop)
+        vol = oct.load_image(crop=crop, camera_shift=cam_shift)
         vol = preprocess_volume(vol)
     elif data_type == 'PSOCT':
         oct = ThorOCT(f, config=psoct_config)
@@ -198,6 +201,7 @@ def main():
             "file": tiles[i],
             "tile_pos": tiles_pos[i],
             "crop": crop,
+            "cam_shift": args.fix_cam_shift,
             "tile_size": tile_size,
             "mosaic": writer,
             "data_type": data_type,
