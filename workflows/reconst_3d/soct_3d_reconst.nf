@@ -147,7 +147,7 @@ process crop_interface {
 }
 
 workflow {
-    inputSlices = Channel.fromFilePairs("$params.input/mosaic_grid_z*.ome.zarr.tar.gz", size: -1)
+    inputSlices = Channel.fromFilePairs("$params.input/mosaic_grid*z*.ome.zarr.tar.gz", size: -1)
         .map { id, files ->
             // Extract the two digits after 'z' using regex
             def matcher = id =~ /z(\d{2})/
