@@ -39,6 +39,7 @@ process compress_mosaic_grid {
 }
 
 process estimate_xy_shifts_from_metadata {
+    cpus params.processes
     publishDir "$params.output"
     input:
         path(input_dir)
@@ -46,7 +47,7 @@ process estimate_xy_shifts_from_metadata {
         path("shifts_xy.csv")
     script:
     """
-    linum_estimate_xy_shift_from_metadata.py ${input_dir} shifts_xy.csv
+    linum_estimate_xy_shift_from_metadata.py ${input_dir} shifts_xy.csv --n_processes $params.processes
     """
 }
 
