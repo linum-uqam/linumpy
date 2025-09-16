@@ -8,6 +8,7 @@ nextflow.enable.dsl = 2
 
 // Parameters
 params.input = ""
+params.shifts_xy = "$params.input/shifts_xy.csv"
 params.output = ""
 params.resolution = 10 // Resolution of the reconstruction in micron/pixel
 params.processes = 1 // Maximum number of python processes per nextflow process
