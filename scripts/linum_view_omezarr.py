@@ -4,7 +4,9 @@
 """View an ome-zarr file with napari."""
 
 import argparse
-
+from ome_zarr.io import parse_url
+from ome_zarr.reader import Reader
+from linumpy.io.zarr import read_omezarr
 import napari
 import zarr
 import numpy as np
@@ -23,24 +25,24 @@ def main():
     p = _build_arg_parser()
     args = p.parse_args()
 
-    # Parameters
-    zarr_location = args.input_zarr
+    # read the image data
+    reader = Reader(parse_url(args.input_zarr))
+    # nodes may include images, labels etc
+    nodes = list(reader())
 
-    # Load the OME-Zarr file
-    root = zarr.open(zarr_location, mode="r")
-    n_scales = len(root)
+    # first node will be the image pixel data
+    image_node = nodes[0]
+
+    dask_data = image_node.data
+    res = image_node.metadata["coordinateTransformations"][0][0]['scale']
+    imin = max(dask_data[-1].min().compute(), 0)
+    imax = dask_data[-1].max().compute()
 
     # Prepare the viewer
     viewer = napari.Viewer()
-    layers = viewer.open(zarr_location, plugin="napari-ome-zarr")
-    layers[0].colormap = "magma"
     viewer.scale_bar.visible = True
-    viewer.scale_bar.unit = "mm"
-
-    # Set the color limits
-    imin = max(root[n_scales-1][:].min(), 0)
-    imax = np.percentile(root[n_scales-1][:], 99.9)
-    layers[0].contrast_limits = [imin, imax]
+    viewer.scale_bar.unit = 'mm'
+    viewer.add_image(dask_data, metadata=image_node.metadata, contrast_limits=(imin, imax), colormap='magma', scale=res)
 
     # Run the viewer
     napari.run()

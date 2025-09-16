@@ -21,7 +21,21 @@ def _build_arg_parser():
                    help='Isotropic resolution for resampling in microns.')
     p.add_argument('--n_levels', type=int, default=5,
                    help='Number of levels in pyramid decomposition [%(default)s].')
+    p.add_argument('--cam_shift', action='store_true',
+                   help='Compensate the camera shift. [%(default)s]')
     return p
+
+
+def compensate_cam_shift(vol):
+    # Compensate the camera shift
+    img = vol.mean(axis=0)
+    pix_max = np.where(img == img.max())
+    cam_shift = pix_max[0][0]
+    vol = np.roll(vol, -cam_shift, axis=1)
+
+    # Replace the saturated pixel value by its neighbor
+    vol[:, 0, 0] = vol[:, 1, 0]
+    return vol
 
 
 def main():
@@ -47,10 +61,14 @@ def main():
     out_zarr = zarr.open(create_tempstore(), mode='w', shape=out_shape,
                          chunks=out_tile_shape, dtype=vol.dtype)
     for i, j in itertools.product(range(nx), range(ny)):
+        current_vol = vol[:, i*tile_shape[1]:(i + 1)*tile_shape[1],
+                          j*tile_shape[2]:(j + 1)*tile_shape[2]]
+        if args.cam_shift:
+            current_vol = compensate_cam_shift(current_vol)
         out_zarr[:, i*out_tile_shape[1]:(i + 1)*out_tile_shape[1],
                  j*out_tile_shape[2]:(j + 1)*out_tile_shape[2]] =\
-            rescale(vol[:, i*tile_shape[1]:(i + 1)*tile_shape[1], j*tile_shape[2]:(j + 1)*tile_shape[2]],
-                    scaling_factor, order=1, preserve_range=True, anti_aliasing=True)
+            rescale(current_vol, scaling_factor, order=1,
+                    preserve_range=True, anti_aliasing=True)
 
     darr = da.from_zarr(out_zarr)
     save_omezarr(darr, args.out_mosaic, [target_res]*3,
