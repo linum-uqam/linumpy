@@ -7,7 +7,7 @@ import dask.array as da
 import itertools
 
 from skimage.transform import rescale
-from linumpy.io import read_omezarr, save_omezarr, create_tempstore
+from linumpy.io import read_omezarr, OmeZarrWriter
 
 
 def _build_arg_parser():
@@ -58,8 +58,8 @@ def main():
     ny = vol.shape[2] // tile_shape[2]
 
     out_shape = (out_tile_shape[0], nx*out_tile_shape[1], ny*out_tile_shape[2])
-    out_zarr = zarr.open(create_tempstore(), mode='w', shape=out_shape,
-                         chunks=out_tile_shape, dtype=vol.dtype)
+    out_zarr = OmeZarrWriter(args.out_mosaic, out_shape, out_tile_shape,
+                             dtype=vol.dtype, overwrite=True)
     for i, j in itertools.product(range(nx), range(ny)):
         current_vol = vol[:, i*tile_shape[1]:(i + 1)*tile_shape[1],
                           j*tile_shape[2]:(j + 1)*tile_shape[2]]
@@ -70,9 +70,7 @@ def main():
             rescale(current_vol, scaling_factor, order=1,
                     preserve_range=True, anti_aliasing=True)
 
-    darr = da.from_zarr(out_zarr)
-    save_omezarr(darr, args.out_mosaic, [target_res]*3,
-                 chunks=out_tile_shape, n_levels=args.n_levels)
+    out_zarr.finalize([target_res] * 3, args.n_levels)
 
 
 if __name__ == '__main__':
