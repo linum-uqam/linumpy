@@ -31,7 +31,7 @@ process compress_mosaic_grid {
     input:
         tuple val(slice_id), path(mosaic_grid)
     output:
-        tuple val(slice_id), path("mosaic_grid_3d_z${slice_id}.ome.zarr.zip")
+        tuple val(slice_id), path("mosaic_grid_3d_z${slice_id}.ome.zarr.tar.gz")
     script:
     """
     tar -czvf mosaic_grid_3d_z${slice_id}.ome.zarr.tar.gz ${mosaic_grid}
