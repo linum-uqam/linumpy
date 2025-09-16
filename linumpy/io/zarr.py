@@ -179,8 +179,24 @@ def create_directory(store_path, overwrite=False):
     return directory
 
 
-def validate_n_levels(n_levels, shape):
-    adjusted_n_levels = min(*np.log2(shape).astype(int), n_levels)
+def validate_n_levels(n_levels, shape, downscale_factor=2):
+    """
+    Validate n_levels such that it does not go beyond the volume shape.
+
+    :type n_levels: int
+    :param n_levels: Requested number of levels
+    :type shape: tuple of int
+    :param shape: Shape of volume to save
+    :type downscale_factor: int
+    :param downscale_factor: The downscale factor
+
+    :type adjusted_n_levels: int
+    :return adjusted_n_levels: Adjusted n_levels such that we don't exceed volume shape.
+    """
+    def logn(arr, n):
+        return np.log2(arr) / np.log2(n)
+
+    adjusted_n_levels = min(*logn(shape, downscale_factor).astype(int), n_levels)
     if n_levels > adjusted_n_levels:
         print(f'WARNING: Requested n_levels {n_levels} too high for image dimensions: {shape}.\n'
               f'Setting to {adjusted_n_levels}.')
@@ -399,7 +415,7 @@ class OmeZarrWriter:
         return len(self.shape)
 
     def finalize(self, res, n_levels=5):
-        n_levels = validate_n_levels(n_levels, self.shape)
+        n_levels = validate_n_levels(n_levels, self.shape, self.downscale_factor)
         paths = [f"{i}" for i in range(n_levels + 1)]
         self._downsample_pyramid_on_disk(self.root, paths)
         transformations = create_transformation_dict(n_levels + 1, res, len(self.shape))
