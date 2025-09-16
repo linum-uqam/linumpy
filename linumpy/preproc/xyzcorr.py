@@ -403,10 +403,10 @@ def findTissueInterface(
                 mask_Aline = mask[x, y, :]
                 Aline = vol_p[x, y, :]
                 vol_g[x, y, mask_Aline] = gaussian_filter1d(
-                    Aline[mask_Aline], s_z, order=order, mode='wrap'
+                    Aline[mask_Aline], s_z, order=order
                 )
     else:
-        vol_g = gaussian_filter1d(vol_p, s_z, order=order, mode='wrap')
+        vol_g = gaussian_filter1d(vol_p, s_z, order=order)
     z0 = np.ceil(vol_g.argmax(axis=2) + s_z * 0.5).astype(int)
 
     # Check if tissue begins before the FOV
