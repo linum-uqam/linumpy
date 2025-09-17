@@ -15,7 +15,8 @@ import numpy as np
 import dask.array as da
 import zarr
 from linumpy.io.zarr import read_omezarr, save_omezarr, create_tempstore
-from linumpy.preproc.xyzcorr import findTissueInterface, maskUnderInterface
+from scipy.ndimage import gaussian_filter1d, gaussian_filter
+
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(description=__doc__,
@@ -61,22 +62,14 @@ def main():
     vol_f = np.abs(vol) if np.iscomplexobj(vol) else vol
     vol_f = np.transpose(vol_f, (1, 2, 0))
 
-    # Detect interface
-    interface = findTissueInterface(
-        vol_f, s_z=args.sigma_z, s_xy=args.sigma_xy, useLog=args.use_log
-    )
+    # compute the derivative along z to find the average tissue depth
+    pad_width = int(np.round(args.sigma_z*4))
+    vol_padded = np.pad(vol_f, ((0, 0), (0, 0), (pad_width, 0)), mode='wrap')
+    vol_padded = gaussian_filter(vol_padded, (args.sigma_xy, args.sigma_xy, 0))
+    dz = gaussian_filter1d(vol_padded, sigma=args.sigma_z, axis=-1, order=1)
+    avg_dz = np.sum(dz, axis=(0, 1))
 
-    # Generate mask Under interface
-    mask = maskUnderInterface(vol_f, interface, returnMask=True)
-
-    # Exclude out of bounds columns
-    mask_all = mask.all(axis=2)  # True where mask is True for every voxel along the aline
-    tissue_present = (
-        ~mask_all
-    )  # keep alines with at least one False (i.e., valid tissue interface)
-    # Average interface only where tissue_present is True
-    valid_ifaces = interface[tissue_present]
-    avg_iface = int(round(valid_ifaces.mean())) if valid_ifaces.size > 0 else 0
+    avg_iface = max(int(np.argmax(avg_dz)) - pad_width, 0)
     print(f"Average surface depth: {avg_iface} voxels")
 
     # Compute number of Z-slices for desired depth (um / um-per-voxel)
