@@ -478,3 +478,117 @@ def register_mosaic_3d_to_reference_2d(ref_image, current_mosaic, method='euler'
         output_volume[i, :, :] = out
 
     return output_volume, R.GetMetricValue()
+
+
+def register_2d_images_sitk(ref_image, moving_image, method='euler',
+                            metric='MSE', max_iterations=10000, 
+                            min_step=1e-12, grad_mag_tol=1e-12,
+                            return_3d_transform=False):
+    # Type cast everything to float32
+    ref_image = ref_image.astype(np.float32)
+    moving_image = moving_image.astype(np.float32)
+
+    fixed_sitk_image = sitk.GetImageFromArray(ref_image)
+    moving_sitk_image = sitk.GetImageFromArray(moving_image)
+
+    R = sitk.ImageRegistrationMethod()
+
+    if metric.lower() == 'mse':
+        R.SetMetricAsMeanSquares()
+    elif metric.lower() == 'cc':
+        R.SetMetricAsCorrelation()
+    elif metric.lower() == 'antscc':
+        R.SetMetricAsANTSNeighborhoodCorrelation(radius=20)
+    elif metric.lower() == 'mi':
+        R.SetMetricAsMattesMutualInformation(numberOfHistogramBins=50)
+    else:
+        raise ValueError("Unknown metric: {}".format(metric))
+
+    R.SetOptimizerAsRegularStepGradientDescent(4.0, min_step, max_iterations,
+                                               0.5, grad_mag_tol)
+    R.SetShrinkFactorsPerLevel([4, 2, 1])
+    R.SetSmoothingSigmasPerLevel([3, 2, 1])
+
+    # this step is essential for the registration to work properly
+    # determines the scale of each parameter in the optimizer
+    R.SetOptimizerScalesFromIndexShift()
+
+    if method == 'euler':
+        sitk_transform = sitk.Euler2DTransform()
+    elif method == 'affine':
+        sitk_transform = sitk.AffineTransform(2)
+    elif method == 'translation':
+        sitk_transform = sitk.TranslationTransform(2)
+    else:
+        raise ValueError("Unknown method: {}".format(method))
+
+    # sitk_transform.SetParameters([0.0] * sitk_transform.GetNumberOfParameters())
+    sitk_transform = sitk.CenteredTransformInitializer(
+        fixed_sitk_image,
+        moving_sitk_image,
+        sitk_transform
+    )
+
+    R.SetInitialTransform(sitk_transform)
+
+    R.SetInterpolator(sitk.sitkLinear)
+
+    R.AddCommand(sitk.sitkIterationEvent, lambda: command_iteration(R))
+
+    out_transform = R.Execute(fixed_sitk_image, moving_sitk_image)
+    stop_condition = R.GetOptimizerStopConditionDescription()
+
+    if return_3d_transform:
+        if method == 'euler':
+            angle_rad = out_transform.GetAngle()
+            center_of_rotation = out_transform.GetCenter()
+            translation = out_transform.GetTranslation()
+            transform_3d = sitk.Euler3DTransform()
+            transform_3d.SetCenter([center_of_rotation[0], center_of_rotation[1], 0.0])
+            transform_3d.SetRotation(0.0, 0.0, angle_rad)
+            transform_3d.SetTranslation([translation[0], translation[1], 0.0])
+        elif method == 'translation':
+            translation = out_transform.GetOffset()
+            transform_3d = sitk.TranslationTransform(3)
+            transform_3d.SetOffset([translation[0], translation[1], 0.0])
+        elif method == 'affine':
+            transform_3d = sitk.AffineTransform(3)
+            translation = out_transform.GetTranslation()
+            transform_3d.SetCenter(out_transform.GetCenter() + (0.0,))
+            transform_3d.SetTranslation([translation[0], translation[1], 0.0])
+            matrix_2d = out_transform.GetMatrix()
+            matrix_3d = np.zeros((3, 3))
+            matrix_3d[:2, :2] = np.array(matrix_2d).reshape((2, 2))
+            matrix_3d[2, 2] = 1.0
+            transform_3d.SetMatrix(matrix_3d.flatten().tolist())
+        else:
+            raise ValueError("Unknown method: {}".format(method))
+        return transform_3d, stop_condition
+
+    return out_transform, stop_condition
+
+
+def command_iteration(method):
+    """ Callback invoked when the optimization has an iteration """
+    if method.GetOptimizerIteration() == 0:
+        print("Estimated Scales: ", method.GetOptimizerScales())
+    print(
+        f"{method.GetOptimizerIteration():3} "
+        + f"= {method.GetMetricValue():7.5f} "
+        + f": {method.GetOptimizerPosition()}"
+    )
+
+
+def apply_transform(moving_image, transform):
+    moving_image_sitk = sitk.GetImageFromArray(moving_image)
+
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetReferenceImage(moving_image_sitk)  # transforms the image inside its domain
+    resampler.SetInterpolator(sitk.sitkLinear)
+    resampler.SetDefaultPixelValue(0)
+    resampler.SetTransform(transform)
+
+    out = resampler.Execute(moving_image_sitk)
+    out = sitk.GetArrayFromImage(out)
+
+    return out

@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+"""
+import argparse
+
+from linumpy.io.zarr import read_omezarr, save_omezarr
+import numpy as np
+import dask.array as da
+
+
+def _build_arg_parser():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument('in_volume',
+                   help='Input volume .ome.zarr.')
+    p.add_argument('out_volume',
+                   help='Output volume .ome.zarr.')
+    p.add_argument('--percentile_lower', default=0, type=float,
+                   help='Percentile below which values will be clipped [%(default)s].')
+    p.add_argument('--percentile_upper', default=99.9, type=float,
+                   help='Percentile above which values will be clipped [%(default)s].')
+    return p
+
+
+def main():
+    parser = _build_arg_parser()
+    args = parser.parse_args()
+
+    vol, res = read_omezarr(args.in_volume)
+    darr = da.from_zarr(vol)
+    darr = da.clip(darr, np.percentile(vol[:], args.percentile_lower),
+                   np.percentile(vol[:], args.percentile_upper))
+
+    save_omezarr(darr, args.out_volume, res, vol.chunks)
+
+
+if __name__ == '__main__':
+    main()
