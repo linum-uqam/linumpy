@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """"Quick reconstruction and processing methods for the S-OCT data."""
-
+import os.path
 import re
 from pathlib import Path
 
@@ -52,8 +52,7 @@ def get_tiles_ids(directory, z: int = None):
     tiles = list(input_directory.rglob(tiles_to_process))
     tiles = [t for t in tiles if t.name.startswith('tile_')]
     # Filter out all files
-    pattern = re.compile("^.+\..{3}$")
-    tiles = [t for t in tiles if not pattern.match(t.name)]
+    tiles = [t for t in tiles if not os.path.isfile(t)]
     tile_ids = get_tiles_ids_from_list(tiles)
 
     return tiles, tile_ids
