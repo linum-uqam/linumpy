@@ -35,8 +35,7 @@ def _get_mosaic_3d_nifti():
         img = nib.Nifti1Image(data, np.eye(4))
         img.header.set_xyzt_units(xyz="micron")
         nib.save(img, filename)
-
-        return filename
+    return filename
 
 
 def _get_mosaic_3d_omezarr():
@@ -45,10 +44,11 @@ def _get_mosaic_3d_omezarr():
     if not os.path.exists(filename):
         # create test data
         data = np.mean(cells3d(), axis=1)  # (60, 256, 256)
+        data = data[:5, :, :]
 
         dask_array = da.from_array(data)
         save_omezarr(
-            dask_array, filename, chunks=(60, 32, 32), n_levels=5, overwrite=False
+            dask_array, filename, chunks=(5, 32, 32), n_levels=5, overwrite=False
         )
     return filename
 

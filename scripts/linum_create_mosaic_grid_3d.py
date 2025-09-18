@@ -12,7 +12,7 @@ import dask.array as da
 import zarr
 from skimage.transform import resize
 from tqdm.auto import tqdm
-from linumpy.io.zarr import save_omezarr
+from linumpy.io.zarr import OmeZarrWriter
 from linumpy import reconstruction
 from linumpy.microscope.oct import OCT
 from linumpy.io.thorlabs import ThorOCT, PreprocessingConfig
@@ -48,6 +48,8 @@ def _build_arg_parser():
     options_g.add_argument('--zarr_root',
                            help='Path to parent directory under which the zarr'
                                 ' temporary directory will be created [/tmp/].')
+    options_g.add_argument('--disable_fix_shift', action='store_true',
+                           help='Disable camera/galvo shift. [%(default)s]')
     add_processes_arg(options_g)
     psoct_options_g = p.add_argument_group("PS-OCT options")  
     psoct_options_g.add_argument('--polarization', type = int, default = 1, choices = [0,1],
@@ -77,6 +79,7 @@ def process_tile(params: dict):
     f = params["file"]
     mx, my, mz = params["tile_pos"]
     crop = params["crop"]
+    fix_shift = params["fix_shift"]
     tile_size = params["tile_size"]
     mosaic = params["mosaic"]
     data_type = params["data_type"]
@@ -86,7 +89,7 @@ def process_tile(params: dict):
     # Load the tile
     if data_type == 'OCT':
         oct = OCT(f)
-        vol = oct.load_image(crop=crop)
+        vol = oct.load_image(crop=crop, fix_shift=fix_shift)
         vol = preprocess_volume(vol)
     elif data_type == 'PSOCT':
         oct = ThorOCT(f, config=psoct_config)
@@ -112,6 +115,7 @@ def process_tile(params: dict):
     cmax = cmin + vol.shape[2]
     mosaic[0:tile_size[0], rmin:rmax, cmin:cmax] = vol
 
+
 def main():
     # Parse arguments
     parser = _build_arg_parser()
@@ -120,6 +124,7 @@ def main():
     # Parameters
     output_resolution = args.resolution
     crop = not args.keep_galvo_return
+    fix_shift = not args.disable_fix_shift
 
     data_type = args.data_type
     angle_index = args.angle_index
@@ -187,10 +192,9 @@ def main():
     mosaic_shape = [tile_size[0], n_mx * tile_size[1], n_my * tile_size[2]]
     
     # Create the zarr persistent array
-    zarr_store = zarr.TempStore(dir=args.zarr_root, suffix=".zarr")
-    mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape,
-                       dtype=np.complex64 if args.return_complex else np.float32,
-                       chunks=tile_size)
+    writer = OmeZarrWriter(args.output_zarr, shape=mosaic_shape,
+                           dtype=np.complex64 if args.return_complex else np.float32,
+                           chunk_shape=tile_size, overwrite=True)
 
     # Create a params dictionary for every tile
     params = []
@@ -199,8 +203,9 @@ def main():
             "file": tiles[i],
             "tile_pos": tiles_pos[i],
             "crop": crop,
+            "fix_shift": fix_shift,
             "tile_size": tile_size,
-            "mosaic": mosaic,
+            "mosaic": writer,
             "data_type": data_type,
             "psoct_config": psoct_config,
             "mxy_min": (mx_min, my_min)
@@ -215,9 +220,7 @@ def main():
             process_tile(p)
 
     # Convert to ome-zarr
-    mosaic_dask = da.from_zarr(mosaic)
-    save_omezarr(mosaic_dask, args.output_zarr, voxel_size=output_resolution,
-                 chunks=tile_size, n_levels=args.n_levels)
+    writer.finalize(output_resolution, args.n_levels)
 
 
 if __name__ == "__main__":

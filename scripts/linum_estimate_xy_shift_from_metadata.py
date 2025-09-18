@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 from tqdm.contrib.concurrent import process_map
+from linumpy.utils.io import add_processes_arg, parse_processes_arg
 
 from linumpy.reconstruction import get_mosaic_info, get_tiles_ids
 
@@ -20,6 +21,7 @@ def _build_arg_parser():
                    help="Tiles directory")
     p.add_argument("output_file",
                    help="Output CSV file")
+    add_processes_arg(p)
     return p
 
 
@@ -32,13 +34,14 @@ def main():
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
+    n_processes = parse_processes_arg(args.n_processes)
 
     # Extract the parameters
     tiles_directory = Path(args.directory)
     output_file = Path(args.output_file)
 
     # Get slice ids
-    tiles, tile_ids = get_tiles_ids(tiles_directory)
+    _, tile_ids = get_tiles_ids(tiles_directory)
     z_values = np.unique([ids[2] for ids in tile_ids])
     n_slices = len(z_values)
 
@@ -46,8 +49,9 @@ def main():
     tiles_directory_list = [tiles_directory] * n_slices
 
     # Extract the metadata
-    results = process_map(process_slice, z_values, tiles_directory_list, unit="slice", desc="Computing Mosaic Info",
-                          position=0, leave=True)
+    results = process_map(process_slice, z_values, tiles_directory_list,
+                          unit="slice", desc="Computing Mosaic Info",
+                          position=0, leave=True, max_workers=n_processes)
 
     xmin_mm, ymin_mm, tile_resolutions = zip(*results)
 

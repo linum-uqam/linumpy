@@ -4,7 +4,7 @@ Stack 3D mosaics into a single 3D volume saved as .ome.zarr file.
 """
 import argparse
 
-from linumpy.io.zarr import read_omezarr, save_omezarr
+from linumpy.io.zarr import read_omezarr, save_omezarr, create_tempstore
 from linumpy.utils_images import apply_xy_shift
 from linumpy.stitching.registration import register_mosaic_3d_to_reference_2d
 
@@ -157,7 +157,7 @@ def main():
     start_index = args.depth_offset
     print(f"Interface index: {start_index}")
 
-    mosaic_store = zarr.TempStore()
+    mosaic_store = create_tempstore()
     mosaic = zarr.open(mosaic_store, mode="w", shape=volume_shape,
                        dtype=np.float32, chunks=(256, 256, 256))
 

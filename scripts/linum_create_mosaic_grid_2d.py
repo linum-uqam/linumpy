@@ -176,10 +176,8 @@ def main():
         tile_pos_px.append((rmin, rmax, cmin, cmax))
 
     # Create the zarr persistent array
-    process_sync_file = str(zarr_file).replace(".zarr", ".sync")
-    synchronizer = zarr.ProcessSynchronizer(process_sync_file)
-    mosaic = zarr.open(zarr_file, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=tile_size,
-                       synchronizer=synchronizer)
+    mosaic = zarr.open(zarr_file, mode="w", shape=mosaic_shape,
+                       dtype=np.float32, chunks=tile_size)
 
     # Create a params dictionary for every tile
     params = []
@@ -194,9 +192,6 @@ def main():
 
     # Process the tiles in parallel
     pqdm(params, process_tile, n_jobs=n_cpus, desc="Processing tiles")
-
-    # Remove the process sync file
-    shutil.rmtree(process_sync_file)
 
     # Normalize the mosaic
     if args.normalize:

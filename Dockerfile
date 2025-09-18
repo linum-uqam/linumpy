@@ -1,4 +1,4 @@
-FROM python:3.10
+FROM python:3.12
 
 WORKDIR /linumpy/
 
@@ -8,7 +8,8 @@ ENV PYTHONUNBUFFERED=1
 # Install dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
-    libgl1-mesa-glx \
+    libgl1 \
+    libglx-mesa0 \
     libhdf5-dev \
     zip \
     && rm -rf /var/lib/apt/lists/*
