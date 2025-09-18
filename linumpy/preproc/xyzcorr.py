@@ -20,7 +20,6 @@ from skimage.filters import threshold_li, threshold_otsu
 from skimage.morphology import dilation, disk
 
 
-
 def cropVolume(vol, xlim=[0, -1], ylim=[0, -1], zlim=[0, -1]):
     """Crops the given volume according to the range given as input
 

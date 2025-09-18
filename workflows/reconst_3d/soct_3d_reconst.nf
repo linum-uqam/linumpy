@@ -8,6 +8,7 @@ nextflow.enable.dsl = 2
 
 // Parameters
 params.input = ""
+params.shifts_xy = "$params.input/shifts_xy.csv"
 params.output = ""
 params.resolution = 10 // Resolution of the reconstruction in micron/pixel
 params.processes = 1 // Maximum number of python processes per nextflow process
@@ -16,7 +17,6 @@ params.initial_search = 25 // Initial search index for mosaics stacking
 params.max_allowed_overlap = 10 // Slices are allowed to shift up to this many voxels from the initial search index
 params.axial_resolution = 1.5 // Axial resolution of imaging system in microns
 params.crop_interface_out_depth = 600 // Minimum depth of the cropped image in microns
-params.use_old_folder_structure = false // Use the old folder structure where tiles are not stored in subfolders based on their Z
 params.method = "euler" // Method for stitching, can be 'euler' or 'affine'
 params.learning_rate = 2.0 // Learning rate for the 3D stacking algorithm
 params.min_step = 1e-12 // Minimum step size for the 3D stacking algorithm
@@ -25,14 +25,22 @@ params.grad_mag_tolerance = 1e-12 // Gradient magnitude tolerance for the 3D sta
 params.metric = "MSE" // Metric for the 3D stacking algorithm, can be 'MSE' or 'CC'
 
 // Processes
-process create_mosaic_grid {
+process resample_mosaic_grid {
     input:
-        tuple val(slice_id), path(tiles)
+        tuple val(slice_id), path(mosaic_grid)
     output:
-        tuple val(slice_id), path("*.ome.zarr")
+        tuple val(slice_id), path("mosaic_grid_3d_${params.resolution}um.ome.zarr")
     script:
     """
-    linum_create_mosaic_grid_3d.py mosaic_grid_3d_${params.resolution}um.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution}
+    tar -xvf $mosaic_grid
+
+    # safety measure to ensure we have the expected filename
+    mv *.ome.zarr dummy_name.ome.zarr
+    mv dummy_name.ome.zarr mosaic_grid_z${slice_id}.ome.zarr
+    linum_resample_mosaic_grid.py mosaic_grid_z${slice_id}.ome.zarr "mosaic_grid_3d_${params.resolution}um.ome.zarr" -r ${params.resolution}
+
+    # cleanup; we don't need these temp files in our working directory
+    rm -rf mosaic_grid_z${slice_id}.ome.zarr
     """
 }
 
@@ -122,7 +130,7 @@ process stack_mosaics_into_3d_volume {
         path("3d_volume.ome.zarr")
     script:
     """
-    linum_stack_mosaics_into_3d_volume.py inputs shifts_xy.csv 3d_volume.ome.zarr --initial_search $params.initial_search --depth_offset $params.depth_offset --max_allowed_overlap $params.max_allowed_overlap  --out_offsets 3d_volume_offsets.npy --method ${params.method} --metric ${params.metric} --learning_rate ${params.learning_rate} --min_step ${params.min_step} --n_iterations ${params.n_iterations} --grad_mag_tolerance ${params.grad_mag_tolerance}
+    linum_stack_mosaics_into_3d_volume.py inputs shifts_xy.csv 3d_volume.ome.zarr --initial_search $params.initial_search --depth_offset $params.depth_offset --max_allowed_overlap $params.max_allowed_overlap  --out_offsets 3d_volume_offsets.npy --method ${params.method} --metric ${params.metric} --learning_rate ${params.learning_rate} --min_step ${params.min_step} --n_iterations ${params.n_iterations} --grad_mag_tolerance ${params.grad_mag_tolerance} --equalize
     """
 }
 
@@ -138,28 +146,20 @@ process crop_interface {
 }
 
 workflow {
-    if (params.use_old_folder_structure)
-    {
-        inputSlices = Channel.fromPath("$params.input/tile_x*_y*_z*/", type: 'dir')
-                            .map{path -> tuple(path.toString().substring(path.toString().length() - 2), path)}
-                            .groupTuple()
-    }
-    else
-    {
-        inputSlices = Channel.fromPath("$params.input/**/tile_x*_y*_z*/", type: 'dir')
-                            .map{path -> tuple(path.toString().substring(path.toString().length() - 2), path)}
-                            .groupTuple()
-    }
-    input_dir_channel = Channel.fromPath("$params.input", type: 'dir')
+    inputSlices = Channel.fromFilePairs("$params.input/mosaic_grid*z*.ome.zarr.tar.gz", size: -1)
+        .map { id, files ->
+            // Extract the two digits after 'z' using regex
+            def matcher = id =~ /z(\d{2})/
+            def key = matcher ? matcher[0][1] : "unknown"
+            [key, files]
+        }
+    shifts_xy = Channel.fromPath("$params.shifts_xy")
 
     // Generate a 3D mosaic grid.
-    create_mosaic_grid(inputSlices)
-
-    // Estimate XY shifts from metadata
-    estimate_xy_shifts_from_metadata(input_dir_channel)
+    resample_mosaic_grid(inputSlices)
 
     // Focal plane curvature compensation
-    fix_focal_curvature(create_mosaic_grid.out)
+    fix_focal_curvature(resample_mosaic_grid.out)
 
     // Compensate for XY illumination inhomogeneity
     fix_illumination(fix_focal_curvature.out)
@@ -186,7 +186,7 @@ workflow {
         .collate(2)
         .map{_meta, filename -> filename}
         .collect()
-        .merge(estimate_xy_shifts_from_metadata.out){a, b -> tuple(a, b)}
+        .merge(shifts_xy){a, b -> tuple(a, b)}
 
     stack_mosaics_into_3d_volume(stack_in_channel)
 }

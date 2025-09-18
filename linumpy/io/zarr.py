@@ -1,18 +1,39 @@
+import os
 import shutil
+import tempfile
+from importlib.metadata import version
 from pathlib import Path
-import numpy as np
 
 import dask.array as da
+import numpy as np
 import zarr
-from ome_zarr.dask_utils import resize as dask_resize
+from ome_zarr.dask_utils import resize as da_resize
+from ome_zarr.format import CurrentFormat
 from ome_zarr.io import parse_url
+from ome_zarr.reader import Reader, Multiscales
 from ome_zarr.scale import Scaler
-from ome_zarr.writer import write_image
+from ome_zarr.writer import write_image, write_multiscales_metadata
 from skimage.transform import resize
 
 """
     This file contains functions for working with zarr files
 """
+
+
+def create_tempstore(dir=None, suffix=None):
+    """
+    Create a zarr store inside a temporary directory.
+
+    :type dir: str
+    :param dir: Directory inside which to create the temporary directory.
+    :type suffix: str
+    :param suffix: Suffix of temporary directory.
+    :type zarr_store: zarr.storage.LocalStore
+    :return zarr_store: Temporary ZarrStore.
+    """
+    tempdir = Path(tempfile.TemporaryDirectory(dir=dir, suffix=suffix).name)
+    zarr_store = zarr.storage.LocalStore(tempdir)
+    return zarr_store
 
 
 class CustomScaler(Scaler):
@@ -22,6 +43,7 @@ class CustomScaler(Scaler):
     Only `resize_image` method is implemented. Interpolation is ALWAYS done
     using 1-st order (linear) interpolation.
     """
+
     def resize_image(self, image):
         """
         Resize a numpy array OR a dask array to a smaller array (not pyramid).
@@ -32,7 +54,7 @@ class CustomScaler(Scaler):
         if isinstance(image, da.Array):
 
             def _resize(image, out_shape, **kwargs):
-                return dask_resize(image, out_shape, **kwargs)
+                return da_resize(image, out_shape, **kwargs)
 
         else:
             _resize = resize
@@ -106,9 +128,10 @@ def create_transformation_dict(nlevels, voxel_size, ndims=3):
     :type coord_transforms: list of Dict
     :return coord_transforms: List of coordinate transformations
     """
+
     def _get_scale(i):
         scale = np.zeros(ndims)
-        scale[:-len(voxel_size)-1:-1] = np.asarray(voxel_size)[::-1] * 2.0**i
+        scale[:-len(voxel_size) - 1:-1] = np.asarray(voxel_size)[::-1] * 2.0 ** i
         return scale.tolist()
 
     coord_transforms = []
@@ -121,7 +144,7 @@ def create_transformation_dict(nlevels, voxel_size, ndims=3):
     return coord_transforms
 
 
-def generate_axes_dict(ndims=3):
+def generate_axes_dict(ndims=3, unit="millimeter"):
     """
     Generate the axes dictionary for up to 4 dimensions.
 
@@ -135,9 +158,9 @@ def generate_axes_dict(ndims=3):
     """
     axes = [
         {"name": "c", "type": "channel"},
-        {"name": "z", "type": "space", "unit": "millimeter"},
-        {"name": "y", "type": "space", "unit": "millimeter"},
-        {"name": "x", "type": "space", "unit": "millimeter"}
+        {"name": "z", "type": "space", "unit": unit},
+        {"name": "y", "type": "space", "unit": unit},
+        {"name": "x", "type": "space", "unit": unit}
     ]
     offset = len(axes) - ndims
     return axes[offset:]
@@ -154,6 +177,30 @@ def create_directory(store_path, overwrite=False):
                                   .format(directory.as_posix()))
     directory.mkdir(parents=True)
     return directory
+
+
+def validate_n_levels(n_levels, shape, downscale_factor=2):
+    """
+    Validate n_levels such that it does not go beyond the volume shape.
+
+    :type n_levels: int
+    :param n_levels: Requested number of levels
+    :type shape: tuple of int
+    :param shape: Shape of volume to save
+    :type downscale_factor: int
+    :param downscale_factor: The downscale factor
+
+    :type adjusted_n_levels: int
+    :return adjusted_n_levels: Adjusted n_levels such that we don't exceed volume shape.
+    """
+    def logn(arr, n):
+        return np.log2(arr) / np.log2(n)
+
+    adjusted_n_levels = min(*logn(shape, downscale_factor).astype(int), n_levels)
+    if n_levels > adjusted_n_levels:
+        print(f'WARNING: Requested n_levels {n_levels} too high for image dimensions: {shape}.\n'
+              f'Setting to {adjusted_n_levels}.')
+    return int(adjusted_n_levels)
 
 
 def save_omezarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3),
@@ -179,37 +226,35 @@ def save_omezarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3),
     :type zarr_group: zarr.hierarchy.group
     :return zarr_group: Resulting zarr group saved to disk.
     """
+    n_levels = validate_n_levels(n_levels, data.shape)
+
     # pyramidal decomposition (ome_zarr.scale.Scaler) keywords
-    pyramid_kw = {"max_layer": n_levels,
+    pyramid_kw = {"max_layer": int(n_levels),
                   "method": "linear",
                   "downscale": 2}
+
+    ome_zarr_version = version("ome-zarr")
+    metadata = {
+        "method": "ome_zarr.scale.Scaler",
+        "version": ome_zarr_version,
+        "args": pyramid_kw
+    }
+
+    # # axes and coordinate transformations
     ndims = len(data.shape)
-
-    # metadata describes the downsampling method used for generating
-    # multiscale data representation (see also type in write_image)
-    metadata = {"method": "ome_zarr.scale.Scaler",
-                "version": "0.5",
-                "args": pyramid_kw}
-
-    # axes and coordinate transformations
     axes = generate_axes_dict(ndims)
-    coordinate_transformations = create_transformation_dict(n_levels+1, voxel_size=voxel_size, ndims=ndims)
+    coordinate_transformations = create_transformation_dict(n_levels + 1, voxel_size=voxel_size, ndims=ndims)
 
     # create directory for zarr storage
     create_directory(store_path, overwrite)
     store = parse_url(store_path, mode='w').store
     zarr_group = zarr.group(store=store)
 
-    # the base transformation is applied to all levels of the pyramid
-    # and describes the original voxel size of the dataset
-    base_coord_transformation = [
-        {"type": "scale", "scale": [1, 1, 1]}
-    ]
-    write_image(data, zarr_group, storage_options=dict(chunks=chunks),
+    write_image(data, zarr_group, axes=axes,
                 scaler=CustomScaler(**pyramid_kw),
-                axes=axes, coordinate_transformations=coordinate_transformations,
-                compute=True, metadata=metadata, type="linear",
-                coordinateTransformations=base_coord_transformation)
+                storage_options=dict(chunks=chunks),
+                coordinate_transformations=coordinate_transformations,
+                compute=True, metadata=metadata)
 
     # return zarr group containing saved data
     return zarr_group
@@ -230,31 +275,163 @@ def read_omezarr(zarr_path, level=0):
     :type res: tuple (3,)
     :return res: Voxel size of zarr array.
     """
-    omezarr = zarr.open(zarr_path, mode='r')
-    if "multiscales" not in omezarr.attrs:
-        raise ValueError(f'Missing "multiscales" field for file {zarr_path}.')
-    multiscales_attrs = omezarr.attrs["multiscales"][0]
+    # read the image data
+    reader = Reader(parse_url(zarr_path))
+    # nodes may include images, labels etc
+    nodes = list(reader())
 
-    # res = omezarr.attrs["multiscales"][0]["coordinateTransformations"][0]["scale"]
-    resolution = np.ones(len(multiscales_attrs["axes"]),)
-    if "coordinateTransformations" in multiscales_attrs:
-        base_coord_transform = multiscales_attrs["coordinateTransformations"]
-        for transform in base_coord_transform:
-            if "scale" in transform:
-                resolution *= np.asarray(transform["scale"])[-len(resolution):]
+    # first node will be the image pixel data
+    image_node = nodes[0]
 
-    vol_header = multiscales_attrs['datasets'][level]
-    if "coordinateTransformations" in vol_header:
-        level_transform = vol_header["coordinateTransformations"]
-        for transform in level_transform:
-            if "scale" in transform:
-                resolution *= np.asarray(transform["scale"])[-len(resolution):]
-    else:
-        raise ValueError(f'Mandatory "coordinateTransformations" field missing for level {level}.')
+    # By default omezarr will return dask array. this can be achieved with:
+    #    vol = image_node.data[level]
+    # However here we will prefer loading a zarr array directly and let
+    # the user convert to dask by themselves in their code.
+    multiscale = None
+    for spec in image_node.specs:
+        if isinstance(spec, Multiscales):
+            multiscale = spec
+    vol = zarr.open_array(Path(zarr_path) / multiscale.datasets[level], mode='r')
 
-    if "path" in vol_header:
-        vol = omezarr[vol_header["path"]]
-    else:
-        raise ValueError(f'Mandatory "path" field missing for level {level}.')
+    coordTransforms = image_node.metadata["coordinateTransformations"][level]
+    scale = [1] * len(vol.shape)
+    for tr in coordTransforms:
+        if tr['type'] == 'scale':
+            scale = tr['scale']
+            break
 
-    return vol, resolution
+    return vol, scale
+
+
+class OmeZarrWriter:
+    fmt: CurrentFormat
+    shape: tuple
+    downscale_factor: int
+    root: zarr.Group
+    axes: list
+    zarray: zarr.Array
+
+    def __init__(self, store_path: str | Path, shape: tuple, chunk_shape: tuple, dtype: np.dtype, overwrite: bool,
+                 downscale_factor: int = 2, unit: str = 'millimeter'):
+        """
+        Class for writing ome-zarr files to disk in a pyramidal format.
+
+        :type store_path: str or Path
+        :param store_path: Path to the output zarr group.
+        :type shape: tuple of n `int`, with n the number of dimensions.
+        :param shape: Shape of the dataset.
+        :type chunk_shape: tuple of n `int`, with n the number of dimensions.
+        :param chunk_shape: Chunk size on disk.
+        :type dtype: np.dtype
+        :param dtype: Data type of the dataset.
+        :type overwrite: bool
+        :param overwrite: Overwrite `store_path` if it already exists.
+        :type downscale_factor: int
+        :param downscale_factor: Downscale factor between levels in the pyramid.
+        :type unit: str
+        :param unit: Unit of the spatial dimensions.
+        Notes
+        -----
+        * Expected ordering for axes in `shape` and `chunk_shape` is `(c,
+            z, y, x)`.
+        """
+        self.fmt = CurrentFormat()
+        self.shape = shape
+        self.downscale_factor = downscale_factor
+
+        if os.path.exists(store_path):
+            if overwrite:
+                shutil.rmtree(store_path)
+            else:
+                raise ValueError(f"Overwrite set to False and {store_path} non-empty.")
+
+        store = parse_url(store_path, mode="w", fmt=self.fmt).store
+        self.root = zarr.group(store=store)
+
+        shape = [int(v) for v in shape]
+        chunk_shape = [int(v) for v in chunk_shape]
+
+        # create empty array at root of pyramid
+        # This is the array we will fill on-the-fly
+        self.axes = generate_axes_dict(len(shape), unit=unit)
+        self.zarray = self.root.require_array(
+            "0",
+            shape=shape,
+            exact=True,
+            chunks=chunk_shape,
+            dtype=dtype,
+            chunk_key_encoding=self.fmt.chunk_key_encoding,
+            dimension_names=[axis["name"] for axis in self.axes],  # omit for v0.4
+        )
+
+    def _downsample_pyramid_on_disk(self, parent, paths):
+        """
+        Takes a high-resolution Zarr array at paths[0] in the zarr group
+        and down-samples it by a given factor for each of the other paths
+        """
+        group_path = str(parent.store_path)
+        img_path = parent.store_path / parent.path
+        image_path = os.path.join(group_path, parent.path)
+        print("downsample_pyramid_on_disk", image_path)
+        for count, path in enumerate(paths[1:]):
+            target_path = os.path.join(image_path, path)
+            if os.path.exists(target_path):
+                print("path exists: %s" % target_path)
+                continue
+            # open previous resolution from disk via dask...
+            path_to_array = os.path.join(image_path, paths[count])
+            dask_image = da.from_zarr(path_to_array)
+
+            # resize in X and Y
+            dims = list(dask_image.shape)
+            dims[-1] = dims[-1] // self.downscale_factor
+            dims[-2] = dims[-2] // self.downscale_factor
+            if len(dims) > 2:
+                dims[-3] = dask_image.shape[-3] // self.downscale_factor
+            output = da_resize(
+                dask_image, tuple(dims), preserve_range=True, anti_aliasing=False
+            )
+
+            options = {}
+            if self.fmt.zarr_format == 2:
+                options["dimension_separator"] = "/"
+            else:
+                options["chunk_key_encoding"] = self.fmt.chunk_key_encoding
+                options["dimension_names"] = [axis["name"] for axis in self.axes]
+            # write to disk
+            da.to_zarr(
+                arr=output, url=img_path, component=path,
+                zarr_format=self.fmt.zarr_format, **options
+            )
+
+    def __setitem__(self, index, data):
+        self.zarray[index] = data
+
+    def __getitem__(self, index):
+        return self.zarray[index]
+
+    @property
+    def ndim(self):
+        return len(self.shape)
+
+    def finalize(self, res, n_levels=5):
+        n_levels = validate_n_levels(n_levels, self.shape, self.downscale_factor)
+        paths = [f"{i}" for i in range(n_levels + 1)]
+        self._downsample_pyramid_on_disk(self.root, paths)
+        transformations = create_transformation_dict(n_levels + 1, res, len(self.shape))
+        datasets = []
+        for p, t in zip(paths, transformations):
+            datasets.append({"path": p, "coordinateTransformations": t})
+
+        pyramid_kw = {"max_layer": n_levels,
+                      "method": "linear",
+                      "downscale": self.downscale_factor}
+
+        ome_zarr_version = version("ome-zarr")
+        metadata = {
+            "method": "ome_zarr.scale.Scaler",
+            "version": ome_zarr_version,
+            "args": pyramid_kw
+        }
+
+        write_multiscales_metadata(self.root, datasets, axes=self.axes, metadata=metadata)

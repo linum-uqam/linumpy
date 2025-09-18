@@ -7,10 +7,10 @@ import argparse
 
 import numpy as np
 import dask.array as da
-from pybasic.shading_correction import BaSiC
-from scipy.ndimage import gaussian_filter, gaussian_filter1d
+from basicpy import BaSiC
 
-from linumpy.io.zarr import save_omezarr, read_omezarr
+from linumpy.io.zarr import save_omezarr, read_omezarr, create_tempstore
+from linumpy.preproc.xyzcorr import findTissueInterface
 import zarr
 
 
@@ -28,22 +28,13 @@ def _build_arg_parser():
                    help="Corrected 3D mosaic grid file path (.ome.zarr).")
     p.add_argument('--n_levels', type=int, default=5,
                    help='Number of levels in pyramid representation.')
+    p.add_argument("--sigma_xy", type=float, default=3.0,
+                   help="Gaussian smoothing sigma in X and Y before interface detection [%(default)s]")
+    p.add_argument("--sigma_z", type=float, default=2.0,
+                   help="Gaussian smoothing sigma in Z before interface detection [%(default)s]")
+    p.add_argument("--use_log", action="store_true",
+                   help="Apply log transform before gradient detection")
     return p
-
-
-def findTissueInterface(vol, sigma=5, sigma_xy=1, useLog=False):
-    """Detects the tissue interface."""
-    # Apply a Gaussian filter
-    vol_p = gaussian_filter(vol, sigma=(0, sigma_xy, sigma_xy))
-
-    if useLog:
-        vol_p[vol_p > 0] = np.log(vol_p[vol_p > 0])
-
-    # Detect the tissue interface
-    vol_g = gaussian_filter1d(vol_p, sigma, order=1, axis=0)
-    z0 = np.ceil(vol_g.argmax(axis=0) + sigma * 0.5).astype(int)
-
-    return z0
 
 
 def main():
@@ -58,8 +49,10 @@ def main():
     # Load ome-zarr data
     vol, res = read_omezarr(input_zarr, level=0)
     dtype = vol.dtype
+    data = np.moveaxis(vol, 0, -1)
     # Estimate the water-tissue interface
-    z0 = findTissueInterface(np.abs(vol), sigma=2, useLog=True)
+    z0 = findTissueInterface(np.abs(data), s_xy=args.sigma_xy,
+                             s_z=args.sigma_z, useLog=args.use_log)
 
     # Extract the tile shape from the filename
     tile_shape = vol.chunks
@@ -80,18 +73,16 @@ def main():
             tiles.append(tile)
 
     # Perform the basic optimization
-    optimizer = BaSiC(tiles, estimate_darkfield=False)
-    optimizer.working_size = 64
-    optimizer.prepare()
-    optimizer.run()
+    optimizer = BaSiC(get_darkfield=False, smoothness_flatfield=1)
+    optimizer.fit(np.asarray(tiles))
 
     # Save the estimated fields (only if the profiles were estimated)
-    flatfield = optimizer.flatfield_fullsize
+    flatfield = optimizer.flatfield
 
     # Apply the correction to a tile
     corr = ((flatfield - 1) * z0.mean()).astype(int)
 
-    temp_store = zarr.TempStore()
+    temp_store = create_tempstore()
     vol_corr = zarr.open(temp_store, mode="w", shape=vol.shape,
                          dtype=dtype, chunks=tile_shape)
 
@@ -112,8 +103,10 @@ def main():
 
     # save to ome-zarr
     dask_arr = da.from_zarr(vol_corr)
-    save_omezarr(dask_arr, output_zarr, voxel_size=res, chunks=tile_shape,
-              n_levels=args.n_levels)
+    save_omezarr(dask_arr, output_zarr,
+                 voxel_size=res,
+                 chunks=tile_shape,
+                 n_levels=args.n_levels)
 
 
 if __name__ == "__main__":
