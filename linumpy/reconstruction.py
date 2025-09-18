@@ -51,6 +51,9 @@ def get_tiles_ids(directory, z: int = None):
         tiles_to_process = f"tile_*"
     tiles = list(input_directory.rglob(tiles_to_process))
     tiles = [t for t in tiles if t.name.startswith('tile_')]
+    # Filter out all files
+    pattern = re.compile("^.+\..{3}$")
+    tiles = [t for t in tiles if not pattern.match(t.name)]
     tile_ids = get_tiles_ids_from_list(tiles)
 
     return tiles, tile_ids
