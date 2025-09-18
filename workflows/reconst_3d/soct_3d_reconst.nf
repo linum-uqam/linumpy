@@ -17,7 +17,6 @@ params.initial_search = 25 // Initial search index for mosaics stacking
 params.max_allowed_overlap = 10 // Slices are allowed to shift up to this many voxels from the initial search index
 params.axial_resolution = 1.5 // Axial resolution of imaging system in microns
 params.crop_interface_out_depth = 600 // Minimum depth of the cropped image in microns
-params.use_old_folder_structure = false // Use the old folder structure where tiles are not stored in subfolders based on their Z
 params.method = "euler" // Method for stitching, can be 'euler' or 'affine'
 params.learning_rate = 2.0 // Learning rate for the 3D stacking algorithm
 params.min_step = 1e-12 // Minimum step size for the 3D stacking algorithm
