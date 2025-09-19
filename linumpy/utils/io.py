@@ -19,6 +19,7 @@ def add_processes_arg(parser):
                                  'all cores [%(default)s].')
     return a
 
+
 def add_overwrite_arg(parser, will_delete_dirs=False):
     if will_delete_dirs:
         _help = ('Force overwriting of the output files.\n'
@@ -28,6 +29,7 @@ def add_overwrite_arg(parser, will_delete_dirs=False):
         _help = 'Force overwriting of the output files.'
     parser.add_argument(
         '-f', dest='overwrite', action='store_true', help=_help)
+
 
 def add_verbose_arg(parser):
     parser.add_argument('-v', default="WARNING", const='INFO', nargs='?',
