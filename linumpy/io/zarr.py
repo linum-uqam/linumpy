@@ -311,7 +311,9 @@ class OmeZarrWriter:
     axes: list
     zarray: zarr.Array
 
-    def __init__(self, store_path: str | Path, shape: tuple, chunk_shape: tuple, dtype: np.dtype, overwrite: bool,
+    def __init__(self, store_path: str | Path, shape: tuple,
+                 chunk_shape: tuple, shards: tuple = None,
+                 dtype: np.dtype = np.float32, overwrite: bool = True,
                  downscale_factor: int = 2, unit: str = 'millimeter'):
         """
         Class for writing ome-zarr files to disk in a pyramidal format.
@@ -359,6 +361,7 @@ class OmeZarrWriter:
             shape=shape,
             exact=True,
             chunks=chunk_shape,
+            shards=shards,
             dtype=dtype,
             chunk_key_encoding=self.fmt.chunk_key_encoding,
             dimension_names=[axis["name"] for axis in self.axes],  # omit for v0.4

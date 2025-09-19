@@ -50,6 +50,8 @@ def _build_arg_parser():
                                 ' temporary directory will be created [/tmp/].')
     options_g.add_argument('--disable_fix_shift', action='store_true',
                            help='Disable camera/galvo shift. [%(default)s]')
+    options_g.add_argument('--sharding_factor', type=int,
+                           help='A sharding factor of N will result in N**2 tiles per shard.')
     add_processes_arg(options_g)
     psoct_options_g = p.add_argument_group("PS-OCT options")  
     psoct_options_g.add_argument('--polarization', type = int, default = 1, choices = [0,1],
@@ -179,7 +181,7 @@ def main():
             vol = oct.second_polarization
         vol = ThorOCT.orient_volume_psoct(vol)
         resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
-        print(f"Resolutoin: z = {resolution[0]} , x = {resolution[1]} , y = {resolution[2]} ")   
+        print(f"Resolution: z = {resolution[0]} , x = {resolution[1]} , y = {resolution[2]} ")   
 
     # Compute the rescaled tile size based on
     # the minimum target output resolution
@@ -190,11 +192,20 @@ def main():
         tile_size = [int(vol.shape[i] * resolution[i] * 1000 / output_resolution) for i in range(3)]
         output_resolution = [output_resolution / 1000.0] * 3
     mosaic_shape = [tile_size[0], n_mx * tile_size[1], n_my * tile_size[2]]
-    
-    # Create the zarr persistent array
+
+    # sharding will lower the number of files stored on disk but increase
+    # RAM usage for writing the data (an entire shard must fit in memory)
+    shards = None
+    if args.sharding_factor is not None:
+        shards = (tile_size[0],
+                args.sharding_factor * tile_size[1],
+                args.sharding_factor * tile_size[2])
+
+    # Create the zarr writer
     writer = OmeZarrWriter(args.output_zarr, shape=mosaic_shape,
                            dtype=np.complex64 if args.return_complex else np.float32,
-                           chunk_shape=tile_size, overwrite=True)
+                           chunk_shape=tile_size, shards=shards,
+                           overwrite=True)
 
     # Create a params dictionary for every tile
     params = []
