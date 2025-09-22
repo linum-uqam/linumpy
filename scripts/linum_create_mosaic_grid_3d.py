@@ -50,7 +50,7 @@ def _build_arg_parser():
                                 ' temporary directory will be created [/tmp/].')
     options_g.add_argument('--disable_fix_shift', action='store_true',
                            help='Disable camera/galvo shift. [%(default)s]')
-    options_g.add_argument('--sharding_factor', type=int,
+    options_g.add_argument('--sharding_factor', type=int, default=1,
                            help='A sharding factor of N will result in N**2 tiles per shard.')
     add_processes_arg(options_g)
     psoct_options_g = p.add_argument_group("PS-OCT options")  
@@ -76,46 +76,62 @@ def preprocess_volume(vol: np.ndarray) -> np.ndarray:
     return vol
 
 
-def process_tile(params: dict):
+def process_tile(proc_params: dict):
     """Process a tile and add it to the mosaic"""
-    f = params["file"]
-    mx, my, mz = params["tile_pos"]
-    crop = params["crop"]
-    fix_shift = params["fix_shift"]
-    tile_size = params["tile_size"]
-    mosaic = params["mosaic"]
-    data_type = params["data_type"]
-    psoct_config = params["psoct_config"]
-    mx_min, my_min = params["mxy_min"]
+    mosaic = proc_params['mosaic']
+    shard_shape = proc_params['shard_shape']
+    tiles_params = proc_params['params']
+    print('process tile', len(tiles_params))
+    shard = np.zeros(shard_shape, dtype=mosaic.dtype)
 
-    # Load the tile
-    if data_type == 'OCT':
-        oct = OCT(f)
-        vol = oct.load_image(crop=crop, fix_shift=fix_shift)
-        vol = preprocess_volume(vol)
-    elif data_type == 'PSOCT':
-        oct = ThorOCT(f, config=psoct_config)
-        if psoct_config.erase_polarization_2:
-            oct.load()
-            vol = oct.first_polarization
+    mx_min = min([p["tile_pos"][0] for p in tiles_params])
+    my_min = min([p["tile_pos"][1] for p in tiles_params])
+
+    for params in tiles_params:
+        f = params["file"]
+        mx, my = params["tile_pos"]
+        crop = params["crop"]
+        fix_shift = params["fix_shift"]
+        tile_size = params["tile_size"]
+        data_type = params["data_type"]
+        psoct_config = params["psoct_config"]
+
+        # Load the tile
+        if data_type == 'OCT':
+            oct = OCT(f)
+            vol = oct.load_image(crop=crop, fix_shift=fix_shift)
+            vol = preprocess_volume(vol)
+        elif data_type == 'PSOCT':
+            oct = ThorOCT(f, config=psoct_config)
+            if psoct_config.erase_polarization_2:
+                oct.load()
+                vol = oct.first_polarization
+            else:
+                oct.load()
+                vol = oct.second_polarization
+            vol = ThorOCT.orient_volume_psoct(vol)
+        # Rescale the volume
+        if np.iscomplexobj(vol):
+            vol = (
+                resize(vol.real, tile_size, anti_aliasing=True, order=1, preserve_range=True) +
+                1j * resize(vol.imag, tile_size, anti_aliasing=True, order=1, preserve_range=True)
+                )
         else:
-            oct.load()
-            vol = oct.second_polarization
-        vol = ThorOCT.orient_volume_psoct(vol)
-    # Rescale the volume
-    if np.iscomplexobj(vol):
-        vol = (
-            resize(vol.real, tile_size, anti_aliasing=True, order=1, preserve_range=True) +
-            1j * resize(vol.imag, tile_size, anti_aliasing=True, order=1, preserve_range=True)
-            )
-    else:
-        vol = resize(vol, tile_size, anti_aliasing=True, order=1, preserve_range=True)
-    # Compute the tile position
-    rmin = (mx - mx_min) * vol.shape[1]
-    cmin = (my - my_min) * vol.shape[2]
-    rmax = rmin + vol.shape[1]
-    cmax = cmin + vol.shape[2]
-    mosaic[0:tile_size[0], rmin:rmax, cmin:cmax] = vol
+            vol = resize(vol, tile_size, anti_aliasing=True, order=1, preserve_range=True)
+
+        # Compute the tile position
+        rmin = (mx - mx_min) * vol.shape[1]
+        cmin = (my - my_min) * vol.shape[2]
+        rmax = rmin + vol.shape[1]
+        cmax = cmin + vol.shape[2]
+
+        shard[0:tile_size[0], rmin:rmax, cmin:cmax] = vol
+
+    # tile index to mosaic grid position
+    mx_min *= vol.shape[1]
+    my_min *= vol.shape[2]
+    # write the whole shard to disk
+    mosaic[0:tile_size[0], mx_min:mx_min+shard_shape[1], my_min:my_min+shard_shape[2]] = shard
 
 
 def main():
@@ -155,15 +171,6 @@ def main():
             number_of_angles=args.number_of_angles
             )
         tiles = tiles[angle_index]
-    
-    mx = [tiles_pos[i][0] for i in range(len(tiles_pos))]
-    my = [tiles_pos[i][1] for i in range(len(tiles_pos))]
-    mx_min = min(mx)
-    mx_max = max(mx)
-    my_min = min(my)
-    my_max = max(my)
-    n_mx = mx_max - mx_min + 1
-    n_my = my_max - my_min + 1
 
     # Prepare the mosaic_grid
     if data_type == 'OCT':
@@ -181,7 +188,12 @@ def main():
             vol = oct.second_polarization
         vol = ThorOCT.orient_volume_psoct(vol)
         resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
-        print(f"Resolution: z = {resolution[0]} , x = {resolution[1]} , y = {resolution[2]} ")   
+    print(f"Resolution: z = {resolution[0]} , x = {resolution[1]} , y = {resolution[2]} ")   
+
+    # tiles position in the mosaic grid
+    pos_xy = np.asarray(tiles_pos)[:, :2]
+    pos_xy = pos_xy - np.min(pos_xy, axis=0)
+    nb_tiles_xy = np.max(pos_xy, axis=0) + 1
 
     # Compute the rescaled tile size based on
     # the minimum target output resolution
@@ -191,37 +203,44 @@ def main():
     else:
         tile_size = [int(vol.shape[i] * resolution[i] * 1000 / output_resolution) for i in range(3)]
         output_resolution = [output_resolution / 1000.0] * 3
-    mosaic_shape = [tile_size[0], n_mx * tile_size[1], n_my * tile_size[2]]
+    mosaic_shape = [tile_size[0], nb_tiles_xy[0] * tile_size[1], nb_tiles_xy[1] * tile_size[2]]
 
     # sharding will lower the number of files stored on disk but increase
     # RAM usage for writing the data (an entire shard must fit in memory)
-    shards = None
-    if args.sharding_factor is not None:
-        shards = (tile_size[0],
-                args.sharding_factor * tile_size[1],
-                args.sharding_factor * tile_size[2])
+    shards = (tile_size[0],
+              args.sharding_factor * tile_size[1],
+              args.sharding_factor * tile_size[2])
+    nb_shards_xy = np.ceil(nb_tiles_xy / float(args.sharding_factor)).astype(int)
 
     # Create the zarr writer
     writer = OmeZarrWriter(args.output_zarr, shape=mosaic_shape,
                            dtype=np.complex64 if args.return_complex else np.float32,
-                           chunk_shape=tile_size, shards=shards,
-                           overwrite=True)
+                           chunk_shape=tile_size, shards=shards, overwrite=True)
 
     # Create a params dictionary for every tile
-    params = []
+    params_grid = np.full((nb_shards_xy[0], nb_shards_xy[1]), None, dtype=object)
     for i in range(len(tiles)):
-        params.append({
+        shard_pos = (pos_xy[i] / args.sharding_factor).astype(int)
+
+        if params_grid[shard_pos[0], shard_pos[1]] is None:
+            params_grid[shard_pos[0], shard_pos[1]] = {
+                'params': [],
+                'mosaic': writer,
+                'shard_shape': shards if shards is not None else tile_size
+            }
+
+        params_grid[shard_pos[0], shard_pos[1]]['params'].append({
             "file": tiles[i],
-            "tile_pos": tiles_pos[i],
+            "tile_pos": pos_xy[i],
             "crop": crop,
             "fix_shift": fix_shift,
             "tile_size": tile_size,
-            "mosaic": writer,
             "data_type": data_type,
             "psoct_config": psoct_config,
-            "mxy_min": (mx_min, my_min)
         })
 
+    # each item in params is a dictionary
+    params = [params_grid[i, j] for i in range(nb_shards_xy[0]) for j in range(nb_shards_xy[1])]
     if n_cpus > 1:  # process in parallel
         with multiprocessing.Pool(n_cpus) as pool:
             results = tqdm(pool.imap(process_tile, params), total=len(params))

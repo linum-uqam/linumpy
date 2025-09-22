@@ -417,6 +417,10 @@ class OmeZarrWriter:
     def ndim(self):
         return len(self.shape)
 
+    @property
+    def dtype(self):
+        return self.zarray.dtype
+
     def finalize(self, res, n_levels=5):
         n_levels = validate_n_levels(n_levels, self.shape, self.downscale_factor)
         paths = [f"{i}" for i in range(n_levels + 1)]
