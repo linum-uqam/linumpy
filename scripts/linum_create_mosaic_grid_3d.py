@@ -81,7 +81,6 @@ def process_tile(proc_params: dict):
     mosaic = proc_params['mosaic']
     shard_shape = proc_params['shard_shape']
     tiles_params = proc_params['params']
-    print('process tile', len(tiles_params))
     shard = np.zeros(shard_shape, dtype=mosaic.dtype)
 
     mx_min = min([p["tile_pos"][0] for p in tiles_params])
