@@ -3,7 +3,7 @@ nextflow.enable.dsl = 2
 
 // Workflow Description
 // Creates a 3D volume from raw S-OCT tiles
-// Input: Directory containing raw data set tiles
+// Input: Directory containing input mosaic grids
 // Output: 3D reconstruction
 
 // Parameters
@@ -12,17 +12,13 @@ params.shifts_xy = "$params.input/shifts_xy.csv"
 params.output = ""
 params.resolution = 10 // Resolution of the reconstruction in micron/pixel
 params.processes = 1 // Maximum number of python processes per nextflow process
-params.depth_offset = 4 // Skip this many voxels from the top of the 3d mosaic
-params.initial_search = 25 // Initial search index for mosaics stacking
-params.max_allowed_overlap = 10 // Slices are allowed to shift up to this many voxels from the initial search index
-params.axial_resolution = 1.5 // Axial resolution of imaging system in microns
+
 params.crop_interface_out_depth = 600 // Minimum depth of the cropped image in microns
-params.method = "euler" // Method for stitching, can be 'euler' or 'affine'
-params.learning_rate = 2.0 // Learning rate for the 3D stacking algorithm
-params.min_step = 1e-12 // Minimum step size for the 3D stacking algorithm
-params.n_iterations = 10000 // Number of iterations for the 3D stacking algorithm
-params.grad_mag_tolerance = 1e-12 // Gradient magnitude tolerance for the 3D stacking algorithm
-params.metric = "MSE" // Metric for the 3D stacking algorithm, can be 'MSE' or 'CC'
+
+// Slices registration parameters
+params.moving_slice_first_index = 4 // Skip this many voxels from the top of the moving 3d mosaic when registering slices
+params.transform = 'affine' // One of 'affine', 'euler', 'translation'
+
 
 // Processes
 process resample_mosaic_grid {
@@ -32,15 +28,7 @@ process resample_mosaic_grid {
         tuple val(slice_id), path("mosaic_grid_3d_${params.resolution}um.ome.zarr")
     script:
     """
-    tar -xvf $mosaic_grid
-
-    # safety measure to ensure we have the expected filename
-    mv *.ome.zarr dummy_name.ome.zarr
-    mv dummy_name.ome.zarr mosaic_grid_z${slice_id}.ome.zarr
-    linum_resample_mosaic_grid.py mosaic_grid_z${slice_id}.ome.zarr "mosaic_grid_3d_${params.resolution}um.ome.zarr" -r ${params.resolution}
-
-    # cleanup; we don't need these temp files in our working directory
-    rm -rf mosaic_grid_z${slice_id}.ome.zarr
+    linum_resample_mosaic_grid.py ${mosaic_grid} "mosaic_grid_3d_${params.resolution}um.ome.zarr" -r ${params.resolution}
     """
 }
 
@@ -145,8 +133,47 @@ process crop_interface {
     """
 }
 
+process bring_to_common_space {
+    publishDir "$params.output/$task.process"
+    input:
+        tuple path("inputs/*"), path("shifts_xy.csv")
+    output:
+        path("*.ome.zarr")
+    script:
+    """
+    echo "Ballin"
+    linum_align_mosaics_3d_from_shifts.py inputs shifts_xy.csv common_space
+    mv common_space/* .
+    """
+}
+
+process register_pairwise {
+    publishDir "$params.output/$task.process"
+    input:
+        tuple path(fixed_vol), path(moving_vol)
+    output:
+        path("*")
+    script:
+    """
+    dirname=`basename $moving_vol .ome.zarr`
+    linum_estimate_transform_pairwise.py ${fixed_vol} ${moving_vol} \$dirname --moving_slice_index $params.moving_slice_first_index --transform $params.transform
+    """
+}
+
+process stack {
+    publishDir "$params.output/$task.process"
+    input:
+        tuple path("mosaics/*"), path("transforms/*")
+    output:
+        path("3d_volume.ome.zarr")
+    script:
+    """
+    linum_stack_slices_3d.py mosaics transforms 3d_volume.ome.zarr --normalize
+    """
+}
+
 workflow {
-    inputSlices = Channel.fromFilePairs("$params.input/mosaic_grid*z*.ome.zarr.tar.gz", size: -1)
+    inputSlices = Channel.fromFilePairs("$params.input/mosaic_grid_3d_z*.ome.zarr", size: -1, type:'dir')
         .map { id, files ->
             // Extract the two digits after 'z' using regex
             def matcher = id =~ /z(\d{2})/
@@ -173,14 +200,14 @@ workflow {
     // Stitch the tiles in 3D mosaics
     stitch_3d(fix_illumination.out.combine(estimate_xy_transformation.out, by:0))
 
-    // Crop at interface
-    crop_interface(stitch_3d.out)
+    // "PSF" correction
+    beam_profile_correction(stitch_3d.out)
 
-    // TODO: PSF and depth correction
-    beam_profile_correction(crop_interface.out)
+    // Crop at interface
+    crop_interface(beam_profile_correction.out)
 
     // Slices stitching
-    stack_in_channel = beam_profile_correction.out
+    common_space_channel = crop_interface.out
         .toSortedList{a, b -> a[0] <=> b[0]}
         .flatten()
         .collate(2)
@@ -188,5 +215,25 @@ workflow {
         .collect()
         .merge(shifts_xy){a, b -> tuple(a, b)}
 
-    stack_mosaics_into_3d_volume(stack_in_channel)
+    // Bring all stitched slices to common space
+    bring_to_common_space(common_space_channel)
+
+    all_slices_common_space = bring_to_common_space.out
+        .flatten()
+        .toSortedList{a, b -> a[0] <=> b[0]}
+
+    fixed_channel = all_slices_common_space
+        .map { list -> list.subList(0, list.size() - 1) }
+        .flatten()
+    moving_channel = all_slices_common_space
+        .map { list -> list.subList(1, list.size()) }
+        .flatten()
+
+    // Register slices pairwise
+    pairs_channel = fixed_channel.merge(moving_channel)
+    register_pairwise(pairs_channel)
+
+    // Stack all the slices in a single volume
+    stack_channel = all_slices_common_space.merge(register_pairwise.out.collect()){a, b -> tuple(a, b)}
+    stack(stack_channel)
 }

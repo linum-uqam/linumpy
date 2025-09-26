@@ -130,7 +130,9 @@ def process_tile(proc_params: dict):
     mx_min *= vol.shape[1]
     my_min *= vol.shape[2]
     # write the whole shard to disk
-    mosaic[0:tile_size[0], mx_min:mx_min+shard_shape[1], my_min:my_min+shard_shape[2]] = shard
+    output_extent_x = min(shard_shape[1], mosaic.shape[1] - mx_min)
+    output_extent_y = min(shard_shape[2], mosaic.shape[2] - my_min)
+    mosaic[0:tile_size[0], mx_min:mx_min+output_extent_x, my_min:my_min+output_extent_y] = shard[:, :output_extent_x, :output_extent_y]
 
 
 def main():

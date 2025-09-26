@@ -483,7 +483,7 @@ def register_mosaic_3d_to_reference_2d(ref_image, current_mosaic, method='euler'
 def register_2d_images_sitk(ref_image, moving_image, method='euler',
                             metric='MSE', max_iterations=10000, 
                             min_step=1e-12, grad_mag_tol=1e-12,
-                            return_3d_transform=False):
+                            return_3d_transform=False, verbose=False):
     # Type cast everything to float32
     ref_image = ref_image.astype(np.float32)
     moving_image = moving_image.astype(np.float32)
@@ -532,11 +532,12 @@ def register_2d_images_sitk(ref_image, moving_image, method='euler',
     R.SetInitialTransform(sitk_transform)
 
     R.SetInterpolator(sitk.sitkLinear)
-
-    R.AddCommand(sitk.sitkIterationEvent, lambda: command_iteration(R))
+    if verbose:
+        R.AddCommand(sitk.sitkIterationEvent, lambda: command_iteration(R))
 
     out_transform = R.Execute(fixed_sitk_image, moving_sitk_image)
     stop_condition = R.GetOptimizerStopConditionDescription()
+    error = R.GetMetricValue()
 
     if return_3d_transform:
         if method == 'euler':
@@ -563,9 +564,9 @@ def register_2d_images_sitk(ref_image, moving_image, method='euler',
             transform_3d.SetMatrix(matrix_3d.flatten().tolist())
         else:
             raise ValueError("Unknown method: {}".format(method))
-        return transform_3d, stop_condition
+        out_transform = transform_3d
 
-    return out_transform, stop_condition
+    return out_transform, stop_condition, error
 
 
 def command_iteration(method):

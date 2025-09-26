@@ -75,8 +75,11 @@ def main():
         id = int(foo.groups()[0])
         slice_ids.append(id)
 
+    slice_ids = np.asarray(slice_ids)
+    slice_ids -= np.min(slice_ids)
+
     # Load cvs containing the shift values for each slice
-    df = pd.read_csv(args.in_xy_shifts)
+    df = pd.read_csv(args.in_shifts)
 
     # We load the shifts in mm, but we need to convert them to pixels
     dx_list = np.array(df["x_shift_mm"].tolist())
@@ -108,8 +111,7 @@ def main():
 
         _, file = psplit(mosaic_file)
         outfile = pjoin(args.out_directory, file)
-        save_omezarr(da.from_array(aligned), outfile, res,
-                     chunks=img.chunks)
+        save_omezarr(da.from_array(aligned), outfile, res, chunks=img.chunks)
 
 
 if __name__ == '__main__':
