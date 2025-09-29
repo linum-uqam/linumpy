@@ -241,7 +241,10 @@ def main():
         })
 
     # each item in params is a dictionary
-    params = [params_grid[i, j] for i in range(nb_shards_xy[0]) for j in range(nb_shards_xy[1])]
+    params = [params_grid[i, j]
+              for i in range(nb_shards_xy[0])
+              for j in range(nb_shards_xy[1])
+              if params_grid[i, j] is not None]
     if n_cpus > 1:  # process in parallel
         with multiprocessing.Pool(n_cpus) as pool:
             results = tqdm(pool.imap(process_tile, params), total=len(params))
