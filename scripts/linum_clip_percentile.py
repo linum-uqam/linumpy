@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+Clip .ome.zarr values between lower and upper percentile.
 """
 import argparse
 
 from linumpy.io.zarr import read_omezarr, save_omezarr
-import numpy as np
 import dask.array as da
 
 
@@ -29,8 +29,9 @@ def main():
 
     vol, res = read_omezarr(args.in_volume)
     darr = da.from_zarr(vol)
-    darr = da.clip(darr, np.percentile(vol[:], args.percentile_lower),
-                   np.percentile(vol[:], args.percentile_upper))
+    darr = da.clip(darr,
+                   da.percentile(darr.flatten(), args.percentile_lower),
+                   da.percentile(darr.flatten(), args.percentile_upper))
 
     save_omezarr(darr, args.out_volume, res, vol.chunks)
 

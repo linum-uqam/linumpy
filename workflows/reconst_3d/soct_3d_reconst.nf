@@ -6,21 +6,28 @@ nextflow.enable.dsl = 2
 // Input: Directory containing input mosaic grids
 // Output: 3D reconstruction
 
-// Parameters
+// Global parameters
 params.input = ""
 params.shifts_xy = "$params.input/shifts_xy.csv"
 params.output = ""
-params.resolution = 10 // Resolution of the reconstruction in micron/pixel
 params.processes = 1 // Maximum number of python processes per nextflow process
 
-params.crop_interface_out_depth = 600 // Minimum depth of the cropped image in microns
+// Resolution of the reconstruction in micron/pixel
+params.resolution = 10
+
+// Clipping of outliers values
+params.clip_enabled = false
+params.clip_percentile_lower = 0.0
+params.clip_percentile_upper = 99.9
+
+// Minimum depth of the cropped image in microns
+params.crop_interface_out_depth = 600
 
 // Slices registration parameters
 params.moving_slice_first_index = 4 // Skip this many voxels from the top of the moving 3d mosaic when registering slices
 params.transform = 'affine' // One of 'affine', 'euler', 'translation'
+params.registration_metric = 'MSE' // One of 'MSE', 'CC', 'AntsCC' or 'MI'
 
-
-// Processes
 process resample_mosaic_grid {
     input:
         tuple val(slice_id), path(mosaic_grid)
@@ -29,6 +36,17 @@ process resample_mosaic_grid {
     script:
     """
     linum_resample_mosaic_grid.py ${mosaic_grid} "mosaic_grid_3d_${params.resolution}um.ome.zarr" -r ${params.resolution}
+    """
+}
+
+process clip_outliers {
+    input:
+        tuple val(slice_id), path(mosaic_grid)
+    output:
+        tuple val(slice_id), path("mosaic_grid_3d_${params.resolution}um_clip_outliers.ome.zarr")
+    script:
+    """
+    linum_clip_percentile.py ${mosaic_grid} "mosaic_grid_3d_${params.resolution}um_clip_outliers.ome.zarr" --percentile_lower ${params.clip_percentile_lower} --percentile_upper ${params.clip_percentile_upper}
     """
 }
 
@@ -156,7 +174,7 @@ process register_pairwise {
     script:
     """
     dirname=`basename $moving_vol .ome.zarr`
-    linum_estimate_transform_pairwise.py ${fixed_vol} ${moving_vol} \$dirname --moving_slice_index $params.moving_slice_first_index --transform $params.transform
+    linum_estimate_transform_pairwise.py ${fixed_vol} ${moving_vol} \$dirname --moving_slice_index $params.moving_slice_first_index --transform $params.transform --metric $params.registration_metric
     """
 }
 
@@ -174,19 +192,25 @@ process stack {
 
 workflow {
     inputSlices = Channel.fromFilePairs("$params.input/mosaic_grid_3d_z*.ome.zarr", size: -1, type:'dir')
+        .ifEmpty {
+            error("No valid files found under '${params.input}'. Please supply a valid input directory.")
+        }
         .map { id, files ->
             // Extract the two digits after 'z' using regex
             def matcher = id =~ /z(\d{2})/
             def key = matcher ? matcher[0][1] : "unknown"
             [key, files]
         }
-    shifts_xy = Channel.fromPath("$params.shifts_xy")
+    shifts_xy = Channel.fromPath("$params.shifts_xy", checkIfExists: true)
+        .ifEmpty {
+            error("XY shifts file not found at path '$params.shifts_xy'.")
+        }
 
     // Generate a 3D mosaic grid.
     resample_mosaic_grid(inputSlices)
 
-    // Focal plane curvature compensation
-    fix_focal_curvature(resample_mosaic_grid.out)
+    // Focal plane curvature compensation will use either the resampled mosaic grid directly, or the output from clip_outliers
+    (params.clip_enabled ? clip_outliers(resample_mosaic_grid.out) : resample_mosaic_grid.out) | fix_focal_curvature
 
     // Compensate for XY illumination inhomogeneity
     fix_illumination(fix_focal_curvature.out)
