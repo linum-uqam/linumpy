@@ -191,7 +191,7 @@ process stack {
 }
 
 workflow {
-    inputSlices = Channel.fromFilePairs("$params.input/mosaic_grid_3d_z*.ome.zarr", size: -1, type:'dir')
+    inputSlices = Channel.fromFilePairs("$params.input/mosaic_grid*_z*.ome.zarr", size: -1, type:'dir')
         .ifEmpty {
             error("No valid files found under '${params.input}'. Please supply a valid input directory.")
         }
