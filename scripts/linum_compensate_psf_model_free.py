@@ -57,10 +57,15 @@ def main():
     profile = np.reshape(vol_data, (len(vol_data), -1))
     profile = np.array([profile[:, i] for i in range(profile.shape[-1]) if agarose_mask.reshape(-1)[i]]).T
     profile = np.mean(profile, axis=-1)
-    profile = np.clip(profile, np.min(profile[profile > 0.0]), None)
 
-    background = np.min(profile)
-    psf = (profile - background) / background
+    # TODO: Prevent this from happening!
+    try:
+        profile = np.clip(profile, np.min(profile[profile > 0.0]), None)
+
+        background = np.min(profile)
+        psf = (profile - background) / background
+    except:
+        psf = np.zeros_like(profile)
 
     if args.fit_gaussian:
         psf_max = np.max(psf)
