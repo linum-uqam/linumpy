@@ -222,7 +222,7 @@ def quick_stitch(directory, z: int, overlap_fraction: float = 0.2, n_rot: int = 
 
         # Load the fringes
         if apply_shift:
-            img = oct.load_image(fix_shift=galvo_shift)
+            img = oct.load_image(fix_galvo_shift=galvo_shift)
         else:
             img = oct.load_image()
 

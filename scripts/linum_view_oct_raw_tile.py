@@ -38,7 +38,7 @@ def main():
 
     # Load an oct volume
     data = oct.OCT(directory)
-    vol = data.load_image(crop=crop, fix_shift=fix_shift)
+    vol = data.load_image(crop=crop, fix_galvo_shift=fix_shift)
 
     # Log transform
     if args.log:

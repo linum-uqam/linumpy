@@ -48,8 +48,12 @@ def _build_arg_parser():
     options_g.add_argument('--zarr_root',
                            help='Path to parent directory under which the zarr'
                                 ' temporary directory will be created [/tmp/].')
-    options_g.add_argument('--disable_fix_shift', action='store_true',
-                           help='Disable camera/galvo shift. [%(default)s]')
+    options_g.add_argument('--fix_galvo_shift', default=True,
+                           action=argparse.BooleanOptionalAction,
+                           help='Fix the galvo shift. [%(default)s]')
+    options_g.add_argument('--fix_camera_shift', default=False,
+                           action=argparse.BooleanOptionalAction,
+                           help='Fix the camera shift. [%(default)s]')
     options_g.add_argument('--sharding_factor', type=int, default=1,
                            help='A sharding factor of N will result in N**2 tiles per shard.')
     add_processes_arg(options_g)
@@ -90,7 +94,8 @@ def process_tile(proc_params: dict):
         f = params["file"]
         mx, my = params["tile_pos"]
         crop = params["crop"]
-        fix_shift = params["fix_shift"]
+        fix_galvo_shift = params["fix_galvo_shift"]
+        fix_camera_shift = params["fix_camera_shift"]
         tile_size = params["tile_size"]
         data_type = params["data_type"]
         psoct_config = params["psoct_config"]
@@ -98,7 +103,9 @@ def process_tile(proc_params: dict):
         # Load the tile
         if data_type == 'OCT':
             oct = OCT(f)
-            vol = oct.load_image(crop=crop, fix_shift=fix_shift)
+            vol = oct.load_image(crop=crop,
+                                 fix_galvo_shift=fix_galvo_shift,
+                                 fix_camera_shift=fix_camera_shift)
             vol = preprocess_volume(vol)
         elif data_type == 'PSOCT':
             oct = ThorOCT(f, config=psoct_config)
@@ -143,7 +150,8 @@ def main():
     # Parameters
     output_resolution = args.resolution
     crop = not args.keep_galvo_return
-    fix_shift = not args.disable_fix_shift
+    fix_galvo_shift = args.fix_galvo_shift
+    fix_camera_shift = args.fix_camera_shift
 
     data_type = args.data_type
     angle_index = args.angle_index
@@ -234,7 +242,8 @@ def main():
             "file": tiles[i],
             "tile_pos": pos_xy[i],
             "crop": crop,
-            "fix_shift": fix_shift,
+            "fix_galvo_shift": fix_galvo_shift,
+            "fix_camera_shift": fix_camera_shift,
             "tile_size": tile_size,
             "data_type": data_type,
             "psoct_config": psoct_config,

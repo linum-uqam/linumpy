@@ -14,6 +14,8 @@ params.processes = 1 // Maximum number of python processes per nextflow process
 params.axial_resolution = 1.5 // Axial resolution of imaging system in microns
 params.resolution = -1 // resolution of mosaic grid. Defaults to full resolution.
 params.sharding_factor = 4 // There will be N x N chunks per shard
+params.fix_galvo_shift = true
+params.fix_camera_shift = false
 
 process create_mosaic_grid {
     cpus params.processes
@@ -22,8 +24,12 @@ process create_mosaic_grid {
     output:
         tuple val(slice_id), path("*.ome.zarr")
     script:
+    String options = ""
+    options += params.fix_galvo_shift? "--fix_galvo_shift":"--no-fix_galvo_shift"
+    options += " "
+    options += params.fix_camera_shift? "--fix_camera_shift":"--no-fix_camera_shift"
     """
-    linum_create_mosaic_grid_3d.py mosaic_grid_3d_z${slice_id}.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution} --n_levels 0 --disable_fix_shift --sharding_factor ${params.sharding_factor}
+    linum_create_mosaic_grid_3d.py mosaic_grid_3d_z${slice_id}.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution} --n_levels 0 --sharding_factor ${params.sharding_factor} ${options}
     """
 }
 
