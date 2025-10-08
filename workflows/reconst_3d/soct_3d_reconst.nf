@@ -46,8 +46,13 @@ process clip_outliers {
     output:
         tuple val(slice_id), path("mosaic_grid_3d_${params.resolution}um_clip_outliers.ome.zarr")
     script:
+    String options = ""
+    if(params.normalize)
+    {
+        options += "--normalize"
+    }
     """
-    linum_clip_percentile.py ${mosaic_grid} "mosaic_grid_3d_${params.resolution}um_clip_outliers.ome.zarr" --percentile_lower ${params.clip_percentile_lower} --percentile_upper ${params.clip_percentile_upper}
+    linum_clip_percentile.py ${mosaic_grid} "mosaic_grid_3d_${params.resolution}um_clip_outliers.ome.zarr" --percentile_lower ${params.clip_percentile_lower} --percentile_upper ${params.clip_percentile_upper} ${options}
     """
 }
 
