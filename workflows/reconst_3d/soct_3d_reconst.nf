@@ -17,8 +17,9 @@ params.resolution = 10
 
 // Clipping of outliers values
 params.clip_enabled = false
-params.clip_percentile_lower = 0.0
+params.clip_percentile_lower = 1.0
 params.clip_percentile_upper = 99.9
+params.normalize = false  // rescale between 0-1
 
 // Minimum depth of the cropped image in microns
 params.crop_interface_out_depth = 600

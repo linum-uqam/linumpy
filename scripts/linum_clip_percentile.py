@@ -20,6 +20,8 @@ def _build_arg_parser():
                    help='Percentile below which values will be clipped [%(default)s].')
     p.add_argument('--percentile_upper', default=99.9, type=float,
                    help='Percentile above which values will be clipped [%(default)s].')
+    p.add_argument('--normalize', action='store_true',
+                   help='Normalize volume intensities after clipping.')
     return p
 
 
@@ -32,6 +34,10 @@ def main():
     darr = da.clip(darr,
                    da.percentile(darr.flatten(), args.percentile_lower),
                    da.percentile(darr.flatten(), args.percentile_upper))
+
+    if args.normalize:
+        darr = darr - darr.flatten().min()
+        darr = darr / darr.flatten().max()
 
     save_omezarr(darr, args.out_volume, res, vol.chunks)
 
