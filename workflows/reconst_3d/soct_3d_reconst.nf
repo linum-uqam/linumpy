@@ -13,7 +13,7 @@ params.output = ""
 params.processes = 1 // Maximum number of python processes per nextflow process
 
 // Resolution of the reconstruction in micron/pixel
-params.resolution = 10
+params.resolution = 10  // can be set to -1 to skip
 
 // Clipping of outliers values
 params.clip_enabled = false
@@ -200,10 +200,13 @@ workflow {
         }
 
     // Generate a 3D mosaic grid.
-    resample_mosaic_grid(inputSlices)
+    resampled_channel = params.resolution > 0 ? resample_mosaic_grid(inputSlices) : inputSlices
 
-    // Focal plane curvature compensation will use either the resampled mosaic grid directly, or the output from clip_outliers
-    (params.clip_enabled ? clip_outliers(resample_mosaic_grid.out) : resample_mosaic_grid.out) | fix_focal_curvature
+    // Input is optionally clipped
+    clipped_channel = params.clip_enabled ? clip_outliers(resampled_channel) : resampled_channel
+
+    // Focal plane curvature
+    fix_focal_curvature(clipped_channel)
 
     // Compensate for XY illumination inhomogeneity
     fix_illumination(fix_focal_curvature.out)
