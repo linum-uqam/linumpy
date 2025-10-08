@@ -14,8 +14,8 @@ params.processes = 1 // Maximum number of python processes per nextflow process
 params.axial_resolution = 1.5 // Axial resolution of imaging system in microns
 params.resolution = -1 // resolution of mosaic grid. Defaults to full resolution.
 params.sharding_factor = 4 // There will be N x N chunks per shard
-params.fix_galvo_shift = true
-params.fix_camera_shift = false
+params.fix_galvo_shift = true  // should be true for new data, else false
+params.fix_camera_shift = false  // should be set to false for new data, else true
 
 process create_mosaic_grid {
     cpus params.processes

@@ -324,6 +324,8 @@ class OmeZarrWriter:
         :param shape: Shape of the dataset.
         :type chunk_shape: tuple of n `int`, with n the number of dimensions.
         :param chunk_shape: Chunk size on disk.
+        :type shards: tuple of `int`
+        :param shards: Dimension of shards. `None` for no sharding.
         :type dtype: np.dtype
         :param dtype: Data type of the dataset.
         :type overwrite: bool

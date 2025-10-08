@@ -58,7 +58,7 @@ def main():
     profile = np.array([profile[:, i] for i in range(profile.shape[-1]) if agarose_mask.reshape(-1)[i]]).T
     profile = np.mean(profile, axis=-1)
 
-    # TODO: Prevent this from happening!
+    # TODO: Prevent this from happening (happens when the profile is all 0s).
     try:
         profile = np.clip(profile, np.min(profile[profile > 0.0]), None)
 

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+Using xy shifts file, bring all mosaics in `in_mosaics_dir` to a common space. Each
+volume is resampled to a common shape and its content is translated following the
+transforms in xy shifts. All transformed mosaics are saved to `out_directory`.
 """
 import argparse
 from pathlib import Path

@@ -1,7 +1,6 @@
 # -*- coding:utf8 -*-
 import multiprocessing
 import os
-from pathlib import Path
 import shutil
 
 DEFAULT_N_CPUS = multiprocessing.cpu_count() - 1

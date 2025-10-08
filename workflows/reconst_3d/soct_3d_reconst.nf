@@ -128,18 +128,6 @@ process estimate_xy_shifts_from_metadata {
     """
 }
 
-process stack_mosaics_into_3d_volume {
-    publishDir "$params.output/$task.process"
-    input:
-        tuple path("inputs/*"), path("shifts_xy.csv")
-    output:
-        path("3d_volume.ome.zarr")
-    script:
-    """
-    linum_stack_mosaics_into_3d_volume.py inputs shifts_xy.csv 3d_volume.ome.zarr --initial_search $params.initial_search --depth_offset $params.depth_offset --max_allowed_overlap $params.max_allowed_overlap  --out_offsets 3d_volume_offsets.npy --method ${params.method} --metric ${params.metric} --learning_rate ${params.learning_rate} --min_step ${params.min_step} --n_iterations ${params.n_iterations} --grad_mag_tolerance ${params.grad_mag_tolerance} --equalize
-    """
-}
-
 process crop_interface {
     input:
         tuple val(slice_id), path(image)
@@ -159,7 +147,6 @@ process bring_to_common_space {
         path("*.ome.zarr")
     script:
     """
-    echo "Ballin"
     linum_align_mosaics_3d_from_shifts.py inputs shifts_xy.csv common_space
     mv common_space/* .
     """

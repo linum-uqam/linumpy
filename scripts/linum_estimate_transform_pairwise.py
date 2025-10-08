@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+Estimate the transform aligning `in_moving` volume over `in_fixed` volume.
+Finds the best shift along the stacking direction and the best 2D transform.
+The output is a directory containing a transform (.mat) and a z offset (.txt)
+for aligning the moving slice over the fixed slice.
 """
 import argparse
 import numpy as np
