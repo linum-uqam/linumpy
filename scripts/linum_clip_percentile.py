@@ -20,8 +20,8 @@ def _build_arg_parser():
                    help='Percentile below which values will be clipped [%(default)s].')
     p.add_argument('--percentile_upper', default=99.9, type=float,
                    help='Percentile above which values will be clipped [%(default)s].')
-    p.add_argument('--normalize', action='store_true',
-                   help='Normalize volume intensities after clipping.')
+    p.add_argument('--rescale', action='store_true',
+                   help='Rescale volume intensities after clipping.')
     return p
 
 
@@ -35,7 +35,7 @@ def main():
                    da.percentile(darr.flatten(), args.percentile_lower),
                    da.percentile(darr.flatten(), args.percentile_upper))
 
-    if args.normalize:
+    if args.rescale:
         darr = darr - darr.flatten().min()
         darr = darr / darr.flatten().max()
 

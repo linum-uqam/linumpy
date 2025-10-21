@@ -6,29 +6,6 @@ nextflow.enable.dsl = 2
 // Input: Directory containing input mosaic grids
 // Output: 3D reconstruction
 
-// Global parameters
-params.input = ""
-params.shifts_xy = "$params.input/shifts_xy.csv"
-params.output = ""
-params.processes = 1 // Maximum number of python processes per nextflow process
-
-// Resolution of the reconstruction in micron/pixel
-params.resolution = 10  // can be set to -1 to skip
-
-// Clipping of outliers values
-params.clip_enabled = false
-params.clip_percentile_lower = 1.0
-params.clip_percentile_upper = 99.9
-params.normalize = false  // rescale between 0-1
-
-// Minimum depth of the cropped image in microns
-params.crop_interface_out_depth = 600
-
-// Slices registration parameters
-params.moving_slice_first_index = 4 // Skip this many voxels from the top of the moving 3d mosaic when registering slices
-params.transform = 'affine' // One of 'affine', 'euler', 'translation'
-params.registration_metric = 'MSE' // One of 'MSE', 'CC', 'AntsCC' or 'MI'
-
 process resample_mosaic_grid {
     input:
         tuple val(slice_id), path(mosaic_grid)
@@ -47,9 +24,9 @@ process clip_outliers {
         tuple val(slice_id), path("mosaic_grid_3d_${params.resolution}um_clip_outliers.ome.zarr")
     script:
     String options = ""
-    if(params.normalize)
+    if(params.clip_rescale)
     {
-        options += "--normalize"
+        options += "--rescale"
     }
     """
     linum_clip_percentile.py ${mosaic_grid} "mosaic_grid_3d_${params.resolution}um_clip_outliers.ome.zarr" --percentile_lower ${params.clip_percentile_lower} --percentile_upper ${params.clip_percentile_upper} ${options}
@@ -141,7 +118,7 @@ process crop_interface {
         tuple val(slice_id), path("slice_z${slice_id}_${params.resolution}um_crop.ome.zarr")
     script:
     """
-    linum_crop_3d_mosaic_below_interface.py $image "slice_z${slice_id}_${params.resolution}um_crop.ome.zarr" --depth $params.crop_interface_out_depth --crop_before_interface --pad_after
+    linum_crop_3d_mosaic_below_interface.py $image "slice_z${slice_id}_${params.resolution}um_crop.ome.zarr" --depth $params.crop_interface_out_depth --crop_before_interface
     """
 }
 
@@ -165,9 +142,18 @@ process register_pairwise {
     output:
         path("*")
     script:
+    String options = ""
+    if(params.pairwise_mask_background)
+    {
+        options += "--estimate_mask "
+    }
+    if(params.pairwise_match_histograms)
+    {
+        options += "--match_histograms"
+    }
     """
     dirname=`basename $moving_vol .ome.zarr`
-    linum_estimate_transform_pairwise.py ${fixed_vol} ${moving_vol} \$dirname --moving_slice_index $params.moving_slice_first_index --transform $params.transform --metric $params.registration_metric
+    linum_estimate_transform_pairwise.py ${fixed_vol} ${moving_vol} \$dirname --moving_slice_index $params.moving_slice_first_index --transform $params.pairwise_transform --metric $params.pairwise_registration_metric ${options}
     """
 }
 

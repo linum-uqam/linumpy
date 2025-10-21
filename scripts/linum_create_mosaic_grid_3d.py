@@ -8,8 +8,6 @@ import multiprocessing
 from pathlib import Path
 
 import numpy as np
-import dask.array as da
-import zarr
 from skimage.transform import resize
 from tqdm.auto import tqdm
 from linumpy.io.zarr import OmeZarrWriter
