@@ -185,10 +185,11 @@ workflow {
             error("XY shifts file not found at path '$params.shifts_xy'.")
         }
 
-    // Generate a 3D mosaic grid.
+    // [Optional] Generate a 3D mosaic grid.
     resampled_channel = params.resolution > 0 ? resample_mosaic_grid(inputSlices) : inputSlices
 
-    // Input is optionally clipped
+    // [Optional] Input is optionally clipped
+    // TODO: Separate clipping and rescale
     clipped_channel = params.clip_enabled ? clip_outliers(resampled_channel) : resampled_channel
 
     // Focal plane curvature
