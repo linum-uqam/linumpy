@@ -12,5 +12,5 @@ def test_execution(script_runner, tmp_path):
     input = get_data('mosaic_3d_omezarr')
     output = tmp_path / 'output.ome.zarr'
 
-    ret = script_runner.run(['linum_clip_percentile.py', input, output, '--normalize'])
+    ret = script_runner.run(['linum_clip_percentile.py', input, output, '--rescale'])
     assert ret.success
