@@ -38,7 +38,7 @@ def _build_arg_parser():
     options_g.add_argument("-r", "--resolution", type=float, default=10.0,
                            help="Output isotropic resolution in micron per pixel. [%(default)s]")
     options_g.add_argument("--axial_resolution", type=float, default=3.5,
-                           help='Axial resolution of the raw data in microns.')
+                           help='Axial resolution of the raw data in microns. [%(default)s]')
     options_g.add_argument("-z", "--slice", type=int,
                            help="Slice to process.")
     options_g.add_argument("--keep_galvo_return", action="store_true",
@@ -55,16 +55,17 @@ def _build_arg_parser():
                            action=argparse.BooleanOptionalAction,
                            help='Fix the camera shift. [%(default)s]')
     options_g.add_argument('--sharding_factor', type=int, default=1,
-                           help='A sharding factor of N will result in N**2 tiles per shard.')
+                           help='A sharding factor of N will result '
+                                'in N**2 tiles per shard. [%(default)s]')
     add_processes_arg(options_g)
-    psoct_options_g = p.add_argument_group("PS-OCT options")  
-    psoct_options_g.add_argument('--polarization', type = int, default = 1, choices = [0,1],
+    psoct_options_g = p.add_argument_group("PS-OCT options")
+    psoct_options_g.add_argument('--polarization', type=int, default = 1, choices = [0,1],
                    help="Polarization index to process")
-    psoct_options_g.add_argument('--number_of_angles', type = int, default = 1,
+    psoct_options_g.add_argument('--number_of_angles', type=int, default = 1,
                    help="Angle index to process")
-    psoct_options_g.add_argument('--angle_index', type = int, default = 0,
+    psoct_options_g.add_argument('--angle_index', type=int, default = 0,
                    help="Angle index to process")
-    psoct_options_g.add_argument('--return_complex', type = bool, default = False,
+    psoct_options_g.add_argument('--return_complex', type=bool, default = False,
                    help="Return Complex64 or Float32 data type")
     psoct_options_g.add_argument('--crop_first_index', type=int, default=320,
                    help="First index for cropping on the z axis (default=%(default)s)")
