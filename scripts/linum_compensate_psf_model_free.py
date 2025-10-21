@@ -64,7 +64,7 @@ def main():
 
         background = np.min(profile)
         psf = (profile - background) / background
-    except:
+    except Exception:
         psf = np.zeros_like(profile)
 
     if args.fit_gaussian:

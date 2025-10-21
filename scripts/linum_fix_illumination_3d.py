@@ -95,12 +95,17 @@ def process_tile(params: dict):
             
     else:
         # Process normally if tiles are real
-        optimizer = BaSiC(get_darkfield=True, smoothness_flatfield=1,
-                          max_iterations=max_iterations)
-        optimizer.fit(np.asarray(tiles))
-
-        # Apply correction
-        tiles_corrected = optimizer.transform(np.asarray(tiles))
+        # TODO: Robustify for 0 flatfield/darkfield
+        try:
+            optimizer = BaSiC(get_darkfield=True,
+                            smoothness_flatfield=1,
+                            max_iterations=max_iterations)
+            optimizer.fit(np.asarray(tiles))
+            # Apply correction
+            tiles_corrected = optimizer.transform(np.asarray(tiles))
+        except RuntimeError:
+            print(f'Got runtime error at z={z}')
+            tiles_corrected = np.asarray(tiles)
 
     # Fill the output mosaic
     vol_output = np.zeros_like(vol)
