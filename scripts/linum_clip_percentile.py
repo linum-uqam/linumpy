@@ -4,6 +4,7 @@
 Clip .ome.zarr volume intensities between lower and upper percentile.
 """
 import argparse
+import numpy as np
 
 from linumpy.io.zarr import read_omezarr, save_omezarr
 import dask.array as da
@@ -31,9 +32,9 @@ def main():
 
     vol, res = read_omezarr(args.in_volume)
     darr = da.from_zarr(vol)
-    darr = da.clip(darr,
-                   da.percentile(darr.flatten(), args.percentile_lower),
-                   da.percentile(darr.flatten(), args.percentile_upper))
+    p_lower = np.percentile(vol[:], args.percentile_lower)
+    p_upper = np.percentile(vol[:], args.percentile_upper)
+    darr = da.clip(darr, p_lower, p_upper)
 
     if args.rescale:
         darr = darr - darr.flatten().min()
