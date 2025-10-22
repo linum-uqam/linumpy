@@ -22,6 +22,8 @@ def _build_arg_parser():
                    help="Output resolution in micron (default=%(default)s)")
     p.add_argument("-i", "--isotropic", action="store_true",
                    help="Interpolate the volume to isotropic resolution")
+    p.add_argument("--save_mm", action='store_true',
+                   help='Save nifti header in mm.')
     return p
 
 
@@ -33,12 +35,19 @@ def main():
     # Load the ome-zarr volume and choose the scale
     vol, zarr_resolution = read_omezarr(args.input)
 
+    # zarr_resolution is already in mm but resolution given in microns
+    if args.save_mm:
+        out_resolution = args.resolution / 1000.0
+    else:
+        out_resolution = args.resolution
+        zarr_resolution = [1000*r for r in zarr_resolution]
+
     # Set the scaling factor
     transform = np.eye(3)
-    transform[0, 0] = args.resolution / (1000 * zarr_resolution[2])
-    transform[1, 1] = args.resolution / (1000 * zarr_resolution[1])
+    transform[0, 0] = out_resolution / (zarr_resolution[2])
+    transform[1, 1] = out_resolution / (zarr_resolution[1])
     if args.isotropic:
-        transform[2, 2] = args.resolution / (1000 * zarr_resolution[0])
+        transform[2, 2] = out_resolution / (zarr_resolution[0])
 
     # Compute the output volume shape
     old_shape = vol.shape
@@ -46,13 +55,14 @@ def main():
                  int(old_shape[1] / transform[1, 1]),
                  int(old_shape[0] / transform[2, 2]))
     if args.isotropic:
-        new_spacing = (args.resolution, args.resolution, args.resolution)
+        new_spacing = (out_resolution, out_resolution, out_resolution)
     else:
-        new_spacing = (args.resolution, args.resolution, zarr_resolution[0] * 1000)
+        new_spacing = (out_resolution, out_resolution, zarr_resolution[0])
 
     # Prepare the output
     input_volume = sitk.GetImageFromArray(vol[:])
-    input_volume.SetSpacing((zarr_resolution[2] * 1000, zarr_resolution[1] * 1000, zarr_resolution[0] * 1000))
+    # conversion mm to um
+    input_volume.SetSpacing((zarr_resolution[2], zarr_resolution[1], zarr_resolution[0]))
 
     # Create the sampler
     sampler = sitk.ResampleImageFilter()
