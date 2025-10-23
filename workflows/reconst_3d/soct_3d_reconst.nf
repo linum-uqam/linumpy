@@ -154,7 +154,7 @@ process stack {
     script:
     """
     linum_stack_slices_3d.py mosaics transforms 3d_volume.ome.zarr --normalize
-    zip -r 3d_volume.ome.zarr 3d_volume.ome.zarr.zip
+    zip -r 3d_volume.ome.zarr.zip 3d_volume.ome.zarr
     """
 }
 
