@@ -75,12 +75,13 @@ def get_input(mosaics_dir, transforms_dir, parser):
     return first_mosaic, mosaics_sorted, transforms, np.array(offsets, dtype=int)
 
 
-def normalize(vol, percentile_min=0.0, percentile_max=99.5):
+def normalize(vol, percentile_min=0.0, percentile_max=99.9):
     pmin = np.percentile(vol, percentile_min, axis=(1, 2))
     pmax = np.percentile(vol, percentile_max, axis=(1, 2))
     divisor = pmax - pmin
     vol = (vol - pmin[:, None, None])
     vol[divisor > 0] = vol[divisor > 0] / np.reshape(divisor[divisor > 0], (-1, 1, 1))
+    vol = np.clip(vol, 0, 1)
     return vol
 
 
@@ -124,7 +125,7 @@ def main():
 
         output_vol[stack_offset:stack_offset+next_fixed_offset] =\
             register_vol[current_moving_offset:current_moving_offset+next_fixed_offset]
-        stack_offset += next_fixed_offset
+        stack_offset += next_fixed_offset - current_moving_offset
 
     output_vol.finalize(res)
 
