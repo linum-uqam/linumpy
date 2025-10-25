@@ -181,20 +181,20 @@ workflow {
     // TODO: Separate clipping and rescale
     clipped_channel = params.clip_enabled ? clip_outliers(resampled_channel) : resampled_channel
 
-    // Focal plane curvature
-    fix_focal_curvature(clipped_channel)
+    // [Optional] Focal plane curvature
+    fixed_focal_channel = params.fix_curvature_enabled ? fix_focal_curvature(clipped_channel) : clipped_channel
 
-    // Compensate for XY illumination inhomogeneity
-    fix_illumination(fix_focal_curvature.out)
+    // [Optional] Compensate for XY illumination inhomogeneity
+    fixed_illum_channel = params.fix_illum_enabled ? fix_illumination(fixed_focal_channel) : fixed_focal_channel
 
     // Generate AIP mosaic grid
-    generate_aip(fix_illumination.out)
+    generate_aip(fixed_illum_channel)
 
     // Extract tile position (XY) from AIP mosaic grid
     estimate_xy_transformation(generate_aip.out)
 
     // Stitch the tiles in 3D mosaics
-    stitch_3d(fix_illumination.out.combine(estimate_xy_transformation.out, by:0))
+    stitch_3d(fixed_illum_channel.combine(estimate_xy_transformation.out, by:0))
 
     // "PSF" correction
     beam_profile_correction(stitch_3d.out)
