@@ -3,7 +3,7 @@
 """
 Stack 3D mosaics on top of each other in a single 3D volume using the
 transforms from `linum_estimate_transform_pairwise.py`. Expects all 3D
-mosaics to be in the same space (same volume dimensions).
+mosaics to be in the same space (same dimensions for last two axes).
 """
 import argparse
 import re
@@ -71,7 +71,6 @@ def get_input(mosaics_dir, transforms_dir, parser):
         mosaics_sorted.append(f)
         transforms.append(sitk.ReadTransform(current_mat_file))
         offsets.append(np.loadtxt(current_txt_file))
-    print(first_mosaic, mosaics_sorted, transforms, np.array(offsets, dtype=int))
     return first_mosaic, mosaics_sorted, transforms, np.array(offsets, dtype=int)
 
 
@@ -94,10 +93,13 @@ def main():
 
     vol, res = read_omezarr(first_mosaic)
     _, nr, nc = vol.shape
+    print(vol.shape[0])
+
+    last_vol, _ = read_omezarr(mosaics_sorted[-1])
 
     fixed_offsets = offsets[:, 0]
     moving_offsets = offsets[:, 1]
-    nz = np.sum(fixed_offsets - moving_offsets) + vol.shape[0]  # because we add the last volume as a whole
+    nz = np.sum(fixed_offsets - moving_offsets) + last_vol.shape[0]  # because we add the last volume as a whole
     output_shape = (nz, nr, nc)
 
     output_vol = OmeZarrWriter(args.out_stack, output_shape, vol.chunks, dtype=vol.dtype)
@@ -111,6 +113,7 @@ def main():
     # assemble volume
     for i in tqdm(range(len(mosaics_sorted)), desc='Apply transforms to volume'):
         vol, res = read_omezarr(mosaics_sorted[i])
+        print(vol.shape[0])
         composite_transform = sitk.CompositeTransform(transforms[i::-1])
         register_vol = apply_transform(vol, composite_transform)
 
@@ -121,8 +124,10 @@ def main():
         if i < len(mosaics_sorted) - 1:
             next_fixed_offset = fixed_offsets[i + 1]
         else:
-            next_fixed_offset = vol.shape[0]
+            next_fixed_offset = vol.shape[0] - current_moving_offset
 
+        print('Output vol indices:', stack_offset, stack_offset+next_fixed_offset)
+        print('Register vol indices:', current_moving_offset, current_moving_offset+next_fixed_offset)
         output_vol[stack_offset:stack_offset+next_fixed_offset] =\
             register_vol[current_moving_offset:current_moving_offset+next_fixed_offset]
         stack_offset += next_fixed_offset - current_moving_offset
