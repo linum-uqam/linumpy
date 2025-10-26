@@ -111,7 +111,7 @@ process crop_interface {
 }
 
 process bring_to_common_space {
-    publishDir "$params.output/$task.process"
+    publishDir "$params.output/$task.process", mode: 'copy'
     input:
         tuple path("inputs/*"), path("shifts_xy.csv")
     output:
@@ -124,7 +124,7 @@ process bring_to_common_space {
 }
 
 process register_pairwise {
-    publishDir "$params.output/$task.process"
+    publishDir "$params.output/$task.process", mode: 'copy'
     input:
         tuple path(fixed_vol), path(moving_vol)
     output:
@@ -146,15 +146,16 @@ process register_pairwise {
 }
 
 process stack {
-    publishDir "$params.output/$task.process"
+    publishDir "$params.output/$task.process", mode: 'copy'
     input:
         tuple path("mosaics/*"), path("transforms/*")
     output:
-        tuple path("3d_volume.ome.zarr"), path("3d_volume.ome.zarr.zip")
+        tuple path("3d_volume.ome.zarr"), path("3d_volume.ome.zarr.zip"), path("3d_volume.png")
     script:
     """
     linum_stack_slices_3d.py mosaics transforms 3d_volume.ome.zarr --normalize
     zip -r 3d_volume.ome.zarr.zip 3d_volume.ome.zarr
+    linum_screenshot_omezarr.py 3d_volume.ome.zarr 3d_volume.png
     """
 }
 
