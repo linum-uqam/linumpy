@@ -93,7 +93,6 @@ def main():
 
     vol, res = read_omezarr(first_mosaic)
     _, nr, nc = vol.shape
-    print(vol.shape[0])
 
     last_vol, _ = read_omezarr(mosaics_sorted[-1])
 
@@ -113,7 +112,6 @@ def main():
     # assemble volume
     for i in tqdm(range(len(mosaics_sorted)), desc='Apply transforms to volume'):
         vol, res = read_omezarr(mosaics_sorted[i])
-        print(vol.shape[0])
         composite_transform = sitk.CompositeTransform(transforms[i::-1])
         register_vol = apply_transform(vol, composite_transform)
 
@@ -126,8 +124,6 @@ def main():
         else:
             next_fixed_offset = vol.shape[0] - current_moving_offset
 
-        print('Output vol indices:', stack_offset, stack_offset+next_fixed_offset)
-        print('Register vol indices:', current_moving_offset, current_moving_offset+next_fixed_offset)
         output_vol[stack_offset:stack_offset+next_fixed_offset] =\
             register_vol[current_moving_offset:current_moving_offset+next_fixed_offset]
         stack_offset += next_fixed_offset - current_moving_offset
