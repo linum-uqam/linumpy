@@ -76,29 +76,36 @@ def get_input(mosaics_dir, transforms_dir, parser):
 
 
 def normalize(vol, percentile_max=99.9):
+    # TODO: Is mean or max the best?
     reference = np.max(vol, axis=0)
     threshold = threshold_otsu(reference[reference > 0])
-    reference_mask = (reference > threshold)
+    reference_mask = (reference > threshold).astype(int)
 
     # clip to remove outlier values
     pmax = np.percentile(vol, percentile_max, axis=(1, 2))
     vol = np.clip(vol, None, pmax[:, None, None])
+
+    # find best threshold for bg/fg classification
     min_thresholds = []
     for curr_slice in vol:
         min_threshold = np.min(curr_slice[curr_slice > 0])
         max_threshold = threshold_otsu(curr_slice[curr_slice > 0])
         best_err = np.inf
         best_th = None
+        all_errors = []
         for th in np.linspace(min_threshold, max_threshold, 100):
-            curr_mask = curr_slice > th
-            # we want the error closest to 0
-            err = np.abs(reference_mask.astype(int) - curr_mask.astype(int)).sum()
+            curr_mask = (curr_slice > th).astype(int)
+            err = np.abs(reference_mask - curr_mask).sum()
+            all_errors.append(err)
             if err < best_err:
                 best_err = err
                 best_th = th
+            else:
+                break
         min_thresholds.append(best_th)
     min_thresholds = np.array(min_thresholds)
 
+    # clip background voxels and rescale between 0 and 1
     vol = np.clip(vol, min_thresholds[:, None, None], None)
     vol = vol - np.min(vol, axis=(1, 2), keepdims=True)
     vmax = np.max(vol, axis=(1, 2))
