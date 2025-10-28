@@ -95,11 +95,8 @@ def process_tile(params: dict):
             
     else:
         # Process normally if tiles are real
-        # TODO: Robustify for 0 flatfield/darkfield
         try:
-            optimizer = BaSiC(get_darkfield=True,
-                            smoothness_flatfield=1,
-                            max_iterations=max_iterations)
+            optimizer = BaSiC(get_darkfield=False, max_iterations=max_iterations)
             optimizer.fit(np.asarray(tiles))
             # Apply correction
             tiles_corrected = optimizer.transform(np.asarray(tiles))
@@ -176,8 +173,8 @@ def main():
     out_dask = da.from_zarr(vol_output)
     min_value = out_dask.min().compute()
     if min_value < 0:
-        print(f"Minimum value in the output volume is {min_value}. Rescaling so minimum is 0.")
-        out_dask = out_dask - min_value
+        print(f"Minimum value in the output volume is {min_value}. Clipping at 0.")
+        out_dask = da.clip(out_dask, 0., None)
 
     save_omezarr(out_dask, output_zarr, voxel_size=resolution,
                  chunks=vol.chunks)
