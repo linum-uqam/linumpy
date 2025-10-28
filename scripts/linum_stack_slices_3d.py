@@ -11,7 +11,9 @@ from pathlib import Path
 import numpy as np
 from linumpy.io.zarr import read_omezarr, OmeZarrWriter
 from linumpy.stitching.registration import apply_transform
+from linumpy.utils.mosaic_grid import getDiffusionBlendingWeights
 from skimage.filters import threshold_otsu
+from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
 import os
 
@@ -31,6 +33,8 @@ def _build_arg_parser():
                    help='Output stack in .ome.zarr format.')
     p.add_argument('--normalize', action='store_true',
                    help='Normalize slices during reconstruction.')
+    p.add_argument('--blend', action='store_true',
+                   help='Use diffusion method for blending consecutive slices.')
     return p
 
 
@@ -76,41 +80,37 @@ def get_input(mosaics_dir, transforms_dir, parser):
 
 
 def normalize(vol, percentile_max=99.9):
-    # TODO: Is mean or max the best?
-    reference = np.max(vol, axis=0)
-    threshold = threshold_otsu(reference[reference > 0])
-    reference_mask = (reference > threshold).astype(int)
+    reference = np.mean(vol, axis=0)
+    reference_smooth = gaussian_filter(reference, sigma=1.0)
+    threshold = threshold_otsu(reference_smooth[reference > 0])
 
-    # clip to remove outlier values
+    # voxels in mask are expected to be agarose voxels
+    agarose_mask = np.logical_and(reference_smooth < threshold, reference > 0)
+
     pmax = np.percentile(vol, percentile_max, axis=(1, 2))
     vol = np.clip(vol, None, pmax[:, None, None])
 
-    # find best threshold for bg/fg classification
-    min_thresholds = []
+    background_thresholds = []
     for curr_slice in vol:
-        min_threshold = np.min(curr_slice[curr_slice > 0])
-        max_threshold = threshold_otsu(curr_slice[curr_slice > 0])
-        best_err = np.inf
-        best_th = None
-        all_errors = []
-        for th in np.linspace(min_threshold, max_threshold, 100):
-            curr_mask = (curr_slice > th).astype(int)
-            err = np.abs(reference_mask - curr_mask).sum()
-            all_errors.append(err)
-            if err < best_err:
-                best_err = err
-                best_th = th
-            else:
-                break
-        min_thresholds.append(best_th)
-    min_thresholds = np.array(min_thresholds)
+        agarose = curr_slice[agarose_mask]
+        bg_median = np.median(agarose)
+        background_thresholds.append(bg_median)
 
-    # clip background voxels and rescale between 0 and 1
-    vol = np.clip(vol, min_thresholds[:, None, None], None)
+    background_thresholds = np.array(background_thresholds)
+    vol = np.clip(vol, background_thresholds[:, None, None], None)
+
+    # rescale
     vol = vol - np.min(vol, axis=(1, 2), keepdims=True)
     vmax = np.max(vol, axis=(1, 2))
     vol[vmax > 0] = vol[vmax > 0] / vmax[:, None, None]
     return vol
+
+
+def get_tissue_mask(vol):
+    vol_smooth = gaussian_filter(vol, sigma=(0.0, 1.0, 1.0))
+    mask = vol_smooth > np.percentile(vol_smooth, 1)
+
+    return mask
 
 
 def main():
@@ -125,9 +125,8 @@ def main():
 
     last_vol, _ = read_omezarr(mosaics_sorted[-1])
 
-    fixed_offsets = offsets[:, 0]
-    moving_offsets = offsets[:, 1]
-    nz = np.sum(fixed_offsets - moving_offsets) + last_vol.shape[0]  # because we add the last volume as a whole
+    fixed_offsets = offsets[:, 0] - offsets[:, 1]
+    nz = np.sum(fixed_offsets) + last_vol.shape[0]  # because we add the last volume as a whole
     output_shape = (nz, nr, nc)
 
     output_vol = OmeZarrWriter(args.out_stack, output_shape, vol.chunks, dtype=vol.dtype)
@@ -136,7 +135,7 @@ def main():
     stack_offset = fixed_offsets[0]
     if args.normalize:
         vol = normalize(vol)
-    output_vol[:stack_offset] = vol[:stack_offset]
+    output_vol[:vol.shape[0]] = vol[:]
 
     # assemble volume
     for i in tqdm(range(len(mosaics_sorted)), desc='Apply transforms to volume'):
@@ -147,15 +146,22 @@ def main():
         if args.normalize:
             register_vol = normalize(register_vol)
 
-        current_moving_offset = moving_offsets[i]
+        if args.blend:
+            blending_mask_fixed = get_tissue_mask(output_vol[stack_offset:stack_offset+register_vol.shape[0]])
+            blending_mask_moving = get_tissue_mask(register_vol)
+
+            alphas = getDiffusionBlendingWeights(blending_mask_fixed, blending_mask_moving)
+        else:
+            alphas = 1
+
         if i < len(mosaics_sorted) - 1:
             next_fixed_offset = fixed_offsets[i + 1]
         else:
-            next_fixed_offset = vol.shape[0] - current_moving_offset
+            next_fixed_offset = register_vol.shape[0]
 
-        output_vol[stack_offset:stack_offset+next_fixed_offset] =\
-            register_vol[current_moving_offset:current_moving_offset+next_fixed_offset]
-        stack_offset += next_fixed_offset - current_moving_offset
+        output_vol[stack_offset:stack_offset+register_vol.shape[0]] =\
+            (1-alphas)*output_vol[stack_offset:stack_offset+register_vol.shape[0]]+(alphas)*register_vol[:]
+        stack_offset += next_fixed_offset
 
     output_vol.finalize(res)
 
