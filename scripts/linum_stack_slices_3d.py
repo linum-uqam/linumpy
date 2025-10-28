@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 from linumpy.io.zarr import read_omezarr, OmeZarrWriter
 from linumpy.stitching.registration import apply_transform
+from skimage.filters import threshold_otsu
 from tqdm import tqdm
 import os
 
@@ -74,13 +75,34 @@ def get_input(mosaics_dir, transforms_dir, parser):
     return first_mosaic, mosaics_sorted, transforms, np.array(offsets, dtype=int)
 
 
-def normalize(vol, percentile_min=0.0, percentile_max=99.9):
-    pmin = np.percentile(vol, percentile_min, axis=(1, 2))
+def normalize(vol, percentile_max=99.9):
+    reference = np.max(vol, axis=0)
+    threshold = threshold_otsu(reference[reference > 0])
+    reference_mask = (reference > threshold)
+
+    # clip to remove outlier values
     pmax = np.percentile(vol, percentile_max, axis=(1, 2))
-    divisor = pmax - pmin
-    vol = (vol - pmin[:, None, None])
-    vol[divisor > 0] = vol[divisor > 0] / np.reshape(divisor[divisor > 0], (-1, 1, 1))
-    vol = np.clip(vol, 0, 1)
+    vol = np.clip(vol, None, pmax[:, None, None])
+    min_thresholds = []
+    for curr_slice in vol:
+        min_threshold = np.min(curr_slice[curr_slice > 0])
+        max_threshold = threshold_otsu(curr_slice[curr_slice > 0])
+        best_err = np.inf
+        best_th = None
+        for th in np.linspace(min_threshold, max_threshold, 100):
+            curr_mask = curr_slice > th
+            # we want the error closest to 0
+            err = np.abs(reference_mask.astype(int) - curr_mask.astype(int)).sum()
+            if err < best_err:
+                best_err = err
+                best_th = th
+        min_thresholds.append(best_th)
+    min_thresholds = np.array(min_thresholds)
+
+    vol = np.clip(vol, min_thresholds[:, None, None], None)
+    vol = vol - np.min(vol, axis=(1, 2), keepdims=True)
+    vmax = np.max(vol, axis=(1, 2))
+    vol[vmax > 0] = vol[vmax > 0] / vmax[:, None, None]
     return vol
 
 
