@@ -36,8 +36,8 @@ def _build_arg_parser():
     p.add_argument('--blend', action='store_true',
                    help='Use diffusion method for blending consecutive slices.')
     p.add_argument('--overlap', type=int,
-                   help='Number of overlapping voxels to keep from bottom of previous mosaic.\n'
-                        'By default keeps all.')
+                   help='Number of overlapping voxels to keep from bottom of\n'
+                        'previous mosaic. By default keeps all.')
     return p
 
 
@@ -159,6 +159,7 @@ def main():
         if i < len(mosaics_sorted) - 1:
             next_fixed_offset = fixed_offsets[i + 1]
             if args.overlap is not None:
+                print(register_vol.shape[0], next_fixed_offset+args.overlap)
                 register_vol = register_vol[:next_fixed_offset+args.overlap]
         else:
             next_fixed_offset = register_vol.shape[0]
