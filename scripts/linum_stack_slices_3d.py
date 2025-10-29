@@ -35,6 +35,9 @@ def _build_arg_parser():
                    help='Normalize slices during reconstruction.')
     p.add_argument('--blend', action='store_true',
                    help='Use diffusion method for blending consecutive slices.')
+    p.add_argument('--overlap', type=int,
+                   help='Number of overlapping voxels to keep from bottom of previous mosaic.\n'
+                        'By default keeps all.')
     return p
 
 
@@ -79,13 +82,19 @@ def get_input(mosaics_dir, transforms_dir, parser):
     return first_mosaic, mosaics_sorted, transforms, np.array(offsets, dtype=int)
 
 
-def normalize(vol, percentile_max=99.9):
+def get_agarose_mask(vol):
     reference = np.mean(vol, axis=0)
     reference_smooth = gaussian_filter(reference, sigma=1.0)
     threshold = threshold_otsu(reference_smooth[reference > 0])
 
     # voxels in mask are expected to be agarose voxels
     agarose_mask = np.logical_and(reference_smooth < threshold, reference > 0)
+    return agarose_mask
+
+
+def normalize(vol, percentile_max=99.9):
+    # voxels in mask are expected to be agarose voxels
+    agarose_mask = get_agarose_mask(vol)
 
     pmax = np.percentile(vol, percentile_max, axis=(1, 2))
     vol = np.clip(vol, None, pmax[:, None, None])
@@ -108,7 +117,7 @@ def normalize(vol, percentile_max=99.9):
 
 def get_tissue_mask(vol):
     vol_smooth = gaussian_filter(vol, sigma=(0.0, 1.0, 1.0))
-    mask = vol_smooth > np.percentile(vol_smooth, 1)
+    mask = vol_smooth > np.percentile(vol_smooth, 10)
 
     return mask
 
@@ -131,17 +140,28 @@ def main():
 
     output_vol = OmeZarrWriter(args.out_stack, output_shape, vol.chunks, dtype=vol.dtype)
 
-    # fixed_offsets[0] is where the next moving slice will start
-    stack_offset = fixed_offsets[0]
     if args.normalize:
         vol = normalize(vol)
+        if args.overlap is not None:
+            vol = vol[:fixed_offsets[0]+args.overlap]
     output_vol[:vol.shape[0]] = vol[:]
+
+    # fixed_offsets[0] is where the next moving slice will start
+    stack_offset = fixed_offsets[0]
 
     # assemble volume
     for i in tqdm(range(len(mosaics_sorted)), desc='Apply transforms to volume'):
         vol, res = read_omezarr(mosaics_sorted[i])
         composite_transform = sitk.CompositeTransform(transforms[i::-1])
         register_vol = apply_transform(vol, composite_transform)
+
+        # crop the volume at next fixed offset + overlap
+        if i < len(mosaics_sorted) - 1:
+            next_fixed_offset = fixed_offsets[i + 1]
+            if args.overlap is not None:
+                register_vol = register_vol[:next_fixed_offset+args.overlap]
+        else:
+            next_fixed_offset = register_vol.shape[0]
 
         if args.normalize:
             register_vol = normalize(register_vol)
@@ -150,14 +170,9 @@ def main():
             blending_mask_fixed = get_tissue_mask(output_vol[stack_offset:stack_offset+register_vol.shape[0]])
             blending_mask_moving = get_tissue_mask(register_vol)
 
-            alphas = getDiffusionBlendingWeights(blending_mask_fixed, blending_mask_moving)
+            alphas = getDiffusionBlendingWeights(blending_mask_fixed, blending_mask_moving, factor=2)
         else:
             alphas = 1
-
-        if i < len(mosaics_sorted) - 1:
-            next_fixed_offset = fixed_offsets[i + 1]
-        else:
-            next_fixed_offset = register_vol.shape[0]
 
         output_vol[stack_offset:stack_offset+register_vol.shape[0]] =\
             (1-alphas)*output_vol[stack_offset:stack_offset+register_vol.shape[0]]+(alphas)*register_vol[:]
