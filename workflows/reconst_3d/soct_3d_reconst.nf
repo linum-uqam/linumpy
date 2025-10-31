@@ -36,7 +36,7 @@ process fix_illumination {
         tuple val(slice_id), path("mosaic_grid_z${slice_id}_illum_fix.ome.zarr")
     script:
     """
-    linum_fix_illumination_3d.py ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" --n_processes ${params.processes} --percentile_upper ${params.clip_percentile_upper}
+    linum_fix_illumination_3d.py ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" --n_processes ${params.processes} --percentile_max ${params.clip_percentile_upper}
     """
 }
 
@@ -102,7 +102,7 @@ process normalize {
         tuple val(slice_id), path("slice_z${slice_id}_normalize.ome.zarr")
     script:
     """
-    linum_normalize_intensities_per_slice.py ${slice_id} "slice_z${slice_id}_normalize.ome.zarr" --percentile_upper ${params.clip_percentile_upper}
+    linum_normalize_intensities_per_slice.py ${slice_id} "slice_z${slice_id}_normalize.ome.zarr" --percentile_max ${params.clip_percentile_upper}
     """
 }
 
