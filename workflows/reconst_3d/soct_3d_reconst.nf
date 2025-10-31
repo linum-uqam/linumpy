@@ -17,22 +17,6 @@ process resample_mosaic_grid {
     """
 }
 
-process clip_outliers {
-    input:
-        tuple val(slice_id), path(mosaic_grid)
-    output:
-        tuple val(slice_id), path("mosaic_grid_z${slice_id}_clip_outliers.ome.zarr")
-    script:
-    String options = ""
-    if(params.clip_rescale)
-    {
-        options += "--rescale"
-    }
-    """
-    linum_clip_percentile.py ${mosaic_grid} "mosaic_grid_z${slice_id}_clip_outliers.ome.zarr" --percentile_lower 0 --percentile_upper ${params.clip_percentile_upper} ${options}
-    """
-}
-
 process fix_focal_curvature {
     input:
         tuple val(slice_id), path(mosaic_grid)
@@ -45,13 +29,14 @@ process fix_focal_curvature {
 }
 
 process fix_illumination {
+    cpus params.processes
     input:
         tuple val(slice_id), path(mosaic_grid)
     output:
         tuple val(slice_id), path("mosaic_grid_z${slice_id}_illum_fix.ome.zarr")
     script:
     """
-    linum_fix_illumination_3d.py ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" --n_processes ${params.processes}
+    linum_fix_illumination_3d.py ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" --n_processes ${params.processes} --percentile_upper ${params.clip_percentile_upper}
     """
 }
 
@@ -95,7 +80,7 @@ process beam_profile_correction {
         tuple val(slice_id), path("slice_z${slice_id}_axial_corr.ome.zarr")
     script:
     """
-    linum_compensate_psf_model_free.py ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr"
+    linum_compensate_psf_model_free.py ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" --percentile_max $params.clip_percentile_upper
     """
 }
 
@@ -106,7 +91,18 @@ process crop_interface {
         tuple val(slice_id), path("slice_z${slice_id}_crop_interface.ome.zarr")
     script:
     """
-    linum_crop_3d_mosaic_below_interface.py $image "slice_z${slice_id}_crop_interface.ome.zarr" --depth $params.crop_interface_out_depth --crop_before_interface
+    linum_crop_3d_mosaic_below_interface.py $image "slice_z${slice_id}_crop_interface.ome.zarr" --depth $params.crop_interface_out_depth --crop_before_interface --percentile_max $params.clip_percentile_upper
+    """
+}
+
+process normalize {
+    input:
+        tuple val(slice_id), path(image)
+    output:
+        tuple val(slice_id), path("slice_z${slice_id}_normalize.ome.zarr")
+    script:
+    """
+    linum_normalize_intensities_per_slice.py ${slice_id} "slice_z${slice_id}_normalize.ome.zarr" --percentile_upper ${params.clip_percentile_upper}
     """
 }
 
@@ -130,18 +126,9 @@ process register_pairwise {
     output:
         path("*")
     script:
-    String options = ""
-    if(params.pairwise_mask_background)
-    {
-        options += "--estimate_mask "
-    }
-    if(params.pairwise_match_histograms)
-    {
-        options += "--match_histograms"
-    }
     """
     dirname=`basename $moving_vol .ome.zarr`
-    linum_estimate_transform_pairwise.py ${fixed_vol} ${moving_vol} \$dirname --moving_slice_index $params.moving_slice_first_index --transform $params.pairwise_transform --metric $params.pairwise_registration_metric ${options}
+    linum_estimate_transform_pairwise.py ${fixed_vol} ${moving_vol} \$dirname --moving_slice_index $params.moving_slice_first_index --transform $params.pairwise_transform --metric $params.pairwise_registration_metric
     """
 }
 
@@ -156,6 +143,10 @@ process stack {
     if(params.stack_blend_enabled)
     {
         options += "--blend"
+        if(params.crop_overlap > 0)
+        {
+            options += " --overlap ${params.crop_overlap}"
+        }
     }
     """
     linum_stack_slices_3d.py mosaics transforms 3d_volume.ome.zarr --normalize ${options}
@@ -165,7 +156,7 @@ process stack {
 }
 
 workflow {
-    inputSlices = Channel.fromFilePairs("$params.input/mosaic_grid*_z*.ome.zarr", size: -1, type:'dir')
+    inputSlices = channel.fromFilePairs("$params.input/mosaic_grid*_z*.ome.zarr", size: -1, type:'dir')
         .ifEmpty {
             error("No valid files found under '${params.input}'. Please supply a valid input directory.")
         }
@@ -175,20 +166,16 @@ workflow {
             def key = matcher ? matcher[0][1] : "unknown"
             [key, files]
         }
-    shifts_xy = Channel.fromPath("$params.shifts_xy", checkIfExists: true)
+    shifts_xy = channel.fromPath("$params.shifts_xy", checkIfExists: true)
         .ifEmpty {
             error("XY shifts file not found at path '$params.shifts_xy'.")
         }
 
-    // [Optional] Generate a 3D mosaic grid.
+    // [Optional] Resample the input mosaic grid
     resampled_channel = params.resolution > 0 ? resample_mosaic_grid(inputSlices) : inputSlices
 
-    // [Optional] Input is optionally clipped
-    // TODO: Separate clipping and rescale
-    clipped_channel = params.clip_enabled ? clip_outliers(resampled_channel) : resampled_channel
-
-    // [Optional] Focal plane curvature
-    fixed_focal_channel = params.fix_curvature_enabled ? fix_focal_curvature(clipped_channel) : clipped_channel
+    // [Optional] Focal plane curvature correction
+    fixed_focal_channel = params.fix_curvature_enabled ? fix_focal_curvature(resampled_channel) : resampled_channel
 
     // [Optional] Compensate for XY illumination inhomogeneity
     fixed_illum_channel = params.fix_illum_enabled ? fix_illumination(fixed_focal_channel) : fixed_focal_channel
@@ -208,8 +195,11 @@ workflow {
     // Crop at interface
     crop_interface(beam_profile_correction.out)
 
+    // Normalize slice (compensate signal attenuation with depth)
+    normalize(crop_interface.out)
+
     // Slices stitching
-    common_space_channel = crop_interface.out
+    common_space_channel = normalize.out
         .toSortedList{a, b -> a[0] <=> b[0]}
         .flatten()
         .collate(2)

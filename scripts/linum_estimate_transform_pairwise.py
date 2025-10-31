@@ -11,10 +11,7 @@ import numpy as np
 from linumpy.io.zarr import read_omezarr
 from linumpy.utils.io import assert_output_exists, add_overwrite_arg
 from linumpy.stitching.registration import register_2d_images_sitk, apply_transform
-from skimage.filters import threshold_otsu, gaussian
-from skimage.exposure import match_histograms
 import os
-
 import matplotlib.pyplot as plt
 
 
@@ -47,22 +44,10 @@ def _build_arg_parser():
                    help='Maximum number of iterations. [%(default)s]')
     p.add_argument('--grad_mag_tol', type=float, default=1e-12,
                    help='Gradient magnitude tolerance for registration. [%(default)s]')
-    p.add_argument('--estimate_mask', action='store_true',
-                   help='Estimate brain mask before registration.')
-    p.add_argument('--match_histograms', action='store_true',
-                   help='Use histogram matching instead of contrast stretching.')
     p.add_argument('--screenshot', default=None,
                    help='Path to save a screenshot of the fixed and moving images for debugging.')
     add_overwrite_arg(p)
     return p
-
-
-def estimate_mask(volume, sigma=5.0):
-    aip = np.mean(volume[:], axis=0)
-    aip = gaussian(aip, sigma)
-    otsu = threshold_otsu(aip[aip > 0])
-    mask = aip > otsu
-    return mask
 
 
 def main():
@@ -79,14 +64,9 @@ def main():
 
     moving_image = moving_vol[args.moving_slice_index]
 
-    if args.estimate_mask:
-        moving_mask = estimate_mask(moving_vol)
-        moving_image[~moving_mask] = 0.0
-
-    if not args.match_histograms:
-        moving_image -= np.percentile(moving_image[moving_image > 0], 0.5)
-        moving_image /= np.percentile(moving_image, 99.5)
-        moving_image = np.clip(moving_image, 0, 1)
+    moving_image -= np.percentile(moving_image[moving_image > 0], 0.5)
+    moving_image /= np.percentile(moving_image, 99.5)
+    moving_image = np.clip(moving_image, 0, 1)
 
     # the index in fixed image which is expected to match the moving image
     interval_vox = int(np.ceil(args.slicing_interval / res[0]))  # in voxels
@@ -98,19 +78,12 @@ def main():
 
     errors = []
     transforms = []
-    if args.estimate_mask:
-        fixed_mask = estimate_mask(fixed_vol)
     for i in candidate_indices:
         fixed_image = fixed_vol[i]
-        if args.estimate_mask:
-            fixed_image[~fixed_mask] = 0.0
 
-        if args.match_histograms:
-            fixed_image = match_histograms(fixed_image, moving_image)
-        else:
-            fixed_image -= np.percentile(fixed_image[fixed_image > 0], 0.5)
-            fixed_image /= np.percentile(fixed_image, 99.5)
-            fixed_image = np.clip(fixed_image, 0, 1)
+        fixed_image -= np.percentile(fixed_image[fixed_image > 0], 0.5)
+        fixed_image /= np.percentile(fixed_image, 99.5)
+        fixed_image = np.clip(fixed_image, 0, 1)
 
         # align the slices
         transform, _, error = register_2d_images_sitk(

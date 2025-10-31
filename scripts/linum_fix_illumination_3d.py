@@ -37,6 +37,9 @@ def _build_arg_parser():
                    help="Full path to the output zarr file")
     p.add_argument("--max_iterations", type=int, default=500,
                    help='Maximum number of iterations for BaSiC. [%(default)s]')
+    p.add_argument("--percentile_max", type=float,
+                   help="Values above this percentile will be clipped when\n"
+                        "estimating the flatfield (inside range [0-100]).")
     add_processes_arg(p)
     return p
 
@@ -47,6 +50,7 @@ def process_tile(params: dict):
     z = params["z"]
     tile_shape = params["tile_shape"]
     max_iterations = params["max_iterations"]
+    p_upper = params["p_upper"]
     vol = io.v3.imread(str(file))
     file_output = Path(file).parent / file.name.replace(".tiff", "_corrected.tiff")
 
@@ -97,8 +101,12 @@ def process_tile(params: dict):
         # Process normally if tiles are real
         try:
             optimizer = BaSiC(get_darkfield=False, max_iterations=max_iterations)
-            optimizer.fit(np.asarray(tiles))
-            # Apply correction
+            tiles_for_fit = np.asarray(tiles)
+            if p_upper is not None:
+                tiles_for_fit = np.clip(tiles_for_fit, None, p_upper)
+            optimizer.fit(tiles_for_fit)
+
+            # Apply correction to original (not clipped) tiles
             tiles_corrected = optimizer.transform(np.asarray(tiles))
         except RuntimeError:
             print(f'Got runtime error at z={z}')
@@ -135,7 +143,11 @@ def main():
 
     # Prepare the data for the parallel processing
     vol, resolution = read_omezarr(input_zarr, level=0)
+    p_upper = None
+    if args.percentile_max is not None:
+        p_upper = np.percentile(vol[:], args.percentile_max)
     n_slices = vol.shape[0]
+
     tmp_dir = tempfile.TemporaryDirectory(
         suffix="_linum_fix_illumination_3d_slices", dir=output_zarr.parent)
     params_list = []
@@ -147,7 +159,8 @@ def main():
             "z": z,
             "slice_file": slice_file,
             "tile_shape": vol.chunks[1:],
-            "max_iterations": args.max_iterations
+            "max_iterations": args.max_iterations,
+            "p_upper": p_upper
         }
         params_list.append(params)
 
