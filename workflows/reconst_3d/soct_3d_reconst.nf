@@ -102,7 +102,7 @@ process normalize {
         tuple val(slice_id), path("slice_z${slice_id}_normalize.ome.zarr")
     script:
     """
-    linum_normalize_intensities_per_slice.py ${slice_id} "slice_z${slice_id}_normalize.ome.zarr" --percentile_max ${params.clip_percentile_upper}
+    linum_normalize_intensities_per_slice.py ${image} "slice_z${slice_id}_normalize.ome.zarr" --percentile_max ${params.clip_percentile_upper}
     """
 }
 
