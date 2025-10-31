@@ -21,7 +21,7 @@ def _build_arg_parser():
                    help='Input image.')
     p.add_argument('out_image',
                    help='Output image.')
-    p.add_argument('--percentile_max', type=int, default=99.9,
+    p.add_argument('--percentile_max', type=float, default=99.9,
                    help='Values above the ith percentile will be clipped. [%(default)s]')
     p.add_argument('--sigma', type=float, default=1.0,
                    help='Smoothing sigma for estimating the agarose mask. [%(default)s]')
