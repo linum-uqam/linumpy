@@ -149,7 +149,7 @@ process stack {
         }
     }
     """
-    linum_stack_slices_3d.py mosaics transforms 3d_volume.ome.zarr --normalize ${options}
+    linum_stack_slices_3d.py mosaics transforms 3d_volume.ome.zarr ${options}
     zip -r 3d_volume.ome.zarr.zip 3d_volume.ome.zarr
     linum_screenshot_omezarr.py 3d_volume.ome.zarr 3d_volume.png
     """
