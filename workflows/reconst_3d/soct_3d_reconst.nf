@@ -143,9 +143,9 @@ process stack {
     if(params.stack_blend_enabled)
     {
         options += "--blend"
-        if(params.crop_overlap > 0)
+        if(params.stack_max_overlap > 0)
         {
-            options += " --overlap ${params.crop_overlap}"
+            options += " --overlap ${params.stack_max_overlap}"
         }
     }
     """
