@@ -69,10 +69,20 @@ def process_tile(params: dict):
             tiles.append(vol[rmin:rmax, cmin:cmax])
 
     # Estimate the illumination bias
-    # Check if tiles contain complex values
-    if np.iscomplexobj(tiles[0]):
-        # Separate real and imaginary parts
-        try:
+    tiles_for_fit = np.asarray(tiles)
+    if np.iscomplexobj(tiles[0]):  # if input is complex, take amplitude of signal
+        tiles_for_fit = np.abs(tiles_for_fit).astype(np.float64)
+    if p_upper is not None:
+        tiles_for_fit = np.clip(tiles_for_fit, None, p_upper)
+    optimizer = BaSiC(get_darkfield=False, max_iterations=max_iterations)
+    optimizer.fit(tiles_for_fit)
+
+    # apply correction to tiles
+    try:
+        # Check if tiles contain complex values
+        # TODO: Hasn't been validated for complex input since basicpy has replaced pybasic
+        if np.iscomplexobj(tiles[0]):
+            # Separate real and imaginary parts
             tiles_real = [t.real for t in tiles]
             tiles_imag = [t.imag for t in tiles]
 
@@ -81,10 +91,6 @@ def process_tile(params: dict):
             sign_imag = [np.sign(t) for t in tiles_imag]
 
             # Run BaSiC
-            # TODO: Validate with data
-            optimizer = BaSiC(get_darkfield=True, smoothness_flatfield=1,
-                              max_iterations=max_iterations)
-            optimizer.fit(np.abs(np.asarray(tiles)).astype(np.float64))
             tiles_real_corr = optimizer.transform(np.asarray(tiles_real))
             tiles_imag_corr = optimizer.transform(np.asarray(tiles_imag))
 
@@ -94,23 +100,13 @@ def process_tile(params: dict):
                 for t_real, t_imag, s_real, s_imag in zip(
                     tiles_real_corr, tiles_imag_corr, sign_real, sign_imag)
             ]
-        except TypeError as e:
-            print(f"Error processing complex tiles: {e}")
-            
-    else:
-        # Process normally if tiles are real
-        try:
-            optimizer = BaSiC(get_darkfield=False, max_iterations=max_iterations)
-            tiles_for_fit = np.asarray(tiles)
-            if p_upper is not None:
-                tiles_for_fit = np.clip(tiles_for_fit, None, p_upper)
-            optimizer.fit(tiles_for_fit)
-
+        else:
+            # Process normally if tiles are real
             # Apply correction to original (not clipped) tiles
             tiles_corrected = optimizer.transform(np.asarray(tiles))
-        except RuntimeError:
-            print(f'Got runtime error at z={z}')
-            tiles_corrected = np.asarray(tiles)
+    except RuntimeError:
+        print(f'Got runtime error at z={z}')
+        tiles_corrected = np.asarray(tiles)
 
     # Fill the output mosaic
     vol_output = np.zeros_like(vol)
