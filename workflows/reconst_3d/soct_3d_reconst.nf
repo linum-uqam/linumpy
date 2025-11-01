@@ -6,6 +6,18 @@ nextflow.enable.dsl = 2
 // Input: Directory containing input mosaic grids
 // Output: 3D reconstruction
 
+process README {
+    publishDir "$params.output/$task.process", mode: 'copy'
+    output:
+        path "readme.txt"
+    script:
+    """
+    echo "3D reconstruction pipeline\n" >> readme.txt
+    echo "Start time: $workflow.start\n" >> readme.txt
+    echo "[Command-line]\n$workflow.commandLine\n" >> readme.txt
+    """
+}
+
 process resample_mosaic_grid {
     input:
         tuple val(slice_id), path(mosaic_grid)
@@ -170,6 +182,9 @@ workflow {
         .ifEmpty {
             error("XY shifts file not found at path '$params.shifts_xy'.")
         }
+
+    // Write readme containing the executed command line
+    README()
 
     // [Optional] Resample the input mosaic grid
     resampled_channel = params.resolution > 0 ? resample_mosaic_grid(inputSlices) : inputSlices
