@@ -13,8 +13,16 @@ process README {
     script:
     """
     echo "3D reconstruction pipeline\n" >> readme.txt
-    echo "Start time: $workflow.start\n" >> readme.txt
-    echo "[Command-line]\n$workflow.commandLine\n" >> readme.txt
+    echo "[Params]" >> readme.txt
+    for p in $params; do
+        echo " \$p" >> readme.txt
+    done
+    echo "" >> readme.txt
+    echo "[Command-line]\n $workflow.commandLine\n" >> readme.txt
+    echo "[Configuration files]">> readme.txt
+    for c in $workflow.configFiles; do
+        echo " \$c" >> readme.txt
+    done
     """
 }
 
@@ -168,6 +176,10 @@ process stack {
 }
 
 workflow {
+    // Write readme containing the parameters for the current execution
+    README()
+
+    // Parse inputs
     inputSlices = channel.fromFilePairs("$params.input/mosaic_grid*_z*.ome.zarr", size: -1, type:'dir')
         .ifEmpty {
             error("No valid files found under '${params.input}'. Please supply a valid input directory.")
@@ -182,9 +194,6 @@ workflow {
         .ifEmpty {
             error("XY shifts file not found at path '$params.shifts_xy'.")
         }
-
-    // Write readme containing the executed command line
-    README()
 
     // [Optional] Resample the input mosaic grid
     resampled_channel = params.resolution > 0 ? resample_mosaic_grid(inputSlices) : inputSlices
@@ -229,11 +238,26 @@ workflow {
         .flatten()
         .toSortedList{a, b -> a[0] <=> b[0]}
 
+    // Prepare for pairwise stack registration
     fixed_channel = all_slices_common_space
-        .map { list -> list.subList(0, list.size() - 1) }
+        .map {list ->
+            if(list.size() > 1){
+                return list.subList(0, list.size() - 1)
+            }
+            else {
+                return channel.empty()
+            }
+        }
         .flatten()
     moving_channel = all_slices_common_space
-        .map { list -> list.subList(1, list.size()) }
+        .map {list ->
+            if(list.size() > 1){
+                return list.subList(1, list.size())
+            }
+            else {
+                return channel.empty()
+            }
+        }
         .flatten()
 
     // Register slices pairwise
