@@ -155,11 +155,13 @@ def main():
         composite_transform = sitk.CompositeTransform(transforms[i::-1])
         register_vol = apply_transform(vol, composite_transform)
 
+        # cropping the registered volume to make sure it fits in output_vol
+        register_vol = register_vol[:min(register_vol.shape[0], output_shape[0]-stack_offset)]
+
         # crop the volume at next fixed offset + overlap
         if i < len(mosaics_sorted) - 1:
             next_fixed_offset = fixed_offsets[i + 1]
             if args.overlap is not None:
-                print(register_vol.shape[0], next_fixed_offset+args.overlap)
                 register_vol = register_vol[:next_fixed_offset+args.overlap]
         else:
             next_fixed_offset = register_vol.shape[0]
