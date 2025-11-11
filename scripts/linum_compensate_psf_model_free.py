@@ -31,6 +31,10 @@ def _build_arg_parser():
                    help='Fit a gaussian on the beam profile.')
     p.add_argument('--output_plot',
                    help='Optional output plot filename.')
+    p.add_argument('--percentile_max', type=float,
+                   help='Values above the ith percentile will be clipped *prior\n'
+                        'to profile estimation*. Original values will\n'
+                        'remain in output corrected volume (range [0-100]).')
     return p
 
 
@@ -41,7 +45,11 @@ def main():
 
     # Load ome-zarr data
     vol, res = read_omezarr(args.input_zarr, level=0)
-    aip = np.mean(vol[:], axis=0)
+    vol_data = vol[:]
+    if args.percentile_max is not None:
+        vol_data = np.clip(vol_data, None, np.percentile(vol_data, args.percentile_max))
+
+    aip = np.mean(vol_data, axis=0)
     otsu = threshold_otsu(aip)
     agarose_mask = aip < otsu
 
@@ -52,15 +60,18 @@ def main():
     mask_all = mask.all(axis=0)  # True where mask is True for every voxel along the aline
     agarose_mask = np.logical_and(agarose_mask, ~mask_all)
 
-    vol_data = vol[:]
-
     profile = np.reshape(vol_data, (len(vol_data), -1))
     profile = np.array([profile[:, i] for i in range(profile.shape[-1]) if agarose_mask.reshape(-1)[i]]).T
     profile = np.mean(profile, axis=-1)
-    profile = np.clip(profile, np.min(profile[profile > 0.0]), None)
 
-    background = np.min(profile)
-    psf = (profile - background) / background
+    # TODO: Prevent this from happening (happens when the profile is all 0s).
+    try:
+        profile = np.clip(profile, np.min(profile[profile > 0.0]), None)
+
+        background = np.min(profile)
+        psf = (profile - background) / background
+    except Exception:
+        psf = np.zeros_like(profile)
 
     if args.fit_gaussian:
         psf_max = np.max(psf)
@@ -87,6 +98,11 @@ def main():
         ax[2].set_title('Estimated PSF')
         fig.set_size_inches(12, 5)
         fig.savefig(args.output_plot)
+
+    if args.percentile_max is not None:
+        # Reload original data
+        vol, res = read_omezarr(args.input_zarr, level=0)
+        vol_data = vol[:]
 
     # apply correction
     vol_corr = vol_data / (1.0 + psf.reshape((-1, 1, 1)))

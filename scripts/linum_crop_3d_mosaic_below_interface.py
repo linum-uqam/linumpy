@@ -38,9 +38,10 @@ def _build_arg_parser():
     p.add_argument("--pad_after", action='store_true',
                    help='If set, pad the volume such that its depth below interface'
                         ' is equal to `depth`.')
-    p.add_argument("--resolution", type=float,
-                   help="Resolution in um. If not provided, it will be read\n"
-                        "from the input zarr metadata.")
+    p.add_argument('--percentile_max', type=float,
+                   help='Values above the ith percentile will be clipped *prior\n'
+                        'to finding the interface*. Original values will\n'
+                        'remain in output clipped volume (range [0-100]).')
     return p
 
 
@@ -52,15 +53,13 @@ def main():
     # Load volume
     vol, res = read_omezarr(input_path, level=0)
     print('Loaded volume shape:', vol.shape)
-    if args.resolution is not None:
-        resolution = args.resolution
-    else:
-        resolution = (
-            res[0] * 1000
-        )  # Extract the Z resolution in um from the zarr metadata
+    resolution_um = res[0] * 1000
+
     # vol is (Z, X, Y); reorient to (X, Y, Z) for xyzcorr functions
     vol_f = np.abs(vol) if np.iscomplexobj(vol) else vol
     vol_f = np.transpose(vol_f, (1, 2, 0))
+    if args.percentile_max is not None:
+        vol_f = np.clip(vol_f, None, np.percentile(vol_f, args.percentile_max))
 
     # compute the derivative along z to find the average tissue depth
     pad_width = int(np.round(args.sigma_z*4))
@@ -73,7 +72,7 @@ def main():
     print(f"Average surface depth: {avg_iface} voxels")
 
     # Compute number of Z-slices for desired depth (um / um-per-voxel)
-    depth_px = int(round(args.depth / resolution))
+    depth_px = int(round(args.depth / resolution_um))
     print(f"Cropping depth: {depth_px} voxels ({args.depth} um)")
 
     # Compute end index for cropping

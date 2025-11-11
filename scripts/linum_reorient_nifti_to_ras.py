@@ -14,6 +14,16 @@ import nibabel as nib
 import numpy as np
 
 
+choices = {
+    'x+': [1.0, 0.0, 0.0],
+    'x-': [-1.0, 0.0, 0.0],
+    'y+': [0.0, 1.0, 0.0],
+    'y-': [0.0, -1.0, 0.0],
+    'z+': [0.0, 0.0, 1.0],
+    'z-': [0.0, 0.0, -1.0]
+}
+
+
 def _build_arg_parser():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
@@ -21,14 +31,12 @@ def _build_arg_parser():
                    help="Full path to the input volume (.nii or .nii.gz)")
     p.add_argument("output_volume",
                    help="Full path to the output volume (.nii or .nii.gz)")
-    p.add_argument("--pos_anterior", nargs=3, type=int, required=True,
-                   help="Position of the anterior control point in pixel.")
-    p.add_argument("--pos_posterior", nargs=3, type=int, required=True,
-                   help="Position of the posterior control point in pixel.")
-    p.add_argument("--pos_superior", nargs=3, type=int, required=True,
-                   help="Position of the superior control point in pixel.")
-    p.add_argument("--pos_inferior", nargs=3, type=int, required=True,
-                   help="Position of the inferior control point in pixel.")
+    p.add_argument('ant_to_pos', choices=choices.keys(),
+                   help='Anterior-to-posterior axis with sign describing whether\n'
+                        'indices increase or decrease along the axis when going\n'
+                        'anterior to posterior.')
+    p.add_argument('inf_to_sup', choices=choices.keys(),
+                   help='Inferior-to-superior axis.')
 
     return p
 
@@ -42,15 +50,9 @@ def main():
     input_volume = Path(args.input_volume)
     output_volume = Path(args.output_volume)
 
-    # Control points position in pixel (ex: from Fiji)
-    pos_anterior = args.pos_anterior
-    pos_posterior = args.pos_posterior
-    pos_superior = args.pos_superior
-    pos_inferior = args.pos_inferior
-
     # Estimate the main axis of the volume
-    vector_pa = np.array(pos_anterior) - np.array(pos_posterior)
-    vector_is = np.array(pos_superior) - np.array(pos_inferior)
+    vector_pa = -np.array(choices[args.ant_to_pos])
+    vector_is = np.array(choices[args.inf_to_sup])
     axis_pa = np.argmax(np.abs(vector_pa))
     axis_pa_sign = np.sign(vector_pa[axis_pa])
     axis_is = np.argmax(np.abs(vector_is))

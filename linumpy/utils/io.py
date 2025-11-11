@@ -1,6 +1,7 @@
 # -*- coding:utf8 -*-
 import multiprocessing
-
+import os
+import shutil
 
 DEFAULT_N_CPUS = multiprocessing.cpu_count() - 1
 
@@ -19,15 +20,19 @@ def add_processes_arg(parser):
                                  'all cores [%(default)s].')
     return a
 
-def add_overwrite_arg(parser, will_delete_dirs=False):
-    if will_delete_dirs:
-        _help = ('Force overwriting of the output files.\n'
-                 'CAREFUL. The whole output directory will be deleted if it '
-                 'exists.')
-    else:
-        _help = 'Force overwriting of the output files.'
+
+def add_overwrite_arg(parser):
     parser.add_argument(
-        '-f', dest='overwrite', action='store_true', help=_help)
+        '-f', dest='overwrite', action='store_true', help='Force overwriting of the output files.')
+
+
+def assert_output_exists(output, parser, args):
+    if os.path.exists(output):
+        if not args.overwrite:
+            parser.error(f'Output {output} exists. Use -f to overwrite.')
+        elif os.path.isdir(output):  # remove the directory if it exists
+            shutil.rmtree(output)
+
 
 def add_verbose_arg(parser):
     parser.add_argument('-v', default="WARNING", const='INFO', nargs='?',

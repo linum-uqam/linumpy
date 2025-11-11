@@ -54,15 +54,20 @@ class OCT:
                 val = int(val)
             self.info[key] = val
 
-    def load_image(self, crop: bool = True, fix_shift: Union[bool, int] = True) -> np.ndarray:
+    def load_image(self, crop: bool = True,
+                   fix_galvo_shift: Union[bool, int] = True,
+                   fix_camera_shift: bool = False) -> np.ndarray:
         """ Load an image dataset
         Parameters
         ----------
         crop
             If crop is True, the galvo returns will be cropped from the volume
-        fix_shift
+        fix_galvo_shift
             If True, the shift caused by the galvo mirror return will be evaluated from the data. If an integer value
             is given, this value will be used to fix the shift.
+        fix_camera_shift
+            If True, the camera shift will be evaluated and compoensated from the data. This will detect
+            the first pixel of the scan that is always overexposed and shift the data to compensate for this.
         Notes
         -----
         * The returned volume is in this order : z (depth), x (a-line), y (b-scan)
@@ -90,15 +95,25 @@ class OCT:
             else:
                 vol = np.concatenate((vol, foo), axis=2)
 
+        # Compensate camera shift (required for old acquisitions on polymtl server)
+        if fix_camera_shift:
+            img = vol.mean(axis=0)
+            pix_max = np.where(img == img.max())
+            cam_shift = pix_max[0][0]
+            vol = np.roll(vol, -cam_shift, axis=1)
+
+            # Replace the saturated pixel value by its neighbor
+            vol[:, 0, 0] = vol[:, 1, 0]
+
         # Estimate the galvo shift
-        if isinstance(fix_shift, bool) and fix_shift is True:
+        if isinstance(fix_galvo_shift, bool) and fix_galvo_shift is True:
             if n_extra == 0:
                 warnings.warn("Cannot estimate the shift correction as there are no extra a-lines in the file.")
             else:
                 shift = xyzcorr.detect_galvo_shift(vol.mean(axis=0), n_pixel_return=n_extra)
                 vol = xyzcorr.fix_galvo_shift(vol, shift=shift)
-        elif isinstance(fix_shift, int):
-            vol = xyzcorr.fix_galvo_shift(vol, shift=fix_shift)
+        elif isinstance(fix_galvo_shift, int):
+            vol = xyzcorr.fix_galvo_shift(vol, shift=fix_galvo_shift)
 
         # Crop the volume
         if crop:

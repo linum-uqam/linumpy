@@ -385,96 +385,165 @@ def align_images_sitk(im1, im2):
     return deltas, m
 
 
-def register_mosaic_3d_to_reference_2d(ref_image, current_mosaic, method='euler',
-                                       metric='MSE', learning_rate=2.0, min_step=1e-6,
-                                       n_iterations=500, grad_mag_tolerance=1e-8):
+def register_2d_images_sitk(ref_image, moving_image, method='euler',
+                            metric='MSE', max_iterations=10000, 
+                            min_step=1e-12, grad_mag_tol=1e-12,
+                            return_3d_transform=False, verbose=False):
     """
-    2D register the top slice of `current_mosaic` to `ref_image` using SimpleITK.
+    Register 2D `moving_image` to `ref_image`.
 
     Parameters
     ----------
-    ref_image: ndarray (nx, ny)
-        Reference image to which the top slice of `current_mosaic` will be registered.
-    current_mosaic: ndarray (nz, nx, ny)
-        3D mosaic to register to ref_image.
+    ref_image: numpy.ndarray
+        The reference image.
+    moving_image: numpy.ndarray
+        The image to register.
     method: str
-        Registration method to use. Options are 'euler' or 'affine'.
+        The type of transform for registration. Choices are: "euler",
+        "affine" or "translation".
     metric: str
-        Similarity metric to use for registration. Options are 'MSE'
-        (mean squared error) or 'CC' (cross-correlation).
-    learning_rate: float
-        Learning rate for the registration optimizer.
+        The metric to optimize. Choices are:
+            - "MSE": Mean-squared error
+            - "MI": Mattes mutual information
+            - "AntsCC": Ants neighbourhood cross-correlation
+            - "CC": Cross-correlation
+    max_iterations: int
+        Maximum number of iterations at each level of the multiscale
+        pyramid (3 levels).
     min_step: float
-        Minimum step size for the registration optimizer.
-    n_iterations: int
-        Number of iterations for the registration optimizer.
-    grad_mag_tolerance: float
-        Gradient magnitude tolerance for the registration optimizer.
+        Minimum step size for the gradient descent.
+    grad_mag_tol: float
+        Gradient magnitude tolerance for gradient descent.
+    return_3d_transform: bool
+        If True, will return a 3D transform instead of 2D. Useful
+        when the transform is applied to a 3D image.
+    verbose: bool
+        If True, will log registrations metric at each iteration.
 
     Returns
     -------
-    output_volume: ndarray (nz, nx, ny)
-        Registered 3D volume where each slice is aligned to `ref_image`.
-    metric_value: float
-        Metric value of the registration (e.g., mean squares).
+    out_transform: sitk.sitkTransform
+        Transform for bringing `moving_image` onto `ref_image`.
+    stop_condition: str
+        String describing optimizer stopping condition.
+    error: float
+        Registration metric value at the end of registration process.
     """
-    current_mosaic_top_slice = current_mosaic[0, :, :]
-
     # Type cast everything to float32
     ref_image = ref_image.astype(np.float32)
-    current_mosaic_top_slice = current_mosaic_top_slice.astype(np.float32)
+    moving_image = moving_image.astype(np.float32)
 
     fixed_sitk_image = sitk.GetImageFromArray(ref_image)
-    moving_sitk_image = sitk.GetImageFromArray(current_mosaic_top_slice)
+    moving_sitk_image = sitk.GetImageFromArray(moving_image)
 
     R = sitk.ImageRegistrationMethod()
 
-    if metric == 'MSE':
+    if metric.lower() == 'mse':
         R.SetMetricAsMeanSquares()
-    elif metric == 'CC':
+    elif metric.lower() == 'cc':
         R.SetMetricAsCorrelation()
+    elif metric.lower() == 'antscc':
+        R.SetMetricAsANTSNeighborhoodCorrelation(radius=20)
+    elif metric.lower() == 'mi':
+        R.SetMetricAsMattesMutualInformation(numberOfHistogramBins=50)
     else:
         raise ValueError("Unknown metric: {}".format(metric))
 
-    R.SetOptimizerAsRegularStepGradientDescent(
-        learningRate=learning_rate,
-        minStep=min_step,
-        numberOfIterations=n_iterations,
-        gradientMagnitudeTolerance=grad_mag_tolerance,
-    )
+    R.SetOptimizerAsRegularStepGradientDescent(4.0, min_step, max_iterations,
+                                               0.5, grad_mag_tol)
     R.SetShrinkFactorsPerLevel([4, 2, 1])
-    R.SetSmoothingSigmasPerLevel([3, 1, 0])
+    R.SetSmoothingSigmasPerLevel([3, 2, 1])
+
+    # this step is essential for the registration to work properly
+    # determines the scale of each parameter in the optimizer
     R.SetOptimizerScalesFromIndexShift()
 
     if method == 'euler':
-        sitkTransform = sitk.Euler2DTransform()
+        sitk_transform = sitk.Euler2DTransform()
     elif method == 'affine':
-        sitkTransform = sitk.AffineTransform(2)
+        sitk_transform = sitk.AffineTransform(2)
+    elif method == 'translation':
+        sitk_transform = sitk.TranslationTransform(2)
     else:
         raise ValueError("Unknown method: {}".format(method))
 
-    tx = sitk.CenteredTransformInitializer(fixed_sitk_image,
-                                           moving_sitk_image,
-                                           sitkTransform)
-    R.SetInitialTransform(tx)
+    # sitk_transform.SetParameters([0.0] * sitk_transform.GetNumberOfParameters())
+    sitk_transform = sitk.CenteredTransformInitializer(
+        fixed_sitk_image,
+        moving_sitk_image,
+        sitk_transform
+    )
+
+    R.SetInitialTransform(sitk_transform)
 
     R.SetInterpolator(sitk.sitkLinear)
+    if verbose:
+        R.AddCommand(sitk.sitkIterationEvent, lambda: command_iteration(R))
 
     out_transform = R.Execute(fixed_sitk_image, moving_sitk_image)
+    stop_condition = R.GetOptimizerStopConditionDescription()
+    error = R.GetMetricValue()
 
-    output_volume = np.zeros((len(current_mosaic), ref_image.shape[0], ref_image.shape[1]))
-    for i, moving in enumerate(current_mosaic):
-        moving_sitk_image = sitk.GetImageFromArray(moving)
+    if return_3d_transform:
+        if method == 'euler':
+            angle_rad = out_transform.GetAngle()
+            center_of_rotation = out_transform.GetCenter()
+            translation = out_transform.GetTranslation()
+            transform_3d = sitk.Euler3DTransform()
+            transform_3d.SetCenter([center_of_rotation[0], center_of_rotation[1], 0.0])
+            transform_3d.SetRotation(0.0, 0.0, angle_rad)
+            transform_3d.SetTranslation([translation[0], translation[1], 0.0])
+        elif method == 'translation':
+            translation = out_transform.GetOffset()
+            transform_3d = sitk.TranslationTransform(3)
+            transform_3d.SetOffset([translation[0], translation[1], 0.0])
+        elif method == 'affine':
+            transform_3d = sitk.AffineTransform(3)
+            translation = out_transform.GetTranslation()
+            transform_3d.SetCenter(out_transform.GetCenter() + (0.0,))
+            transform_3d.SetTranslation([translation[0], translation[1], 0.0])
+            matrix_2d = out_transform.GetMatrix()
+            matrix_3d = np.zeros((3, 3))
+            matrix_3d[:2, :2] = np.array(matrix_2d).reshape((2, 2))
+            matrix_3d[2, 2] = 1.0
+            transform_3d.SetMatrix(matrix_3d.flatten().tolist())
+        else:
+            raise ValueError("Unknown method: {}".format(method))
+        out_transform = transform_3d
 
-        resampler = sitk.ResampleImageFilter()
-        resampler.SetReferenceImage(fixed_sitk_image)
-        resampler.SetInterpolator(sitk.sitkLinear)
-        resampler.SetDefaultPixelValue(0)
-        resampler.SetTransform(out_transform)
+    return out_transform, stop_condition, error
 
-        out = resampler.Execute(moving_sitk_image)
-        out = sitk.GetArrayFromImage(out)
 
-        output_volume[i, :, :] = out
+def command_iteration(method):
+    """ Callback invoked when the optimization has an iteration """
+    if method.GetOptimizerIteration() == 0:
+        print("Estimated Scales: ", method.GetOptimizerScales())
+    print(f"{method.GetOptimizerIteration():3} "
+        + f"= {method.GetMetricValue():7.5f} "
+        + f": {method.GetOptimizerPosition()}")
 
-    return output_volume, R.GetMetricValue()
+
+def apply_transform(moving_image, transform):
+    """
+    Apply `transform` to `moving_image`. The image is
+    transformed inside its own domain.
+
+    Parameters
+    ----------
+    moving_image: numpy.ndarray
+        Moving image to transform.
+    transform: sitk.sitkTransform
+        Transform to apply to `moving_image`.
+    """
+    moving_image_sitk = sitk.GetImageFromArray(moving_image)
+
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetReferenceImage(moving_image_sitk)  # transforms the image inside its domain
+    resampler.SetInterpolator(sitk.sitkLinear)
+    resampler.SetDefaultPixelValue(0)
+    resampler.SetTransform(transform)
+
+    out = resampler.Execute(moving_image_sitk)
+    out = sitk.GetArrayFromImage(out)
+
+    return out

@@ -311,7 +311,9 @@ class OmeZarrWriter:
     axes: list
     zarray: zarr.Array
 
-    def __init__(self, store_path: str | Path, shape: tuple, chunk_shape: tuple, dtype: np.dtype, overwrite: bool,
+    def __init__(self, store_path: str | Path, shape: tuple,
+                 chunk_shape: tuple, shards: tuple = None,
+                 dtype: np.dtype = np.float32, overwrite: bool = True,
                  downscale_factor: int = 2, unit: str = 'millimeter'):
         """
         Class for writing ome-zarr files to disk in a pyramidal format.
@@ -322,6 +324,8 @@ class OmeZarrWriter:
         :param shape: Shape of the dataset.
         :type chunk_shape: tuple of n `int`, with n the number of dimensions.
         :param chunk_shape: Chunk size on disk.
+        :type shards: tuple of `int`
+        :param shards: Dimension of shards. `None` for no sharding.
         :type dtype: np.dtype
         :param dtype: Data type of the dataset.
         :type overwrite: bool
@@ -359,6 +363,7 @@ class OmeZarrWriter:
             shape=shape,
             exact=True,
             chunks=chunk_shape,
+            shards=shards,
             dtype=dtype,
             chunk_key_encoding=self.fmt.chunk_key_encoding,
             dimension_names=[axis["name"] for axis in self.axes],  # omit for v0.4
@@ -413,6 +418,10 @@ class OmeZarrWriter:
     @property
     def ndim(self):
         return len(self.shape)
+
+    @property
+    def dtype(self):
+        return self.zarray.dtype
 
     def finalize(self, res, n_levels=5):
         n_levels = validate_n_levels(n_levels, self.shape, self.downscale_factor)

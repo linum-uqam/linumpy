@@ -642,15 +642,12 @@ def getDiffusionBlendingWeights(fixedMask: np.ndarray, movingMask: np.ndarray = 
 
     small_mask = np.logical_and(small_fixedMask, small_movingMask)
     erodedMask = morpho.binary_erosion(small_mask, structure=strel)
-    boundary_moving = np.logical_xor(small_movingMask, morpho.binary_erosion(small_movingMask, structure=strel))
-    boundary_fixed = np.logical_xor(small_fixedMask, morpho.binary_erosion(small_fixedMask, structure=strel))
     boundary = np.logical_xor(small_mask, morpho.binary_erosion(small_mask, structure=strel))
 
     # Getting the boundary conditions
     bc = boundary.copy()
     bc = bc * morpho.binary_erosion(small_fixedMask, strel)
 
-    # bc = morpho.binary_erosion(small_fixedMask, strel)*boundary
     dilatedMask = morpho.binary_dilation(~np.logical_or(small_fixedMask, small_mask), structure=strel)
     bc = np.zeros(new_shape)
     bc[boundary] = (~ dilatedMask[boundary]) * 1.0

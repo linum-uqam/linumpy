@@ -74,7 +74,7 @@ def get_volume(filename: str, config: dict = None) -> np.ndarray:
                                True)  # Either a precomputed shift, or a True value to compute it during loading.
 
     # Load the volume
-    vol = OCT(filename).load_image(crop=crop, fix_shift=fix_shift)
+    vol = OCT(filename).load_image(crop=crop, fix_galvo_shift=fix_shift)
 
     # Rotation and flips
     n_rots = config.get("n_rots", 0)

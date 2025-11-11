@@ -37,6 +37,9 @@ def _build_arg_parser():
                    help="Full path to the output zarr file")
     p.add_argument("--max_iterations", type=int, default=500,
                    help='Maximum number of iterations for BaSiC. [%(default)s]')
+    p.add_argument("--percentile_max", type=float,
+                   help="Values above this percentile will be clipped when\n"
+                        "estimating the flatfield (inside range [0-100]).")
     add_processes_arg(p)
     return p
 
@@ -47,6 +50,7 @@ def process_tile(params: dict):
     z = params["z"]
     tile_shape = params["tile_shape"]
     max_iterations = params["max_iterations"]
+    p_upper = params["p_upper"]
     vol = io.v3.imread(str(file))
     file_output = Path(file).parent / file.name.replace(".tiff", "_corrected.tiff")
 
@@ -65,10 +69,20 @@ def process_tile(params: dict):
             tiles.append(vol[rmin:rmax, cmin:cmax])
 
     # Estimate the illumination bias
-    # Check if tiles contain complex values
-    if np.iscomplexobj(tiles[0]):
-        # Separate real and imaginary parts
-        try:
+    tiles_for_fit = np.asarray(tiles)
+    if np.iscomplexobj(tiles[0]):  # if input is complex, take amplitude of signal
+        tiles_for_fit = np.abs(tiles_for_fit).astype(np.float64)
+    if p_upper is not None:
+        tiles_for_fit = np.clip(tiles_for_fit, None, p_upper)
+    optimizer = BaSiC(get_darkfield=False, max_iterations=max_iterations)
+    optimizer.fit(tiles_for_fit)
+
+    # apply correction to tiles
+    try:
+        # Check if tiles contain complex values
+        # TODO: Hasn't been validated for complex input since basicpy has replaced pybasic
+        if np.iscomplexobj(tiles[0]):
+            # Separate real and imaginary parts
             tiles_real = [t.real for t in tiles]
             tiles_imag = [t.imag for t in tiles]
 
@@ -77,10 +91,6 @@ def process_tile(params: dict):
             sign_imag = [np.sign(t) for t in tiles_imag]
 
             # Run BaSiC
-            # TODO: Validate with data
-            optimizer = BaSiC(get_darkfield=True, smoothness_flatfield=1,
-                              max_iterations=max_iterations)
-            optimizer.fit(np.abs(np.asarray(tiles)).astype(np.float64))
             tiles_real_corr = optimizer.transform(np.asarray(tiles_real))
             tiles_imag_corr = optimizer.transform(np.asarray(tiles_imag))
 
@@ -90,17 +100,13 @@ def process_tile(params: dict):
                 for t_real, t_imag, s_real, s_imag in zip(
                     tiles_real_corr, tiles_imag_corr, sign_real, sign_imag)
             ]
-        except TypeError as e:
-            print(f"Error processing complex tiles: {e}")
-            
-    else:
-        # Process normally if tiles are real
-        optimizer = BaSiC(get_darkfield=True, smoothness_flatfield=1,
-                          max_iterations=max_iterations)
-        optimizer.fit(np.asarray(tiles))
-
-        # Apply correction
-        tiles_corrected = optimizer.transform(np.asarray(tiles))
+        else:
+            # Process normally if tiles are real
+            # Apply correction to original (not clipped) tiles
+            tiles_corrected = optimizer.transform(np.asarray(tiles))
+    except RuntimeError:
+        print(f'Got runtime error at z={z}')
+        tiles_corrected = np.asarray(tiles)
 
     # Fill the output mosaic
     vol_output = np.zeros_like(vol)
@@ -133,7 +139,11 @@ def main():
 
     # Prepare the data for the parallel processing
     vol, resolution = read_omezarr(input_zarr, level=0)
+    p_upper = None
+    if args.percentile_max is not None:
+        p_upper = np.percentile(vol[:], args.percentile_max)
     n_slices = vol.shape[0]
+
     tmp_dir = tempfile.TemporaryDirectory(
         suffix="_linum_fix_illumination_3d_slices", dir=output_zarr.parent)
     params_list = []
@@ -145,7 +155,8 @@ def main():
             "z": z,
             "slice_file": slice_file,
             "tile_shape": vol.chunks[1:],
-            "max_iterations": args.max_iterations
+            "max_iterations": args.max_iterations,
+            "p_upper": p_upper
         }
         params_list.append(params)
 
@@ -171,8 +182,8 @@ def main():
     out_dask = da.from_zarr(vol_output)
     min_value = out_dask.min().compute()
     if min_value < 0:
-        print(f"Minimum value in the output volume is {min_value}. Rescaling so minimum is 0.")
-        out_dask = out_dask - min_value
+        print(f"Minimum value in the output volume is {min_value}. Clipping at 0.")
+        out_dask = da.clip(out_dask, 0., None)
 
     save_omezarr(out_dask, output_zarr, voxel_size=resolution,
                  chunks=vol.chunks)

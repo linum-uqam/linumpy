@@ -13,6 +13,9 @@ params.use_old_folder_structure = false // Use the old folder structure where ti
 params.processes = 1 // Maximum number of python processes per nextflow process
 params.axial_resolution = 1.5 // Axial resolution of imaging system in microns
 params.resolution = -1 // resolution of mosaic grid. Defaults to full resolution.
+params.sharding_factor = 4 // There will be N x N chunks per shard
+params.fix_galvo_shift = true  // should be true for new data, else false
+params.fix_camera_shift = false  // should be set to false for new data, else true
 
 process create_mosaic_grid {
     cpus params.processes
@@ -21,20 +24,12 @@ process create_mosaic_grid {
     output:
         tuple val(slice_id), path("*.ome.zarr")
     script:
+    String options = ""
+    options += params.fix_galvo_shift? "--fix_galvo_shift":"--no-fix_galvo_shift"
+    options += " "
+    options += params.fix_camera_shift? "--fix_camera_shift":"--no-fix_camera_shift"
     """
-    linum_create_mosaic_grid_3d.py mosaic_grid_3d_z${slice_id}.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution} --n_levels 0 --disable_fix_shift
-    """
-}
-
-process compress_mosaic_grid {
-    publishDir "$params.output"
-    input:
-        tuple val(slice_id), path(mosaic_grid)
-    output:
-        tuple val(slice_id), path("mosaic_grid_3d_z${slice_id}.ome.zarr.tar.gz")
-    script:
-    """
-    tar -czvf mosaic_grid_3d_z${slice_id}.ome.zarr.tar.gz ${mosaic_grid}
+    linum_create_mosaic_grid_3d.py mosaic_grid_3d_z${slice_id}.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution} --n_levels 0 --sharding_factor ${params.sharding_factor} ${options}
     """
 }
 
@@ -68,9 +63,6 @@ workflow {
 
     // Generate a 3D mosaic grid at full resolution
     create_mosaic_grid(inputSlices)
-
-    // Compress to zip to reduce the number of files
-    compress_mosaic_grid(create_mosaic_grid.out)
 
     // Estimate XY shifts from metadata
     estimate_xy_shifts_from_metadata(input_dir_channel)
