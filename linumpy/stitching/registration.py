@@ -386,7 +386,7 @@ def align_images_sitk(im1, im2):
 
 
 def register_2d_images_sitk(ref_image, moving_image, method='euler',
-                            metric='MSE', max_iterations=10000, 
+                            metric='MSE', max_iterations=2500,
                             min_step=1e-12, grad_mag_tol=1e-12,
                             return_3d_transform=False, verbose=False):
     """
