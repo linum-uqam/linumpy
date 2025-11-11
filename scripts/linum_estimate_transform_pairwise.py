@@ -7,12 +7,15 @@ The output is a directory containing a transform (.mat) and a z offset (.txt)
 for aligning the moving slice over the fixed slice.
 """
 import argparse
-import numpy as np
-from linumpy.io.zarr import read_omezarr
-from linumpy.utils.io import assert_output_exists, add_overwrite_arg
-from linumpy.stitching.registration import register_2d_images_sitk, apply_transform
 import os
+
 import matplotlib.pyplot as plt
+import numpy as np
+from SimpleITK import CompositeTransform
+
+from linumpy.io.zarr import read_omezarr
+from linumpy.stitching.registration import register_2d_images_sitk, apply_transform
+from linumpy.utils.io import assert_output_exists, add_overwrite_arg
 
 
 def _build_arg_parser():
@@ -24,7 +27,7 @@ def _build_arg_parser():
                    help='Moving image in .ome.zarr format.')
     p.add_argument('out_directory',
                    help='Output directory containing transform (.mat) and offsets (.txt) for aligning\n'
-                   ' the moving slice over the previous slice.')
+                        ' the moving slice over the previous slice.')
     p.add_argument('--out_transform', default='transform.mat',
                    help='Output transform [%(default)s].')
     p.add_argument('--out_offsets', default='offsets.txt',
@@ -40,7 +43,7 @@ def _build_arg_parser():
                    help='Registration method to use. [%(default)s]')
     p.add_argument('--metric', choices=['MSE', 'CC', 'AntsCC', 'MI'], default='MSE',
                    help='Registration metric to use. [%(default)s]')
-    p.add_argument('--max_iterations', type=int, default=10000,
+    p.add_argument('--max_iterations', type=int, default=2500,
                    help='Maximum number of iterations. [%(default)s]')
     p.add_argument('--grad_mag_tol', type=float, default=1e-12,
                    help='Gradient magnitude tolerance for registration. [%(default)s]')
@@ -85,14 +88,30 @@ def main():
         fixed_image /= np.percentile(fixed_image, 99.5)
         fixed_image = np.clip(fixed_image, 0, 1)
 
-        # align the slices
+        # Perform rigid registration if needed, e.g. the requested method is affine
+        if args.transform == 'affine':
+            rigid_transform, _, _ = register_2d_images_sitk(
+                fixed_image, moving_image, metric=args.metric,
+                method='euler', max_iterations=args.max_iterations,
+                grad_mag_tol=args.grad_mag_tol, return_3d_transform=True,
+                verbose=False)
+            moving_image = apply_transform(moving_image, rigid_transform)
+
+        # Align the slices
         transform, _, error = register_2d_images_sitk(
             fixed_image, moving_image, metric=args.metric,
             method=args.transform, max_iterations=args.max_iterations,
             grad_mag_tol=args.grad_mag_tol, return_3d_transform=True,
             verbose=False)
         errors.append(error)
-        transforms.append(transform)
+
+        # Create the full transform including the previous rigid part if any
+        if args.transform == 'affine':
+            composite_transform = CompositeTransform(2)
+            composite_transform.AddTransform(transform)
+            composite_transform.AddTransform(rigid_transform)
+
+        transforms.append(composite_transform)
 
     best_fit_index = np.argmin(errors)
     best_candidate_index = candidate_indices[best_fit_index]
