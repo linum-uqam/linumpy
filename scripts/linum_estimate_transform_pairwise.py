@@ -29,7 +29,7 @@ def _build_arg_parser():
     p.add_argument('out_directory',
                    help='Output directory containing transform (.mat) and offsets (.txt) for aligning\n'
                         ' the moving slice over the previous slice.')
-    p.add_argument('--out_transform', default='transform.mat',
+    p.add_argument('--out_transform', default='transform.tfm',
                    help='Output transform [%(default)s].')
     p.add_argument('--out_offsets', default='offsets.txt',
                    help='Output offsets along stacking axis in fixed and moving volumes [%(default)s].')
@@ -134,7 +134,8 @@ def main():
     best_candidate_index = candidate_indices[best_fit_index]
     best_transform = transforms[best_fit_index]
 
-    best_transform.WriteTransform(os.path.join(args.out_directory, args.out_transform))
+    # best_transform.WriteTransform(os.path.join(args.out_directory, args.out_transform))
+    sitk.WriteTransform(best_transform, os.path.join(args.out_directory, args.out_transform))
     np.savetxt(os.path.join(args.out_directory, args.out_offsets),
                np.array([best_candidate_index, args.moving_slice_index]), fmt='%d')
 
