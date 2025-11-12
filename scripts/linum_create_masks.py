@@ -29,7 +29,6 @@ def _build_arg_parser():
                    help='Minimum size of objects to keep in the final mask. [%(default)s]')
     p.add_argument('--normalize', action='store_true',
                    help='Normalize the image before processing.')
-    p.add_argument()
     return p
 
 
@@ -38,7 +37,7 @@ def main():
     args = parser.parse_args()
 
     # Load image
-    vol, res = read_omezarr(args.in_image, level=0)
+    vol, res = read_omezarr(args.image, level=0)
     vol = vol[:]
 
     # Create mask
@@ -46,7 +45,7 @@ def main():
                        normalize=args.normalize)
 
     # Save mask
-    save_omezarr(da.from_array(mask), args.out_file, res, chunks=vol.chunks)
+    save_omezarr(da.from_array(mask), args.out_file, res, n_levels=0)
 
 
 if __name__ == '__main__':
