@@ -388,6 +388,7 @@ def align_images_sitk(im1, im2):
 def register_2d_images_sitk(ref_image, moving_image, method='euler',
                             metric='MSE', max_iterations=2500,
                             min_step=1e-12, grad_mag_tol=1e-12,
+                            fixed_mask=None, moving_mask=None,
                             return_3d_transform=False, verbose=False):
     """
     Register 2D `moving_image` to `ref_image`.
@@ -414,6 +415,12 @@ def register_2d_images_sitk(ref_image, moving_image, method='euler',
         Minimum step size for the gradient descent.
     grad_mag_tol: float
         Gradient magnitude tolerance for gradient descent.
+    fixed_mask: numpy.ndarray
+        Optional mask to apply to the reference image during
+        registration.
+    moving_mask: numpy.ndarray
+        Optional mask to apply to the moving image during
+        registration.
     return_3d_transform: bool
         If True, will return a 3D transform instead of 2D. Useful
         when the transform is applied to a 3D image.
@@ -436,7 +443,16 @@ def register_2d_images_sitk(ref_image, moving_image, method='euler',
     fixed_sitk_image = sitk.GetImageFromArray(ref_image)
     moving_sitk_image = sitk.GetImageFromArray(moving_image)
 
+
+
     R = sitk.ImageRegistrationMethod()
+
+    if fixed_mask is not None:
+        fixed_sitk_mask = sitk.GetImageFromArray(fixed_mask.astype(np.uint8))
+        R.SetMetricFixedMask(fixed_sitk_mask)
+    if moving_mask is not None:
+        moving_sitk_mask = sitk.GetImageFromArray(moving_mask.astype(np.uint8))
+        R.SetMetricMovingMask(moving_sitk_mask)
 
     if metric.lower() == 'mse':
         R.SetMetricAsMeanSquares()
