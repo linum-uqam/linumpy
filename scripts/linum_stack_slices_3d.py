@@ -68,10 +68,10 @@ def get_input(mosaics_dir, transforms_dir, parser):
         if not os.path.exists(current_transform_dir):
             parser.error(f'Transform {current_transform_dir} not found.')
 
-        current_mat_file = list(current_transform_dir.glob('*.mat'))
+        current_mat_file = list(current_transform_dir.glob('*.tfm'))
         current_txt_file = list(current_transform_dir.glob('*.txt'))
         if len(current_mat_file) != 1:
-            parser.error(f'Found {len(current_mat_file)} .mat file under {current_transform_dir.as_posix()}')
+            parser.error(f'Found {len(current_mat_file)} .tfm file under {current_transform_dir.as_posix()}')
         current_mat_file = current_mat_file[0]
         if len(current_txt_file) > 1:
             parser.error(f'Found {len(current_txt_file)} .txt file under {current_transform_dir.as_posix()}')
