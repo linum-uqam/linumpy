@@ -7,20 +7,22 @@ nextflow.enable.dsl = 2
 // Output: 3D reconstruction
 
 process README {
-    publishDir "$params.output/$task.process", mode: 'copy'
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
     output:
-        path "readme.txt"
+    path "readme.txt"
+
     script:
     """
     echo "3D reconstruction pipeline\n" >> readme.txt
     echo "[Params]" >> readme.txt
-    for p in $params; do
+    for p in ${params}; do
         echo " \$p" >> readme.txt
     done
     echo "" >> readme.txt
-    echo "[Command-line]\n $workflow.commandLine\n" >> readme.txt
+    echo "[Command-line]\n ${workflow.commandLine}\n" >> readme.txt
     echo "[Configuration files]">> readme.txt
-    for c in $workflow.configFiles; do
+    for c in ${workflow.configFiles}; do
         echo " \$c" >> readme.txt
     done
     """
@@ -28,9 +30,11 @@ process README {
 
 process resample_mosaic_grid {
     input:
-        tuple val(slice_id), path(mosaic_grid)
+    tuple val(slice_id), path(mosaic_grid)
+
     output:
-        tuple val(slice_id), path("mosaic_grid_z${slice_id}_resampled.ome.zarr")
+    tuple val(slice_id), path("mosaic_grid_z${slice_id}_resampled.ome.zarr")
+
     script:
     """
     linum_resample_mosaic_grid.py ${mosaic_grid} "mosaic_grid_z${slice_id}_resampled.ome.zarr" -r ${params.resolution}
@@ -39,9 +43,11 @@ process resample_mosaic_grid {
 
 process fix_focal_curvature {
     input:
-        tuple val(slice_id), path(mosaic_grid)
+    tuple val(slice_id), path(mosaic_grid)
+
     output:
-        tuple val(slice_id), path("mosaic_grid_z${slice_id}_focal_fix.ome.zarr")
+    tuple val(slice_id), path("mosaic_grid_z${slice_id}_focal_fix.ome.zarr")
+
     script:
     """
     linum_detect_focal_curvature.py ${mosaic_grid} "mosaic_grid_z${slice_id}_focal_fix.ome.zarr"
@@ -50,10 +56,13 @@ process fix_focal_curvature {
 
 process fix_illumination {
     cpus params.processes
+
     input:
-        tuple val(slice_id), path(mosaic_grid)
+    tuple val(slice_id), path(mosaic_grid)
+
     output:
-        tuple val(slice_id), path("mosaic_grid_z${slice_id}_illum_fix.ome.zarr")
+    tuple val(slice_id), path("mosaic_grid_z${slice_id}_illum_fix.ome.zarr")
+
     script:
     """
     linum_fix_illumination_3d.py ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" --n_processes ${params.processes} --percentile_max ${params.clip_percentile_upper}
@@ -62,9 +71,11 @@ process fix_illumination {
 
 process generate_aip {
     input:
-        tuple val(slice_id), path(mosaic_grid)
+    tuple val(slice_id), path(mosaic_grid)
+
     output:
-        tuple val(slice_id), path("mosaic_grid_z${slice_id}_aip.ome.zarr")
+    tuple val(slice_id), path("mosaic_grid_z${slice_id}_aip.ome.zarr")
+
     script:
     """
     linum_aip.py ${mosaic_grid} "mosaic_grid_z${slice_id}_aip.ome.zarr"
@@ -73,9 +84,11 @@ process generate_aip {
 
 process estimate_xy_transformation {
     input:
-        tuple val(slice_id), path(aip)
+    tuple val(slice_id), path(aip)
+
     output:
-        tuple val(slice_id), path("z${slice_id}_transform_xy.npy")
+    tuple val(slice_id), path("z${slice_id}_transform_xy.npy")
+
     script:
     """
     linum_estimate_transform.py ${aip} "z${slice_id}_transform_xy.npy"
@@ -84,9 +97,11 @@ process estimate_xy_transformation {
 
 process stitch_3d {
     input:
-        tuple val(slice_id), path(mosaic_grid), path(transform_xy)
+    tuple val(slice_id), path(mosaic_grid), path(transform_xy)
+
     output:
-        tuple val(slice_id), path("slice_z${slice_id}_stitch_3d.ome.zarr")
+    tuple val(slice_id), path("slice_z${slice_id}_stitch_3d.ome.zarr")
+
     script:
     """
     linum_stitch_3d.py ${mosaic_grid} ${transform_xy} "slice_z${slice_id}_stitch_3d.ome.zarr"
@@ -95,31 +110,37 @@ process stitch_3d {
 
 process beam_profile_correction {
     input:
-        tuple val(slice_id), path(slice_3d)
+    tuple val(slice_id), path(slice_3d)
+
     output:
-        tuple val(slice_id), path("slice_z${slice_id}_axial_corr.ome.zarr")
+    tuple val(slice_id), path("slice_z${slice_id}_axial_corr.ome.zarr")
+
     script:
     """
-    linum_compensate_psf_model_free.py ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" --percentile_max $params.clip_percentile_upper
+    linum_compensate_psf_model_free.py ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" --percentile_max ${params.clip_percentile_upper}
     """
 }
 
 process crop_interface {
     input:
-        tuple val(slice_id), path(image)
+    tuple val(slice_id), path(image)
+
     output:
-        tuple val(slice_id), path("slice_z${slice_id}_crop_interface.ome.zarr")
+    tuple val(slice_id), path("slice_z${slice_id}_crop_interface.ome.zarr")
+
     script:
     """
-    linum_crop_3d_mosaic_below_interface.py $image "slice_z${slice_id}_crop_interface.ome.zarr" --depth $params.crop_interface_out_depth --crop_before_interface --percentile_max $params.clip_percentile_upper
+    linum_crop_3d_mosaic_below_interface.py ${image} "slice_z${slice_id}_crop_interface.ome.zarr" --depth ${params.crop_interface_out_depth} --crop_before_interface --percentile_max ${params.clip_percentile_upper}
     """
 }
 
 process normalize {
     input:
-        tuple val(slice_id), path(image)
+    tuple val(slice_id), path(image)
+
     output:
-        tuple val(slice_id), path("slice_z${slice_id}_normalize.ome.zarr")
+    tuple val(slice_id), path("slice_z${slice_id}_normalize.ome.zarr")
+
     script:
     """
     linum_normalize_intensities_per_slice.py ${image} "slice_z${slice_id}_normalize.ome.zarr" --percentile_max ${params.clip_percentile_upper}
@@ -127,11 +148,14 @@ process normalize {
 }
 
 process bring_to_common_space {
-    publishDir "$params.output/$task.process", mode: 'copy'
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
     input:
-        tuple path("inputs/*"), path("shifts_xy.csv")
+    tuple path("inputs/*"), path("shifts_xy.csv")
+
     output:
-        path("*.ome.zarr")
+    path "*.ome.zarr"
+
     script:
     """
     linum_align_mosaics_3d_from_shifts.py inputs shifts_xy.csv common_space
@@ -139,32 +163,68 @@ process bring_to_common_space {
     """
 }
 
-process register_pairwise {
-    publishDir "$params.output/$task.process", mode: 'copy'
+process create_registration_masks {
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
     input:
-        tuple path(fixed_vol), path(moving_vol)
+    tuple val(slice_id), path(image)
+
     output:
-        path("*")
+    path "mask_slice_z${slice_id}.ome.zarr"
+
     script:
+    def String normalize_flag = params.mask_normalize ? "--normalize" : ""
+
     """
-    dirname=`basename $moving_vol .ome.zarr`
-    linum_estimate_transform_pairwise.py ${fixed_vol} ${moving_vol} \$dirname --moving_slice_index $params.moving_slice_first_index --transform $params.pairwise_transform --metric $params.pairwise_registration_metric
+    linum_create_registration_mask.py ${image} mask_slice_z${slice_id}.ome.zarr --sigma ${params.mask_smoothing_sigma} --selem_radius ${params.selem_radius} --min_size ${params.min_size} ${normalize_flag}
+    """
+}
+
+process register_pairwise {
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
+    input:
+    tuple path(fixed_vol), path(moving_vol)
+    tuple path(moving_mask), path(fixed_mask), optional: true
+
+    output:
+    path "*"
+
+    script:
+    def use_masks = params.create_registration_masks
+    """
+    dirname=\$(basename ${moving_vol} .ome.zarr)
+    
+    if [ "${use_masks}" = "true" ]; then
+        linum_estimate_transform_pairwise.py ${fixed_vol} ${moving_vol} \$dirname \
+            --moving_slice_index ${params.moving_slice_first_index} \
+            --transform ${params.pairwise_transform} \
+            --metric ${params.pairwise_registration_metric} \
+            --moving_mask ${moving_mask} \
+            --fixed_mask ${fixed_mask}
+    else
+        linum_estimate_transform_pairwise.py ${fixed_vol} ${moving_vol} \$dirname \
+            --moving_slice_index ${params.moving_slice_first_index} \
+            --transform ${params.pairwise_transform} \
+            --metric ${params.pairwise_registration_metric}
+    fi
     """
 }
 
 process stack {
-    publishDir "$params.output/$task.process", mode: 'copy'
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
     input:
-        tuple path("mosaics/*"), path("transforms/*")
+    tuple path("mosaics/*"), path("transforms/*")
+
     output:
-        tuple path("3d_volume.ome.zarr"), path("3d_volume.ome.zarr.zip"), path("3d_volume.png")
+    tuple path("3d_volume.ome.zarr"), path("3d_volume.ome.zarr.zip"), path("3d_volume.png")
+
     script:
-    String options = ""
-    if(params.stack_blend_enabled)
-    {
+    def String options = ""
+    if (params.stack_blend_enabled) {
         options += "--blend"
-        if(params.stack_max_overlap > 0)
-        {
+        if (params.stack_max_overlap > 0) {
             options += " --overlap ${params.stack_max_overlap}"
         }
     }
@@ -180,7 +240,8 @@ workflow {
     README()
 
     // Parse inputs
-    inputSlices = channel.fromFilePairs("$params.input/mosaic_grid*_z*.ome.zarr", size: -1, type:'dir')
+    inputSlices = channel
+        .fromFilePairs("${params.input}/mosaic_grid*_z*.ome.zarr", size: -1, type: 'dir')
         .ifEmpty {
             error("No valid files found under '${params.input}'. Please supply a valid input directory.")
         }
@@ -190,9 +251,10 @@ workflow {
             def key = matcher ? matcher[0][1] : "unknown"
             [key, files]
         }
-    shifts_xy = channel.fromPath("$params.shifts_xy", checkIfExists: true)
+    shifts_xy = channel
+        .fromPath("${params.shifts_xy}", checkIfExists: true)
         .ifEmpty {
-            error("XY shifts file not found at path '$params.shifts_xy'.")
+            error("XY shifts file not found at path '${params.shifts_xy}'.")
         }
 
     // [Optional] Resample the input mosaic grid
@@ -211,7 +273,7 @@ workflow {
     estimate_xy_transformation(generate_aip.out)
 
     // Stitch the tiles in 3D mosaics
-    stitch_3d(fixed_illum_channel.combine(estimate_xy_transformation.out, by:0))
+    stitch_3d(fixed_illum_channel.combine(estimate_xy_transformation.out, by: 0))
 
     // "PSF" correction
     beam_profile_correction(stitch_3d.out)
@@ -224,47 +286,68 @@ workflow {
 
     // Slices stitching
     common_space_channel = normalize.out
-        .toSortedList{a, b -> a[0] <=> b[0]}
+        .toSortedList { a, b -> a[0] <=> b[0] }
         .flatten()
         .collate(2)
-        .map{_meta, filename -> filename}
+        .map { _meta, filename -> filename }
         .collect()
-        .merge(shifts_xy){a, b -> tuple(a, b)}
+        .merge(shifts_xy) { a, b -> tuple(a, b) }
 
     // Bring all stitched slices to common space
     bring_to_common_space(common_space_channel)
 
     all_slices_common_space = bring_to_common_space.out
         .flatten()
-        .toSortedList{a, b -> a[0] <=> b[0]}
+        .toSortedList { a, b -> a[0] <=> b[0] }
+
+    if (params.create_registration_masks) {
+        // Create registration masks for all slices
+        create_registration_masks(all_slices_common_space)
+        
+        // Create pairs of masks (moving_mask, fixed_mask) matching the volume pairs
+        all_masks = create_registration_masks.out
+            .toSortedList { a, b -> a.name <=> b.name }
+        
+        pairs_mask_channel = all_masks
+            .map { list ->
+                if (list.size() > 1) {
+                    return (0..<(list.size() - 1)).collect { i ->
+                        tuple(list[i + 1], list[i])  // (moving_mask, fixed_mask)
+                    }
+                } else {
+                    return []
+                }
+            }
+            .flatten()
+    }
 
     // Prepare for pairwise stack registration
-    fixed_channel = all_slices_common_space
-        .map {list ->
-            if(list.size() > 1){
-                return list.subList(0, list.size() - 1)
-            }
-            else {
-                return channel.empty()
-            }
-        }
-        .flatten()
-    moving_channel = all_slices_common_space
-        .map {list ->
-            if(list.size() > 1){
-                return list.subList(1, list.size())
-            }
-            else {
-                return channel.empty()
+    // Create pairs of (fixed, moving) volumes
+    pairs_channel = all_slices_common_space
+        .map { list ->
+            if (list.size() > 1) {
+                return (0..<(list.size() - 1)).collect { i ->
+                    tuple(list[i], list[i + 1])
+                }
+            } else {
+                return []
             }
         }
         .flatten()
 
-    // Register slices pairwise
-    pairs_channel = fixed_channel.merge(moving_channel)
-    register_pairwise(pairs_channel)
+    // Register slices pairwise - call with two separate channels
+    if (params.create_registration_masks) {
+        // Pass volumes channel AND masks channel separately
+        register_pairwise(pairs_channel, pairs_mask_channel)
+    } else {
+        // Create an empty channel for masks when not used
+        empty_mask_channel = Channel.empty()
+        register_pairwise(pairs_channel, empty_mask_channel)
+    }
+
+
 
     // Stack all the slices in a single volume
-    stack_channel = all_slices_common_space.merge(register_pairwise.out.collect()){a, b -> tuple(a, b)}
+    stack_channel = all_slices_common_space.merge(register_pairwise.out.collect()) { a, b -> tuple(a, b) }
     stack(stack_channel)
 }
