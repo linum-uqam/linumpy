@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
-"""Convert an ome-zarr volume into a nifti volume at a given resolution."""
-
+"""
+Convert an ome-zarr volume into a nifti volume at a given resolution.
+"""
 import argparse
-from pathlib import Path
 
 import SimpleITK as sitk
 import numpy as np
 from linumpy.io.zarr import read_omezarr
+
+import nibabel as nib
 
 
 def _build_arg_parser():
@@ -74,9 +75,10 @@ def main():
     warped = sampler.Execute(input_volume)
 
     # Save the output volume
-    output_volume = Path(args.output)
-    output_volume.parent.mkdir(exist_ok=True, parents=True)
-    sitk.WriteImage(warped, str(output_volume))
+    warped_np = sitk.GetArrayFromImage(warped)
+    nib.save(nib.Nifti1Image(warped_np.astype(np.float32),
+                             np.diag(new_spacing + (1,))),
+             args.output)
 
 
 if __name__ == "__main__":

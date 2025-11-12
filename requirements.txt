@@ -9,6 +9,7 @@ dipy
 dask>=2024.10.0
 SimpleITK
 tqdm
+torch
 pqdm
 hyperactive<=4.8.0
 basicpy

@@ -22,8 +22,8 @@ def add_processes_arg(parser):
 
 
 def add_overwrite_arg(parser):
-    parser.add_argument(
-        '-f', dest='overwrite', action='store_true', help='Force overwriting of the output files.')
+    parser.add_argument('-f', dest='overwrite', action='store_true',
+                        help='Force overwriting of the output files.')
 
 
 def assert_output_exists(output, parser, args):
