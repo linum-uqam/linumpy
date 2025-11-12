@@ -3,10 +3,15 @@
 
 import SimpleITK as sitk
 import numpy as np
-from scipy.ndimage import binary_erosion, binary_fill_holes
+from scipy.ndimage import binary_erosion
+from scipy.ndimage import gaussian_filter, binary_fill_holes, distance_transform_edt
+from skimage.filters import threshold_otsu, median
+from skimage.measure import label
+from skimage.morphology import remove_small_objects, disk, ball, binary_opening, binary_closing, local_maxima
+from skimage.segmentation import watershed
 
 
-def segmentOCT3D(vol: np.ndarray, k:int=5, useLog:bool=True, thresholdMethod:str="otsu") -> np.ndarray:
+def segmentOCT3D(vol: np.ndarray, k: int = 5, useLog: bool = True, thresholdMethod: str = "otsu") -> np.ndarray:
     """To segment an S-OCT brain in 3D using thresholding and morphological watershed
     Parameters
     ----------
@@ -79,7 +84,8 @@ def fillHoles_2Dand3D(mask: np.ndarray) -> np.ndarray:
     return mask
 
 
-def removeBottom(mask: np.ndarray, k:int=10, axis:int=2, inverse:bool=False, fillHoles:bool=False) -> np.ndarray:
+def removeBottom(mask: np.ndarray, k: int = 10, axis: int = 2, inverse: bool = False,
+                 fillHoles: bool = False) -> np.ndarray:
     """Remove the bottom side of the mask.
     Parameters
     ----------
@@ -115,3 +121,50 @@ def removeBottom(mask: np.ndarray, k:int=10, axis:int=2, inverse:bool=False, fil
     else:
         mask_p = binary_erosion(mask, kernel)
     return mask_p
+
+
+def create_mask(image: np.ndarray, sigma: float = 5.0, selem_radius: int = 1, min_size: int = 100):
+    """
+    Create a mask for the given image using normalization, smoothing, thresholding, morphological operations,
+    distance transform, and watershed segmentation. Not dependent on SimpleITK.
+
+    Parameters:
+    - image: np.ndarray
+        The input image to create a mask for.
+    - sigma: float
+        The standard deviation for Gaussian smoothing.
+    - selem_radius: int
+        The radius of the structuring element for morphological operations.
+    - min_size: int
+        The minimum size of objects to keep in the final mask.
+
+    Returns:
+    - mask: np.ndarray
+    """
+    # Smoothing
+    image = gaussian_filter(image, sigma=sigma)
+    image = median(image)  # simple denoising
+
+    # threshold
+    threshold = threshold_otsu(image)
+    mask = image > threshold
+
+    selem = disk(selem_radius) if image.ndim == 2 else ball(selem_radius)
+    mask = binary_opening(mask, selem)
+    mask = binary_closing(mask, selem)
+    mask = binary_fill_holes(mask)
+    mask = remove_small_objects(mask, min_size=min_size)
+
+    # compute distance transform and use local maxima as markers
+    dist = distance_transform_edt(mask)
+    peaks = local_maxima(dist)
+    markers = label(peaks)
+
+    # watershed on -distance to segment foreground objects; mask restricts to bw
+    labels = watershed(-dist, markers=markers, mask=mask)
+
+    mask = labels > 0
+    mask = binary_fill_holes(mask)
+    mask = remove_small_objects(mask, min_size=min_size)
+
+    return mask
