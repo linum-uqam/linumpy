@@ -27,7 +27,7 @@ def _build_arg_parser():
                    help='Radius of the structuring element for morphological operations. [%(default)s]')
     p.add_argument('--min_size', type=int, default=100,
                    help='Minimum size of objects to keep in the final mask. [%(default)s]')
-    p.add_argument('--normalize', action='store_true', default=True,
+    p.add_argument('--normalize', action='store_true',
                    help='Normalize the image before processing.')
     p.add_argument()
     return p
@@ -38,14 +38,15 @@ def main():
     args = parser.parse_args()
 
     # Load image
-    img, res = read_omezarr(args.image)
+    vol, res = read_omezarr(args.in_image, level=0)
+    vol = vol[:]
 
     # Create mask
-    mask = create_mask(img, sigma=args.sigma, selem_radius=args.selem_radius, min_size=args.min_size,
+    mask = create_mask(vol, sigma=args.sigma, selem_radius=args.selem_radius, min_size=args.min_size,
                        normalize=args.normalize)
 
     # Save mask
-    save_omezarr(da.from_array(mask), args.out_file, res, chunks=img.chunks)
+    save_omezarr(da.from_array(mask), args.out_file, res, chunks=vol.chunks)
 
 
 if __name__ == '__main__':
