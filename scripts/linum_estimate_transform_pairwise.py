@@ -9,6 +9,7 @@ for aligning the moving slice over the fixed slice.
 import argparse
 import os
 
+import SimpleITK as sitk
 import matplotlib.pyplot as plt
 import numpy as np
 from SimpleITK import CompositeTransform
@@ -45,12 +46,25 @@ def _build_arg_parser():
                    help='Registration metric to use. [%(default)s]')
     p.add_argument('--max_iterations', type=int, default=2500,
                    help='Maximum number of iterations. [%(default)s]')
-    p.add_argument('--grad_mag_tol', type=float, default=1e-12,
+    p.add_argument('--grad_mag_tol', type=float, default=1e-6,
                    help='Gradient magnitude tolerance for registration. [%(default)s]')
     p.add_argument('--screenshot', default=None,
                    help='Path to save a screenshot of the fixed and moving images for debugging.')
     add_overwrite_arg(p)
     return p
+
+
+def convert_3d_rigid_to_2d(rigid_3d):
+    # Extract rotation around z, translation x/y, and center x/y
+    params = rigid_3d.GetParameters()
+    rz = params[2]  # rotation around z axis
+    translation = params[3:5]  # tx, ty
+    center = rigid_3d.GetCenter()[:2]
+    rigid_2d = sitk.Euler2DTransform()
+    rigid_2d.SetCenter(center)
+    rigid_2d.SetAngle(rz)
+    rigid_2d.SetTranslation(translation)
+    return rigid_2d
 
 
 def main():
@@ -94,24 +108,27 @@ def main():
                 fixed_image, moving_image, metric=args.metric,
                 method='euler', max_iterations=args.max_iterations,
                 grad_mag_tol=args.grad_mag_tol, return_3d_transform=True,
-                verbose=False)
-            moving_image = apply_transform(moving_image, rigid_transform)
+                verbose=True)
+            two_d_transform = convert_3d_rigid_to_2d(rigid_transform)
+            moving_image = apply_transform(moving_image, two_d_transform)
 
         # Align the slices
         transform, _, error = register_2d_images_sitk(
             fixed_image, moving_image, metric=args.metric,
             method=args.transform, max_iterations=args.max_iterations,
             grad_mag_tol=args.grad_mag_tol, return_3d_transform=True,
-            verbose=False)
+            verbose=True)
         errors.append(error)
 
         # Create the full transform including the previous rigid part if any
         if args.transform == 'affine':
-            composite_transform = CompositeTransform(2)
+            composite_transform = CompositeTransform(3)
             composite_transform.AddTransform(transform)
             composite_transform.AddTransform(rigid_transform)
-
-        transforms.append(composite_transform)
+            transforms.append(composite_transform)
+        else:
+            # Else just store the transform
+            transforms.append(transform)
 
     best_fit_index = np.argmin(errors)
     best_candidate_index = candidate_indices[best_fit_index]
