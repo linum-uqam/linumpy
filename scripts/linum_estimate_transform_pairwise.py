@@ -13,6 +13,7 @@ import SimpleITK as sitk
 import matplotlib.pyplot as plt
 import numpy as np
 from SimpleITK import CompositeTransform
+from skimage.filters import threshold_otsu
 
 from linumpy.io.zarr import read_omezarr
 from linumpy.stitching.registration import register_2d_images_sitk, apply_transform
@@ -85,6 +86,10 @@ def main():
     moving_image /= np.percentile(moving_image, 99.5)
     moving_image = np.clip(moving_image, 0, 1)
 
+    # Create moving mask
+    thresh = threshold_otsu(moving_image)
+    moving_mask = moving_image > thresh
+
     # the index in fixed image which is expected to match the moving image
     interval_vox = int(np.ceil(args.slicing_interval / res[0]))  # in voxels
     allowed_drifting_vox = int(np.ceil(args.allowed_drifting / res[0]))
@@ -102,13 +107,17 @@ def main():
         fixed_image /= np.percentile(fixed_image, 99.5)
         fixed_image = np.clip(fixed_image, 0, 1)
 
+        # Create fixed mask
+        thresh = threshold_otsu(fixed_image)
+        fixed_mask = fixed_image > thresh
+
         # Perform rigid registration if needed, e.g. the requested method is affine
         if args.transform == 'affine':
             rigid_transform, _, _ = register_2d_images_sitk(
                 fixed_image, moving_image, metric=args.metric,
                 method='euler', max_iterations=args.max_iterations,
-                grad_mag_tol=args.grad_mag_tol, return_3d_transform=True,
-                verbose=True)
+                grad_mag_tol=args.grad_mag_tol, moving_mask=moving_mask, fixed_mask=fixed_mask,
+                return_3d_transform=True, verbose=True)
             two_d_transform = convert_3d_rigid_to_2d(rigid_transform)
             moving_image = apply_transform(moving_image, two_d_transform)
 
@@ -116,8 +125,8 @@ def main():
         transform, _, error = register_2d_images_sitk(
             fixed_image, moving_image, metric=args.metric,
             method=args.transform, max_iterations=args.max_iterations,
-            grad_mag_tol=args.grad_mag_tol, return_3d_transform=True,
-            verbose=True)
+            grad_mag_tol=args.grad_mag_tol, moving_mask=moving_mask, fixed_mask=fixed_mask,
+            return_3d_transform=True, verbose=True)
         errors.append(error)
 
         # Create the full transform including the previous rigid part if any
