@@ -123,7 +123,8 @@ def removeBottom(mask: np.ndarray, k: int = 10, axis: int = 2, inverse: bool = F
     return mask_p
 
 
-def create_mask(image: np.ndarray, sigma: float = 5.0, selem_radius: int = 1, min_size: int = 100):
+def create_mask(image: np.ndarray, sigma: float = 5.0, selem_radius: int = 1, min_size: int = 100,
+                normalize: bool = True) -> np.ndarray:
     """
     Create a mask for the given image using normalization, smoothing, thresholding, morphological operations,
     distance transform, and watershed segmentation. Not dependent on SimpleITK.
@@ -137,10 +138,18 @@ def create_mask(image: np.ndarray, sigma: float = 5.0, selem_radius: int = 1, mi
         The radius of the structuring element for morphological operations.
     - min_size: int
         The minimum size of objects to keep in the final mask.
+    - normalize: bool
+        Whether to normalize the image before processing.
 
     Returns:
     - mask: np.ndarray
     """
+    if normalize:
+        # Normalize image
+        image -= np.percentile(image[image > 0], 0.5)
+        image /= np.percentile(image, 99.5)
+        image = np.clip(image, 0, 1)
+
     # Smoothing
     image = gaussian_filter(image, sigma=sigma)
     image = median(image)  # simple denoising
