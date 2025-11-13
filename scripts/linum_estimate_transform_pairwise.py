@@ -71,6 +71,36 @@ def convert_3d_rigid_to_2d(rigid_3d):
     return rigid_2d
 
 
+def apply_transform_mask(moving_mask, transform):
+    """
+    Apply transform to a binary mask using nearest-neighbor interpolation.
+
+    Parameters
+    ----------
+    moving_mask: numpy.ndarray
+        Binary mask to transform.
+    transform: sitk.sitkTransform
+        Transform to apply.
+
+    Returns
+    -------
+    numpy.ndarray
+        Transformed binary mask.
+    """
+    moving_mask_sitk = sitk.GetImageFromArray(moving_mask)
+
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetReferenceImage(moving_mask_sitk)
+    resampler.SetInterpolator(sitk.sitkNearestNeighbor)  # Use nearest neighbor for masks
+    resampler.SetDefaultPixelValue(0)
+    resampler.SetTransform(transform)
+
+    out = resampler.Execute(moving_mask_sitk)
+    out = sitk.GetArrayFromImage(out)
+
+    return (out > 0).astype(np.uint8)
+
+
 def main():
     parser = _build_arg_parser()
     args = parser.parse_args()
@@ -130,32 +160,60 @@ def main():
             fixed_mask = np.array(fixed_mask_vol[i])
             fixed_mask = (fixed_mask > 0).astype(np.uint8)
 
-        # Perform rigid registration if needed, e.g. the requested method is affine
+        # Validate masks before registration
+        if args.use_masks and idx == 0:  # Print once for debugging
+            if moving_mask is not None:
+                moving_mask_coverage = np.sum(moving_mask) / moving_mask.size
+                print(f"Moving mask coverage: {moving_mask_coverage*100:.2f}%")
+                if moving_mask_coverage < 0.01:
+                    print("WARNING: Moving mask covers less than 1% of the image!")
+                elif moving_mask_coverage > 0.99:
+                    print("WARNING: Moving mask covers more than 99% of the image - might be inverted!")
+            if fixed_mask is not None:
+                fixed_mask_coverage = np.sum(fixed_mask) / fixed_mask.size
+                print(f"Fixed mask coverage: {fixed_mask_coverage*100:.2f}%")
+                if fixed_mask_coverage < 0.01:
+                    print("WARNING: Fixed mask covers less than 1% of the image!")
+                elif fixed_mask_coverage > 0.99:
+                    print("WARNING: Fixed mask covers more than 99% of the image - might be inverted!")
+
+        # Perform two-stage registration for affine: rigid then affine
         if args.transform == 'affine':
             rigid_transform, _, _ = register_2d_images_sitk(
                 fixed_image, moving_image, metric=args.metric,
                 method='euler', max_iterations=args.max_iterations,
                 grad_mag_tol=args.grad_mag_tol, moving_mask=moving_mask, fixed_mask=fixed_mask,
                 return_3d_transform=True, verbose=False)
+
             two_d_transform = convert_3d_rigid_to_2d(rigid_transform)
             moving_image = apply_transform(moving_image, two_d_transform)
-            # Also transform the moving mask to keep it aligned with the transformed image
-            if moving_mask is not None:
-                moving_mask = apply_transform(moving_mask, two_d_transform)
 
-        # Align the slices
-        transform, _, error = register_2d_images_sitk(
-            fixed_image, moving_image, metric=args.metric,
-            method=args.transform, max_iterations=args.max_iterations,
-            grad_mag_tol=args.grad_mag_tol, moving_mask=moving_mask, fixed_mask=fixed_mask,
-            return_3d_transform=True, verbose=False)
-        errors.append(error)
+            # Transform moving mask to match the rigid-aligned image space
+            # The mask MUST be in the same space as the moving image for registration
+            if moving_mask is not None:
+                moving_mask = apply_transform_mask(moving_mask, two_d_transform)
+
+            # Stage 2: Affine refinement on rigid-aligned image with rigid-aligned mask
+            transform, _, error = register_2d_images_sitk(
+                fixed_image, moving_image, metric=args.metric,
+                method='affine', max_iterations=args.max_iterations,
+                grad_mag_tol=args.grad_mag_tol, moving_mask=moving_mask, fixed_mask=fixed_mask,
+                return_3d_transform=True, verbose=False)
+            errors.append(error)
+        else:
+            # Single-stage registration (euler or translation)
+            transform, _, error = register_2d_images_sitk(
+                fixed_image, moving_image, metric=args.metric,
+                method=args.transform, max_iterations=args.max_iterations,
+                grad_mag_tol=args.grad_mag_tol, moving_mask=moving_mask, fixed_mask=fixed_mask,
+                return_3d_transform=True, verbose=False)
+            errors.append(error)
 
         # Create the full transform including the previous rigid part if any
         if args.transform == 'affine':
             composite_transform = CompositeTransform(3)
-            composite_transform.AddTransform(transform)
             composite_transform.AddTransform(rigid_transform)
+            composite_transform.AddTransform(transform)
             transforms.append(composite_transform)
         else:
             # Else just store the transform
@@ -165,7 +223,7 @@ def main():
     best_candidate_index = candidate_indices[best_fit_index]
     best_transform = transforms[best_fit_index]
 
-    # best_transform.WriteTransform(os.path.join(args.out_directory, args.out_transform))
+
     sitk.WriteTransform(best_transform, os.path.join(args.out_directory, args.out_transform))
     np.savetxt(os.path.join(args.out_directory, args.out_offsets),
                np.array([best_candidate_index, args.moving_slice_index]), fmt='%d')
