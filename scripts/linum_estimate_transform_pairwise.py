@@ -6,7 +6,6 @@ Finds the best shift along the stacking direction and the best 2D transform.
 The output is a directory containing a transform (.mat) and a z offset (.txt)
 for aligning the moving slice over the fixed slice.
 """
-import sys
 import argparse
 import os
 
