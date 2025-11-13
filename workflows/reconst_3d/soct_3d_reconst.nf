@@ -325,8 +325,18 @@ workflow {
 
 
     if (params.create_registration_masks) {
-       create_registration_masks(all_slices_common_space)
+       mask_input_channel = all_slices_common_space
+          .flatten()
+          .map { file_path ->
+            // Extract the two digits after 'slice_z' from the filename
+            def matcher = file_path.getName() =~ /slice_z(\d+)/
+            def slice_id = matcher ? matcher[0][1] : "unknown"
+            tuple(slice_id, file_path)
+        }
+       create_registration_masks(mask_input_channel)
        all_masks = create_registration_masks.out
+           .flatten()
+           .toSortedList{a, b -> a.getName() <=> b.getName()}
 
        fixed_masks = all_masks
            .map {list ->
