@@ -170,7 +170,7 @@ process create_registration_masks {
     tuple val(slice_id), path(image)
 
     output:
-    path "mask_slice_z${slice_id}.ome.zarr"
+    path("mask_slice_z${slice_id}.ome.zarr")
 
     script:
     def String normalize_flag = params.mask_normalize ? "--normalize" : ""
@@ -184,7 +184,7 @@ process register_pairwise {
     publishDir "${params.output}/${task.process}", mode: 'copy'
 
     input:
-    tuple path(fixed_vol), path(moving_vol), val(use_masks), path(moving_mask, stageAs: 'moving_mask*'), path(fixed_mask, stageAs: 'fixed_mask*')
+    tuple path(fixed_vol), path(moving_vol), path(moving_mask, stageAs: 'moving_mask*'), path(fixed_mask, stageAs: 'fixed_mask*')
 
     output:
     path "*"
@@ -193,7 +193,7 @@ process register_pairwise {
     """
     dirname=\$(basename ${moving_vol} .ome.zarr)
     
-    if [ "${use_masks}" = "true" ]; then
+    if [ "${params.create_registration_masks}" = "true" ]; then
         linum_estimate_transform_pairwise.py ${fixed_vol} ${moving_vol} \$dirname \
             --moving_slice_index ${params.moving_slice_first_index} \
             --transform ${params.pairwise_transform} \
@@ -297,59 +297,63 @@ workflow {
 
     all_slices_common_space = bring_to_common_space.out
         .flatten()
-        .toSortedList { a, b -> a.name <=> b.name }
+        .toSortedList{a, b -> a[0] <=> b[0]}
 
     // Prepare for pairwise stack registration
-    // Create pairs of (fixed, moving) volumes
+    fixed_channel = all_slices_common_space
+        .map {list ->
+            if(list.size() > 1){
+                return list.subList(0, list.size() - 1)
+            }
+            else {
+                return channel.empty()
+            }
+        }
+        .flatten()
+    moving_channel = all_slices_common_space
+        .map {list ->
+            if(list.size() > 1){
+                return list.subList(1, list.size())
+            }
+            else {
+                return channel.empty()
+            }
+        }
+        .flatten()
+        // Register slices pairwise
+        pairs_channel = fixed_channel.merge(moving_channel)
+
+
     if (params.create_registration_masks) {
-        // Add slice_id to each path for create_registration_masks
-        slices_with_id = all_slices_common_space
-            .flatten()
-            .map { path ->
-                // Extract slice_id from filename (e.g., "slice_z01_..." -> "01")
-                def matcher = path.name =~ /slice_z(\d+)/
-                def slice_id = matcher ? matcher[0][1] : "unknown"
-                tuple(slice_id, path)
-            }
-        
-        // Create registration masks for all slices
-        create_registration_masks(slices_with_id)
-        
-        // Collect masks, then sort
-        collected_masks = create_registration_masks.out
-            .collect()
-            .map { list -> list.sort { file -> file.name } }
-        
-        // Combine both lists into a single channel emission
-        paired_data = all_slices_common_space
-            .concat(collected_masks)
-            .toList()
-        
-        // Create pairs using slices and masks
-        pairs_channel = paired_data
-            .flatMap { both_lists ->
-                def slices_list = both_lists[0]
-                def masks_list = both_lists[1]
-                def pairs = []
-                if (slices_list.size() > 1 && masks_list.size() > 1) {
-                    (0..(slices_list.size() - 2)).each { i ->
-                        pairs << tuple(slices_list[i], slices_list[i + 1], true, masks_list[i + 1], masks_list[i])
+       create_registration_masks(all_slices_common_space)
+       all_masks = create_registration_masks.out
+
+       fixed_masks = all_masks
+           .map {list ->
+               if(list.size() > 1){
+                   return list.subList(0, list.size() - 1)
+               }
+               else {
+                   return channel.empty()
+               }
+           }
+           .flatten()
+       moving_masks = all_masks
+              .map {list ->
+                    if(list.size() > 1){
+                        return list.subList(1, list.size())
+                    }
+                    else {
+                        return channel.empty()
                     }
                 }
-                pairs
-            }
+                .flatten()
+        pairs_channel = pairs_channel
+            .merge(moving_masks) { a, b -> tuple(a[0], a[1], b) }
+            .merge(fixed_masks) { a, b -> tuple(a[0], a[1], a[2], b) }
     } else {
-        // Create pairs without masks
-        pairs_channel = all_slices_common_space
-            .flatMap { list ->
-                def pairs = []
-                if (list.size() > 1) {
-                    (0..(list.size() - 2)).each { i ->
-                        pairs << tuple(list[i], list[i + 1], false, file('NO_FILE'), file('NO_FILE'))
-                    }
-                }
-                pairs
-            }
+        pairs_channel = pairs_channel
+            .map { a, b -> tuple(a, b, [], []) }
     }
 
     // Register slices pairwise
