@@ -211,7 +211,7 @@ process register_pairwise {
 }
 
 process stack {
-    publishDir "$params.output/$task.process", mode :'move'
+    publishDir "$params.output/$task.process", mode: 'move'
     input:
     tuple path("mosaics/*"), path("transforms/*")
 
