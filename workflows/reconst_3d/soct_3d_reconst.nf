@@ -7,7 +7,7 @@ nextflow.enable.dsl = 2
 // Output: 3D reconstruction
 
 process README {
-    publishDir "${params.output}/${task.process}", mode: 'copy'
+    publishDir "${params.output}/${task.process}", mode: 'move'
 
     output:
     path "readme.txt"
@@ -148,7 +148,7 @@ process normalize {
 }
 
 process bring_to_common_space {
-    publishDir "${params.output}/${task.process}", mode: 'copy'
+    publishDir "${params.output}/${task.process}", mode: 'move'
 
     input:
     tuple path("inputs/*"), path("shifts_xy.csv")
@@ -164,7 +164,7 @@ process bring_to_common_space {
 }
 
 process create_registration_masks {
-    publishDir "${params.output}/${task.process}", mode: 'copy'
+    publishDir "${params.output}/${task.process}", mode: 'move'
 
     input:
     tuple val(slice_id), path(image)
@@ -181,7 +181,7 @@ process create_registration_masks {
 }
 
 process register_pairwise {
-    publishDir "${params.output}/${task.process}", mode: 'copy'
+    publishDir "${params.output}/${task.process}", mode: 'move'
 
     input:
     tuple path(fixed_vol), path(moving_vol), path(moving_mask, stageAs: 'moving_mask*'), path(fixed_mask, stageAs: 'fixed_mask*')
@@ -211,8 +211,7 @@ process register_pairwise {
 }
 
 process stack {
-    publishDir "${params.output}/${task.process}", mode: 'copy'
-
+    publishDir "$params.output/$task.process", mode :'move'
     input:
     tuple path("mosaics/*"), path("transforms/*")
 
