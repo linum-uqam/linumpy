@@ -113,25 +113,20 @@ def main():
 
     moving_image = moving_vol[args.moving_slice_index]
 
-    # Load masks if needed - convert to numpy for faster repeated access
-    moving_mask = None
-    fixed_mask_vol = None
-    if args.use_masks and args.moving_mask is not None:
-        moving_mask_vol, _ = read_omezarr(args.moving_mask)
-        moving_mask = np.array(moving_mask_vol[args.moving_slice_index])
-        moving_mask = (moving_mask > 0).astype(np.uint8)
-
-    if args.use_masks and args.fixed_mask is not None:
-        # Keep as zarr array for lazy loading
-        fixed_mask_vol, _ = read_omezarr(args.fixed_mask)
-
     moving_image -= np.percentile(moving_image[moving_image > 0], 0.5)
     moving_image /= np.percentile(moving_image, 99.5)
     moving_image = np.clip(moving_image, 0, 1)
 
-    # Save original moving image and mask for resetting in the loop
-    moving_image_original = moving_image.copy()
-    moving_mask_original = moving_mask.copy() if moving_mask is not None else None
+    # Load masks if requested
+    moving_mask = None
+    fixed_mask_vol = None
+    if args.use_masks:
+        if args.moving_mask is not None:
+            moving_mask_vol, _ = read_omezarr(args.moving_mask)
+            moving_mask = np.array(moving_mask_vol[args.moving_slice_index])
+            moving_mask = (moving_mask > 0).astype(np.uint8)
+        if args.fixed_mask is not None:
+            fixed_mask_vol, _ = read_omezarr(args.fixed_mask)
 
     # the index in fixed image which is expected to match the moving image
     interval_vox = int(np.ceil(args.slicing_interval / res[0]))  # in voxels
@@ -140,60 +135,40 @@ def main():
 
     candidate_indices = np.arange(max(0, expected_corresponding_index - allowed_drifting_vox),
                                   min(expected_corresponding_index + allowed_drifting_vox + 1, fixed_vol.shape[0]))
-    
+
     errors = []
     transforms = []
-    for idx, i in enumerate(candidate_indices):
-        # Reset moving image for each candidate
-        moving_image = moving_image_original.copy()
-
+    for i in candidate_indices:
         fixed_image = fixed_vol[i]
 
         fixed_image -= np.percentile(fixed_image[fixed_image > 0], 0.5)
         fixed_image /= np.percentile(fixed_image, 99.5)
         fixed_image = np.clip(fixed_image, 0, 1)
 
-        # Load the fixed mask for this slice if provided
-        fixed_mask = None
-        if args.use_masks and fixed_mask_vol is not None:
+        # Load fixed mask for this slice if provided
+        if args.use_masks and args.fixed_mask is not None:
             fixed_mask = np.array(fixed_mask_vol[i])
             fixed_mask = (fixed_mask > 0).astype(np.uint8)
+        else:
+            fixed_mask = None
 
-        # Use moving mask if provided
-        current_moving_mask = None
-        if args.use_masks and moving_mask_original is not None:
-            current_moving_mask = moving_mask_original.copy()
-
-        # Perform two-stage registration for affine: rigid then affine
+        # Perform rigid registration if needed, e.g. the requested method is affine
         if args.transform == 'affine':
-            # Stage 1: Rigid registration with original image and mask
             rigid_transform, _, _ = register_2d_images_sitk(
                 fixed_image, moving_image, metric=args.metric,
                 method='euler', max_iterations=args.max_iterations,
-                grad_mag_tol=args.grad_mag_tol, moving_mask=current_moving_mask, fixed_mask=fixed_mask,
+                grad_mag_tol=args.grad_mag_tol, moving_mask=moving_mask, fixed_mask=fixed_mask,
                 return_3d_transform=True, verbose=False)
-
-            # Transform moving image to rigid-aligned space
             two_d_transform = convert_3d_rigid_to_2d(rigid_transform)
             moving_image = apply_transform(moving_image, two_d_transform)
 
-            # Stage 2: Affine refinement on rigid-aligned image
-            # Keep using the ORIGINAL moving mask (not transformed)
-            transform, _, error = register_2d_images_sitk(
-                fixed_image, moving_image, metric=args.metric,
-                method='affine', max_iterations=args.max_iterations,
-                grad_mag_tol=args.grad_mag_tol, moving_mask=current_moving_mask, fixed_mask=fixed_mask,
-                return_3d_transform=True, verbose=False)
-            errors.append(error)
-        else:
-            # Single-stage registration (euler or translation)
-            # Use original mask without transformation
-            transform, _, error = register_2d_images_sitk(
-                fixed_image, moving_image, metric=args.metric,
-                method=args.transform, max_iterations=args.max_iterations,
-                grad_mag_tol=args.grad_mag_tol, moving_mask=current_moving_mask, fixed_mask=fixed_mask,
-                return_3d_transform=True, verbose=False)
-            errors.append(error)
+        # Align the slices
+        transform, _, error = register_2d_images_sitk(
+            fixed_image, moving_image, metric=args.metric,
+            method=args.transform, max_iterations=args.max_iterations,
+            grad_mag_tol=args.grad_mag_tol, moving_mask=moving_mask, fixed_mask=fixed_mask,
+            return_3d_transform=True, verbose=False)
+        errors.append(error)
 
         # Create the full transform including the previous rigid part if any
         if args.transform == 'affine':
