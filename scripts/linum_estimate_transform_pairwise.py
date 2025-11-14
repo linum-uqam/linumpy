@@ -160,31 +160,16 @@ def main():
             fixed_mask = np.array(fixed_mask_vol[i])
             fixed_mask = (fixed_mask > 0).astype(np.uint8)
 
-        # Validate masks before registration
-        if args.use_masks and idx == 0:  # Print once for debugging
-            if moving_mask is not None:
-                moving_mask_coverage = np.sum(moving_mask) / moving_mask.size
-                print(f"Moving mask coverage: {moving_mask_coverage*100:.2f}%")
-                if moving_mask_coverage < 0.01:
-                    print("WARNING: Moving mask covers less than 1% of the image!")
-                elif moving_mask_coverage > 0.99:
-                    print("WARNING: Moving mask covers more than 99% of the image - might be inverted!")
-            if fixed_mask is not None:
-                fixed_mask_coverage = np.sum(fixed_mask) / fixed_mask.size
-                print(f"Fixed mask coverage: {fixed_mask_coverage*100:.2f}%")
-                if fixed_mask_coverage < 0.01:
-                    print("WARNING: Fixed mask covers less than 1% of the image!")
-                elif fixed_mask_coverage > 0.99:
-                    print("WARNING: Fixed mask covers more than 99% of the image - might be inverted!")
-
         # Perform two-stage registration for affine: rigid then affine
         if args.transform == 'affine':
+            # Stage 1: Rigid registration with original image and mask
             rigid_transform, _, _ = register_2d_images_sitk(
                 fixed_image, moving_image, metric=args.metric,
                 method='euler', max_iterations=args.max_iterations,
                 grad_mag_tol=args.grad_mag_tol, moving_mask=moving_mask, fixed_mask=fixed_mask,
                 return_3d_transform=True, verbose=False)
 
+            # Transform moving image to rigid-aligned space
             two_d_transform = convert_3d_rigid_to_2d(rigid_transform)
             moving_image = apply_transform(moving_image, two_d_transform)
 
@@ -212,8 +197,11 @@ def main():
         # Create the full transform including the previous rigid part if any
         if args.transform == 'affine':
             composite_transform = CompositeTransform(3)
-            composite_transform.AddTransform(rigid_transform)
+            # Note: CompositeTransform applies transforms in REVERSE order of addition
+            # We want: final = affine(rigid(original))
+            # So we add: affine first, then rigid
             composite_transform.AddTransform(transform)
+            composite_transform.AddTransform(rigid_transform)
             transforms.append(composite_transform)
         else:
             # Else just store the transform
