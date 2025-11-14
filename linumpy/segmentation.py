@@ -146,6 +146,7 @@ def create_mask(image: np.ndarray, sigma: float = 5.0, selem_radius: int = 1, mi
     """
     if normalize:
         # Normalize image
+        image = np.copy(image)
         image -= np.percentile(image[image > 0], 0.5)
         image /= np.percentile(image, 99.5)
         image = np.clip(image, 0, 1)
