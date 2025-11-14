@@ -296,7 +296,7 @@ workflow {
 
     all_slices_common_space = bring_to_common_space.out
         .flatten()
-        .toSortedList{a, b -> a[0] <=> b[0]}
+        .toSortedList{a, b -> a.getName() <=> b.getName()}
 
     // Prepare for pairwise stack registration
     fixed_channel = all_slices_common_space
