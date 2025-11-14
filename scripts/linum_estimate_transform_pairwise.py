@@ -117,6 +117,9 @@ def main():
     moving_image /= np.percentile(moving_image, 99.5)
     moving_image = np.clip(moving_image, 0, 1)
 
+    # Save normalized moving image to reset for each candidate
+    moving_image_normalized = moving_image.copy()
+
     # Load masks if requested
     moving_mask = None
     fixed_mask_vol = None
@@ -139,6 +142,9 @@ def main():
     errors = []
     transforms = []
     for i in candidate_indices:
+        # Reset moving image for each candidate to avoid accumulating transformations
+        moving_image = moving_image_normalized.copy()
+
         fixed_image = fixed_vol[i]
 
         fixed_image -= np.percentile(fixed_image[fixed_image > 0], 0.5)
