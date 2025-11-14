@@ -169,10 +169,15 @@ def main():
             moving_image = apply_transform(moving_image, two_d_transform)
 
         # Align the slices
+        # For affine mode: don't use masks (less overlap after rigid transform)
+        # For other modes (euler, translation): use masks
+        use_masks_for_final = args.transform != 'affine' and args.use_masks
         transform, _, error = register_2d_images_sitk(
             fixed_image, moving_image, metric=args.metric,
             method=args.transform, max_iterations=args.max_iterations,
-            grad_mag_tol=args.grad_mag_tol, moving_mask=moving_mask, fixed_mask=fixed_mask,
+            grad_mag_tol=args.grad_mag_tol,
+            moving_mask=moving_mask if use_masks_for_final else None,
+            fixed_mask=fixed_mask if use_masks_for_final else None,
             return_3d_transform=True, verbose=False)
         errors.append(error)
 
