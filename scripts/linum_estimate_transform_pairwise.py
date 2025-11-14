@@ -144,21 +144,25 @@ def main():
     errors = []
     transforms = []
     for idx, i in enumerate(candidate_indices):
-        # Reset moving image and mask for each candidate
+        # Reset moving image for each candidate
         moving_image = moving_image_original.copy()
-        moving_mask = moving_mask_original.copy() if moving_mask_original is not None else None
-        
+
         fixed_image = fixed_vol[i]
 
         fixed_image -= np.percentile(fixed_image[fixed_image > 0], 0.5)
         fixed_image /= np.percentile(fixed_image, 99.5)
         fixed_image = np.clip(fixed_image, 0, 1)
 
-        # Reset and load the fixed mask for this slice
+        # Load the fixed mask for this slice if provided
         fixed_mask = None
         if args.use_masks and fixed_mask_vol is not None:
             fixed_mask = np.array(fixed_mask_vol[i])
             fixed_mask = (fixed_mask > 0).astype(np.uint8)
+
+        # Use moving mask if provided
+        current_moving_mask = None
+        if args.use_masks and moving_mask_original is not None:
+            current_moving_mask = moving_mask_original.copy()
 
         # Perform two-stage registration for affine: rigid then affine
         if args.transform == 'affine':
@@ -166,31 +170,28 @@ def main():
             rigid_transform, _, _ = register_2d_images_sitk(
                 fixed_image, moving_image, metric=args.metric,
                 method='euler', max_iterations=args.max_iterations,
-                grad_mag_tol=args.grad_mag_tol, moving_mask=moving_mask, fixed_mask=fixed_mask,
+                grad_mag_tol=args.grad_mag_tol, moving_mask=current_moving_mask, fixed_mask=fixed_mask,
                 return_3d_transform=True, verbose=False)
 
             # Transform moving image to rigid-aligned space
             two_d_transform = convert_3d_rigid_to_2d(rigid_transform)
             moving_image = apply_transform(moving_image, two_d_transform)
 
-            # Transform moving mask to match the rigid-aligned image space
-            # The mask MUST be in the same space as the moving image for registration
-            if moving_mask is not None:
-                moving_mask = apply_transform_mask(moving_mask, two_d_transform)
-
-            # Stage 2: Affine refinement on rigid-aligned image with rigid-aligned mask
+            # Stage 2: Affine refinement on rigid-aligned image
+            # Keep using the ORIGINAL moving mask (not transformed)
             transform, _, error = register_2d_images_sitk(
                 fixed_image, moving_image, metric=args.metric,
                 method='affine', max_iterations=args.max_iterations,
-                grad_mag_tol=args.grad_mag_tol, moving_mask=moving_mask, fixed_mask=fixed_mask,
+                grad_mag_tol=args.grad_mag_tol, moving_mask=current_moving_mask, fixed_mask=fixed_mask,
                 return_3d_transform=True, verbose=False)
             errors.append(error)
         else:
             # Single-stage registration (euler or translation)
+            # Use original mask without transformation
             transform, _, error = register_2d_images_sitk(
                 fixed_image, moving_image, metric=args.metric,
                 method=args.transform, max_iterations=args.max_iterations,
-                grad_mag_tol=args.grad_mag_tol, moving_mask=moving_mask, fixed_mask=fixed_mask,
+                grad_mag_tol=args.grad_mag_tol, moving_mask=current_moving_mask, fixed_mask=fixed_mask,
                 return_3d_transform=True, verbose=False)
             errors.append(error)
 
