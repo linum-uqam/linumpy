@@ -8,7 +8,7 @@
 
 This document provides a complete index of all AI-generated documentation for the linumpy microscopy processing library. Documentation is organized by topic for easy reference.
 
-**Total**: 8 files  
+**Total**: 9 files  
 **Last Updated**: November 28, 2025  
 **AI Author**: Claude (Anthropic)
 
@@ -34,18 +34,22 @@ This document provides a complete index of all AI-generated documentation for th
 
 5. **[SLICE_CONFIG_FEATURE.md](SLICE_CONFIG_FEATURE.md)** - Slice selection and filtering system
 
+### Slice Interpolation (November 2025)
+
+6. **[SLICE_INTERPOLATION_FEATURE.md](SLICE_INTERPOLATION_FEATURE.md)** - Missing slice reconstruction using registration-based morphing
+
 ---
 
 ## Reference
 
-6. **[SCRIPTS_REFERENCE.md](SCRIPTS_REFERENCE.md)** - Command-line scripts reference guide
-7. **[LIBRARY_MODULES.md](LIBRARY_MODULES.md)** - Python library module documentation
+7. **[SCRIPTS_REFERENCE.md](SCRIPTS_REFERENCE.md)** - Command-line scripts reference guide
+8. **[LIBRARY_MODULES.md](LIBRARY_MODULES.md)** - Python library module documentation
 
 ---
 
 ## Meta
 
-8. **[AI_DOCUMENTATION_INDEX.md](AI_DOCUMENTATION_INDEX.md)** - This index file
+9. **[AI_DOCUMENTATION_INDEX.md](AI_DOCUMENTATION_INDEX.md)** - This index file
 
 ---
 
@@ -95,6 +99,6 @@ workflows/
 ---
 
 **Last Updated**: November 28, 2025  
-**Total Documentation**: 8 files  
+**Total Documentation**: 9 files  
 **AI Author**: Claude (Anthropic)
 
