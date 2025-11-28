@@ -16,6 +16,7 @@ params.resolution = -1 // resolution of mosaic grid. Defaults to full resolution
 params.sharding_factor = 4 // There will be N x N chunks per shard
 params.fix_galvo_shift = true  // should be true for new data, else false
 params.fix_camera_shift = false  // should be set to false for new data, else true
+params.generate_slice_config = true // Generate slice_config.csv for controlling which slices to use
 
 process create_mosaic_grid {
     cpus params.processes
@@ -46,6 +47,18 @@ process estimate_xy_shifts_from_metadata {
     """
 }
 
+process generate_slice_config {
+    publishDir "$params.output"
+    input:
+        path(shifts_file)
+    output:
+        path("slice_config.csv")
+    script:
+    """
+    linum_generate_slice_config.py ${shifts_file} slice_config.csv --from_shifts
+    """
+}
+
 workflow {
     if (params.use_old_folder_structure)
     {
@@ -66,4 +79,9 @@ workflow {
 
     // Estimate XY shifts from metadata
     estimate_xy_shifts_from_metadata(input_dir_channel)
+
+    // Generate slice configuration file (for controlling which slices to use in reconstruction)
+    if (params.generate_slice_config) {
+        generate_slice_config(estimate_xy_shifts_from_metadata.out)
+    }
 }
