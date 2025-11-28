@@ -164,6 +164,25 @@ process bring_to_common_space {
     """
 }
 
+process interpolate_missing_slice {
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
+    input:
+    tuple val(missing_slice_id), path(slice_before), path(slice_after)
+
+    output:
+    path "slice_z${missing_slice_id}_interpolated.ome.zarr"
+
+    script:
+    """
+    linum_interpolate_missing_slice.py ${slice_before} ${slice_after} \
+        "slice_z${missing_slice_id}_interpolated.ome.zarr" \
+        --method ${params.interpolation_method} \
+        --registration_metric ${params.interpolation_registration_metric} \
+        --max_iterations ${params.interpolation_max_iterations}
+    """
+}
+
 process create_registration_masks {
     publishDir "${params.output}/${task.process}", mode: 'copy'
 
@@ -257,6 +276,40 @@ def parseSliceConfig(configPath) {
     return slicesToUse
 }
 
+// Helper function to detect single gaps in sorted slice IDs
+// Returns list of [missing_id, before_id, after_id] for each single gap
+def detectSingleGaps(sliceList) {
+    def gaps = []
+    def pattern = ~/slice_z(\d+)/
+    
+    // Extract numeric slice IDs and sort
+    def sliceIds = sliceList.collect { file ->
+        def matcher = pattern.matcher(file.getName())
+        matcher.find() ? matcher.group(1).toInteger() : -1
+    }.findAll { it >= 0 }.sort()
+    
+    // Detect single gaps (consecutive missing slices are NOT interpolatable)
+    for (int i = 0; i < sliceIds.size() - 1; i++) {
+        def current = sliceIds[i]
+        def next = sliceIds[i + 1]
+        def gap = next - current
+        
+        if (gap == 2) {
+            // Single missing slice - can interpolate
+            def missingId = String.format("%02d", current + 1)
+            def beforeId = String.format("%02d", current)
+            def afterId = String.format("%02d", next)
+            gaps.add([missingId, beforeId, afterId])
+            log.info "Detected single gap: slice ${missingId} missing (between ${beforeId} and ${afterId})"
+        } else if (gap > 2) {
+            // Multiple consecutive missing slices - cannot interpolate
+            log.warn "Multiple consecutive slices missing between ${current} and ${next} - cannot interpolate"
+        }
+    }
+    
+    return gaps
+}
+
 workflow {
     // Write readme containing the parameters for the current execution
     README()
@@ -346,9 +399,51 @@ workflow {
     // Bring all stitched slices to common space
     bring_to_common_space(common_space_channel)
 
-    all_slices_common_space = bring_to_common_space.out
+    // Get sorted list of slices in common space
+    slices_after_common_space = bring_to_common_space.out
         .flatten()
         .toSortedList{a, b -> a.getName() <=> b.getName()}
+
+    // [Optional] Interpolate missing slices (single gaps only)
+    if (params.interpolate_missing_slices) {
+        // Detect gaps and create interpolation tasks
+        gaps_channel = slices_after_common_space
+            .map { sliceList ->
+                detectSingleGaps(sliceList)
+            }
+            .flatten()
+            .collate(3)  // Each gap is [missing_id, before_id, after_id]
+        
+        // Create channel with (missing_id, slice_before, slice_after)
+        interpolation_input = gaps_channel
+            .combine(slices_after_common_space)
+            .map { gap_info ->
+                def missingId = gap_info[0]
+                def beforeId = gap_info[1]
+                def afterId = gap_info[2]
+                def sliceList = gap_info[3]
+                
+                def sliceBefore = sliceList.find { it.getName().contains("slice_z${beforeId}") }
+                def sliceAfter = sliceList.find { it.getName().contains("slice_z${afterId}") }
+                
+                if (sliceBefore && sliceAfter) {
+                    return tuple(missingId, sliceBefore, sliceAfter)
+                }
+                return null
+            }
+            .filter { it != null }
+        
+        // Run interpolation
+        interpolate_missing_slice(interpolation_input)
+        
+        // Merge interpolated slices with existing slices
+        all_slices_common_space = slices_after_common_space
+            .mix(interpolate_missing_slice.out.collect())
+            .flatten()
+            .toSortedList{a, b -> a.getName() <=> b.getName()}
+    } else {
+        all_slices_common_space = slices_after_common_space
+    }
 
     // Prepare for pairwise stack registration
     fixed_channel = all_slices_common_space
