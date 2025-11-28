@@ -151,14 +151,15 @@ process bring_to_common_space {
     publishDir "${params.output}/${task.process}", mode: 'copy'
 
     input:
-    tuple path("inputs/*"), path("shifts_xy.csv")
+    tuple path("inputs/*"), path("shifts_xy.csv"), path(slice_config)
 
     output:
     path "*.ome.zarr"
 
     script:
+    def slice_config_arg = slice_config.name != 'NO_SLICE_CONFIG' ? "--slice_config ${slice_config}" : ""
     """
-    linum_align_mosaics_3d_from_shifts.py inputs shifts_xy.csv common_space
+    linum_align_mosaics_3d_from_shifts.py inputs shifts_xy.csv common_space ${slice_config_arg}
     mv common_space/* .
     """
 }
@@ -233,9 +234,39 @@ process stack {
     """
 }
 
+// Helper function to parse slice config CSV and return set of slice IDs to use
+def parseSliceConfig(configPath) {
+    def slicesToUse = [] as Set
+    def file = new File(configPath)
+    if (!file.exists()) {
+        error("Slice config file not found: ${configPath}")
+    }
+    file.withReader { reader ->
+        def header = reader.readLine() // skip header
+        reader.eachLine { line ->
+            def parts = line.split(',')
+            if (parts.size() >= 2) {
+                def sliceId = parts[0].trim()
+                def use = parts[1].trim().toLowerCase()
+                if (use in ['true', '1', 'yes']) {
+                    slicesToUse.add(sliceId)
+                }
+            }
+        }
+    }
+    return slicesToUse
+}
+
 workflow {
     // Write readme containing the parameters for the current execution
     README()
+
+    // Parse slice config if provided
+    def slicesToUse = null
+    if (params.slice_config && params.slice_config != "") {
+        slicesToUse = parseSliceConfig(params.slice_config)
+        log.info "Slice config loaded: using ${slicesToUse.size()} slices: ${slicesToUse}"
+    }
 
     // Parse inputs
     inputSlices = channel
@@ -249,10 +280,30 @@ workflow {
             def key = matcher ? matcher[0][1] : "unknown"
             [key, files]
         }
+        .filter { slice_id, _files ->
+            // Filter by slice config if provided
+            if (slicesToUse != null) {
+                def included = slicesToUse.contains(slice_id)
+                if (!included) {
+                    log.info "Excluding slice ${slice_id} (not in slice_config)"
+                }
+                return included
+            }
+            return true
+        }
+    
     shifts_xy = channel
         .fromPath("${params.shifts_xy}", checkIfExists: true)
         .ifEmpty {
             error("XY shifts file not found at path '${params.shifts_xy}'.")
+        }
+    
+    // Load slice config channel (or dummy file if not provided)
+    slice_config_channel = params.slice_config && params.slice_config != "" 
+        ? channel.fromPath(params.slice_config, checkIfExists: true)
+        : channel.fromPath("${workflow.projectDir}/NO_SLICE_CONFIG", type: 'file').ifEmpty { 
+            // Create a dummy channel with a placeholder name
+            channel.of(file('NO_SLICE_CONFIG'))
         }
 
     // [Optional] Resample the input mosaic grid
@@ -290,6 +341,7 @@ workflow {
         .map { _meta, filename -> filename }
         .collect()
         .merge(shifts_xy) { a, b -> tuple(a, b) }
+        .merge(slice_config_channel) { a, b -> tuple(a[0], a[1], b) }
 
     // Bring all stitched slices to common space
     bring_to_common_space(common_space_channel)
