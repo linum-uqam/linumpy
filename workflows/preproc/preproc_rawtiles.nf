@@ -41,14 +41,15 @@ process generate_slice_config {
     publishDir "$params.output", mode: 'copy'
     
     input:
-        path(shifts_file)
+        tuple path(shifts_file), path(input_dir)
     
     output:
         path("slice_config.csv")
     
     script:
+    String galvo_opts = params.detect_galvo ? "--detect_galvo --tiles_dir ${input_dir} --galvo_threshold ${params.galvo_confidence_threshold}" : ""
     """
-    linum_generate_slice_config.py ${shifts_file} slice_config.csv --from_shifts
+    linum_generate_slice_config.py ${shifts_file} slice_config.csv --from_shifts ${galvo_opts}
     """
 }
 
@@ -95,6 +96,9 @@ workflow {
 
     // Generate slice configuration file (for controlling which slices to use in reconstruction)
     if (params.generate_slice_config) {
-        generate_slice_config(estimate_xy_shifts_from_metadata.out)
+        // Combine shifts file with input directory for optional galvo detection
+        slice_config_input = estimate_xy_shifts_from_metadata.out
+            .combine(input_dir_channel)
+        generate_slice_config(slice_config_input)
     }
 }
