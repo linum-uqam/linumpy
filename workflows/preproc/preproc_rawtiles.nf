@@ -37,7 +37,7 @@ process create_mosaic_grid {
 
 process estimate_xy_shifts_from_metadata {
     cpus params.processes
-    publishDir "$params.output"
+    publishDir "$params.output", mode: 'copy' 
     input:
         path(input_dir)
     output:
@@ -49,11 +49,14 @@ process estimate_xy_shifts_from_metadata {
 }
 
 process generate_slice_config {
-    publishDir "$params.output"
+    publishDir "$params.output", mode: 'copy'
+    
     input:
         path(shifts_file)
+    
     output:
         path("slice_config.csv")
+    
     script:
     """
     linum_generate_slice_config.py ${shifts_file} slice_config.csv --from_shifts
