@@ -17,6 +17,7 @@ params.sharding_factor = 4 // There will be N x N chunks per shard
 params.fix_galvo_shift = true  // should be true for new data, else false
 params.fix_camera_shift = false  // should be set to false for new data, else true
 params.generate_slice_config = true // Generate slice_config.csv for controlling which slices to use
+params.generate_previews = false // Generate orthogonal view previews of mosaic grids
 
 process create_mosaic_grid {
     cpus params.processes
@@ -59,6 +60,21 @@ process generate_slice_config {
     """
 }
 
+process generate_mosaic_preview {
+    publishDir "$params.output/previews", mode: 'move'
+    
+    input:
+        tuple val(slice_id), path(mosaic_grid)
+    
+    output:
+        path("mosaic_grid_z${slice_id}_preview.png")
+    
+    script:
+    """
+    linum_screenshot_omezarr.py ${mosaic_grid} mosaic_grid_z${slice_id}_preview.png
+    """
+}
+
 workflow {
     if (params.use_old_folder_structure)
     {
@@ -76,6 +92,11 @@ workflow {
 
     // Generate a 3D mosaic grid at full resolution
     create_mosaic_grid(inputSlices)
+
+    // [Optional] Generate orthogonal view previews of mosaic grids
+    if (params.generate_previews) {
+        generate_mosaic_preview(create_mosaic_grid.out)
+    }
 
     // Estimate XY shifts from metadata
     estimate_xy_shifts_from_metadata(input_dir_channel)
