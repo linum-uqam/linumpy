@@ -10,7 +10,7 @@ nextflow.enable.dsl = 2
 
 process create_mosaic_grid {
     cpus params.processes
-    publishDir "$params.output", mode: 'move'
+    publishDir "$params.output", mode: 'link'  // Hard link: no duplication, file stays accessible
     
     input:
         tuple val(slice_id), path(tiles)
