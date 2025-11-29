@@ -10,6 +10,8 @@ nextflow.enable.dsl = 2
 
 process create_mosaic_grid {
     cpus params.processes
+    publishDir "$params.output", mode: 'move'
+    
     input:
         tuple val(slice_id), path(tiles)
     output:
@@ -21,6 +23,19 @@ process create_mosaic_grid {
     options += params.fix_camera_shift? "--fix_camera_shift":"--no-fix_camera_shift"
     """
     linum_create_mosaic_grid_3d.py mosaic_grid_3d_z${slice_id}.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution} --n_levels 0 --sharding_factor ${params.sharding_factor} ${options}
+    """
+}
+
+process generate_mosaic_preview {
+    publishDir "$params.output/previews", mode: 'move'
+    
+    input:
+        tuple val(slice_id), path(mosaic_grid)
+    output:
+        path("mosaic_grid_z${slice_id}_preview.png")
+    script:
+    """
+    linum_screenshot_omezarr.py ${mosaic_grid} mosaic_grid_z${slice_id}_preview.png
     """
 }
 
@@ -50,21 +65,6 @@ process generate_slice_config {
     String galvo_opts = params.detect_galvo ? "--detect_galvo --tiles_dir ${input_dir} --galvo_threshold ${params.galvo_confidence_threshold}" : ""
     """
     linum_generate_slice_config.py ${shifts_file} slice_config.csv --from_shifts ${galvo_opts}
-    """
-}
-
-process generate_mosaic_preview {
-    publishDir "$params.output/previews", mode: 'move'
-    
-    input:
-        tuple val(slice_id), path(mosaic_grid)
-    
-    output:
-        path("mosaic_grid_z${slice_id}_preview.png")
-    
-    script:
-    """
-    linum_screenshot_omezarr.py ${mosaic_grid} mosaic_grid_z${slice_id}_preview.png
     """
 }
 
