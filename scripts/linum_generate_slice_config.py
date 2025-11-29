@@ -116,7 +116,7 @@ def main():
     
     # Detect slice IDs based on input type
     if args.from_shifts:
-        if not input_path.is_file():
+        if not input_path.exists():
             p.error(f"Shifts file not found: {input_path}")
         slice_ids = get_slice_ids_from_shifts(input_path)
         print(f"Found {len(slice_ids)} slices in shifts file: {input_path}")
