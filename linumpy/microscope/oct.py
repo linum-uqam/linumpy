@@ -64,10 +64,11 @@ class OCT:
             If crop is True, the galvo returns will be cropped from the volume
         fix_galvo_shift
             If True, the shift caused by the galvo mirror return will be evaluated from the data. If an integer value
-            is given, this value will be used to fix the shift.
+            is given, this value will be used to fix the shift. The fix is only applied if detection confidence >= 0.3.
         fix_camera_shift
-            If True, the camera shift will be evaluated and compoensated from the data. This will detect
+            If True, the camera shift will be evaluated and compensated from the data. This will detect
             the first pixel of the scan that is always overexposed and shift the data to compensate for this.
+            
         Notes
         -----
         * The returned volume is in this order : z (depth), x (a-line), y (b-scan)
@@ -110,8 +111,12 @@ class OCT:
             if n_extra == 0:
                 warnings.warn("Cannot estimate the shift correction as there are no extra a-lines in the file.")
             else:
-                shift = xyzcorr.detect_galvo_shift(vol.mean(axis=0), n_pixel_return=n_extra)
-                vol = xyzcorr.fix_galvo_shift(vol, shift=shift)
+                shift, confidence = xyzcorr.detect_galvo_shift(
+                    vol.mean(axis=0), n_pixel_return=n_extra, return_confidence=True
+                )
+                # Only apply fix if confidence is high enough (galvo shift is likely present)
+                if confidence >= 0.3:
+                    vol = xyzcorr.fix_galvo_shift(vol, shift=shift)
         elif isinstance(fix_galvo_shift, int):
             vol = xyzcorr.fix_galvo_shift(vol, shift=fix_galvo_shift)
 
