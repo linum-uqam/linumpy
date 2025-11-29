@@ -5,19 +5,8 @@ nextflow.enable.dsl = 2
 // Convert raw S-OCT tiles into mosaic grids and xy shifts
 // Input: Directory containing raw data set tiles
 // Output: Mosaic grids and xy shifts
-
-// Parameters
-params.input = ""
-params.output = "output"
-params.use_old_folder_structure = false // Use the old folder structure where tiles are not stored in subfolders based on their Z
-params.processes = 1 // Maximum number of python processes per nextflow process
-params.axial_resolution = 1.5 // Axial resolution of imaging system in microns
-params.resolution = -1 // resolution of mosaic grid. Defaults to full resolution.
-params.sharding_factor = 4 // There will be N x N chunks per shard
-params.fix_galvo_shift = true  // should be true for new data, else false
-params.fix_camera_shift = false  // should be set to false for new data, else true
-params.generate_slice_config = true // Generate slice_config.csv for controlling which slices to use
-params.generate_previews = false // Generate orthogonal view previews of mosaic grids
+//
+// Parameters are defined in nextflow.config
 
 process create_mosaic_grid {
     cpus params.processes
