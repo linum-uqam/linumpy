@@ -770,8 +770,10 @@ def estimateLHProfileParameters(vol, s=25):
     return z0, dz, I0, Ib, sigma
 
 
-def detect_galvo_shift(aip: np.ndarray, n_pixel_return: int = 40) -> int:
+def detect_galvo_shift(aip: np.ndarray, n_pixel_return: int = 40, 
+                       return_confidence: bool = False) -> int:
     """Detects the galvo shift in the AIP.
+    
     Parameters
     ----------
     aip : ndarray
@@ -779,10 +781,16 @@ def detect_galvo_shift(aip: np.ndarray, n_pixel_return: int = 40) -> int:
         A-line axis, and the second axis is the B-scan axis, and the average was taken over the depth axis.
     n_pixel_return : int
         Number of pixels used for the galvo returns.
+    return_confidence : bool
+        If True, also return a confidence score (0-1) indicating how certain the detection is.
+        
     Returns
     -------
     int
         Shift in pixels
+    float (optional)
+        Confidence score (0-1) if return_confidence=True. Higher means more confident.
+        A score below 0.3 suggests the galvo shift may not be present.
     """
     # Compute the average a-line
     profile = aip.mean(axis=1)
@@ -801,9 +809,33 @@ def detect_galvo_shift(aip: np.ndarray, n_pixel_return: int = 40) -> int:
         foo = (differences[s] * differences[s + n_pixel_return])
         similarities.append(foo)
 
-    shift = np.argmax(similarities)
-    shift = len(profile) - shift - n_pixel_return
+    similarities = np.array(similarities)
+    shift_idx = np.argmax(similarities)
+    shift = len(profile) - shift_idx - n_pixel_return
+    
+    # Calculate confidence score
+    # High confidence = clear peak in similarities, low confidence = flat/noisy
+    if len(similarities) > 0 and similarities.max() > 0:
+        # Normalize similarities
+        sim_norm = similarities / similarities.max()
+        
+        # Peak prominence: how much the max stands out from the mean
+        peak_prominence = (similarities.max() - np.mean(similarities)) / (np.std(similarities) + 1e-10)
+        
+        # Also check if the detected shift is near the expected galvo return region
+        # (shifts close to 0 or close to the full length are suspicious)
+        relative_shift = shift / len(profile)
+        position_score = 1.0 - 2 * abs(relative_shift - 0.5)  # Best at middle, worst at edges
+        position_score = max(0, position_score)
+        
+        # Combine into confidence score
+        confidence = min(1.0, peak_prominence / 5.0) * 0.7 + position_score * 0.3
+        confidence = max(0.0, min(1.0, confidence))
+    else:
+        confidence = 0.0
 
+    if return_confidence:
+        return shift, confidence
     return shift
 
 def fix_galvo_shift(vol: np.ndarray, shift: int=0, axis:int=1) -> np.ndarray:
