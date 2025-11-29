@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
+Generate orthogonal view screenshots from an OME-Zarr volume.
 
+Creates a figure with three panels showing XY, XZ, and YZ views
+through the center of the volume (or at specified slice indices).
 """
 import argparse
+from pathlib import Path
 from linumpy.io.zarr import read_omezarr
 import numpy as np
 
@@ -31,7 +35,15 @@ def main():
     parser = _build_arg_parser()
     args = parser.parse_args()
 
-    image, _ = read_omezarr(args.in_zarr)
+    # Validate input path
+    in_path = Path(args.in_zarr)
+    if not in_path.exists():
+        parser.error(f"Input file not found: {args.in_zarr}")
+    
+    # Resolve symlinks (common in Nextflow work directories)
+    in_path = in_path.resolve()
+    
+    image, _ = read_omezarr(str(in_path))
 
     z_slice = args.z_slice if args.z_slice is not None else image.shape[0]//2
     x_slice = args.x_slice if args.x_slice is not None else image.shape[1]//2
