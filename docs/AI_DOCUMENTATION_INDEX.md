@@ -9,7 +9,7 @@
 This document provides a complete index of all AI-generated documentation for the linumpy microscopy processing library. Documentation is organized by topic for easy reference.
 
 **Total**: 9 files  
-**Last Updated**: November 28, 2025  
+**Last Updated**: November 29, 2025  
 **AI Author**: Claude (Anthropic)
 
 ---
@@ -33,10 +33,12 @@ This document provides a complete index of all AI-generated documentation for th
 ### Slice Configuration (November 2025)
 
 5. **[SLICE_CONFIG_FEATURE.md](SLICE_CONFIG_FEATURE.md)** - Slice selection and filtering system
+   - Updated: Galvo shift detection integration (Nov 29)
 
 ### Slice Interpolation (November 2025)
 
 6. **[SLICE_INTERPOLATION_FEATURE.md](SLICE_INTERPOLATION_FEATURE.md)** - Missing slice reconstruction using registration-based morphing
+   - Updated: Degraded slice support (Nov 29)
 
 ---
 
@@ -98,7 +100,7 @@ workflows/
 
 ---
 
-**Last Updated**: November 28, 2025  
+**Last Updated**: November 29, 2025  
 **Total Documentation**: 9 files  
 **AI Author**: Claude (Anthropic)
 

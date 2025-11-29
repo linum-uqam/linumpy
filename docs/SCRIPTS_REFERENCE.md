@@ -384,7 +384,7 @@ linum_create_masks.py <input.ome.zarr> <output.ome.zarr> \
 
 ### linum_generate_slice_config.py
 
-Generate slice configuration file.
+Generate slice configuration file with optional galvo shift detection.
 
 ```bash
 # From mosaic grids
@@ -398,7 +398,25 @@ linum_generate_slice_config.py <shifts.csv> <output.csv> --from_shifts
 
 # With exclusions
 linum_generate_slice_config.py <input> <output.csv> --exclude 1 2 5
+
+# With galvo detection (adds galvo_confidence and galvo_fix columns)
+linum_generate_slice_config.py <tiles_dir> <output.csv> --from_tiles --detect_galvo
+
+# From shifts with galvo detection
+linum_generate_slice_config.py <shifts.csv> <output.csv> --from_shifts \
+    --detect_galvo --tiles_dir <tiles_dir>
+
+# Custom galvo threshold
+linum_generate_slice_config.py <tiles_dir> <output.csv> --from_tiles \
+    --detect_galvo --galvo_threshold 0.4
 ```
+
+**Galvo Detection Options:**
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--detect_galvo` | off | Enable galvo shift detection |
+| `--tiles_dir` | - | Raw tiles directory (if input is shifts file) |
+| `--galvo_threshold` | 0.3 | Confidence threshold for galvo fix |
 
 ---
 

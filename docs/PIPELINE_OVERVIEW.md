@@ -80,15 +80,35 @@ Converts raw OCT tiles into organized mosaic grids and extracts metadata for sub
 | `axial_resolution` | `1.5` | Axial resolution in microns |
 | `resolution` | `-1` | Output resolution (-1 = full) |
 | `sharding_factor` | `4` | Zarr sharding factor |
-| `fix_galvo_shift` | `true` | Correct galvo shifts (new data) |
+| `fix_galvo_shift` | `true` | Enable galvo shift detection and correction |
 | `fix_camera_shift` | `false` | Correct camera shifts (old data) |
+| `galvo_confidence_threshold` | `0.3` | Minimum confidence to apply galvo fix |
 | `generate_slice_config` | `true` | Generate slice_config.csv |
+| `generate_previews` | `false` | Generate orthogonal view previews |
+| `detect_galvo` | `false` | Include galvo detection in slice_config.csv |
 
 ### Processes
 
 1. **create_mosaic_grid**: Creates 3D OME-Zarr mosaic from raw tiles
 2. **estimate_xy_shifts_from_metadata**: Extracts XY shifts from tile metadata
 3. **generate_slice_config**: Creates slice configuration file
+
+### Galvo Shift Correction
+
+The galvo mirror in OCT systems can introduce horizontal banding artifacts where alternating rows of pixels are shifted. This is caused by timing differences during the galvo return sweep.
+
+**How it works:**
+- When `fix_galvo_shift = true`, each tile is analyzed for galvo artifacts
+- The detection algorithm computes a **confidence score** (0-1) indicating how likely an artifact is present
+- The correction is **only applied if confidence ≥ threshold** (default 0.3)
+- This prevents false positives on tiles that don't have the artifact
+
+**When to use:**
+- Set `fix_galvo_shift = true` for acquisitions that may contain galvo artifacts (most new data)
+- Set `fix_galvo_shift = false` if you know the data is clean (skips detection entirely)
+- Adjust `galvo_confidence_threshold` if needed:
+  - Lower (e.g., 0.2): More aggressive, applies fix more often
+  - Higher (e.g., 0.5): More conservative, only fixes obvious artifacts
 
 ---
 
@@ -317,6 +337,6 @@ output/
 
 ---
 
-**Last Updated**: November 28, 2025  
+**Last Updated**: November 29, 2025  
 **AI Author**: Claude (Anthropic)
 

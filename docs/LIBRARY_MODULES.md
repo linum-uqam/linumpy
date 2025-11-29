@@ -101,7 +101,7 @@ raw_tiles_path = get_data('raw_tiles')
 
 ### oct.py - OCT Tile Reading
 
-Read raw OCT tiles with metadata.
+Read raw OCT tiles with metadata and optional corrections.
 
 ```python
 from linumpy.microscope.oct import OCT
@@ -115,8 +115,12 @@ resolution = tile.resolution # (res_z, res_x, res_y)
 dimension = tile.dimension   # Physical dimensions
 position = tile.position     # Stage position (if available)
 
-# Read data
-data = tile.data  # numpy.ndarray
+# Read data with corrections
+data = tile.load_image(
+    crop=True,              # Crop galvo return region
+    fix_galvo_shift=True,   # Auto-detect and fix galvo artifacts
+    fix_camera_shift=False  # Fix camera timing shift (old data)
+)
 ```
 
 **Properties:**
@@ -125,6 +129,14 @@ data = tile.data  # numpy.ndarray
 - `dimension`: Physical dimensions in mm
 - `position`: Stage position (x, y, z) in mm
 - `position_available`: Whether position metadata exists
+
+**load_image() Parameters:**
+- `crop`: Remove extra pixels from galvo return
+- `fix_galvo_shift`: 
+  - `True`: Auto-detect artifact and fix if confident (≥0.3 confidence)
+  - `int`: Apply specific shift value
+  - `False`: No correction
+- `fix_camera_shift`: Correct camera timing offset (legacy data)
 
 ---
 
@@ -146,13 +158,43 @@ corrected = apply_illumination_correction(image, profile)
 
 ### xyzcorr.py - XYZ Corrections
 
-Apply spatial corrections.
+Apply spatial corrections including galvo shift detection and correction.
 
 ```python
-from linumpy.preproc.xyzcorr import correct_xyz
+from linumpy.preproc.xyzcorr import (
+    detect_galvo_shift,
+    fix_galvo_shift,
+    findTissueInterface,
+    cropVolume
+)
 
-corrected = correct_xyz(image, correction_params)
+# Detect galvo shift with confidence score
+aip = volume.mean(axis=0)  # Average intensity projection
+shift, confidence = detect_galvo_shift(
+    aip, 
+    n_pixel_return=40,      # Number of pixels in galvo return region
+    return_confidence=True  # Return confidence score (0-1)
+)
+
+# Only apply fix if confident (artifact is present)
+if confidence >= 0.3:
+    corrected = fix_galvo_shift(volume, shift=shift, axis=1)
+
+# Or apply with known shift value
+corrected = fix_galvo_shift(volume, shift=15, axis=1)
 ```
+
+**Galvo Shift Detection:**
+
+The galvo mirror in OCT systems can cause horizontal banding artifacts. The detection algorithm:
+1. Computes average A-line intensity profile
+2. Searches for discontinuities at the galvo return boundaries
+3. Returns the optimal shift value and a confidence score
+
+**Confidence Score (0-1):**
+- High confidence (≥0.3): Clear artifact detected, apply fix
+- Low confidence (<0.3): No clear artifact, skip fix
+- Based on peak prominence and shift position validity
 
 ---
 
@@ -479,6 +521,6 @@ Key dependencies used by the library:
 
 ---
 
-**Last Updated**: November 28, 2025  
+**Last Updated**: November 29, 2025  
 **AI Author**: Claude (Anthropic)
 
