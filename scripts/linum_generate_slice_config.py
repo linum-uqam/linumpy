@@ -100,8 +100,9 @@ def get_slice_ids_from_shifts(shifts_file: Path) -> list:
     with open(shifts_file, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            slice_ids.add(int(row['fixed_id']))
-            slice_ids.add(int(row['moving_id']))
+            # Handle both int and float string formats (e.g., '0' or '0.0')
+            slice_ids.add(int(float(row['fixed_id'])))
+            slice_ids.add(int(float(row['moving_id'])))
     
     return sorted(slice_ids)
 
