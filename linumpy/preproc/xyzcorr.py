@@ -854,7 +854,16 @@ def detect_galvo_artifact_presence(aip: np.ndarray, n_pixel_return: int = 40,
     The detection focuses on:
     1. Intensity contrast between the galvo return region and image region
     2. Sharpness of the transition at the boundary (edge strength)
-    3. Whether the return region has characteristically low/different intensity
+    3. Whether the return region has characteristically different intensity
+    
+    Important: The algorithm uses ABSOLUTE intensity difference because the
+    galvo return region can be either brighter OR darker than surrounding tissue,
+    depending on the sample. The key indicator is the presence of a discontinuity,
+    not the direction of intensity change.
+    
+    Score interpretation:
+    - < 0.3: No correction needed (return region at edge or no discontinuity)
+    - >= 0.3: Correction recommended (clear intensity discontinuity detected)
     """
     n_alines = aip.shape[0]
     
