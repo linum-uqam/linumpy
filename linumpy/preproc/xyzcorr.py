@@ -925,11 +925,11 @@ def detect_galvo_artifact_presence(aip: np.ndarray, n_pixel_return: int = 40,
                     image_intensity = np.mean(intensities)
                     
                     # Contrast: how different is the return region from image regions?
-                    # Galvo return regions typically have LOWER intensity
+                    # Galvo return regions have DIFFERENT intensity (can be darker OR brighter)
                     if image_intensity > 0:
-                        relative_diff = (image_intensity - return_intensity) / image_intensity
-                        # We expect return region to be darker, so positive diff indicates artifact
-                        boundary_contrast = max(0, relative_diff)
+                        relative_diff = abs(image_intensity - return_intensity) / image_intensity
+                        # Any significant difference indicates artifact
+                        boundary_contrast = relative_diff
                     
                     # Check edge sharpness at the boundaries
                     row_gradient = np.abs(np.diff(row_means_smooth))
@@ -950,10 +950,10 @@ def detect_galvo_artifact_presence(aip: np.ndarray, n_pixel_return: int = 40,
                         edge_sharpness = max(left_edge_max, right_edge_max) / (typical_gradient * 3)
                         edge_sharpness = min(1.0, edge_sharpness)
                     
-                    # Check if return region intensity is anomalously low
-                    # (galvo return = mirror moving, so signal is typically weaker)
-                    z_score = (image_intensity - return_intensity) / (overall_std + 1e-10)
-                    if z_score > 1.5:  # Return region is significantly darker
+                    # Check if return region intensity is anomalously different
+                    # (galvo return = mirror moving, so signal is typically different)
+                    z_score = abs(image_intensity - return_intensity) / (overall_std + 1e-10)
+                    if z_score > 1.5:  # Return region is significantly different
                         return_region_anomaly = min(1.0, (z_score - 1.5) / 3.0)
         
         elif shift_abs <= n_pixel_return or shift_abs >= n_alines - n_pixel_return:
