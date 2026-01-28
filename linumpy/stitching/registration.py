@@ -8,9 +8,8 @@ from skimage.feature import peak_local_max
 from linumpy.stitching.stitch_utils import getOverlap
 
 
-
 def pairWisePhaseCorrelation(
-    vol1, vol2, nPeaks=8, returnCC=False
+        vol1, vol2, nPeaks=8, returnCC=False
 ):  # TODO: Test for 3D images
     """Find the translation between image pairs using phase correlation and cross-correlation.
     Parameters
@@ -225,14 +224,14 @@ def applyHanningWindow(im, padshape):
 
 
 def ITKRegistration(
-    vol1,
-    vol2,
-    offset=(0, 0, 0),
-    metric="MSQ",
-    verbose=False,
-    matchHistograms=False,
-    maskFixed=None,
-    maskMoving=None,
+        vol1,
+        vol2,
+        offset=(0, 0, 0),
+        metric="MSQ",
+        verbose=False,
+        matchHistograms=False,
+        maskFixed=None,
+        maskMoving=None,
 ):
     """Uses ITK::ImageRegistrationMethod.MutualInformation
 
@@ -258,8 +257,8 @@ def ITKRegistration(
 
     """
     # Equalize histogram
-    #vol1 = icorr.eqhist(vol1)
-    #vol2 = icorr.eqhist(vol2)
+    # vol1 = icorr.eqhist(vol1)
+    # vol2 = icorr.eqhist(vol2)
 
     # Make the itk images
     fixed_vol = sitk.GetImageFromArray(vol1)
@@ -297,7 +296,7 @@ def ITKRegistration(
     # reg.SetOptimizerAsConjugateGradientLineSearch(learningRate, nIterations)
     # reg.SetOptimizerAsGradientDescentLineSearch(learningRate, minStep)
     reg.SetOptimizerAsRegularStepGradientDescent(learningRate, minStep, nIterations)
-    #reg.SetOptimizerScalesFromPhysicalShift()
+    # reg.SetOptimizerScalesFromPhysicalShift()
     reg.SetShrinkFactorsPerLevel(shrinkFactors=[1])
     # reg.SetSmoothingSigmasPerLevel(smoothingSigmas=[3,2,1])
     reg.SmoothingSigmasAreSpecifiedInPhysicalUnitsOn()
@@ -331,52 +330,51 @@ def ITKRegistration(
 
 
 def align_images_sitk(im1, im2):
-    #plt.subplot(121)
-    #plt.imshow(im1)
-    #plt.subplot(122)
-    #plt.imshow(im2)
-    #plt.show()
+    # plt.subplot(121)
+    # plt.imshow(im1)
+    # plt.subplot(122)
+    # plt.imshow(im2)
+    # plt.show()
 
     # Parameters
     learning_rate = 4.0
     min_step = 0.01
     max_iteration = 200
 
-
     fixed = sitk.GetImageFromArray(im1)
     moving = sitk.GetImageFromArray(im2)
 
     R = sitk.ImageRegistrationMethod()
-    #R.SetMetricAsMeanSquares()
+    # R.SetMetricAsMeanSquares()
     R.SetMetricAsCorrelation()
-    #R.SetOptimizerAsGradientDescent(learning_rate, max_iteration)
-    R.SetOptimizerAsRegularStepGradientDescent(learning_rate, min_step, max_iteration, relaxationFactor=0.5, gradientMagnitudeTolerance=1e-9)
+    # R.SetOptimizerAsGradientDescent(learning_rate, max_iteration)
+    R.SetOptimizerAsRegularStepGradientDescent(learning_rate, min_step, max_iteration, relaxationFactor=0.5,
+                                               gradientMagnitudeTolerance=1e-9)
     R.SetInitialTransform(sitk.TranslationTransform(fixed.GetDimension()))
-    #R.SetOptimizerScales([8,4,2,1])
+    # R.SetOptimizerScales([8,4,2,1])
     R.SetInterpolator(sitk.sitkLinear)
 
     outTx = R.Execute(fixed, moving)
 
-    #print("-------")
-    #print(outTx)
-    #print(f"Optimizer stop condition: {R.GetOptimizerStopConditionDescription()}")
-    #print(f" Iteration: {R.GetOptimizerIteration()}")
-    #print(f" Metric value: {R.GetMetricValue()}")
+    # print("-------")
+    # print(outTx)
+    # print(f"Optimizer stop condition: {R.GetOptimizerStopConditionDescription()}")
+    # print(f" Iteration: {R.GetOptimizerIteration()}")
+    # print(f" Metric value: {R.GetMetricValue()}")
 
     # Resampling
-    #resampler = sitk.ResampleImageFilter()
-    #resampler.SetReferenceImage(fixed)
-    #resampler.SetInterpolator(sitk.sitkLinear)
-    #resampler.SetDefaultPixelValue(1.0)
-    #resampler.SetTransform(outTx)
-    #out = resampler.Execute(moving)
+    # resampler = sitk.ResampleImageFilter()
+    # resampler.SetReferenceImage(fixed)
+    # resampler.SetInterpolator(sitk.sitkLinear)
+    # resampler.SetDefaultPixelValue(1.0)
+    # resampler.SetTransform(outTx)
+    # out = resampler.Execute(moving)
 
     # Create composite
-    #simg1 = sitk.Cast(sitk.RescaleIntensity(fixed), sitk.sitkUInt8)
-    #simg2 = sitk.Cast(sitk.RescaleIntensity(out), sitk.sitkUInt8)
-    #cimg = sitk.Compose(simg1, simg2, simg1 // 2.0 + simg2 // 2.0)
-    #plt.imshow(sitk.GetArrayFromImage(cimg)); plt.show()
-
+    # simg1 = sitk.Cast(sitk.RescaleIntensity(fixed), sitk.sitkUInt8)
+    # simg2 = sitk.Cast(sitk.RescaleIntensity(out), sitk.sitkUInt8)
+    # cimg = sitk.Compose(simg1, simg2, simg1 // 2.0 + simg2 // 2.0)
+    # plt.imshow(sitk.GetArrayFromImage(cimg)); plt.show()
 
     dx = -outTx.GetParameters()[1]
     dy = -outTx.GetParameters()[0]
@@ -389,7 +387,8 @@ def register_2d_images_sitk(ref_image, moving_image, method='euler',
                             metric='MSE', max_iterations=2500,
                             min_step=1e-12, grad_mag_tol=1e-12,
                             fixed_mask=None, moving_mask=None,
-                            return_3d_transform=False, verbose=False):
+                            return_3d_transform=False, verbose=False,
+                            initial_translation=None, initial_step=None):
     """
     Register 2D `moving_image` to `ref_image`.
 
@@ -426,6 +425,12 @@ def register_2d_images_sitk(ref_image, moving_image, method='euler',
         when the transform is applied to a 3D image.
     verbose: bool
         If True, will log registrations metric at each iteration.
+    initial_translation: tuple or None
+        Optional initial translation (tx, ty) to use as starting point.
+        If None, uses CenteredTransformInitializer.
+    initial_step: float or None
+        Initial step size for the optimizer. If None, uses 4.0 pixels.
+        When initial_translation is provided, a smaller step (e.g., 1.0) is recommended.
 
     Returns
     -------
@@ -442,8 +447,6 @@ def register_2d_images_sitk(ref_image, moving_image, method='euler',
 
     fixed_sitk_image = sitk.GetImageFromArray(ref_image)
     moving_sitk_image = sitk.GetImageFromArray(moving_image)
-
-
 
     R = sitk.ImageRegistrationMethod()
 
@@ -465,7 +468,13 @@ def register_2d_images_sitk(ref_image, moving_image, method='euler',
     else:
         raise ValueError("Unknown metric: {}".format(metric))
 
-    R.SetOptimizerAsRegularStepGradientDescent(4.0, min_step, max_iterations,
+    # Use smaller step size when we have an initial translation estimate (to avoid drifting away)
+    if initial_step is None:
+        step_size = 1.0 if initial_translation is not None else 4.0
+    else:
+        step_size = initial_step
+
+    R.SetOptimizerAsRegularStepGradientDescent(step_size, min_step, max_iterations,
                                                0.5, grad_mag_tol)
     R.SetShrinkFactorsPerLevel([4, 2, 1])
     R.SetSmoothingSigmasPerLevel([3, 2, 1])
@@ -483,12 +492,24 @@ def register_2d_images_sitk(ref_image, moving_image, method='euler',
     else:
         raise ValueError("Unknown method: {}".format(method))
 
-    # sitk_transform.SetParameters([0.0] * sitk_transform.GetNumberOfParameters())
-    sitk_transform = sitk.CenteredTransformInitializer(
-        fixed_sitk_image,
-        moving_sitk_image,
-        sitk_transform
-    )
+    # Initialize transform - use provided translation or centered initializer
+    if initial_translation is not None:
+        # Set center to image center
+        center = [fixed_sitk_image.GetWidth() / 2.0, fixed_sitk_image.GetHeight() / 2.0]
+        if method == 'euler':
+            sitk_transform.SetCenter(center)
+            sitk_transform.SetTranslation(initial_translation)
+        elif method == 'affine':
+            sitk_transform.SetCenter(center)
+            sitk_transform.SetTranslation(initial_translation)
+        elif method == 'translation':
+            sitk_transform.SetOffset(initial_translation)
+    else:
+        sitk_transform = sitk.CenteredTransformInitializer(
+            fixed_sitk_image,
+            moving_sitk_image,
+            sitk_transform
+        )
 
     R.SetInitialTransform(sitk_transform)
 
@@ -535,8 +556,8 @@ def command_iteration(method):
     if method.GetOptimizerIteration() == 0:
         print("Estimated Scales: ", method.GetOptimizerScales())
     print(f"{method.GetOptimizerIteration():3} "
-        + f"= {method.GetMetricValue():7.5f} "
-        + f": {method.GetOptimizerPosition()}")
+          + f"= {method.GetMetricValue():7.5f} "
+          + f": {method.GetOptimizerPosition()}")
 
 
 def apply_transform(moving_image, transform):

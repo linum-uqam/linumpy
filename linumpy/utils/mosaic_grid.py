@@ -7,9 +7,7 @@ import scipy.ndimage
 import scipy.ndimage.morphology as morpho
 from scipy.ndimage import gaussian_filter
 from skimage.morphology import disk, ball
-from skimage import metrics
 from tqdm import tqdm
-from scipy import optimize
 
 
 # TODO: Add an algorithm to estimate the affine transform parameters
@@ -38,7 +36,7 @@ class MosaicGrid():
         self.dtype = image.dtype
         self.imin = image.min()
         self.imax = image.max()
-        #self.image = (image - self.imin) / (self.imax - self.imin)
+        # self.image = (image - self.imin) / (self.imax - self.imin)
         self.image = image
 
         self.compute_mosaic_shape()
@@ -268,10 +266,6 @@ class MosaicGrid():
         p1, p2 = self.neighbors_list[n_id]
         return self.get_neighbor_overlap_from_pos(p1, p2)
 
-
-
-
-
     def crop_tiles(self, xlim: tuple = (0, -1), ylim: tuple = (0, -1)):
         """Crop all tiles in the mosaic grid.
 
@@ -396,7 +390,8 @@ class MosaicGrid():
             error = error / float(n_samples)
         return error
 
-    def optimize_overlap(self, step: float = 0.01, omin: float = 0.1, omax: float = 0.5, display: bool = False, random_fraction=1.0, threshold=None):
+    def optimize_overlap(self, step: float = 0.01, omin: float = 0.1, omax: float = 0.5, display: bool = False,
+                         random_fraction=1.0, threshold=None):
         """Uses the similarity between every neighboring tiles to estimate the overlap fraction.
 
         :param step: Overlap fraction steps used for the search.
@@ -462,6 +457,7 @@ class MosaicGrid():
         :param initial_overlap: Initial overlap fraction (between 0 and 1), defaults to 0.2
         :type initial_overlap: float, optional
         """
+
         def loss(x):
             """Computing the normalized root mse over all the overlaps for a given transform"""
             self.affine = np.array(x).reshape((2, 2))
@@ -572,7 +568,8 @@ def addVolumeToMosaic(volume, pos, mosaic, blendingMethod='diffusion', factor=3,
 
     # Adding the volume to the mosaic using the blending weights computed above
     if mosaic.ndim == 3:
-        mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny] = volume * alpha + (1 - alpha) * mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny]
+        mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny] = volume * alpha + (1 - alpha) * mosaic[
+            wz:wz + nz, wx:wx + nx, wy:wy + ny]
     else:
         mosaic[wx:wx + nx, wy:wy + ny] = volume * alpha + (1 - alpha) * mosaic[wx:wx + nx, wy:wy + ny]
 

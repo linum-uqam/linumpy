@@ -15,6 +15,11 @@ from ome_zarr.scale import Scaler
 from ome_zarr.writer import write_image, write_multiscales_metadata
 from skimage.transform import resize
 
+# Configure dask thread pool based on environment variables
+from linumpy._thread_config import configure_dask
+
+configure_dask()
+
 """
     This file contains functions for working with zarr files
 """
@@ -193,6 +198,7 @@ def validate_n_levels(n_levels, shape, downscale_factor=2):
     :type adjusted_n_levels: int
     :return adjusted_n_levels: Adjusted n_levels such that we don't exceed volume shape.
     """
+
     def logn(arr, n):
         return np.log2(arr) / np.log2(n)
 
@@ -424,6 +430,16 @@ class OmeZarrWriter:
         return self.zarray.dtype
 
     def finalize(self, res, n_levels=5):
+        """
+        Finalize the OME-Zarr with traditional power-of-2 pyramid levels.
+        
+        Parameters
+        ----------
+        res : list of float
+            Resolution in mm for each axis (e.g., [0.01, 0.01, 0.01] for 10 µm isotropic)
+        n_levels : int
+            Number of pyramid levels (default: 5). Each level is 2x downsampled.
+        """
         n_levels = validate_n_levels(n_levels, self.shape, self.downscale_factor)
         paths = [f"{i}" for i in range(n_levels + 1)]
         self._downsample_pyramid_on_disk(self.root, paths)
@@ -441,6 +457,211 @@ class OmeZarrWriter:
             "method": "ome_zarr.scale.Scaler",
             "version": ome_zarr_version,
             "args": pyramid_kw
+        }
+
+        write_multiscales_metadata(self.root, datasets, axes=self.axes, metadata=metadata)
+
+
+class AnalysisOmeZarrWriter(OmeZarrWriter):
+    """
+    OmeZarrWriter subclass that supports custom analysis-friendly resolution pyramids.
+    
+    This class extends OmeZarrWriter to create pyramid levels at specific target
+    resolutions (e.g., 10, 25, 50, 100 µm) instead of traditional power-of-2
+    downsampling. This is useful for creating output volumes optimized for
+    downstream analysis at specific scales.
+    
+    Example
+    -------
+    >>> writer = AnalysisOmeZarrWriter("output.ome.zarr", shape, chunks, dtype=np.float32)
+    >>> writer[:] = data  # Write data at full resolution
+    >>> writer.finalize(base_res, [10, 25, 50, 100])
+    
+    Notes
+    -----
+    - Use `finalize()` for traditional power-of-2 pyramids (inherited from OmeZarrWriter)
+    - Use `finalize_with_resolutions()` for custom analysis-friendly resolutions
+    """
+
+    def _downsample_to_resolution(self, parent, source_path, target_path, target_shape):
+        """
+        Downsample from source_path to target_path with specific target shape.
+        """
+        group_path = str(parent.store_path)
+        # Remove file:// prefix if present (from zarr URL format)
+        if group_path.startswith("file://"):
+            group_path = group_path[7:]
+        img_path = parent.store_path / parent.path
+        image_path = os.path.join(group_path, parent.path)
+
+        full_target_path = os.path.join(image_path, target_path)
+        if os.path.exists(full_target_path):
+            print(f"Path exists: {full_target_path}")
+            return
+
+        # Open source from disk via dask
+        path_to_array = os.path.join(image_path, source_path)
+        dask_image = da.from_zarr(path_to_array)
+
+        output = da_resize(
+            dask_image, tuple(target_shape), preserve_range=True, anti_aliasing=True
+        )
+
+        options = {}
+        if self.fmt.zarr_format == 2:
+            options["dimension_separator"] = "/"
+        else:
+            options["chunk_key_encoding"] = self.fmt.chunk_key_encoding
+            options["dimension_names"] = [axis["name"] for axis in self.axes]
+
+        da.to_zarr(
+            arr=output, url=img_path, component=target_path,
+            zarr_format=self.fmt.zarr_format, **options
+        )
+
+    def finalize(self, res, target_resolutions_um=(10, 25, 50, 100), n_levels=None,
+                 make_isotropic=True):
+        """
+        Finalize the OME-Zarr with pyramid levels.
+        
+        Parameters
+        ----------
+        res : list of float
+            Base resolution in mm (e.g., [0.01, 0.01, 0.01] for 10 µm isotropic,
+            or [0.0015, 0.01, 0.01] for anisotropic z=1.5µm, xy=10µm)
+        target_resolutions_um : list of float, optional
+            Target resolutions in microns (default: [10, 25, 50, 100]).
+            Ignored if n_levels is specified.
+        n_levels : int, optional
+            If specified, uses traditional power-of-2 downsampling instead of
+            custom resolutions (backward compatible with OmeZarrWriter).
+        make_isotropic : bool, optional
+            If True (default), resamples anisotropic data to produce isotropic
+            voxels at each target resolution. Each dimension is scaled independently
+            to achieve the target resolution.
+            If False, preserves the original aspect ratio by scaling all dimensions
+            uniformly based on the finest (smallest) base resolution.
+            
+        Notes
+        -----
+        By default, creates pyramid levels at specific analysis-friendly
+        resolutions (e.g., 10, 25, 50, 100 µm). If n_levels is provided,
+        falls back to traditional power-of-2 downsampling for backward
+        compatibility.
+        
+        Examples
+        --------
+        For anisotropic data with base resolution [1.5, 10, 10] µm targeting 25 µm:
+        
+        With make_isotropic=True (default):
+            - Scale factors: [16.67, 2.5, 2.5] (per-dimension)
+            - Output: isotropic 25 µm voxels
+            - Shape aspect ratio changes
+            
+        With make_isotropic=False:
+            - Scale factor: 16.67 (uniform, based on finest dimension 1.5 µm)
+            - Output: anisotropic [25, 167, 167] µm voxels
+            - Shape aspect ratio preserved
+        """
+        # Backward compatibility: if n_levels is specified, use parent's power-of-2 method
+        if n_levels is not None:
+            super().finalize(res, n_levels)
+            return
+        # Convert base resolution to microns
+        base_res_um = [r * 1000 for r in res]  # mm to µm
+        min_base_res_um = min(base_res_um)
+
+        # Filter target resolutions to only include those >= finest base resolution
+        valid_targets = sorted([t for t in target_resolutions_um if t >= min_base_res_um])
+
+        if not valid_targets:
+            print(f"WARNING: No valid target resolutions. Base resolution is {base_res_um} µm")
+            # Fall back to parent's power-of-2 finalize with no levels
+            super().finalize(res, n_levels=0)
+            return
+
+        # Inform user about anisotropic handling
+        is_anisotropic = max(base_res_um) / min_base_res_um > 1.1  # 10% threshold
+        if is_anisotropic:
+            if make_isotropic:
+                print(f"Creating ISOTROPIC pyramid from anisotropic data")
+                print(f"  Base resolution: {base_res_um} µm (anisotropic)")
+                print(f"  Output: isotropic voxels at {valid_targets} µm")
+            else:
+                print(f"Creating pyramid PRESERVING ASPECT RATIO")
+                print(f"  Base resolution: {base_res_um} µm (anisotropic)")
+                print(f"  Scaling uniformly based on finest dimension ({min_base_res_um} µm)")
+        else:
+            print(f"Creating pyramid with target resolutions: {valid_targets} µm")
+
+        paths = []
+        resolutions = []
+
+        # Get the path to level 0 (base resolution) for downsampling source
+        # Remove file:// prefix if present (from zarr URL format)
+        group_path = str(self.root.store_path)
+        if group_path.startswith("file://"):
+            group_path = group_path[7:]  # Remove "file://" prefix
+
+        for i, target_um in enumerate(valid_targets):
+            path = f"{i}"
+            paths.append(path)
+
+            if make_isotropic:
+                # Per-dimension scaling to achieve isotropic target resolution
+                # Each dimension scales independently to reach the target resolution
+                scale_factors = [target_um / base_res_um_d for base_res_um_d in base_res_um]
+            else:
+                # Uniform scaling to preserve aspect ratio
+                # All dimensions scale by the same factor based on finest resolution
+                uniform_scale = target_um / min_base_res_um
+                scale_factors = [uniform_scale] * len(base_res_um)
+
+            # Calculate target shape using scale factors
+            target_shape = [max(1, int(s / sf)) for s, sf in zip(self.shape, scale_factors)]
+
+            # Calculate target resolution per-dimension
+            target_res_mm = [r * sf for r, sf in zip(res, scale_factors)]
+            resolutions.append(target_res_mm)
+
+            # Display resolution info
+            target_res_um = [r * 1000 for r in target_res_mm]
+            if make_isotropic or not is_anisotropic:
+                print(f"  Level {i}: {target_um} µm -> shape {target_shape}")
+            else:
+                print(f"  Level {i}: {target_res_um} µm -> shape {target_shape}")
+
+            if i == 0:
+                # For level 0, we need to replace the base resolution data
+                # First downsample to a temp location, then replace
+                temp_path = f"_temp_{i}"
+                self._downsample_to_resolution(self.root, "0", temp_path, target_shape)
+
+                # Remove original level 0 and rename temp
+                original_path = os.path.join(group_path, self.root.path, "0")
+                temp_full_path = os.path.join(group_path, self.root.path, temp_path)
+
+                if os.path.exists(original_path):
+                    shutil.rmtree(original_path)
+                shutil.move(temp_full_path, original_path)
+            else:
+                # For other levels, downsample from the new level 0
+                self._downsample_to_resolution(self.root, "0", path, target_shape)
+
+        # Create transformation metadata
+        datasets = []
+        for path, res_mm in zip(paths, resolutions):
+            transforms = [{"type": "scale", "scale": res_mm}]
+            datasets.append({"path": path, "coordinateTransformations": transforms})
+
+        ome_zarr_version = version("ome-zarr")
+        metadata = {
+            "method": "custom_resolution_pyramid",
+            "version": ome_zarr_version,
+            "args": {
+                "target_resolutions_um": valid_targets,
+                "make_isotropic": make_isotropic
+            }
         }
 
         write_multiscales_metadata(self.root, datasets, axes=self.axes, metadata=metadata)

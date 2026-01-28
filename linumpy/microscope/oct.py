@@ -22,6 +22,7 @@ class OCT:
     axial_res: float, optional
         Axial resolution of the data in microns.
     """
+
     def __init__(self, directory: str, axial_res=3.5):
         self.directory = Path(directory)
         self.info_filename = self.directory / "info.txt"
@@ -107,20 +108,26 @@ class OCT:
             vol[:, 0, 0] = vol[:, 1, 0]
 
         # Estimate the galvo shift
+        galvo_fix_applied = False
         if isinstance(fix_galvo_shift, bool) and fix_galvo_shift is True:
             if n_extra == 0:
                 warnings.warn("Cannot estimate the shift correction as there are no extra a-lines in the file.")
             else:
                 shift, confidence = xyzcorr.detect_galvo_shift(
-                    vol.mean(axis=0), n_pixel_return=n_extra, return_confidence=True
+                    vol.mean(axis=0), n_pixel_return=n_extra
                 )
                 # Only apply fix if confidence is high enough (galvo shift is likely present)
-                if confidence >= 0.3:
+                if confidence >= 0.5:
                     vol = xyzcorr.fix_galvo_shift(vol, shift=shift)
-        elif isinstance(fix_galvo_shift, int):
-            vol = xyzcorr.fix_galvo_shift(vol, shift=fix_galvo_shift)
+                    galvo_fix_applied = True
+        elif isinstance(fix_galvo_shift, (int, np.integer)) and fix_galvo_shift != 0:
+            vol = xyzcorr.fix_galvo_shift(vol, shift=int(fix_galvo_shift))
+            galvo_fix_applied = True
 
         # Crop the volume
+        # After galvo fix, the galvo return region is shifted to positions n_alines:n_alines+n_extra
+        # (i.e., at the END), so we crop [0:n_alines] to remove it
+        # Without galvo fix, we also crop [0:n_alines] since galvo return could be anywhere
         if crop:
             vol = vol[:, 0:n_alines, 0:n_bscans]
 

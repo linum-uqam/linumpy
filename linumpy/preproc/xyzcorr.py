@@ -3,17 +3,16 @@
 """ Collection of functions to fix spatial-related artefacts in raw data """
 import itertools
 
-import numpy as np
 import SimpleITK as sitk
+import numpy as np
 from scipy.interpolate import interp1d
+from scipy.ndimage import binary_closing, binary_fill_holes
 from scipy.ndimage import (
     gaussian_filter,
     gaussian_filter1d,
-    gaussian_gradient_magnitude,
     uniform_filter, median_filter,
 )
 from scipy.ndimage import label
-from scipy.ndimage import binary_closing, binary_fill_holes
 from scipy.optimize import curve_fit
 from scipy.signal import argrelmax
 from skimage.filters import threshold_li, threshold_otsu
@@ -521,9 +520,7 @@ def removeZ0Outliers(z0map):
         return z0map
 
 
-def applyInterfaceCorrection(
-        vol, interface
-):  # TODO: Test this algorithm to make sure it works well.
+def applyInterfaceCorrection(vol, interface):
     """Apply interface depth correction using linear interpolation.
 
     :param vol: (ndarray) containing the volume to fix.
@@ -701,27 +698,7 @@ def estimateLHProfileParameters(vol, s=25):
     vol_p = uniform_filter(
         vol_p, (s, s, 0)
     )  # Averaging intensities over a small XY neigborhood
-    vol_f = gaussian_filter1d(
-        vol_p, sigma=1, axis=2
-    )  # Smoothing the intensity profiles in Z
-    vol_g = gaussian_gradient_magnitude(
-        vol_p, [0, 0, 1]
-    )  # TODO: Computing gradient in z direction only ?
-
-    # Finding max gradient position
-    z0 = vol_g.argmax(axis=2)
-
-    xx, yy = np.meshgrid(list(range(nx)), list(range(ny)), indexing="ij")
-    I_gmax = vol_p[xx, yy, z0]
-
-    test = np.zeros(vol_p.shape)
-    test[xx, yy, z0] = 1
-    import nibabel as nib
-
-    nib.save(
-        nib.Nifti1Image(test, np.eye(4)),
-        "/home/local/LIOM/jlefebvre/tmp/interface_test.nii",
-    )
+    vol_f = gaussian_filter1d(vol_p, sigma=1, axis=2)
 
     # Preparing variables
     z0 = np.zeros((nx, ny), dtype=np.uint)
@@ -730,7 +707,7 @@ def estimateLHProfileParameters(vol, s=25):
     Ib = np.zeros((nx, ny))
     sigma = np.zeros((nx, ny))
 
-    for x in range(nx):  # TODO: Accelerate this loop (multithreading ?)
+    for x in range(nx):
         for y in range(ny):
             I = vol_p[x, y, :]
             If = vol_f[x, y, :]
@@ -770,234 +747,236 @@ def estimateLHProfileParameters(vol, s=25):
     return z0, dz, I0, Ib, sigma
 
 
-def detect_galvo_shift(aip: np.ndarray, n_pixel_return: int = 40, 
-                       return_confidence: bool = False) -> int:
-    """Detects the galvo shift in the AIP.
-    
+def detect_galvo_shift(aip: np.ndarray, n_pixel_return: int = 40) -> tuple:
+    """Detect galvo shift artifact in an average intensity projection.
+
+    The galvo return region creates a dark horizontal band in OCT data.
+    This function locates the band by finding gradient pairs separated by
+    n_pixel_return pixels, then validates using dark band consistency.
+
     Parameters
     ----------
-    aip : ndarray
-        AIP of the OCT volume containing both the image and the galvo return. This assumes that the first axis is the
-        A-line axis, and the second axis is the B-scan axis, and the average was taken over the depth axis.
+    aip : np.ndarray
+        Average intensity projection of shape (n_alines, n_bscans).
     n_pixel_return : int
-        Number of pixels used for the galvo returns.
-    return_confidence : bool
-        If True, also return a confidence score (0-1) indicating how certain the detection is.
-        
+        Width of galvo return region in pixels (from acquisition metadata).
+
     Returns
     -------
-    int
-        Shift in pixels
-    float (optional)
-        Confidence score (0-1) if return_confidence=True. Higher means more confident.
-        A score below 0.3 suggests the galvo shift may not be present.
+    tuple
+        (shift, confidence) where shift is the circular shift needed to move
+        the galvo region to the edge, and confidence (0-1) indicates detection
+        reliability. Apply fix when confidence >= 0.5.
     """
-    # Compute the average a-line
-    profile = aip.mean(axis=1)
-    profile = median_filter(profile, 9)
+    n_alines = aip.shape[0]
 
-    # Compute the intensity difference between the start and end of the a-line for various shifts.
-    # A wrong shift would result in values close to zero as they would be close by in the actual scan
-    differences = []
-    for s in range(len(profile)):
-        d = np.abs(profile[s] - profile[-1 + s])
-        differences.append(d)
+    # Find galvo position using gradient pair detection
+    profile = median_filter(aip.mean(axis=1), 5)
+    gradient = np.abs(np.diff(profile))
 
-    # If we find the right shift, both the beginning and the end of galvo return will result in high differences
-    similarities = []
-    for s in range(len(profile) - n_pixel_return):
-        foo = (differences[s] * differences[s + n_pixel_return])
-        similarities.append(foo)
+    # Find gradient pairs separated by n_pixel_return (galvo region width)
+    n = len(gradient) - n_pixel_return
+    if n <= 0:
+        return 0, 0.0
 
-    similarities = np.array(similarities)
+    similarities = gradient[:n] * gradient[n_pixel_return:n_pixel_return + n]
     shift_idx = np.argmax(similarities)
-    shift = len(profile) - shift_idx - n_pixel_return
+    shift = n_alines - shift_idx - n_pixel_return
 
-    if return_confidence:
-        confidence = detect_galvo_artifact_presence(aip, n_pixel_return, shift)
-        return shift, confidence
-    return shift
+    # Compute galvo region boundaries
+    boundary_pos = shift_idx
+    boundary_end = boundary_pos + n_pixel_return
+
+    # Validate: check for consistent dark band across B-scans
+    confidence = _compute_dark_band_confidence(aip, boundary_pos, boundary_end)
+
+    return int(shift), float(confidence)
 
 
-def detect_galvo_artifact_presence(aip: np.ndarray, n_pixel_return: int = 40, 
-                                    detected_shift: int = None) -> float:
-    """Detect whether galvo shift correction is needed for a raw tile AIP.
-    
-    In raw OCT tile data, the galvo return region (n_pixel_return pixels) contains
-    data collected while the galvo mirror was returning. If this region is NOT at
-    the edge of the data (i.e., mixed into the middle), a circular shift is needed
-    to move it to the edge before stitching.
-    
-    This function checks if there's a clear intensity discontinuity at the detected
-    shift position - indicating the galvo return region is misplaced and needs correction.
-    
+def detect_galvo_for_slice(tiles: list, n_extra: int, threshold: float = 0.6,
+                           n_samples: int = 5, axial_resolution: float = None,
+                           min_intensity: float = 20.0) -> tuple:
+    """Detect galvo shift for a slice by sampling multiple tiles.
+
     Parameters
     ----------
-    aip : ndarray
-        AIP of a single raw OCT tile (A-line axis x B-scan axis). Should be UNCROPPED
-        so the galvo return region is visible.
-    n_pixel_return : int
-        Number of pixels used for the galvo returns (from acquisition metadata)
-    detected_shift : int, optional
-        Pre-detected shift value from detect_galvo_shift(). If None, assumes no shift.
-        
+    tiles : list
+        List of tile paths for the slice.
+    n_extra : int
+        Number of extra A-lines (galvo return pixels) from acquisition metadata.
+    threshold : float
+        Confidence threshold for applying fix (default: 0.6).
+    n_samples : int
+        Maximum number of tiles to sample (default: 5).
+    axial_resolution : float, optional
+        Axial resolution for OCT loading.
+    min_intensity : float
+        Minimum mean intensity for a tile to be considered valid.
+
+    Returns
+    -------
+    tuple
+        (shift, confidence) where shift is 0 if confidence < threshold.
+    """
+    from linumpy.microscope.oct import OCT
+
+    if not tiles or n_extra <= 0:
+        return 0, 0.0
+
+    n_tiles = len(tiles)
+
+    # Sample tiles from center region (more likely to contain tissue)
+    center_start = int(n_tiles * 0.2)
+    center_end = int(n_tiles * 0.8)
+    sample_indices = np.linspace(center_start, max(center_end - 1, center_start),
+                                 min(n_samples, n_tiles), dtype=int)
+    sample_indices = list(dict.fromkeys(sample_indices))  # Remove duplicates
+
+    # Collect detections
+    detections = []
+    for idx in sample_indices:
+        if len(detections) >= n_samples:
+            break
+
+        oct_obj = OCT(tiles[idx], axial_resolution) if axial_resolution else OCT(tiles[idx])
+        vol = oct_obj.load_image(crop=False, fix_galvo_shift=False, fix_camera_shift=False)
+        aip = vol.mean(axis=0)
+
+        if np.mean(aip) < min_intensity:
+            continue
+
+        shift, conf = detect_galvo_shift(aip, n_pixel_return=n_extra)
+        detections.append((shift, conf))
+
+    if not detections:
+        return 0, 0.0
+
+    # Use best detection, penalized by cross-tile consistency
+    shifts = np.array([d[0] for d in detections])
+    confidences = np.array([d[1] for d in detections])
+
+    best_idx = np.argmax(confidences)
+    best_shift = shifts[best_idx]
+    best_confidence = confidences[best_idx]
+
+    # Check shift consistency across tiles
+    if len(shifts) > 1:
+        shift_tolerance = max(n_extra // 4, 5)
+        n_consistent = np.sum(np.abs(shifts - best_shift) <= shift_tolerance)
+        consistency_factor = (n_consistent / len(shifts)) ** 0.5
+        best_confidence *= consistency_factor
+
+    if best_confidence >= threshold:
+        return int(best_shift), float(best_confidence)
+    return 0, float(best_confidence)
+
+
+def _compute_dark_band_confidence(aip: np.ndarray, boundary_pos: int,
+                                  boundary_end: int) -> float:
+    """Compute confidence that a dark band exists at the detected position.
+
+    Real galvo artifacts create a consistent dark horizontal band visible
+    across all B-scans. This is the key discriminator vs tissue boundaries.
+
+    Parameters
+    ----------
+    aip : np.ndarray
+        Average intensity projection of shape (n_alines, n_bscans).
+    boundary_pos : int
+        Start position of detected galvo region.
+    boundary_end : int
+        End position of detected galvo region.
+
     Returns
     -------
     float
-        Artifact presence score (0-1). Higher means correction IS needed.
-        - < 0.3: No clear discontinuity, data appears clean, skip correction
-        - 0.3-0.5: Mild discontinuity, correction may help
-        - > 0.5: Clear discontinuity, correction recommended
-        
-    Notes
-    -----
-    The detection focuses on:
-    1. Intensity contrast between the galvo return region and image region
-    2. Sharpness of the transition at the boundary (edge strength)
-    3. Whether the return region has characteristically different intensity
-    
-    Important: The algorithm uses ABSOLUTE intensity difference because the
-    galvo return region can be either brighter OR darker than surrounding tissue,
-    depending on the sample. The key indicator is the presence of a discontinuity,
-    not the direction of intensity change.
-    
-    Score interpretation:
-    - < 0.3: No correction needed (return region at edge or no discontinuity)
-    - >= 0.3: Correction recommended (clear intensity discontinuity detected)
+        Confidence score (0-1).
     """
-    n_alines = aip.shape[0]
-    
-    # Compute row-wise mean intensity (average across B-scans for each A-line position)
-    row_means = aip.mean(axis=1)
-    
-    # Light smoothing to reduce noise
-    row_means_smooth = median_filter(row_means, 5)
-    
-    # Overall statistics for normalization
-    overall_mean = np.mean(row_means_smooth)
-    overall_std = np.std(row_means_smooth)
-    
-    if overall_std < 1e-10:
-        # Flat image, no discontinuity possible
-        return 0.0
-    
-    # === Primary Method: Check intensity discontinuity at detected shift position ===
-    # If there's a galvo artifact, the detected_shift marks where the return region
-    # boundary is located within the data
-    
-    boundary_contrast = 0.0
-    edge_sharpness = 0.0
-    return_region_anomaly = 0.0
-    
-    if detected_shift is not None and n_pixel_return > 0:
-        # The shift tells us where the galvo return boundary is
-        # Positive shift means return region starts at (n_alines - shift)
-        # Negative shift means return region starts at (-shift)
-        
-        shift_abs = abs(detected_shift)
-        
-        if shift_abs > n_pixel_return and shift_abs < n_alines - n_pixel_return:
-            # Return region is somewhere in the middle - this indicates a problem
-            
-            # Define the suspected return region boundaries
-            if detected_shift > 0:
-                return_start = n_alines - shift_abs
-                return_end = min(return_start + n_pixel_return, n_alines)
-            else:
-                return_start = shift_abs
-                return_end = min(return_start + n_pixel_return, n_alines)
-            
-            # Ensure valid range
-            return_start = max(0, min(return_start, n_alines - 1))
-            return_end = max(return_start + 1, min(return_end, n_alines))
-            
-            if return_end - return_start >= 5:
-                # Get intensity of the suspected return region
-                return_intensity = np.mean(row_means_smooth[return_start:return_end])
-                
-                # Get intensity of the image regions (before and after return region)
-                margin = min(10, return_start // 2, (n_alines - return_end) // 2)
-                
-                before_start = max(0, return_start - n_pixel_return - margin)
-                before_end = max(before_start + 5, return_start - margin)
-                
-                after_start = min(return_end + margin, n_alines - 5)
-                after_end = min(after_start + n_pixel_return + margin, n_alines)
-                
-                intensities = []
-                if before_end > before_start:
-                    intensities.append(np.mean(row_means_smooth[before_start:before_end]))
-                if after_end > after_start:
-                    intensities.append(np.mean(row_means_smooth[after_start:after_end]))
-                
-                if intensities:
-                    image_intensity = np.mean(intensities)
-                    
-                    # Contrast: how different is the return region from image regions?
-                    # Galvo return regions have DIFFERENT intensity (can be darker OR brighter)
-                    if image_intensity > 0:
-                        relative_diff = abs(image_intensity - return_intensity) / image_intensity
-                        # Any significant difference indicates artifact
-                        boundary_contrast = relative_diff
-                    
-                    # Check edge sharpness at the boundaries
-                    row_gradient = np.abs(np.diff(row_means_smooth))
-                    
-                    # Look for sharp edges at the return region boundaries
-                    edge_window = 5
-                    left_edge_region = slice(max(0, return_start - edge_window), 
-                                            min(return_start + edge_window, len(row_gradient)))
-                    right_edge_region = slice(max(0, return_end - edge_window - 1), 
-                                             min(return_end + edge_window - 1, len(row_gradient)))
-                    
-                    left_edge_max = np.max(row_gradient[left_edge_region]) if left_edge_region.stop > left_edge_region.start else 0
-                    right_edge_max = np.max(row_gradient[right_edge_region]) if right_edge_region.stop > right_edge_region.start else 0
-                    
-                    # Compare edge strength to typical gradient in the image
-                    typical_gradient = np.percentile(row_gradient, 75)
-                    if typical_gradient > 0:
-                        edge_sharpness = max(left_edge_max, right_edge_max) / (typical_gradient * 3)
-                        edge_sharpness = min(1.0, edge_sharpness)
-                    
-                    # Check if return region intensity is anomalously different
-                    # (galvo return = mirror moving, so signal is typically different)
-                    z_score = abs(image_intensity - return_intensity) / (overall_std + 1e-10)
-                    if z_score > 1.5:  # Return region is significantly different
-                        return_region_anomaly = min(1.0, (z_score - 1.5) / 3.0)
-        
-        elif shift_abs <= n_pixel_return or shift_abs >= n_alines - n_pixel_return:
-            # Return region is already at the edge - this is the CORRECT state
-            # Low score = no correction needed
-            return 0.1  # Small baseline for edge cases
-    
-    # === Combine metrics ===
-    
-    # Boundary contrast is the primary indicator (weight: 50%)
-    # - High contrast between return and image regions = artifact present
-    contrast_score = min(1.0, boundary_contrast / 0.15)  # 15% contrast -> score 1.0
-    
-    # Edge sharpness confirms the discontinuity is real (weight: 30%)
-    sharpness_score = edge_sharpness
-    
-    # Return region anomaly provides additional confirmation (weight: 20%)
-    anomaly_score = return_region_anomaly
-    
-    # Weighted combination
-    artifact_score = (
-        contrast_score * 0.50 +
-        sharpness_score * 0.30 +
-        anomaly_score * 0.20
-    )
-    
-    # Clamp to [0, 1]
-    artifact_score = max(0.0, min(1.0, artifact_score))
-    
-    return artifact_score
+    n_alines, n_bscans = aip.shape
+    n_pixel_return = boundary_end - boundary_pos
 
-def fix_galvo_shift(vol: np.ndarray, shift: int=0, axis:int=1) -> np.ndarray:
-    """Fix the galvo shift in an OCT volume."""
+    # Validate boundaries
+    if boundary_pos < 0 or boundary_end > n_alines or n_pixel_return < 5:
+        return 0.0
+
+    # Define comparison regions
+    margin = max(10, n_pixel_return // 2)
+    before_start = max(0, boundary_pos - margin * 2)
+    before_end = boundary_pos
+    after_start = boundary_end
+    after_end = min(n_alines, boundary_end + margin * 2)
+
+    # Need valid comparison regions
+    if before_end <= before_start or after_end <= after_start:
+        return 0.0
+
+    # Check intensity drop consistency across B-scan columns
+    n_check = min(n_bscans, 20)
+    column_indices = np.linspace(0, n_bscans - 1, n_check, dtype=int)
+
+    drop_count = 0
+    significant_drops = 0
+    total_drop = 0.0
+    valid_cols = 0
+
+    for col_idx in column_indices:
+        col = aip[:, col_idx]
+
+        before_val = np.mean(col[before_start:before_end])
+        galvo_val = np.mean(col[boundary_pos:boundary_end])
+        after_val = np.mean(col[after_start:after_end])
+        surrounding = (before_val + after_val) / 2
+
+        if surrounding < 10:  # Skip background columns
+            continue
+
+        valid_cols += 1
+        if galvo_val < surrounding:
+            drop_count += 1
+            rel_drop = (surrounding - galvo_val) / surrounding
+            total_drop += rel_drop
+            if rel_drop > 0.10:
+                significant_drops += 1
+
+    if valid_cols == 0:
+        return 0.0
+
+    # Score: consistency of dark band across columns
+    consistency = drop_count / valid_cols
+    significant_ratio = significant_drops / valid_cols
+    avg_drop = total_drop / max(drop_count, 1)
+
+    # Low consistency = likely not a real artifact
+    if consistency < 0.5:
+        return consistency * 0.3
+
+    # Combine scores
+    score = (
+            consistency * 0.40 +
+            significant_ratio * 0.35 +
+            min(avg_drop / 0.3, 1.0) * 0.25
+    )
+
+    return float(np.clip(score, 0.0, 1.0))
+
+
+def fix_galvo_shift(vol: np.ndarray, shift: int = 0, axis: int = 1) -> np.ndarray:
+    """Apply circular shift to move galvo return region to edge of volume.
+
+    Parameters
+    ----------
+    vol : np.ndarray
+        OCT volume data.
+    shift : int
+        Number of pixels to shift.
+    axis : int
+        Axis along which to shift (default: 1 for A-line axis).
+
+    Returns
+    -------
+    np.ndarray
+        Shifted volume. Crop with vol[:, :n_alines, :] to remove galvo region.
+    """
     if shift == 0:
         return vol
-    else:
-        return np.roll(vol, shift, axis=axis)
-
+    return np.roll(vol, shift, axis=axis)

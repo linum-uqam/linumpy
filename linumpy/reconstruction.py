@@ -36,7 +36,6 @@ def getLargestCC(segmentation: np.ndarray) -> np.ndarray:
     return largestCC
 
 
-
 DEFAULT_TILE_FILE_PATTERN = r"tile_x(?P<x>\d+)_y(?P<y>\d+)_z(?P<z>\d+)"
 
 
@@ -71,7 +70,6 @@ def get_tiles_ids_from_list(tiles_list,
         tile_ids.append((mx, my, mz))
 
     return tile_ids
-
 
 
 def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_positions: bool = False):
@@ -256,8 +254,9 @@ def quick_stitch(directory, z: int, overlap_fraction: float = 0.2, n_rot: int = 
     return mosaic
 
 
-def detect_mosaic(directory: str, z: int, img: np.ndarray=None,  margin: float = 0.5, display: bool = False, image_file: str = None,
-                  roi_file: str = None, keep_largest_island: bool = False, stitching_settings:dict = None):
+def detect_mosaic(directory: str, z: int, img: np.ndarray = None, margin: float = 0.5, display: bool = False,
+                  image_file: str = None,
+                  roi_file: str = None, keep_largest_island: bool = False, stitching_settings: dict = None):
     """Detect the tissue in the mosaic and compute the limits of the tissue.
     Parameters
     ----------

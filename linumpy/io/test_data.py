@@ -1,11 +1,13 @@
 # -*- coding:utf-8 -*-
+import os
+
+import dask.array as da
+import nibabel as nib
+import numpy as np
+from skimage.data import cells3d
+
 from linumpy import LINUMPY_HOME
 from linumpy.io.zarr import save_omezarr
-from skimage.data import cells3d
-import nibabel as nib
-import os
-import numpy as np
-import dask.array as da
 
 
 def get_data(name):
@@ -73,7 +75,7 @@ def _get_aip():
 
 
 def _get_scan_info(
-    nx, ny, top_z, bottom_z, width_mm, height_mm, x_pos_mm, y_pos_mm, z_pos_mm
+        nx, ny, top_z, bottom_z, width_mm, height_mm, x_pos_mm, y_pos_mm, z_pos_mm
 ):
     focus_z = int((top_z + bottom_z) / 2)
     scan_info = "Scan info\n"
