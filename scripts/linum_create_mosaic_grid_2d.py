@@ -8,9 +8,11 @@ Notes
 - jpg output should only be used for visualization purposes due to loss of data from the 8bit conversion.
 """
 
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 import json
-import multiprocessing
 import shutil
 from pathlib import Path
 
@@ -22,6 +24,7 @@ from skimage.transform import resize
 
 from linumpy import reconstruction
 from linumpy.microscope.oct import OCT
+from linumpy.utils.io import get_available_cpus
 
 
 def _build_arg_parser():
@@ -135,7 +138,7 @@ def main():
     output_resolution = args.resolution
     n_cpus = args.n_cpus
     if n_cpus == -1:
-        n_cpus = multiprocessing.cpu_count() - 2
+        n_cpus = get_available_cpus()
 
     # Analyze the tiles
     tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)

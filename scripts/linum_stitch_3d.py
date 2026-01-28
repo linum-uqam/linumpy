@@ -4,6 +4,9 @@
 """Stitch a 3D mosaic grid.
 """
 
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 from pathlib import Path
 
@@ -11,6 +14,7 @@ import numpy as np
 
 from linumpy.io.zarr import read_omezarr, OmeZarrWriter
 from linumpy.utils.mosaic_grid import addVolumeToMosaic
+from linumpy.utils.metrics import collect_stitch_3d_metrics
 
 
 def _build_arg_parser():
@@ -92,6 +96,17 @@ def main():
                               blendingMethod=blending_method)
 
     writer.finalize(resolution)
+
+    # Collect metrics
+    collect_stitch_3d_metrics(
+        input_shape=tuple(volume.shape),
+        output_shape=tuple(mosaic_shape),
+        num_tiles=nx * ny,
+        resolution=list(resolution),
+        output_path=output_file,
+        input_path=str(input_file),
+        blending_method=blending_method
+    )
 
 
 if __name__ == "__main__":

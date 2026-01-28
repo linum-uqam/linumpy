@@ -5,6 +5,9 @@
 Download the Allen mouse brain template, and setting the correct RAS+ direction and spacing.
 """
 
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 from pathlib import Path
 

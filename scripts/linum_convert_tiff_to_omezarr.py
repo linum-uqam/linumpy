@@ -17,6 +17,9 @@ If there are more than one channel, file structure should be
     │   └── ...
     └── ...
 """
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 from glob import glob
 import logging

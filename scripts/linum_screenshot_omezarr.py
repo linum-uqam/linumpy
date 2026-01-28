@@ -5,6 +5,9 @@ Generate orthogonal view screenshots from an OME-Zarr volume.
 Creates a figure with three panels showing XY, XZ, and YZ views
 through the center of the volume (or at specified slice indices).
 """
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 from pathlib import Path
 from linumpy.io.zarr import read_omezarr

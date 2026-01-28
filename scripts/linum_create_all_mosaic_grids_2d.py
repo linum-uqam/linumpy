@@ -3,6 +3,9 @@
 
 """Convert all 3D OCT tiles in a directory to 2D mosaic grids"""
 
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 import subprocess
 from tqdm.auto import tqdm

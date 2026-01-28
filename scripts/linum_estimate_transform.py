@@ -3,17 +3,25 @@
 
 """Estimate the affine transform used to compute the tile position given a 2D mosaic grid."""
 
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 import numpy as np
 import SimpleITK as sitk
 from linumpy.stitching.registration import pairWisePhaseCorrelation
 from linumpy.utils import mosaic_grid
+from linumpy.utils.metrics import collect_xy_transform_metrics
 from skimage.filters import threshold_otsu
 from skimage.exposure import match_histograms
 from pathlib import Path
 import random
 import zarr
 from linumpy.io.zarr import read_omezarr
+
+# Configure all libraries (especially SimpleITK) to respect thread limits
+from linumpy._thread_config import configure_all_libraries
+configure_all_libraries()
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
@@ -158,11 +166,24 @@ def main():
         b[2 * i + 1, 0] = cols_px[i]
 
     # Solve this
-    transform = np.linalg.lstsq(a, b, rcond=None)[0].reshape((2, 2))
+    result = np.linalg.lstsq(a, b, rcond=None)
+    transform = result[0].reshape((2, 2))
+    residuals = result[1] if len(result[1]) > 0 else np.array([0.0])
 
     # Save the transform
     output_transform.parent.mkdir(exist_ok=True, parents=True)
     np.save(str(output_transform), transform)
+
+    # Collect metrics using helper function
+    collect_xy_transform_metrics(
+        transform=transform,
+        tile_pairs_used=tile_count,
+        tile_shape=tuple(tile_shape),
+        residuals=residuals,
+        output_path=output_transform,
+        input_paths=input_images,
+        params={'initial_overlap': args.initial_overlap}
+    )
 
 
 if __name__ == "__main__":

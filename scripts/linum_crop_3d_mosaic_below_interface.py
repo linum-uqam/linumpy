@@ -9,12 +9,16 @@ volume to a specified depth *below* the interface. The script can also crop the 
 water/tissue interface. The cropped volume is saved as a new OME-Zarr file.
 """
 
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 from pathlib import Path
 import numpy as np
 import dask.array as da
 import zarr
 from linumpy.io.zarr import read_omezarr, save_omezarr, create_tempstore
+from linumpy.utils.metrics import collect_interface_crop_metrics
 from scipy.ndimage import gaussian_filter1d, gaussian_filter
 
 
@@ -96,6 +100,21 @@ def main():
     crop_dask = da.from_array(vol_crop, chunks=vol.chunks)
     # Save cropped volume as OME-Zarr
     save_omezarr(crop_dask, output_path, voxel_size=res, chunks=vol.chunks)
+
+    # Collect metrics using helper function
+    original_shape = vol.shape
+    collect_interface_crop_metrics(
+        detected_interface=avg_iface,
+        crop_depth_px=depth_px,
+        start_idx=start_idx,
+        end_idx=end_idx,
+        input_shape=original_shape,
+        output_shape=vol_crop.shape,
+        resolution_um=resolution_um,
+        output_path=output_path,
+        input_path=str(input_path),
+        padding_needed=(end_idx > original_shape[0])
+    )
 
 
 if __name__ == "__main__":
