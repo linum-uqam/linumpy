@@ -39,15 +39,28 @@ Example usage:
     linum_interpolate_missing_slice.py slice_z00.ome.zarr slice_z02.ome.zarr \\
         slice_z01_interpolated.ome.zarr --degraded_slice slice_z01_bad.ome.zarr
 """
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 import numpy as np
 import SimpleITK as sitk
+import matplotlib.pyplot as plt
 from pathlib import Path
 
 from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.stitching.registration import register_2d_images_sitk, apply_transform
 from linumpy.utils.io import add_overwrite_arg, assert_output_exists
+from linumpy.utils.image_quality import (
+    compute_ssim_3d,
+    compute_edge_score,
+    compute_variance_score,
+)
 import dask.array as da
+
+# Configure all libraries (especially SimpleITK) to respect thread limits
+from linumpy._thread_config import configure_all_libraries
+configure_all_libraries()
 
 
 def _build_arg_parser():
@@ -95,6 +108,20 @@ def _build_arg_parser():
                                      "Below this threshold, degraded slice is ignored.\n"
                                      "[default: %(default)s]")
     
+    # Preview/debug options
+    preview_group = p.add_argument_group('Preview Options',
+                                         'Generate visual previews for quality checking')
+    preview_group.add_argument("--preview", type=str, default=None,
+                               help="Path to save a preview image (PNG) showing:\n"
+                                    "- Slice before, slice after\n"
+                                    "- Interpolated result\n"
+                                    "- Degraded slice (if provided)\n"
+                                    "Useful for verifying interpolation quality.")
+    preview_group.add_argument("--preview_slice", type=int, default=None,
+                               help="Z-index to use for preview. Default: middle slice.")
+    preview_group.add_argument("--preview_dpi", type=int, default=150,
+                               help="DPI for preview image [default: %(default)s]")
+
     add_overwrite_arg(p)
     return p
 
@@ -370,138 +397,8 @@ def interpolate_weighted(vol_before, vol_after, sigma=2.0):
     return smoothed
 
 
-def compute_ssim_3d(vol1, vol2, win_size=7):
-    """
-    Compute mean Structural Similarity Index (SSIM) between two 3D volumes.
-    
-    Computes SSIM for each z-slice and returns the mean.
-    
-    Parameters
-    ----------
-    vol1 : np.ndarray
-        First volume (Z, X, Y).
-    vol2 : np.ndarray
-        Second volume (Z, X, Y).
-    win_size : int
-        Window size for SSIM computation.
-        
-    Returns
-    -------
-    float
-        Mean SSIM score (0 to 1, higher is better).
-    """
-    from skimage.metrics import structural_similarity as ssim
-    
-    # Normalize volumes to [0, 1]
-    v1 = vol1.astype(np.float32)
-    v2 = vol2.astype(np.float32)
-    
-    if v1.max() > v1.min():
-        v1 = (v1 - v1.min()) / (v1.max() - v1.min())
-    if v2.max() > v2.min():
-        v2 = (v2 - v2.min()) / (v2.max() - v2.min())
-    
-    ssim_scores = []
-    for z in range(vol1.shape[0]):
-        # Handle small images
-        actual_win_size = min(win_size, min(v1.shape[1], v1.shape[2]) - 1)
-        if actual_win_size % 2 == 0:
-            actual_win_size -= 1
-        if actual_win_size < 3:
-            actual_win_size = 3
-            
-        try:
-            score = ssim(v1[z], v2[z], win_size=actual_win_size, data_range=1.0)
-            ssim_scores.append(score)
-        except Exception:
-            # If SSIM fails, use normalized cross-correlation as fallback
-            ncc = np.corrcoef(v1[z].flatten(), v2[z].flatten())[0, 1]
-            ssim_scores.append(max(0, ncc))
-    
-    return np.mean(ssim_scores)
-
-
-def compute_edge_preservation_score(vol_degraded, vol_reference):
-    """
-    Compute edge preservation score between degraded and reference volume.
-    
-    Uses Sobel edge detection to compare edge structures.
-    
-    Parameters
-    ----------
-    vol_degraded : np.ndarray
-        Degraded volume.
-    vol_reference : np.ndarray
-        Reference volume (e.g., average of neighbors).
-        
-    Returns
-    -------
-    float
-        Edge preservation score (0 to 1, higher is better).
-    """
-    from scipy.ndimage import sobel
-    
-    # Normalize
-    v_deg = vol_degraded.astype(np.float32)
-    v_ref = vol_reference.astype(np.float32)
-    
-    if v_deg.max() > v_deg.min():
-        v_deg = (v_deg - v_deg.min()) / (v_deg.max() - v_deg.min())
-    if v_ref.max() > v_ref.min():
-        v_ref = (v_ref - v_ref.min()) / (v_ref.max() - v_ref.min())
-    
-    # Compute edges using Sobel
-    edges_deg = np.sqrt(sobel(v_deg, axis=1)**2 + sobel(v_deg, axis=2)**2)
-    edges_ref = np.sqrt(sobel(v_ref, axis=1)**2 + sobel(v_ref, axis=2)**2)
-    
-    # Normalize edges
-    if edges_deg.max() > 0:
-        edges_deg = edges_deg / edges_deg.max()
-    if edges_ref.max() > 0:
-        edges_ref = edges_ref / edges_ref.max()
-    
-    # Compute correlation of edge maps
-    correlation = np.corrcoef(edges_deg.flatten(), edges_ref.flatten())[0, 1]
-    
-    # Handle NaN (can occur if one image has no edges)
-    if np.isnan(correlation):
-        return 0.0
-    
-    # Convert to 0-1 range (correlation is -1 to 1)
-    return max(0, correlation)
-
-
-def compute_variance_ratio(vol_degraded, vol_reference):
-    """
-    Compute variance ratio between degraded and reference volumes.
-    
-    Low variance in degraded slice may indicate data loss or corruption.
-    
-    Parameters
-    ----------
-    vol_degraded : np.ndarray
-        Degraded volume.
-    vol_reference : np.ndarray
-        Reference volume.
-        
-    Returns
-    -------
-    float
-        Variance ratio score (0 to 1, higher means more similar variance).
-    """
-    var_deg = np.var(vol_degraded)
-    var_ref = np.var(vol_reference)
-    
-    if var_ref == 0:
-        return 0.0
-    
-    ratio = var_deg / var_ref
-    
-    # Score is 1 when variances are equal, decreases as they diverge
-    # Using a logistic-like function
-    score = 2.0 / (1.0 + np.abs(np.log(ratio + 1e-10)))
-    
-    return min(1.0, max(0.0, score))
+# Note: Quality assessment functions (compute_ssim_3d, compute_edge_score,
+# compute_variance_score) are imported from linumpy.utils.image_quality
 
 
 def assess_degraded_slice_quality(vol_degraded, vol_before, vol_after):
@@ -534,18 +431,18 @@ def assess_degraded_slice_quality(vol_degraded, vol_before, vol_after):
     # Create expected reference (simple average of neighbors)
     reference = 0.5 * vol_before.astype(np.float32) + 0.5 * vol_after.astype(np.float32)
     
-    # Metric 1: SSIM with neighbors
+    # Metric 1: SSIM with neighbors (using consolidated module)
     ssim_before = compute_ssim_3d(vol_degraded, vol_before)
     ssim_after = compute_ssim_3d(vol_degraded, vol_after)
     ssim_score = (ssim_before + ssim_after) / 2
     print(f"    SSIM with neighbors: {ssim_score:.3f} (before={ssim_before:.3f}, after={ssim_after:.3f})")
     
-    # Metric 2: Edge preservation
-    edge_score = compute_edge_preservation_score(vol_degraded, reference)
+    # Metric 2: Edge preservation (using consolidated module)
+    edge_score = compute_edge_score(vol_degraded, reference)
     print(f"    Edge preservation: {edge_score:.3f}")
     
-    # Metric 3: Variance consistency
-    variance_score = compute_variance_ratio(vol_degraded, reference)
+    # Metric 3: Variance consistency (using consolidated module)
+    variance_score = compute_variance_score(vol_degraded, reference)
     print(f"    Variance ratio: {variance_score:.3f}")
     
     # Combine metrics (weighted average)
@@ -570,6 +467,164 @@ def assess_degraded_slice_quality(vol_degraded, vol_before, vol_after):
     print(f"    Overall quality score: {quality_score:.3f}")
     
     return quality_score, metrics
+
+
+def generate_preview(vol_before, vol_after, interpolated, output_path,
+                     vol_degraded=None, final_result=None,
+                     preview_slice=None, dpi=150,
+                     degraded_weight=None, quality_threshold=None):
+    """
+    Generate a preview image showing the interpolation results.
+
+    Parameters
+    ----------
+    vol_before : np.ndarray
+        Volume before the missing slice.
+    vol_after : np.ndarray
+        Volume after the missing slice.
+    interpolated : np.ndarray
+        Pure interpolated result.
+    output_path : str or Path
+        Path to save the preview image.
+    vol_degraded : np.ndarray, optional
+        Degraded slice volume if provided.
+    final_result : np.ndarray, optional
+        Final result after blending with degraded (if different from interpolated).
+    preview_slice : int, optional
+        Z-index to use for preview. Default: middle slice.
+    dpi : int
+        DPI for the output image.
+    degraded_weight : float, optional
+        Weight used for degraded slice blending.
+    quality_threshold : float, optional
+        Quality threshold used.
+    """
+    # Determine slice index
+    if preview_slice is None:
+        preview_slice = vol_before.shape[0] // 2
+    preview_slice = max(0, min(preview_slice, vol_before.shape[0] - 1))
+
+    # Normalize function for display
+    def normalize_for_display(img):
+        img = img.astype(np.float32)
+        p1, p99 = np.percentile(img[img > 0], [1, 99]) if np.any(img > 0) else (0, 1)
+        if p99 > p1:
+            img = (img - p1) / (p99 - p1)
+        return np.clip(img, 0, 1)
+
+    # Extract slices
+    before_slice = normalize_for_display(vol_before[preview_slice])
+    after_slice = normalize_for_display(vol_after[preview_slice])
+    interp_slice = normalize_for_display(interpolated[preview_slice])
+
+    # Determine layout based on whether we have degraded slice
+    has_degraded = vol_degraded is not None
+    has_final = final_result is not None and not np.allclose(final_result, interpolated)
+
+    if has_degraded and has_final:
+        # 2x3 layout: before, after, degraded, interpolated, final, difference
+        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+        axes = axes.flatten()
+
+        degraded_slice = normalize_for_display(vol_degraded[preview_slice])
+        final_slice = normalize_for_display(final_result[preview_slice])
+
+        # Row 1: inputs
+        axes[0].imshow(before_slice, cmap='gray')
+        axes[0].set_title('Slice Before (input)')
+        axes[0].axis('off')
+
+        axes[1].imshow(after_slice, cmap='gray')
+        axes[1].set_title('Slice After (input)')
+        axes[1].axis('off')
+
+        axes[2].imshow(degraded_slice, cmap='gray')
+        title = f'Degraded Slice'
+        if degraded_weight is not None:
+            title += f'\n(quality={degraded_weight:.2f})'
+        axes[2].set_title(title)
+        axes[2].axis('off')
+
+        # Row 2: outputs
+        axes[3].imshow(interp_slice, cmap='gray')
+        axes[3].set_title('Pure Interpolation')
+        axes[3].axis('off')
+
+        axes[4].imshow(final_slice, cmap='gray')
+        title = 'Final Result (blended)'
+        if degraded_weight is not None:
+            title += f'\n(w={degraded_weight:.2f})'
+        axes[4].set_title(title)
+        axes[4].axis('off')
+
+        # Difference image
+        diff = np.abs(interp_slice - degraded_slice)
+        axes[5].imshow(diff, cmap='hot')
+        axes[5].set_title('|Interpolated - Degraded|')
+        axes[5].axis('off')
+
+    elif has_degraded:
+        # 2x2 layout: before, after, interpolated, degraded
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        axes = axes.flatten()
+
+        degraded_slice = normalize_for_display(vol_degraded[preview_slice])
+
+        axes[0].imshow(before_slice, cmap='gray')
+        axes[0].set_title('Slice Before (input)')
+        axes[0].axis('off')
+
+        axes[1].imshow(after_slice, cmap='gray')
+        axes[1].set_title('Slice After (input)')
+        axes[1].axis('off')
+
+        axes[2].imshow(interp_slice, cmap='gray')
+        axes[2].set_title('Interpolated (output)')
+        axes[2].axis('off')
+
+        axes[3].imshow(degraded_slice, cmap='gray')
+        title = f'Degraded (not used)'
+        if degraded_weight is not None:
+            title = f'Degraded (q={degraded_weight:.2f} < {quality_threshold})'
+        axes[3].set_title(title)
+        axes[3].axis('off')
+
+    else:
+        # 2x2 layout: before, after, interpolated, XZ view
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        axes = axes.flatten()
+
+        axes[0].imshow(before_slice, cmap='gray')
+        axes[0].set_title('Slice Before (input)')
+        axes[0].axis('off')
+
+        axes[1].imshow(after_slice, cmap='gray')
+        axes[1].set_title('Slice After (input)')
+        axes[1].axis('off')
+
+        axes[2].imshow(interp_slice, cmap='gray')
+        axes[2].set_title('Interpolated (output)')
+        axes[2].axis('off')
+
+        # Show XZ cross-section to visualize z-continuity
+        y_mid = vol_before.shape[1] // 2
+        xz_before = normalize_for_display(vol_before[:, y_mid, :])
+        xz_interp = normalize_for_display(interpolated[:, y_mid, :])
+        xz_after = normalize_for_display(vol_after[:, y_mid, :])
+
+        # Stack them for comparison
+        xz_combined = np.vstack([xz_before, xz_interp, xz_after])
+        axes[3].imshow(xz_combined, cmap='gray', aspect='auto')
+        axes[3].set_title('XZ View: Before | Interp | After')
+        axes[3].axhline(y=xz_before.shape[0], color='cyan', linestyle='--', linewidth=0.5)
+        axes[3].axhline(y=xz_before.shape[0] + xz_interp.shape[0], color='cyan', linestyle='--', linewidth=0.5)
+        axes[3].axis('off')
+
+    fig.suptitle(f'Slice Interpolation Preview (z={preview_slice})', fontsize=14)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Preview saved to: {output_path}")
 
 
 def blend_with_degraded(interpolated, degraded, quality_weight):
@@ -618,10 +673,40 @@ def main():
     vol_after, res_after = read_omezarr(slice_after_path)
     vol_after = np.array(vol_after)
     
-    # Validate shapes match
+    # Handle shape mismatches
     if vol_before.shape != vol_after.shape:
-        p.error(f"Shape mismatch: {vol_before.shape} vs {vol_after.shape}")
-    
+        print(f"Shape mismatch detected: {vol_before.shape} vs {vol_after.shape}")
+
+        # Handle z-dimension mismatch by truncating to minimum
+        min_z = min(vol_before.shape[0], vol_after.shape[0])
+        if vol_before.shape[0] != vol_after.shape[0]:
+            print(f"  Truncating z-dimension to minimum: {min_z}")
+            vol_before = vol_before[:min_z]
+            vol_after = vol_after[:min_z]
+
+        # Handle X/Y dimension mismatch by using maximum and zero-padding
+        if vol_before.shape[1:] != vol_after.shape[1:]:
+            max_x = max(vol_before.shape[1], vol_after.shape[1])
+            max_y = max(vol_before.shape[2], vol_after.shape[2])
+            print(f"  Adjusting X/Y dimensions to: ({max_x}, {max_y})")
+
+            # Pad vol_before if needed
+            if vol_before.shape[1] < max_x or vol_before.shape[2] < max_y:
+                padded = np.zeros((min_z, max_x, max_y), dtype=vol_before.dtype)
+                padded[:, :vol_before.shape[1], :vol_before.shape[2]] = vol_before
+                vol_before = padded
+
+            # Pad vol_after if needed
+            if vol_after.shape[1] < max_x or vol_after.shape[2] < max_y:
+                padded = np.zeros((min_z, max_x, max_y), dtype=vol_after.dtype)
+                padded[:, :vol_after.shape[1], :vol_after.shape[2]] = vol_after
+                vol_after = padded
+
+        print(f"  Adjusted shapes: {vol_before.shape}")
+
+    # Store original z-depth for output (use the target z-depth, which is average of neighbors)
+    output_z_depth = vol_before.shape[0]
+
     # Validate resolutions match
     if res_before != res_after:
         print(f"Warning: Resolution mismatch: {res_before} vs {res_after}")
@@ -636,8 +721,31 @@ def main():
             vol_degraded = np.array(vol_degraded)
             
             if vol_degraded.shape != vol_before.shape:
-                print(f"Warning: Degraded slice shape mismatch, ignoring: {vol_degraded.shape} vs {vol_before.shape}")
-                vol_degraded = None
+                print(f"Degraded slice shape mismatch: {vol_degraded.shape} vs {vol_before.shape}")
+                # Try to adjust degraded slice to match
+                target_shape = vol_before.shape
+                try:
+                    # Truncate z if needed
+                    if vol_degraded.shape[0] > target_shape[0]:
+                        vol_degraded = vol_degraded[:target_shape[0]]
+                    elif vol_degraded.shape[0] < target_shape[0]:
+                        # Pad z with zeros
+                        padded = np.zeros(target_shape, dtype=vol_degraded.dtype)
+                        padded[:vol_degraded.shape[0]] = vol_degraded
+                        vol_degraded = padded
+
+                    # Handle X/Y mismatch
+                    if vol_degraded.shape[1:] != target_shape[1:]:
+                        padded = np.zeros(target_shape, dtype=vol_degraded.dtype)
+                        min_x = min(vol_degraded.shape[1], target_shape[1])
+                        min_y = min(vol_degraded.shape[2], target_shape[2])
+                        padded[:, :min_x, :min_y] = vol_degraded[:, :min_x, :min_y]
+                        vol_degraded = padded
+
+                    print(f"  Adjusted degraded slice shape to: {vol_degraded.shape}")
+                except Exception as e:
+                    print(f"  Could not adjust degraded slice shape, ignoring: {e}")
+                    vol_degraded = None
         else:
             print(f"Warning: Degraded slice not found, proceeding without it: {degraded_path}")
     
@@ -666,6 +774,8 @@ def main():
     
     # Blend with degraded slice if available
     final_result = interpolated
+    quality_weight = None
+    used_degraded = False
     if vol_degraded is not None:
         # Determine quality weight
         if args.degraded_weight is not None:
@@ -682,10 +792,25 @@ def main():
         if quality_weight >= args.min_quality_threshold:
             print(f"Blending with degraded slice (weight={quality_weight:.3f})")
             final_result = blend_with_degraded(interpolated, vol_degraded, quality_weight)
+            used_degraded = True
         else:
             print(f"Degraded slice quality ({quality_weight:.3f}) below threshold "
                   f"({args.min_quality_threshold}), using pure interpolation")
     
+    # Generate preview if requested
+    if args.preview is not None:
+        print(f"Generating preview...")
+        generate_preview(
+            vol_before, vol_after, interpolated,
+            output_path=args.preview,
+            vol_degraded=vol_degraded,
+            final_result=final_result if used_degraded else None,
+            preview_slice=args.preview_slice,
+            dpi=args.preview_dpi,
+            degraded_weight=quality_weight,
+            quality_threshold=args.min_quality_threshold
+        )
+
     # Convert to original dtype if needed
     original_dtype = vol_before.dtype
     if np.issubdtype(original_dtype, np.integer):
@@ -701,4 +826,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

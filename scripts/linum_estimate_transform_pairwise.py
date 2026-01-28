@@ -1,296 +1,443 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Estimate the transform aligning `in_moving` volume over `in_fixed` volume.
-Finds the best shift along the stacking direction and the best 2D transform.
-The output is a directory containing a transform (.mat) and a z offset (.txt)
-for aligning the moving slice over the fixed slice.
-"""
-import argparse
-import os
-import logging
+Pairwise slice registration for 3D reconstruction.
 
-import SimpleITK as sitk
-import matplotlib.pyplot as plt
+Estimates the 2D transform (translation, rotation, or affine) to align consecutive
+slices in a serial sectioning dataset. Uses phase correlation for robust initial
+alignment followed by intensity-based refinement.
+
+Output:
+- transform.tfm: SimpleITK transform file
+- offsets.txt: Z-index correspondence between fixed and moving volumes
+"""
+import linumpy._thread_config  # noqa: F401
+
+import argparse
+import logging
+import os
+
 import numpy as np
-from SimpleITK import CompositeTransform
+import SimpleITK as sitk
 
 from linumpy.io.zarr import read_omezarr
-from linumpy.stitching.registration import register_2d_images_sitk, apply_transform
+from linumpy.stitching.registration import pairWisePhaseCorrelation
 from linumpy.utils.io import assert_output_exists, add_overwrite_arg
+from linumpy.utils.metrics import collect_pairwise_registration_metrics
 
-# Configure logging
+from linumpy._thread_config import configure_all_libraries
+configure_all_libraries()
+
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# Argument Parsing
+# =============================================================================
+
 def _build_arg_parser():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument('in_fixed',
-                   help='Input stack in .ome.zarr format.')
-    p.add_argument('in_moving',
-                   help='Moving image in .ome.zarr format.')
-    p.add_argument('out_directory',
-                   help='Output directory containing transform (.mat) and offsets (.txt) for aligning\n'
-                        ' the moving slice over the previous slice.')
-    p.add_argument('--use_masks', action='store_true',
-                   help='Use masks in the registration process.')
-    p.add_argument('--moving_mask', type=str, default=None, )
-    p.add_argument('--fixed_mask', type=str, default=None, )
-    p.add_argument('--out_transform', default='transform.tfm',
-                   help='Output transform [%(default)s].')
-    p.add_argument('--out_offsets', default='offsets.txt',
-                   help='Output offsets along stacking axis in fixed and moving volumes [%(default)s].')
+    p.add_argument('in_fixed', help='Fixed volume (.ome.zarr)')
+    p.add_argument('in_moving', help='Moving volume (.ome.zarr)')
+    p.add_argument('out_directory', help='Output directory')
 
-    p.add_argument('--slicing_interval', type=float, default=0.200,
-                   help='Interval between slices in mm. [%(default)s]')
-    p.add_argument('--allowed_drifting', type=float, default=0.050,
-                   help='Allowing error in mm on slice position along the z axis.')
+    # Masks
+    p.add_argument('--use_masks', action='store_true', help='Use masks for registration')
+    p.add_argument('--moving_mask', type=str, default=None)
+    p.add_argument('--fixed_mask', type=str, default=None)
+
+    # Registration settings
     p.add_argument('--moving_slice_index', type=int, default=0,
-                   help='Index of the top slice (first clean slice) to use for registration.')
-    p.add_argument('--transform', choices=['euler', 'affine', 'translation'], default='affine',
-                   help='Registration method to use. [%(default)s]')
-    p.add_argument('--metric', choices=['MSE', 'CC', 'AntsCC', 'MI'], default='MSE',
-                   help='Registration metric to use. [%(default)s]')
-    p.add_argument('--max_iterations', type=int, default=2500,
-                   help='Maximum number of iterations. [%(default)s]')
-    p.add_argument('--grad_mag_tol', type=float, default=1e-6,
-                   help='Gradient magnitude tolerance for registration. [%(default)s]')
-    p.add_argument('--screenshot', default=None,
-                   help='Path to save a screenshot of the fixed and moving images for debugging.')
+                   help='Z-index in moving volume to use [%(default)s]')
+    p.add_argument('--transform', choices=['translation', 'euler', 'affine'],
+                   default='translation', help='Transform type [%(default)s]')
+    p.add_argument('--metric', choices=['MSE', 'CC', 'MI'], default='CC',
+                   help='Similarity metric [%(default)s]')
+    p.add_argument('--max_translation', type=float, default=50.0,
+                   help='Max allowed translation in pixels [%(default)s]')
+    p.add_argument('--max_rotation', type=float, default=2.0,
+                   help='Max allowed rotation in degrees [%(default)s]')
+
+    # Z-matching
+    p.add_argument('--slicing_interval', type=float, default=0.200,
+                   help='Physical distance between slices in mm [%(default)s]')
+    p.add_argument('--slice_gap_multiplier', type=int, default=1,
+                   help='Multiplier when slices are skipped [%(default)s]')
+    p.add_argument('--allowed_drifting', type=float, default=0.050,
+                   help='Z-drift tolerance in mm [%(default)s]')
+
+    # Output
+    p.add_argument('--out_transform', default='transform.tfm')
+    p.add_argument('--out_offsets', default='offsets.txt')
+    p.add_argument('--screenshot', default=None, help='Debug screenshot path')
+
     add_overwrite_arg(p)
     return p
 
 
-def normalize_image(image, lower_percentile=0.5, upper_percentile=99.5):
-    """
-    Normalize image to [0, 1] range using percentile-based clipping.
-    
-    Parameters
-    ----------
-    image : np.ndarray
-        Input image.
-    lower_percentile : float
-        Lower percentile for clipping.
-    upper_percentile : float
-        Upper percentile for clipping.
-        
-    Returns
-    -------
-    np.ndarray
-        Normalized image in [0, 1] range.
-    """
-    # Get values only from non-zero regions
-    valid_mask = image > 0
-    if not np.any(valid_mask):
-        logger.warning("Image contains no positive values, returning zeros")
+# =============================================================================
+# Image Processing
+# =============================================================================
+
+def normalize_image(image):
+    """Normalize image to [0, 1] using percentile clipping."""
+    valid = image > 0
+    if not np.any(valid):
         return np.zeros_like(image, dtype=np.float32)
-    
-    pmin = np.percentile(image[valid_mask], lower_percentile)
-    pmax = np.percentile(image, upper_percentile)
-    
+
+    pmin = np.percentile(image[valid], 1)
+    pmax = np.percentile(image, 99)
+
     if pmax <= pmin:
-        logger.warning(f"Invalid percentile range: [{pmin}, {pmax}], returning zeros")
         return np.zeros_like(image, dtype=np.float32)
-    
+
     normalized = (image.astype(np.float32) - pmin) / (pmax - pmin)
     return np.clip(normalized, 0, 1)
 
 
-def convert_3d_rigid_to_2d(rigid_3d):
-    """Convert a 3D rigid (Euler) transform to 2D for applying to single slices."""
-    # Extract rotation around z, translation x/y, and center x/y
-    params = rigid_3d.GetParameters()
-    rz = params[2]  # rotation around z axis
-    translation = params[3:5]  # tx, ty
-    center = rigid_3d.GetCenter()[:2]
-    rigid_2d = sitk.Euler2DTransform()
-    rigid_2d.SetCenter(center)
-    rigid_2d.SetAngle(rz)
-    rigid_2d.SetTranslation(translation)
-    return rigid_2d
-
-
-def apply_transform_mask(moving_mask, transform):
+def compute_phase_correlation(fixed, moving, downsample=4):
     """
-    Apply transform to a binary mask using nearest-neighbor interpolation.
+    Compute translation using phase correlation.
 
-    Parameters
-    ----------
-    moving_mask: numpy.ndarray
-        Binary mask to transform.
-    transform: sitk.sitkTransform
-        Transform to apply.
-
-    Returns
-    -------
-    numpy.ndarray
-        Transformed binary mask.
+    Uses downsampled images for speed, returns translation in original coordinates.
     """
-    moving_mask_sitk = sitk.GetImageFromArray(moving_mask)
+    from scipy.ndimage import zoom
 
-    resampler = sitk.ResampleImageFilter()
-    resampler.SetReferenceImage(moving_mask_sitk)
-    resampler.SetInterpolator(sitk.sitkNearestNeighbor)  # Use nearest neighbor for masks
-    resampler.SetDefaultPixelValue(0)
-    resampler.SetTransform(transform)
+    # Downsample for speed
+    if downsample > 1:
+        fixed_ds = zoom(fixed, 1/downsample, order=1)
+        moving_ds = zoom(moving, 1/downsample, order=1)
+    else:
+        fixed_ds, moving_ds = fixed, moving
 
-    out = resampler.Execute(moving_mask_sitk)
-    out = sitk.GetArrayFromImage(out)
+    try:
+        deltas = pairWisePhaseCorrelation(fixed_ds, moving_ds)
+        # Scale back to original resolution
+        tx = float(deltas[1]) * downsample
+        ty = float(deltas[0]) * downsample
+        return tx, ty
+    except Exception as e:
+        logger.warning(f"Phase correlation failed: {e}")
+        return 0.0, 0.0
 
-    return (out > 0).astype(np.uint8)
+
+# =============================================================================
+# Registration
+# =============================================================================
+
+def register_translation(fixed, moving, fixed_mask=None, moving_mask=None,
+                         initial_translation=None, metric='CC', max_iter=500):
+    """
+    Register using translation-only transform.
+
+    Returns (tx, ty, metric_value).
+    """
+    fixed_sitk = sitk.GetImageFromArray(fixed.astype(np.float32))
+    moving_sitk = sitk.GetImageFromArray(moving.astype(np.float32))
+
+    # Initial transform
+    transform = sitk.TranslationTransform(2)
+    if initial_translation is not None:
+        transform.SetOffset([float(initial_translation[0]), float(initial_translation[1])])
+
+    # Registration setup
+    registration = sitk.ImageRegistrationMethod()
+
+    if metric == 'CC':
+        registration.SetMetricAsCorrelation()
+    elif metric == 'MI':
+        registration.SetMetricAsMattesMutualInformation(numberOfHistogramBins=50)
+    else:
+        registration.SetMetricAsMeanSquares()
+
+    # Use masks if provided
+    if fixed_mask is not None:
+        fixed_mask_sitk = sitk.GetImageFromArray(fixed_mask.astype(np.uint8))
+        registration.SetMetricFixedMask(fixed_mask_sitk)
+    if moving_mask is not None:
+        moving_mask_sitk = sitk.GetImageFromArray(moving_mask.astype(np.uint8))
+        registration.SetMetricMovingMask(moving_mask_sitk)
+
+    registration.SetOptimizerAsRegularStepGradientDescent(
+        learningRate=2.0,
+        minStep=0.01,
+        numberOfIterations=max_iter
+    )
+    registration.SetOptimizerScalesFromPhysicalShift()
+
+    registration.SetInitialTransform(transform, inPlace=False)
+    registration.SetInterpolator(sitk.sitkLinear)
+
+    # Multi-resolution
+    registration.SetShrinkFactorsPerLevel([4, 2, 1])
+    registration.SetSmoothingSigmasPerLevel([2, 1, 0])
+
+    try:
+        final_transform = registration.Execute(fixed_sitk, moving_sitk)
+        offset = final_transform.GetOffset()
+        metric_value = registration.GetMetricValue()
+        return offset[0], offset[1], metric_value
+    except Exception as e:
+        logger.warning(f"Registration failed: {e}")
+        return 0.0, 0.0, float('inf')
+
+
+def register_rigid(fixed, moving, fixed_mask=None, moving_mask=None,
+                   initial_translation=None, metric='CC', max_iter=500):
+    """
+    Register using rigid (rotation + translation) transform.
+
+    Returns (tx, ty, angle_deg, metric_value).
+    """
+    fixed_sitk = sitk.GetImageFromArray(fixed.astype(np.float32))
+    moving_sitk = sitk.GetImageFromArray(moving.astype(np.float32))
+
+    # Initial transform centered on image
+    transform = sitk.Euler2DTransform()
+    center = [fixed.shape[1] / 2.0, fixed.shape[0] / 2.0]
+    transform.SetCenter(center)
+
+    if initial_translation is not None:
+        transform.SetTranslation([float(initial_translation[0]), float(initial_translation[1])])
+
+    # Registration setup
+    registration = sitk.ImageRegistrationMethod()
+
+    if metric == 'CC':
+        registration.SetMetricAsCorrelation()
+    elif metric == 'MI':
+        registration.SetMetricAsMattesMutualInformation(numberOfHistogramBins=50)
+    else:
+        registration.SetMetricAsMeanSquares()
+
+    if fixed_mask is not None:
+        fixed_mask_sitk = sitk.GetImageFromArray(fixed_mask.astype(np.uint8))
+        registration.SetMetricFixedMask(fixed_mask_sitk)
+    if moving_mask is not None:
+        moving_mask_sitk = sitk.GetImageFromArray(moving_mask.astype(np.uint8))
+        registration.SetMetricMovingMask(moving_mask_sitk)
+
+    registration.SetOptimizerAsRegularStepGradientDescent(
+        learningRate=1.0,
+        minStep=0.001,
+        numberOfIterations=max_iter
+    )
+    registration.SetOptimizerScalesFromPhysicalShift()
+
+    registration.SetInitialTransform(transform, inPlace=False)
+    registration.SetInterpolator(sitk.sitkLinear)
+
+    registration.SetShrinkFactorsPerLevel([4, 2, 1])
+    registration.SetSmoothingSigmasPerLevel([2, 1, 0])
+
+    try:
+        final_transform = registration.Execute(fixed_sitk, moving_sitk)
+        params = final_transform.GetParameters()
+        angle_rad = params[0]
+        tx, ty = params[1], params[2]
+        metric_value = registration.GetMetricValue()
+        return tx, ty, np.degrees(angle_rad), metric_value
+    except Exception as e:
+        logger.warning(f"Rigid registration failed: {e}")
+        return 0.0, 0.0, 0.0, float('inf')
+
+
+def create_3d_transform(tx, ty, angle_deg=0.0, transform_type='translation'):
+    """Create a 3D SimpleITK transform from 2D parameters."""
+    if transform_type == 'translation' or angle_deg == 0.0:
+        transform = sitk.TranslationTransform(3)
+        transform.SetOffset([tx, ty, 0.0])
+    else:
+        transform = sitk.Euler3DTransform()
+        transform.SetRotation(0.0, 0.0, np.radians(angle_deg))
+        transform.SetTranslation([tx, ty, 0.0])
+    return transform
+
+
+# =============================================================================
+# Main Registration Logic
+# =============================================================================
+
+def find_best_z_match(fixed_vol, moving_image, expected_z, search_range, metric='CC'):
+    """
+    Find the best matching z-index in fixed volume for the moving image.
+
+    Uses normalized cross-correlation on downsampled images for speed.
+    """
+    from scipy.ndimage import zoom
+
+    best_z = expected_z
+    best_score = -float('inf')
+
+    # Downsample for speed
+    moving_ds = zoom(moving_image, 0.25, order=1)
+    moving_norm = normalize_image(moving_ds)
+
+    for z in range(max(0, expected_z - search_range),
+                   min(fixed_vol.shape[0], expected_z + search_range + 1)):
+        fixed_slice = np.array(fixed_vol[z])
+        fixed_ds = zoom(fixed_slice, 0.25, order=1)
+        fixed_norm = normalize_image(fixed_ds)
+
+        # Compute correlation
+        if np.std(fixed_norm) > 0 and np.std(moving_norm) > 0:
+            score = np.corrcoef(fixed_norm.ravel(), moving_norm.ravel())[0, 1]
+            if score > best_score:
+                best_score = score
+                best_z = z
+
+    logger.info(f"Best z-match: {best_z} (correlation: {best_score:.3f})")
+    return best_z
 
 
 def main():
     parser = _build_arg_parser()
     args = parser.parse_args()
 
-    logger.info(f"Loading fixed volume: {args.in_fixed}")
+    # Load volumes
+    logger.info(f"Loading fixed: {args.in_fixed}")
     fixed_vol, res = read_omezarr(args.in_fixed)
-    logger.info(f"Loading moving volume: {args.in_moving}")
-    moving_vol, res = read_omezarr(args.in_moving)
+    logger.info(f"Loading moving: {args.in_moving}")
+    moving_vol, _ = read_omezarr(args.in_moving)
 
+    # Create output directory
     assert_output_exists(args.out_directory, parser, args)
     os.makedirs(args.out_directory)
 
-    # Normalize moving image using safe percentile-based normalization
-    moving_image_raw = np.array(moving_vol[args.moving_slice_index])
-    moving_image_normalized = normalize_image(moving_image_raw)
+    # Get moving image
+    moving_raw = np.array(moving_vol[args.moving_slice_index])
+    moving_image = normalize_image(moving_raw)
 
-    # Load masks if requested
-    moving_mask_original = None
-    fixed_mask_vol = None
+    # Load masks if provided
+    fixed_mask = None
+    moving_mask = None
     if args.use_masks:
-        if args.moving_mask is not None:
+        if args.moving_mask:
             moving_mask_vol, _ = read_omezarr(args.moving_mask)
-            moving_mask_original = np.array(moving_mask_vol[args.moving_slice_index])
-            moving_mask_original = (moving_mask_original > 0).astype(np.uint8)
-        if args.fixed_mask is not None:
+            moving_mask = np.array(moving_mask_vol[args.moving_slice_index]) > 0
+        if args.fixed_mask:
             fixed_mask_vol, _ = read_omezarr(args.fixed_mask)
 
-    # Calculate the index in fixed image which is expected to match the moving image
-    interval_vox = int(np.ceil(args.slicing_interval / res[0]))  # in voxels
-    allowed_drifting_vox = int(np.ceil(args.allowed_drifting / res[0]))
-    expected_corresponding_index = interval_vox + args.moving_slice_index
+    # Calculate expected z-index correspondence
+    interval_vox = int(np.ceil(args.slicing_interval / res[0]))
+    total_interval = interval_vox * args.slice_gap_multiplier
+    expected_z = total_interval + args.moving_slice_index
+    search_range = int(np.ceil(args.allowed_drifting / res[0])) * args.slice_gap_multiplier
 
-    candidate_indices = np.arange(max(0, expected_corresponding_index - allowed_drifting_vox),
-                                  min(expected_corresponding_index + allowed_drifting_vox + 1, fixed_vol.shape[0]))
+    logger.info(f"Expected z: {expected_z}, search range: ±{search_range}")
 
-    logger.info(f"Testing {len(candidate_indices)} candidate z-indices: {candidate_indices.tolist()}")
-    logger.info(f"Expected correspondence at z={expected_corresponding_index} "
-                f"(interval={interval_vox} voxels, drift tolerance=±{allowed_drifting_vox} voxels)")
+    # Find best z-match
+    best_z = find_best_z_match(fixed_vol, moving_raw, expected_z, search_range)
 
-    errors = []
-    transforms = []
-    
-    for i in candidate_indices:
-        # Reset moving image and mask for each candidate
-        moving_image = moving_image_normalized.copy()
-        moving_mask = moving_mask_original.copy() if moving_mask_original is not None else None
+    # Get fixed image at best z
+    fixed_raw = np.array(fixed_vol[best_z])
+    fixed_image = normalize_image(fixed_raw)
 
-        # Normalize fixed image
-        fixed_image_raw = np.array(fixed_vol[i])
-        fixed_image = normalize_image(fixed_image_raw)
+    # Get fixed mask if provided
+    if args.use_masks and args.fixed_mask:
+        fixed_mask = np.array(fixed_mask_vol[best_z]) > 0
 
-        # Load fixed mask for this slice if provided
-        if args.use_masks and args.fixed_mask is not None:
-            fixed_mask = np.array(fixed_mask_vol[i])
-            fixed_mask = (fixed_mask > 0).astype(np.uint8)
-        else:
-            fixed_mask = None
+    # Step 1: Phase correlation for initial translation estimate
+    logger.info("Computing phase correlation...")
+    init_tx, init_ty = compute_phase_correlation(fixed_image, moving_image)
+    init_mag = np.sqrt(init_tx**2 + init_ty**2)
+    logger.info(f"Phase correlation: tx={init_tx:.1f}, ty={init_ty:.1f} (mag={init_mag:.1f})")
 
-        try:
-            # Perform rigid registration if needed, e.g. the requested method is affine
-            if args.transform == 'affine':
-                rigid_transform, _, rigid_error = register_2d_images_sitk(
-                    fixed_image, moving_image, metric=args.metric,
-                    method='euler', max_iterations=args.max_iterations,
-                    grad_mag_tol=args.grad_mag_tol, moving_mask=moving_mask, fixed_mask=fixed_mask,
-                    return_3d_transform=True, verbose=False)
-                two_d_transform = convert_3d_rigid_to_2d(rigid_transform)
-                moving_image = apply_transform(moving_image, two_d_transform)
-                
-                # Also transform the moving mask to maintain consistency
-                if moving_mask is not None:
-                    moving_mask = apply_transform_mask(moving_mask, two_d_transform)
+    # Step 2: Refine with intensity-based registration
+    if args.transform == 'translation':
+        logger.info("Refining with translation registration...")
+        tx, ty, metric_val = register_translation(
+            fixed_image, moving_image,
+            fixed_mask, moving_mask,
+            initial_translation=(init_tx, init_ty),
+            metric=args.metric
+        )
+        angle_deg = 0.0
+    else:
+        logger.info(f"Refining with {args.transform} registration...")
+        tx, ty, angle_deg, metric_val = register_rigid(
+            fixed_image, moving_image,
+            fixed_mask, moving_mask,
+            initial_translation=(init_tx, init_ty),
+            metric=args.metric
+        )
 
-            # Align the slices
-            # For affine: don't use masks (needs more freedom after rigid alignment)
-            # For euler/translation: use masks
-            use_masks_for_final = args.transform != 'affine'
-            final_moving_mask = moving_mask if use_masks_for_final else None
-            final_fixed_mask = fixed_mask if use_masks_for_final else None
+    # Validate result
+    translation_mag = np.sqrt(tx**2 + ty**2)
+    logger.info(f"Final: tx={tx:.1f}, ty={ty:.1f}, rot={angle_deg:.2f}°, mag={translation_mag:.1f}")
 
-            transform, stop_condition, error = register_2d_images_sitk(
-                fixed_image, moving_image, metric=args.metric,
-                method=args.transform, max_iterations=args.max_iterations,
-                grad_mag_tol=args.grad_mag_tol, moving_mask=final_moving_mask, fixed_mask=final_fixed_mask,
-                return_3d_transform=True, verbose=False)
-            
-            logger.info(f"  Candidate z={i}: error={error:.6f} ({stop_condition})")
-            errors.append(error)
+    # Check bounds
+    if translation_mag > args.max_translation:
+        logger.warning(f"Translation {translation_mag:.1f} exceeds max {args.max_translation}")
+        logger.warning("Using phase correlation result instead")
+        tx, ty = init_tx, init_ty
+        angle_deg = 0.0
+        translation_mag = init_mag
 
-            # Create the full transform including the previous rigid part if any
-            if args.transform == 'affine':
-                composite_transform = CompositeTransform(3)
-                # Note: CompositeTransform applies transforms in REVERSE order of addition
-                # We want: final = affine(rigid(original))
-                # So we add: affine first, then rigid
-                composite_transform.AddTransform(transform)
-                composite_transform.AddTransform(rigid_transform)
-                transforms.append(composite_transform)
-            else:
-                transforms.append(transform)
-                
-        except Exception as e:
-            logger.warning(f"  Candidate z={i}: registration failed - {e}")
-            errors.append(float('inf'))
-            transforms.append(None)
+    if abs(angle_deg) > args.max_rotation:
+        logger.warning(f"Rotation {angle_deg:.2f}° exceeds max {args.max_rotation}°")
+        angle_deg = 0.0
 
-    # Find best candidate
-    best_fit_index = np.argmin(errors)
-    best_candidate_index = candidate_indices[best_fit_index]
-    best_transform = transforms[best_fit_index]
-    best_error = errors[best_fit_index]
+    # Still exceeds? Fall back to identity
+    if translation_mag > args.max_translation:
+        logger.warning("Phase correlation also exceeds threshold - using identity")
+        tx, ty, angle_deg = 0.0, 0.0, 0.0
 
-    if best_transform is None:
-        raise RuntimeError("All registration candidates failed")
+    # Create and save transform
+    transform = create_3d_transform(tx, ty, angle_deg, args.transform)
+    sitk.WriteTransform(transform, os.path.join(args.out_directory, args.out_transform))
 
-    logger.info(f"Best match: z={best_candidate_index} with error={best_error:.6f}")
-
-    # Save results
-    sitk.WriteTransform(best_transform, os.path.join(args.out_directory, args.out_transform))
+    # Save offsets
     np.savetxt(os.path.join(args.out_directory, args.out_offsets),
-               np.array([best_candidate_index, args.moving_slice_index]), fmt='%d')
+               np.array([best_z, args.moving_slice_index]), fmt='%d')
 
-    if args.screenshot is not None:
-        # Compute the registered result for visualization
-        out = apply_transform(moving_vol, best_transform)
-        out_vol = np.zeros((best_candidate_index + moving_vol.shape[0] - args.moving_slice_index, *fixed_vol.shape[1:]),
-                           dtype=fixed_vol.dtype)
-        out_vol[:best_candidate_index] = fixed_vol[:best_candidate_index]
-        out_vol[best_candidate_index:] = out[args.moving_slice_index:]
+    # Collect metrics
+    collect_pairwise_registration_metrics(
+        registration_error=float(metric_val) if metric_val != float('inf') else 0.0,
+        tx=float(tx),
+        ty=float(ty),
+        rotation_deg=float(angle_deg),
+        best_z_index=int(best_z),
+        expected_z_index=int(expected_z),
+        output_path=args.out_directory,
+        fixed_path=args.in_fixed,
+        moving_path=args.in_moving,
+        params={'transform_type': args.transform, 'metric': args.metric}
+    )
 
-        # Get the correctly normalized images for display
-        best_fixed_image = normalize_image(np.array(fixed_vol[best_candidate_index]))
-        best_moving_registered = apply_transform(moving_image_normalized, best_transform)
+    logger.info(f"Transform saved to {args.out_directory}")
 
-        # Save the images for debugging
-        fig, ax = plt.subplots(2, 2, figsize=(10, 6))
-        ax[0, 0].imshow(best_fixed_image, cmap='gray')
-        ax[0, 0].set_title(f'Fixed slice z={best_candidate_index}')
-        ax[0, 1].imshow(best_moving_registered, cmap='gray')
-        ax[0, 1].set_title(f'Moving slice z={args.moving_slice_index} (registered)')
-        ax[1, 0].imshow(out_vol[:, fixed_vol.shape[1] // 2, :], cmap='gray')
-        ax[1, 0].set_title('Aligned slices (XZ view)')
-        ax[1, 1].imshow(out_vol[:, :, fixed_vol.shape[2] // 2], cmap='gray')
-        ax[1, 1].set_title('Aligned slices (YZ view)')
-        fig.suptitle(f'Registration error: {best_error:.6f}')
+    # Screenshot if requested
+    if args.screenshot:
+        import matplotlib.pyplot as plt
+
+        # Apply transform for visualization
+        moving_sitk = sitk.GetImageFromArray(moving_image.astype(np.float32))
+        transform_2d = sitk.TranslationTransform(2, [tx, ty])
+        resampler = sitk.ResampleImageFilter()
+        resampler.SetReferenceImage(moving_sitk)
+        resampler.SetTransform(transform_2d)
+        resampler.SetInterpolator(sitk.sitkLinear)
+        registered = sitk.GetArrayFromImage(resampler.Execute(moving_sitk))
+
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        axes[0].imshow(fixed_image, cmap='gray')
+        axes[0].set_title(f'Fixed (z={best_z})')
+        axes[1].imshow(moving_image, cmap='gray')
+        axes[1].set_title('Moving')
+        axes[2].imshow(registered, cmap='gray')
+        axes[2].set_title(f'Registered (tx={tx:.1f}, ty={ty:.1f})')
+
+        for ax in axes:
+            ax.axis('off')
+
+        fig.suptitle(f'Registration: metric={metric_val:.4f}')
         fig.tight_layout()
-        fig.savefig(args.screenshot, dpi=400)
+        fig.savefig(args.screenshot, dpi=150)
         plt.close(fig)
-        logger.info(f"Screenshot saved to: {args.screenshot}")
+        logger.info(f"Screenshot saved to {args.screenshot}")
 
 
 if __name__ == '__main__':
