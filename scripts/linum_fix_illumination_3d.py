@@ -4,11 +4,34 @@
 """
 Detect and fix the lateral illumination inhomogeneities for each
 3D tiles of a mosaic grid.
+
+This is the CPU version. For GPU acceleration, use linum_fix_illumination_3d_gpu.py
 """
 
-from os import environ
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
 
-environ["OMP_NUM_THREADS"] = "1"
+import os
+
+# When using multiprocessing with pqdm, we need to limit threads per worker
+# to prevent thread oversubscription. The number of threads per worker should be
+# calculated based on total CPUs and number of parallel processes.
+# This is set dynamically in main() after parsing arguments.
+# For now, we preserve any existing OMP_NUM_THREADS setting from Nextflow,
+# or default to 1 for safety when multiprocessing.
+if 'OMP_NUM_THREADS' not in os.environ:
+    os.environ["OMP_NUM_THREADS"] = "1"
+
+# Configure JAX/XLA thread limits for BaSiCPy
+# Must be set BEFORE importing jax/basicpy
+if 'XLA_FLAGS' not in os.environ:
+    omp_threads = os.environ.get('OMP_NUM_THREADS', '1')
+    os.environ['XLA_FLAGS'] = f'--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads={omp_threads}'
+if 'OMP_NUM_THREADS' not in os.environ:
+    os.environ["OMP_NUM_THREADS"] = "1"
+
+# Force CPU mode for JAX
+os.environ['JAX_PLATFORMS'] = 'cpu'
 
 import argparse
 import tempfile
@@ -45,7 +68,16 @@ def _build_arg_parser():
 
 
 def process_tile(params: dict):
-    """Process a tile and add it to the output mosaic"""
+    """Process a tile and add it to the output mosaic.
+
+    Note: This function runs in a subprocess when using pqdm multiprocessing.
+    Thread limits are configured via environment variables which are inherited.
+    """
+    # Ensure thread limits are applied in this worker process
+    # (environment variables are inherited but threadpoolctl needs to be reapplied)
+    from linumpy._thread_config import apply_threadpool_limits
+    apply_threadpool_limits()
+
     file = params["slice_file"]
     z = params["z"]
     tile_shape = params["tile_shape"]
