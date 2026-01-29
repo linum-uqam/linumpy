@@ -40,6 +40,17 @@ def _build_arg_parser():
                    help='Optional slice configuration file (.csv) to filter slices.\n'
                         'Expected columns: slice_id, use (true/false), notes (optional)')
 
+    p.add_argument('--excluded_slice_mode',
+                   choices=['keep', 'local_median', 'median', 'zero'],
+                   default='keep',
+                   help='How to handle shifts that involve excluded slices:\n'
+                        '  keep: use original shifts (default)\n'
+                        '  local_median: replace with local median of neighbors\n'
+                        '  median: replace with global median of non-excluded shifts\n'
+                        '  zero: replace with zero')
+    p.add_argument('--excluded_slice_window', type=int, default=2,
+                   help='Neighbor window for excluded-slice replacement [%(default)s]')
+
     # Outlier filtering options
     p.add_argument('--filter_outliers', action='store_true',
                    help='Detect and filter outlier shifts that cause excessive drift.')
@@ -54,6 +65,12 @@ def _build_arg_parser():
                         '  iqr: Auto-detect outliers using IQR and replace with local median [%(default)s]')
     p.add_argument('--iqr_multiplier', type=float, default=1.5,
                    help='IQR multiplier for outlier detection (only with --outlier_method iqr). [%(default)s]')
+    p.add_argument('--max_step_mm', type=float, default=0.0,
+                   help='Maximum allowed per-step shift in mm. 0 disables. [%(default)s]')
+    p.add_argument('--step_window', type=int, default=2,
+                   help='Neighbor window for step outlier replacement [%(default)s]')
+    p.add_argument('--step_method', choices=['clamp', 'local_median'], default='local_median',
+                   help='How to handle per-step spikes: clamp or local_median [%(default)s]')
 
     # Drift centering
     p.add_argument('--no_center_drift', action='store_true',
@@ -217,6 +234,157 @@ def filter_outlier_shifts(shifts_df, max_shift_mm=0.5, method='median', iqr_mult
     new_cumsum_x = df['x_shift_mm'].cumsum()
     new_cumsum_y = df['y_shift_mm'].cumsum()
     print(f"New total drift: ({new_cumsum_x.iloc[-1]:.3f}, {new_cumsum_y.iloc[-1]:.3f}) mm")
+
+    return df
+
+
+def _replace_with_local_median(df, idx, window, skip_mask=None):
+    pos = df.index.get_loc(idx)
+    neighbor_vals_x = []
+    neighbor_vals_y = []
+    neighbor_vals_px_x = []
+    neighbor_vals_px_y = []
+
+    for offset in range(-window, window + 1):
+        if offset == 0:
+            continue
+        neighbor_pos = pos + offset
+        if 0 <= neighbor_pos < len(df):
+            neighbor_idx = df.index[neighbor_pos]
+            if skip_mask is not None and skip_mask.get(neighbor_idx, False):
+                continue
+            neighbor_vals_x.append(df.loc[neighbor_idx, 'x_shift_mm'])
+            neighbor_vals_y.append(df.loc[neighbor_idx, 'y_shift_mm'])
+            if 'x_shift' in df.columns:
+                neighbor_vals_px_x.append(df.loc[neighbor_idx, 'x_shift'])
+                neighbor_vals_px_y.append(df.loc[neighbor_idx, 'y_shift'])
+
+    if not neighbor_vals_x:
+        return None
+
+    result = {
+        'x_shift_mm': float(np.median(neighbor_vals_x)),
+        'y_shift_mm': float(np.median(neighbor_vals_y))
+    }
+    if neighbor_vals_px_x:
+        result['x_shift'] = float(np.median(neighbor_vals_px_x))
+        result['y_shift'] = float(np.median(neighbor_vals_px_y))
+    return result
+
+
+def handle_excluded_slice_shifts(shifts_df, excluded_slice_ids, mode='keep', window=2):
+    if not excluded_slice_ids or mode == 'keep':
+        return shifts_df
+
+    df = shifts_df.copy()
+    excluded_set = set(int(s) for s in excluded_slice_ids)
+    mask = (
+        df['fixed_id'].astype(int).isin(excluded_set) |
+        df['moving_id'].astype(int).isin(excluded_set)
+    )
+    n_pairs = int(mask.sum())
+    if n_pairs == 0:
+        print("No shifts involve excluded slices")
+        return df
+
+    print(f"Handling {n_pairs} shifts involving excluded slices (mode: {mode})")
+
+    if mode == 'zero':
+        df.loc[mask, ['x_shift_mm', 'y_shift_mm']] = 0.0
+        if 'x_shift' in df.columns:
+            df.loc[mask, ['x_shift', 'y_shift']] = 0.0
+        return df
+
+    non_masked = df[~mask]
+    if non_masked.empty:
+        print("Warning: all shifts involve excluded slices; falling back to zeros")
+        df.loc[mask, ['x_shift_mm', 'y_shift_mm']] = 0.0
+        if 'x_shift' in df.columns:
+            df.loc[mask, ['x_shift', 'y_shift']] = 0.0
+        return df
+
+    if mode == 'median':
+        med_x = float(non_masked['x_shift_mm'].median())
+        med_y = float(non_masked['y_shift_mm'].median())
+        df.loc[mask, 'x_shift_mm'] = med_x
+        df.loc[mask, 'y_shift_mm'] = med_y
+        if 'x_shift' in df.columns:
+            df.loc[mask, 'x_shift'] = float(non_masked['x_shift'].median())
+            df.loc[mask, 'y_shift'] = float(non_masked['y_shift'].median())
+        return df
+
+    # local_median
+    skip_mask = {idx: True for idx in df[mask].index}
+    for idx in df[mask].index:
+        replacement = _replace_with_local_median(df, idx, window, skip_mask=skip_mask)
+        if replacement is None:
+            df.loc[idx, 'x_shift_mm'] = float(non_masked['x_shift_mm'].median())
+            df.loc[idx, 'y_shift_mm'] = float(non_masked['y_shift_mm'].median())
+            if 'x_shift' in df.columns:
+                df.loc[idx, 'x_shift'] = float(non_masked['x_shift'].median())
+                df.loc[idx, 'y_shift'] = float(non_masked['y_shift'].median())
+            continue
+        df.loc[idx, 'x_shift_mm'] = replacement['x_shift_mm']
+        df.loc[idx, 'y_shift_mm'] = replacement['y_shift_mm']
+        if 'x_shift' in replacement:
+            df.loc[idx, 'x_shift'] = replacement['x_shift']
+            df.loc[idx, 'y_shift'] = replacement['y_shift']
+
+    return df
+
+
+def filter_step_outliers(shifts_df, max_step_mm=0.0, window=2, method='local_median'):
+    """
+    Fix per-step spikes in shifts, independent of global outlier detection.
+
+    Parameters
+    ----------
+    max_step_mm : float
+        Maximum allowed per-step shift magnitude in mm. 0 disables.
+    window : int
+        Neighbor window size for local median replacement.
+    method : str
+        'clamp' or 'local_median'.
+    """
+    if max_step_mm is None or max_step_mm <= 0:
+        return shifts_df
+
+    df = shifts_df.copy()
+    shift_mag = np.sqrt(df['x_shift_mm']**2 + df['y_shift_mm']**2)
+    outlier_mask = shift_mag > max_step_mm
+
+    n_outliers = int(outlier_mask.sum())
+    if n_outliers == 0:
+        print(f"No step outliers detected (threshold: {max_step_mm} mm)")
+        return df
+
+    print(f"Detected {n_outliers} step outliers (threshold: {max_step_mm} mm)")
+
+    for idx in df[outlier_mask].index:
+        row = df.loc[idx]
+        if method == 'clamp':
+            scale = max_step_mm / shift_mag[idx]
+            df.loc[idx, 'x_shift_mm'] *= scale
+            df.loc[idx, 'y_shift_mm'] *= scale
+            if 'x_shift' in df.columns:
+                df.loc[idx, 'x_shift'] *= scale
+                df.loc[idx, 'y_shift'] *= scale
+            print(f"  {int(row['fixed_id'])}->{int(row['moving_id'])}: clamped")
+        else:
+            replacement = _replace_with_local_median(df, idx, window)
+            if replacement is None:
+                print(f"  {int(row['fixed_id'])}->{int(row['moving_id'])}: no neighbors, leaving as-is")
+                continue
+            old_x = df.loc[idx, 'x_shift_mm']
+            old_y = df.loc[idx, 'y_shift_mm']
+            df.loc[idx, 'x_shift_mm'] = replacement['x_shift_mm']
+            df.loc[idx, 'y_shift_mm'] = replacement['y_shift_mm']
+            if 'x_shift' in replacement:
+                df.loc[idx, 'x_shift'] = replacement['x_shift']
+                df.loc[idx, 'y_shift'] = replacement['y_shift']
+            print(f"  {int(row['fixed_id'])}->{int(row['moving_id'])}: "
+                  f"({old_x:.3f}, {old_y:.3f}) -> "
+                  f"({replacement['x_shift_mm']:.3f}, {replacement['y_shift_mm']:.3f}) mm")
 
     return df
 
@@ -417,11 +585,20 @@ def main():
             print(f"Excluding slices from config: {sorted(excluded)}")
     else:
         selected_slice_ids = available_slice_ids
+        excluded = set()
 
     print(f"Processing {len(selected_slice_ids)} slices: {selected_slice_ids}")
 
     # Load shifts file
     shifts_df = pd.read_csv(args.in_shifts)
+
+    if excluded:
+        shifts_df = handle_excluded_slice_shifts(
+            shifts_df,
+            excluded_slice_ids=excluded,
+            mode=args.excluded_slice_mode,
+            window=args.excluded_slice_window
+        )
 
     # Report original cumulative drift
     orig_cumsum_x = shifts_df['x_shift_mm'].cumsum()
@@ -440,6 +617,15 @@ def main():
             max_shift_mm=args.max_shift_mm,
             method=args.outlier_method,
             iqr_multiplier=args.iqr_multiplier
+        )
+
+    if args.max_step_mm and args.max_step_mm > 0:
+        print(f"\nFiltering step outliers (method: {args.step_method})")
+        shifts_df = filter_step_outliers(
+            shifts_df,
+            max_step_mm=args.max_step_mm,
+            window=args.step_window,
+            method=args.step_method
         )
 
     # Validate that shifts file contains required slices

@@ -296,6 +296,7 @@ The final 3D volume is stored as an OME-Zarr with multiple resolution levels opt
 | `registration_max_translation` | `30.0` | Max allowed translation (pixels) |
 | `registration_max_rotation` | `2.0` | Max allowed rotation (degrees) |
 | `stack_blend_enabled` | `false` | Enable blending |
+| `interpolation_blend_method` | `'gaussian'` | Blend method: 'gaussian' (feathered) or 'linear' |
 | `pyramid_resolutions` | `[10, 25, 50, 100]` | Pyramid resolution levels (µm) |
 | `use_gpu` | `true` | Enable GPU acceleration (auto-fallback to CPU) |
 
@@ -303,15 +304,18 @@ The final 3D volume is stored as an OME-Zarr with multiple resolution levels opt
 
 The pairwise registration uses a two-step approach:
 
-1. **Phase Correlation**: FFT-based estimation of translation between slices. Fast and robust to intensity variations.
+1. **Phase Correlation**: FFT-based estimation of translation between slices. Fast and robust to intensity variations. Uses windowed images to reduce edge effects.
 
 2. **Intensity-Based Refinement**: Gradient descent optimization using the specified metric (CC recommended for OCT data).
 
-3. **Validation**: If the estimated transform exceeds `registration_max_translation` or `registration_max_rotation`, it falls back to identity (no correction).
+3. **Masking**: Registration masks created by `create_registration_masks` focus registration on tissue content, reducing sensitivity to background edges.
+
+4. **Validation**: If the estimated transform exceeds `registration_max_translation` or `registration_max_rotation`, it falls back to identity (no correction).
 
 **Recommendations:**
 - Use `translation` transform unless rotation is needed between slices
 - Keep `registration_max_translation` low (20-30 pixels) to trust microscope positions
+- Enable `create_registration_masks` to focus registration on tissue
 - CC (correlation coefficient) is the most robust metric for OCT data
 
 
@@ -454,6 +458,40 @@ Common issues indicated by metrics:
 2. **Slice mismatch**: Use `slice_config.csv` to exclude problematic slices
 3. **Memory issues**: Reduce `processes` parameter or increase available memory
 4. **Registration failures**: Try different `pairwise_transform` or `pairwise_registration_metric`
+
+### Troubleshooting Reconstruction Artifacts
+
+#### Boomerang/Curved Shape (Cumulative Drift)
+
+**Symptoms:** Brain appears curved when viewed from the side instead of straight.
+
+**Cause:** Small registration biases accumulate over many slices.
+
+**Solutions:**
+- Enable registration masks: `--create_registration_masks true` (focuses registration on tissue)
+- Enable outlier filtering: `--filter_shift_outliers true --outlier_method iqr`
+- Use `--stack_no_accumulate_transforms true` since slices are already aligned
+
+#### Shadowing/Banding Effect
+
+**Symptoms:** Horizontal bands visible in sagittal/coronal views; slices appear to have different sizes.
+
+**Cause:** Inconsistent normalization, varying tissue coverage, or registration errors.
+
+**Solutions:**
+- Enable illumination correction: `--fix_illum_enabled true`
+- Enable stack blending: `--stack_blend_enabled true`
+- Check agarose mask quality in normalization step
+
+#### Double Edges in Interpolated Slices
+
+**Symptoms:** Visible edge artifacts at slice boundaries after interpolation.
+
+**Cause:** Linear blending creates hard transitions at volume boundaries.
+
+**Solutions:**
+- Use feathered blending: `--interpolation_blend_method gaussian` (default)
+- The gaussian method uses distance transform to create soft edges
 
 ### Slice Selection
 

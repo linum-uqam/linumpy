@@ -212,9 +212,12 @@ process bring_to_common_space {
     script:
     def slice_config_arg = slice_config.name != 'NO_SLICE_CONFIG' ? "--slice_config ${slice_config}" : ""
     def outlier_args = params.filter_shift_outliers ?
-        "--filter_outliers --max_shift_mm ${params.max_shift_mm} --outlier_method ${params.outlier_method} --iqr_multiplier ${params.outlier_iqr_multiplier}" : ""
+        "--filter_outliers --max_shift_mm ${params.max_shift_mm} --outlier_method ${params.outlier_method} --iqr_multiplier ${params.outlier_iqr_multiplier} " +
+        "--max_step_mm ${params.common_space_max_step_mm} --step_window ${params.common_space_step_window} --step_method ${params.common_space_step_method}" : ""
+    def excluded_args = params.common_space_excluded_slice_mode ?
+        "--excluded_slice_mode ${params.common_space_excluded_slice_mode} --excluded_slice_window ${params.common_space_excluded_slice_window}" : ""
     """
-    linum_align_mosaics_3d_from_shifts.py inputs shifts_xy.csv common_space ${slice_config_arg} ${outlier_args}
+    linum_align_mosaics_3d_from_shifts.py inputs shifts_xy.csv common_space ${slice_config_arg} ${outlier_args} ${excluded_args}
     mv common_space/* .
     """
 }
@@ -243,6 +246,7 @@ process interpolate_missing_slice {
     linum_interpolate_missing_slice.py ${slice_before} ${slice_after} \
         "slice_z${missing_slice_id}_interpolated.ome.zarr" \
         --method ${params.interpolation_method} \
+        --blend_method ${params.interpolation_blend_method} \
         --registration_metric ${params.interpolation_registration_metric} \
         --max_iterations ${params.interpolation_max_iterations} \
         ${preview_opt}
@@ -289,12 +293,16 @@ process register_pairwise {
         "--transform ${params.registration_transform}",
         "--metric ${params.registration_metric}",
         "--max_translation ${params.registration_max_translation}",
-        "--max_rotation ${params.registration_max_rotation}"
+        "--max_rotation ${params.registration_max_rotation}",
+        "--slicing_interval ${params.registration_slicing_interval_mm}",
+        "--allowed_drifting ${params.registration_allowed_drifting_mm}",
+        "--z_bias ${params.registration_z_bias}"
     ]
     if (slice_gap > 1) opts << "--slice_gap_multiplier ${slice_gap}"
 
+
     def options_str = opts.join(' ')
-    def mask_opts = params.create_registration_masks ? "--use_masks --moving_mask ${moving_mask} --fixed_mask ${fixed_mask}" : ""
+    def mask_opts = params.create_registration_masks ? "--use_masks --moving_mask ${moving_mask} --fixed_mask ${fixed_mask} --mask_mode ${params.registration_mask_mode}" : ""
     """
     dirname=\$(basename ${moving_vol} .ome.zarr)
     linum_estimate_transform_pairwise.py ${fixed_vol} ${moving_vol} \$dirname ${options_str} ${mask_opts}

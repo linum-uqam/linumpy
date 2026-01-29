@@ -92,6 +92,15 @@ This ensures that applying the half-transform twice yields the full transform.
 | `average` | Simple 50/50 pixel average | Fast baseline, no deformation handling |
 | `weighted` | Gaussian-smoothed average | Reduces discontinuities |
 
+### Blending Methods
+
+When combining the warped before and after volumes, two blending methods are available:
+
+| Blend Method | Description |
+|--------------|-------------|
+| `gaussian` | **Recommended.** Uses distance transform to create feathered edges. Interior pixels get more weight than edge pixels, eliminating visible double-edge artifacts. |
+| `linear` | Simple 50/50 blend. Fast but may show visible edges where the two warped volumes have different boundaries. |
+
 ---
 
 ## Degraded Slice Support
@@ -148,6 +157,7 @@ nextflow run soct_3d_reconst.nf \
 |-----------|---------|-------------|
 | `interpolate_missing_slices` | `false` | Enable interpolation |
 | `interpolation_method` | `'registration'` | Method: `registration`, `average`, `weighted` |
+| `interpolation_blend_method` | `'gaussian'` | Blend method: `gaussian` (feathered), `linear` (50/50) |
 | `interpolation_registration_metric` | `'MSE'` | Registration metric: `MSE`, `CC`, `MI` |
 | `interpolation_max_iterations` | `1000` | Max registration iterations |
 | `interpolation_use_degraded` | `true` | Use degraded slice data if available |

@@ -47,6 +47,9 @@ def _build_arg_parser():
     p.add_argument('--use_masks', action='store_true', help='Use masks for registration')
     p.add_argument('--moving_mask', type=str, default=None)
     p.add_argument('--fixed_mask', type=str, default=None)
+    p.add_argument('--mask_mode', choices=['multiply', 'sitk', 'none'], default='multiply',
+                   help='How to use masks: multiply (pre-multiply images), '
+                        'sitk (use SimpleITK mask parameters), none (ignore) [%(default)s]')
 
     # Registration settings
     p.add_argument('--moving_slice_index', type=int, default=0,
@@ -67,6 +70,8 @@ def _build_arg_parser():
                    help='Multiplier when slices are skipped [%(default)s]')
     p.add_argument('--allowed_drifting', type=float, default=0.050,
                    help='Z-drift tolerance in mm [%(default)s]')
+    p.add_argument('--z_bias', type=float, default=0.15,
+                   help='Penalty weight for deviation from expected z (0-1) [%(default)s]')
 
     # Output
     p.add_argument('--out_transform', default='transform.tfm')
@@ -81,14 +86,30 @@ def _build_arg_parser():
 # Image Processing
 # =============================================================================
 
-def normalize_image(image):
-    """Normalize image to [0, 1] using percentile clipping."""
+def normalize_image(image, robust=True):
+    """
+    Normalize image to [0, 1] using percentile clipping.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Input image.
+    robust : bool
+        If True, uses a more robust normalization that better handles
+        varying tissue content between slices.
+    """
     valid = image > 0
     if not np.any(valid):
         return np.zeros_like(image, dtype=np.float32)
 
-    pmin = np.percentile(image[valid], 1)
-    pmax = np.percentile(image, 99)
+    if robust:
+        # Use narrower percentile range for more stable normalization
+        # This reduces sensitivity to varying tissue content
+        pmin = np.percentile(image[valid], 5)
+        pmax = np.percentile(image[valid], 95)
+    else:
+        pmin = np.percentile(image[valid], 1)
+        pmax = np.percentile(image, 99)
 
     if pmax <= pmin:
         return np.zeros_like(image, dtype=np.float32)
@@ -97,11 +118,13 @@ def normalize_image(image):
     return np.clip(normalized, 0, 1)
 
 
+
 def compute_phase_correlation(fixed, moving, downsample=4):
     """
     Compute translation using phase correlation.
 
     Uses downsampled images for speed, returns translation in original coordinates.
+    Applies windowing to reduce edge effects that can bias translation estimates.
     """
     from scipy.ndimage import zoom
 
@@ -112,8 +135,17 @@ def compute_phase_correlation(fixed, moving, downsample=4):
     else:
         fixed_ds, moving_ds = fixed, moving
 
+    # Apply Hanning window to reduce edge effects
+    # Edge effects can cause systematic bias in phase correlation
+    window_y = np.hanning(fixed_ds.shape[0])
+    window_x = np.hanning(fixed_ds.shape[1])
+    window = np.outer(window_y, window_x)
+
+    fixed_windowed = fixed_ds * window
+    moving_windowed = moving_ds * window
+
     try:
-        deltas = pairWisePhaseCorrelation(fixed_ds, moving_ds)
+        deltas = pairWisePhaseCorrelation(fixed_windowed, moving_windowed)
         # Scale back to original resolution
         tx = float(deltas[1]) * downsample
         ty = float(deltas[0]) * downsample
@@ -128,12 +160,30 @@ def compute_phase_correlation(fixed, moving, downsample=4):
 # =============================================================================
 
 def register_translation(fixed, moving, fixed_mask=None, moving_mask=None,
-                         initial_translation=None, metric='CC', max_iter=500):
+                         initial_translation=None, metric='CC', max_iter=500,
+                         mask_mode='multiply'):
     """
     Register using translation-only transform.
 
+    Parameters
+    ----------
+    mask_mode : str
+        How to use masks: 'multiply' (pre-multiply images, recommended),
+        'sitk' (use SimpleITK mask parameters), 'none' (ignore masks).
+
     Returns (tx, ty, metric_value).
     """
+    # Apply masks by multiplication if requested (recommended approach)
+    # This avoids issues with SimpleITK mask handling at tissue boundaries
+    if mask_mode == 'multiply':
+        if fixed_mask is not None:
+            fixed = fixed * fixed_mask.astype(np.float32)
+        if moving_mask is not None:
+            moving = moving * moving_mask.astype(np.float32)
+        # Don't pass masks to SimpleITK
+        fixed_mask = None
+        moving_mask = None
+
     fixed_sitk = sitk.GetImageFromArray(fixed.astype(np.float32))
     moving_sitk = sitk.GetImageFromArray(moving.astype(np.float32))
 
@@ -152,13 +202,14 @@ def register_translation(fixed, moving, fixed_mask=None, moving_mask=None,
     else:
         registration.SetMetricAsMeanSquares()
 
-    # Use masks if provided
-    if fixed_mask is not None:
-        fixed_mask_sitk = sitk.GetImageFromArray(fixed_mask.astype(np.uint8))
-        registration.SetMetricFixedMask(fixed_mask_sitk)
-    if moving_mask is not None:
-        moving_mask_sitk = sitk.GetImageFromArray(moving_mask.astype(np.uint8))
-        registration.SetMetricMovingMask(moving_mask_sitk)
+    # Use masks in SimpleITK only if mask_mode is 'sitk'
+    if mask_mode == 'sitk':
+        if fixed_mask is not None:
+            fixed_mask_sitk = sitk.GetImageFromArray(fixed_mask.astype(np.uint8))
+            registration.SetMetricFixedMask(fixed_mask_sitk)
+        if moving_mask is not None:
+            moving_mask_sitk = sitk.GetImageFromArray(moving_mask.astype(np.uint8))
+            registration.SetMetricMovingMask(moving_mask_sitk)
 
     registration.SetOptimizerAsRegularStepGradientDescent(
         learningRate=2.0,
@@ -185,12 +236,29 @@ def register_translation(fixed, moving, fixed_mask=None, moving_mask=None,
 
 
 def register_rigid(fixed, moving, fixed_mask=None, moving_mask=None,
-                   initial_translation=None, metric='CC', max_iter=500):
+                   initial_translation=None, metric='CC', max_iter=500,
+                   mask_mode='multiply'):
     """
     Register using rigid (rotation + translation) transform.
 
+    Parameters
+    ----------
+    mask_mode : str
+        How to use masks: 'multiply' (pre-multiply images, recommended),
+        'sitk' (use SimpleITK mask parameters), 'none' (ignore masks).
+
     Returns (tx, ty, angle_deg, metric_value).
     """
+    # Apply masks by multiplication if requested (recommended approach)
+    if mask_mode == 'multiply':
+        if fixed_mask is not None:
+            fixed = fixed * fixed_mask.astype(np.float32)
+        if moving_mask is not None:
+            moving = moving * moving_mask.astype(np.float32)
+        # Don't pass masks to SimpleITK
+        fixed_mask = None
+        moving_mask = None
+
     fixed_sitk = sitk.GetImageFromArray(fixed.astype(np.float32))
     moving_sitk = sitk.GetImageFromArray(moving.astype(np.float32))
 
@@ -212,12 +280,14 @@ def register_rigid(fixed, moving, fixed_mask=None, moving_mask=None,
     else:
         registration.SetMetricAsMeanSquares()
 
-    if fixed_mask is not None:
-        fixed_mask_sitk = sitk.GetImageFromArray(fixed_mask.astype(np.uint8))
-        registration.SetMetricFixedMask(fixed_mask_sitk)
-    if moving_mask is not None:
-        moving_mask_sitk = sitk.GetImageFromArray(moving_mask.astype(np.uint8))
-        registration.SetMetricMovingMask(moving_mask_sitk)
+    # Use masks in SimpleITK only if mask_mode is 'sitk'
+    if mask_mode == 'sitk':
+        if fixed_mask is not None:
+            fixed_mask_sitk = sitk.GetImageFromArray(fixed_mask.astype(np.uint8))
+            registration.SetMetricFixedMask(fixed_mask_sitk)
+        if moving_mask is not None:
+            moving_mask_sitk = sitk.GetImageFromArray(moving_mask.astype(np.uint8))
+            registration.SetMetricMovingMask(moving_mask_sitk)
 
     registration.SetOptimizerAsRegularStepGradientDescent(
         learningRate=1.0,
@@ -260,11 +330,20 @@ def create_3d_transform(tx, ty, angle_deg=0.0, transform_type='translation'):
 # Main Registration Logic
 # =============================================================================
 
-def find_best_z_match(fixed_vol, moving_image, expected_z, search_range, metric='CC'):
+def _downsample_mask(mask, scale):
+    if mask is None:
+        return None
+    from scipy.ndimage import zoom
+    return zoom(mask.astype(np.float32), scale, order=0) > 0
+
+
+def find_best_z_match(fixed_vol, moving_image, expected_z, search_range, metric='CC',
+                      fixed_mask_vol=None, moving_mask=None, z_bias=0.0):
     """
     Find the best matching z-index in fixed volume for the moving image.
 
     Uses normalized cross-correlation on downsampled images for speed.
+    Optionally masks and biases toward the expected z to avoid interface snapping.
     """
     from scipy.ndimage import zoom
 
@@ -274,6 +353,7 @@ def find_best_z_match(fixed_vol, moving_image, expected_z, search_range, metric=
     # Downsample for speed
     moving_ds = zoom(moving_image, 0.25, order=1)
     moving_norm = normalize_image(moving_ds)
+    moving_mask_ds = _downsample_mask(moving_mask, 0.25)
 
     for z in range(max(0, expected_z - search_range),
                    min(fixed_vol.shape[0], expected_z + search_range + 1)):
@@ -281,9 +361,27 @@ def find_best_z_match(fixed_vol, moving_image, expected_z, search_range, metric=
         fixed_ds = zoom(fixed_slice, 0.25, order=1)
         fixed_norm = normalize_image(fixed_ds)
 
-        # Compute correlation
+        fixed_mask_ds = None
+        if fixed_mask_vol is not None:
+            fixed_mask_ds = _downsample_mask(np.array(fixed_mask_vol[z]) > 0, 0.25)
+
+        # Compute correlation with optional mask intersection
         if np.std(fixed_norm) > 0 and np.std(moving_norm) > 0:
-            score = np.corrcoef(fixed_norm.ravel(), moving_norm.ravel())[0, 1]
+            if fixed_mask_ds is not None and moving_mask_ds is not None:
+                mask = np.logical_and(fixed_mask_ds, moving_mask_ds)
+                if np.count_nonzero(mask) > 100:
+                    fixed_vals = fixed_norm[mask]
+                    moving_vals = moving_norm[mask]
+                else:
+                    fixed_vals = fixed_norm.ravel()
+                    moving_vals = moving_norm.ravel()
+            else:
+                fixed_vals = fixed_norm.ravel()
+                moving_vals = moving_norm.ravel()
+
+            score = np.corrcoef(fixed_vals, moving_vals)[0, 1]
+            if z_bias > 0 and search_range > 0:
+                score -= z_bias * (abs(z - expected_z) / float(search_range))
             if score > best_score:
                 best_score = score
                 best_z = z
@@ -313,6 +411,7 @@ def main():
     # Load masks if provided
     fixed_mask = None
     moving_mask = None
+    fixed_mask_vol = None
     if args.use_masks:
         if args.moving_mask:
             moving_mask_vol, _ = read_omezarr(args.moving_mask)
@@ -329,15 +428,24 @@ def main():
     logger.info(f"Expected z: {expected_z}, search range: ±{search_range}")
 
     # Find best z-match
-    best_z = find_best_z_match(fixed_vol, moving_raw, expected_z, search_range)
+    best_z = find_best_z_match(
+        fixed_vol,
+        moving_raw,
+        expected_z,
+        search_range,
+        fixed_mask_vol=fixed_mask_vol,
+        moving_mask=moving_mask,
+        z_bias=args.z_bias
+    )
 
     # Get fixed image at best z
     fixed_raw = np.array(fixed_vol[best_z])
     fixed_image = normalize_image(fixed_raw)
 
     # Get fixed mask if provided
-    if args.use_masks and args.fixed_mask:
+    if args.use_masks and fixed_mask_vol is not None:
         fixed_mask = np.array(fixed_mask_vol[best_z]) > 0
+
 
     # Step 1: Phase correlation for initial translation estimate
     logger.info("Computing phase correlation...")
@@ -346,13 +454,16 @@ def main():
     logger.info(f"Phase correlation: tx={init_tx:.1f}, ty={init_ty:.1f} (mag={init_mag:.1f})")
 
     # Step 2: Refine with intensity-based registration
+    if args.use_masks:
+        logger.info(f"Using masks with mode: {args.mask_mode}")
     if args.transform == 'translation':
         logger.info("Refining with translation registration...")
         tx, ty, metric_val = register_translation(
             fixed_image, moving_image,
             fixed_mask, moving_mask,
             initial_translation=(init_tx, init_ty),
-            metric=args.metric
+            metric=args.metric,
+            mask_mode=args.mask_mode
         )
         angle_deg = 0.0
     else:
@@ -361,7 +472,8 @@ def main():
             fixed_image, moving_image,
             fixed_mask, moving_mask,
             initial_translation=(init_tx, init_ty),
-            metric=args.metric
+            metric=args.metric,
+            mask_mode=args.mask_mode
         )
 
     # Validate result

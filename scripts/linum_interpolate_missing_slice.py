@@ -80,10 +80,10 @@ def _build_arg_parser():
                         "  weighted - Weighted average with distance falloff\n"
                         "[default: %(default)s]")
     p.add_argument("--blend_method", choices=['linear', 'gaussian'],
-                   default='linear',
+                   default='gaussian',
                    help="Blending method for combining warped slices:\n"
-                        "  linear - Equal 50/50 blend\n"
-                        "  gaussian - Distance-weighted gaussian blend\n"
+                        "  linear - Equal 50/50 blend (may show edges)\n"
+                        "  gaussian - Feathered blend using distance transform (recommended)\n"
                         "[default: %(default)s]")
     p.add_argument("--registration_metric", choices=['MSE', 'CC', 'MI'],
                    default='MSE',
@@ -328,21 +328,42 @@ def interpolate_registration_based(vol_before, vol_after, metric='MSE',
         # Simple 50/50 blend
         interpolated = 0.5 * warped_before + 0.5 * warped_after
     elif blend_method == 'gaussian':
-        # Gaussian-weighted blend (slightly favor the center)
-        # Create spatial weights based on content (non-zero regions)
-        weight_before = (warped_before > 0).astype(np.float32)
-        weight_after = (warped_after > 0).astype(np.float32)
-        
-        # Normalize weights
-        total_weight = weight_before + weight_after + 1e-10
-        w_before = weight_before / total_weight
-        w_after = weight_after / total_weight
-        
-        # Where both have content, use 50/50
-        both_valid = (weight_before > 0) & (weight_after > 0)
-        w_before[both_valid] = 0.5
-        w_after[both_valid] = 0.5
-        
+        # Feathered blend: use distance transform to create soft edges
+        # This eliminates the double-edge artifact when blending
+        from scipy.ndimage import distance_transform_edt, gaussian_filter
+
+        # Create masks for valid regions
+        mask_before = warped_before > 0
+        mask_after = warped_after > 0
+
+        # Compute distance from edges (higher = more interior)
+        dist_before = np.zeros_like(warped_before, dtype=np.float32)
+        dist_after = np.zeros_like(warped_after, dtype=np.float32)
+
+        for z in range(warped_before.shape[0]):
+            if np.any(mask_before[z]):
+                dist_before[z] = distance_transform_edt(mask_before[z])
+            if np.any(mask_after[z]):
+                dist_after[z] = distance_transform_edt(mask_after[z])
+
+        # Apply light smoothing to the distance maps
+        dist_before = gaussian_filter(dist_before, sigma=(0, 2, 2))
+        dist_after = gaussian_filter(dist_after, sigma=(0, 2, 2))
+
+        # Compute weights based on distance from edges
+        # Interior pixels get more weight
+        total_dist = dist_before + dist_after + 1e-10
+        w_before = dist_before / total_dist
+        w_after = dist_after / total_dist
+
+        # Where only one has content, use that one entirely
+        only_before = mask_before & ~mask_after
+        only_after = mask_after & ~mask_before
+        w_before[only_before] = 1.0
+        w_after[only_before] = 0.0
+        w_before[only_after] = 0.0
+        w_after[only_after] = 1.0
+
         interpolated = w_before * warped_before + w_after * warped_after
     else:
         raise ValueError(f"Unknown blend method: {blend_method}")
