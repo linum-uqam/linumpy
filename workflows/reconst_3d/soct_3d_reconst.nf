@@ -66,10 +66,98 @@ process analyze_shifts {
     """
 }
 
+// -----------------------------------------------------------------------------
+// Diagnostic Processes (for troubleshooting reconstruction artifacts)
+// -----------------------------------------------------------------------------
+
+process analyze_rotation_drift {
+    publishDir "${params.output}/diagnostics/rotation_analysis", mode: 'copy'
+    input: path(reg_dirs)
+    output: path "rotation_analysis/*"
+
+    script:
+    """
+    # Create a directory structure that the script expects
+    mkdir -p register_pairwise
+    for d in ${reg_dirs}; do
+        if [ -d "\$d" ]; then
+            ln -s "\$(pwd)/\$d" "register_pairwise/\$d"
+        fi
+    done
+
+    linum_analyze_registration_transforms.py register_pairwise rotation_analysis \
+        --resolution ${params.resolution} \
+        --rotation_threshold ${params.diagnostic_rotation_threshold}
+    """
+}
+
+process analyze_tile_dilation {
+    publishDir "${params.output}/diagnostics/dilation_analysis/${slice_id}", mode: 'copy'
+    input: tuple val(slice_id), path(mosaic_grid), path(transform_xy)
+    output: path "dilation_analysis/*"
+
+    script:
+    """
+    linum_analyze_tile_dilation.py ${mosaic_grid} ${transform_xy} dilation_analysis \
+        --resolution ${params.resolution} \
+        --overlap_fraction ${params.motor_only_overlap} \
+        --slice_id ${slice_id}
+    """
+}
+
+process stitch_motor_only {
+    publishDir "${params.output}/diagnostics/motor_only_stitch", mode: 'copy'
+    input: tuple val(slice_id), path(mosaic_grid)
+    output: path "slice_z${slice_id}_motor_only.ome.zarr"
+
+    script:
+    """
+    linum_stitch_motor_only.py ${mosaic_grid} "slice_z${slice_id}_motor_only.ome.zarr" \
+        --overlap_fraction ${params.motor_only_overlap} \
+        --blending_method diffusion
+    """
+}
+
+process run_full_diagnostics {
+    publishDir "${params.output}/diagnostics", mode: 'copy'
+    input: path(pipeline_output)
+    output: path "full_diagnostics/*"
+
+    script:
+    """
+    linum_diagnose_reconstruction.py ${pipeline_output} full_diagnostics \
+        --resolution ${params.resolution} \
+        --rotation_threshold ${params.diagnostic_rotation_threshold}
+    """
+}
+
+process analyze_acquisition_rotation {
+    publishDir "${params.output}/diagnostics/acquisition_rotation", mode: 'copy'
+    input:
+        path(shifts_file)
+        path(reg_dirs)
+    output: path "*"
+
+    script:
+    """
+    # Create a directory structure that the script expects
+    mkdir -p register_pairwise
+    for d in ${reg_dirs}; do
+        if [ -d "\$d" ]; then
+            ln -s "\$(pwd)/\$d" "register_pairwise/\$d"
+        fi
+    done
+
+    linum_analyze_acquisition_rotation.py ${shifts_file} . \
+        --registration_dir register_pairwise \
+        --resolution ${params.resolution}
+    """
+}
+
 process generate_report {
     publishDir "$params.output", mode: 'copy'
     input:
-        tuple path(zarr), path(zip), path(png)
+        tuple path(zarr), path(zip), path(png), path(annotated_png)
         val subject_name
     output: path "${subject_name}_quality_report.html"
 
@@ -269,12 +357,13 @@ process create_registration_masks {
     def gpu_opts = params.use_gpu ? "--use_gpu" : ""
     def normalize_flag = params.mask_normalize ? "--normalize" : ""
     def preview_flag = params.mask_preview ? "--preview mask_slice_z${slice_id}_preview.png" : ""
+    def fill_holes_opt = params.mask_fill_holes ? "--fill_holes ${params.mask_fill_holes}" : ""
     """
     ${script} ${image} mask_slice_z${slice_id}.ome.zarr \
         --sigma ${params.mask_smoothing_sigma} \
         --selem_radius ${params.selem_radius} \
         --min_size ${params.min_size} \
-        ${normalize_flag} ${preview_flag} ${gpu_opts}
+        ${normalize_flag} ${fill_holes_opt} ${preview_flag} ${gpu_opts}
     """
 }
 
@@ -316,7 +405,7 @@ process register_pairwise {
 process stack {
     publishDir "$params.output/$task.process", mode: 'move'
     input: tuple path("mosaics/*"), path("transforms/*"), val(subject_name)
-    output: tuple path("${subject_name}.ome.zarr"), path("${subject_name}.ome.zarr.zip"), path("${subject_name}.png")
+    output: tuple path("${subject_name}.ome.zarr"), path("${subject_name}.ome.zarr.zip"), path("${subject_name}.png"), path("${subject_name}_annotated.png")
 
     script:
     def options = ""
@@ -342,9 +431,36 @@ process stack {
         options += params.pyramid_make_isotropic ? " --make_isotropic" : " --no-make_isotropic"
     }
     """
+    # Extract slice IDs from mosaic filenames (e.g., slice_z05_... -> 05)
+    # Sort numerically so they appear in correct order in the preview
+    slice_ids=\$(ls -1 mosaics/*.ome.zarr 2>/dev/null | sed -n 's/.*slice_z\\([0-9]*\\).*/\\1/p' | sort -n | tr '\\n' ',' | sed 's/,\$//')
+    n_slices=\$(echo "\$slice_ids" | tr ',' '\\n' | wc -l | tr -d ' ')
+
+    # Validate n_slices is a positive number
+    if [ -z "\$n_slices" ] || [ "\$n_slices" -lt 1 ]; then
+        echo "WARNING: Could not count input slices, trying alternative method"
+        n_slices=\$(ls -d mosaics/*.ome.zarr 2>/dev/null | wc -l | tr -d ' ')
+        slice_ids=""
+    fi
+    echo "DEBUG: Found \$n_slices input slices for annotated preview"
+    echo "DEBUG: Slice IDs: \$slice_ids"
+
     linum_stack_slices_3d.py mosaics transforms ${subject_name}.ome.zarr ${options}
     zip -r ${subject_name}.ome.zarr.zip ${subject_name}.ome.zarr
     linum_screenshot_omezarr.py ${subject_name}.ome.zarr ${subject_name}.png
+
+    # Pass slice_ids if available, otherwise fall back to n_slices
+    if [ -n "\$slice_ids" ]; then
+        linum_screenshot_omezarr_annotated.py ${subject_name}.ome.zarr ${subject_name}_annotated.png \
+            --slice_ids "\$slice_ids" \
+            --label_every ${params.annotated_label_every} \
+            ${params.annotated_show_lines ? '--show_lines' : ''}
+    else
+        linum_screenshot_omezarr_annotated.py ${subject_name}.ome.zarr ${subject_name}_annotated.png \
+            --n_slices \$n_slices \
+            --label_every ${params.annotated_label_every} \
+            ${params.annotated_show_lines ? '--show_lines' : ''}
+    fi
     """
 }
 
@@ -412,6 +528,30 @@ def detectSingleGaps(sliceList) {
     return gaps
 }
 
+def parseDebugSlices(debugSlicesStr) {
+    // Parse debug_slices parameter: "25,26" or "25-29" or "25,27-29"
+    // Returns a Set of slice IDs as zero-padded strings (e.g., ["25", "26"])
+    if (!debugSlicesStr || debugSlicesStr.trim().isEmpty()) return null
+
+    def sliceIds = [] as Set
+    debugSlicesStr.split(',').each { part ->
+        part = part.trim()
+        if (part.contains('-')) {
+            // Range: "25-29"
+            def rangeParts = part.split('-')
+            if (rangeParts.size() == 2) {
+                def start = rangeParts[0].trim().toInteger()
+                def end = rangeParts[1].trim().toInteger()
+                (start..end).each { sliceIds.add(String.format("%02d", it)) }
+            }
+        } else {
+            // Single ID: "25"
+            sliceIds.add(String.format("%02d", part.toInteger()))
+        }
+    }
+    return sliceIds
+}
+
 // =============================================================================
 // MAIN WORKFLOW
 // =============================================================================
@@ -446,6 +586,12 @@ workflow {
     }
     log.info "Subject: ${subject_name}"
     log.info "GPU: ${params.use_gpu ? 'ENABLED' : 'DISABLED'}"
+
+    // Parse debug_slices parameter for quick testing
+    def debugSlices = parseDebugSlices(params.debug_slices)
+    if (debugSlices) {
+        log.info "DEBUG MODE: Processing only slices ${debugSlices.sort().join(', ')}"
+    }
 
     // Auto-detect shifts_xy path if not provided
     def shifts_xy_path = params.shifts_xy ? params.shifts_xy : "${inputDir}/shifts_xy.csv"
@@ -497,9 +643,18 @@ workflow {
             tuple(key, file_path)
         }
         .filter { slice_id, _files ->
-            if (slicesToUse == null) return true
-            def included = slicesToUse.contains(slice_id)
-            return included
+            // First check debug_slices (highest priority for quick testing)
+            if (debugSlices != null) {
+                def included = debugSlices.contains(slice_id)
+                if (!included) log.debug "Skipping slice ${slice_id} (not in debug_slices)"
+                return included
+            }
+            // Then check slice_config
+            if (slicesToUse != null) {
+                def included = slicesToUse.contains(slice_id)
+                return included
+            }
+            return true
         }
 
     slice_config_channel = file(slice_config_path).exists()
@@ -638,5 +793,52 @@ workflow {
     // -------------------------------------------------------------------------
     if (params.generate_report) {
         generate_report(stack.out, subject_name)
+    }
+
+    // -------------------------------------------------------------------------
+    // Stage 9: Diagnostic Analyses (optional)
+    // -------------------------------------------------------------------------
+    // These analyses help troubleshoot reconstruction artifacts like edge
+    // mismatches and "overhangs" in obliquely-mounted samples (e.g., 45° angle)
+    //
+    // diagnostic_mode=true enables ALL diagnostics (master switch)
+    // Individual flags provide granular control when diagnostic_mode=false
+
+    // Master switch logic: diagnostic_mode enables all, or use individual flags
+    def runRotationAnalysis = params.diagnostic_mode || params.analyze_rotation_drift
+    def runDilationAnalysis = params.diagnostic_mode || params.analyze_tile_dilation
+    def runMotorOnlyStitch = params.diagnostic_mode || params.motor_only_stitch
+
+    if (params.diagnostic_mode) {
+        log.info "DIAGNOSTIC MODE ENABLED - Running all diagnostic analyses"
+        log.info "  - Acquisition rotation analysis (from shifts)"
+        log.info "  - Registration rotation drift analysis (mosaic-level)"
+        log.info "  - Tile dilation analysis (tile-level)"
+        log.info "  - Motor-only stitching"
+    }
+
+    // Acquisition rotation analysis: analyzes shift vectors for rotation patterns
+    if (params.diagnostic_mode) {
+        log.info "Running acquisition rotation analysis..."
+        analyze_acquisition_rotation(shifts_xy, register_pairwise.out.collect())
+    }
+
+    // Registration rotation drift analysis: detects cumulative rotation between slices
+    if (runRotationAnalysis) {
+        log.info "Running registration rotation drift analysis..."
+        analyze_rotation_drift(register_pairwise.out.collect())
+    }
+
+    // Tile dilation analysis: compares motor vs registration positions
+    if (runDilationAnalysis) {
+        log.info "Running tile dilation analysis..."
+        dilation_input = illum_fixed.combine(estimate_xy_transformation.out, by: 0)
+        analyze_tile_dilation(dilation_input)
+    }
+
+    // Motor-only stitching: creates slices using only motor positions
+    if (runMotorOnlyStitch) {
+        log.info "Creating motor-only stitched slices..."
+        stitch_motor_only(illum_fixed)
     }
 }

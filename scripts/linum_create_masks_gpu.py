@@ -61,6 +61,9 @@ def _build_arg_parser():
                    help='Minimum size of objects to keep in the final mask. [%(default)s]')
     p.add_argument('--normalize', action='store_true',
                    help='Normalize the image before processing.')
+    p.add_argument('--fill_holes', type=str, default='3d', choices=['none', '3d', 'slicewise'],
+                   help='Hole filling method: none (no extra filling), 3d (standard scipy fill), '
+                        'slicewise (fill in all 3 axes - best for masks with through-holes). [%(default)s]')
     p.add_argument('--use_gpu', default=True,
                    action=argparse.BooleanOptionalAction,
                    help='Use GPU acceleration if available. [%(default)s]')
@@ -71,6 +74,53 @@ def _build_arg_parser():
     p.add_argument('--preview', type=str, default=None,
                    help='Path to save a preview image (PNG) for visual verification.')
     return p
+
+
+def fill_holes_slicewise(mask, use_gpu=False):
+    """
+    Fill holes in a 3D mask by applying 2D hole filling in all three axes.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        3D binary mask
+    use_gpu : bool
+        Whether to use GPU acceleration
+
+    Returns
+    -------
+    np.ndarray
+        Mask with holes filled
+    """
+    if mask.ndim != 3:
+        return binary_fill_holes(mask, use_gpu=use_gpu)
+
+    # First do 3D fill
+    mask = binary_fill_holes(mask, use_gpu=use_gpu)
+
+    # Then fill slice-by-slice in all three axes
+    # For GPU efficiency, we process on CPU for the slicewise operations
+    # as the overhead of many small GPU transfers outweighs the benefit
+    from scipy.ndimage import binary_fill_holes as scipy_fill_holes
+
+    nz, ny, nx = mask.shape
+
+    # Fill in XY planes (along Z axis)
+    for z in range(nz):
+        mask[z, :, :] = scipy_fill_holes(mask[z, :, :])
+
+    # Fill in XZ planes (along Y axis)
+    for y in range(ny):
+        mask[:, y, :] = scipy_fill_holes(mask[:, y, :])
+
+    # Fill in YZ planes (along X axis)
+    for x in range(nx):
+        mask[:, :, x] = scipy_fill_holes(mask[:, :, x])
+
+    # Final 3D fill
+    mask = binary_fill_holes(mask, use_gpu=use_gpu)
+
+    return mask
 
 
 
@@ -203,6 +253,14 @@ def main():
         use_gpu=use_gpu
     )
 
+    # Apply additional hole filling if requested
+    if args.fill_holes == 'slicewise':
+        print("Applying slicewise hole filling...")
+        mask = fill_holes_slicewise(mask, use_gpu=use_gpu)
+    elif args.fill_holes == '3d':
+        mask = binary_fill_holes(mask, use_gpu=use_gpu)
+    # 'none' - no additional filling
+
     # Determine number of pyramid levels
     if args.n_levels is not None:
         n_levels = args.n_levels
@@ -227,7 +285,8 @@ def main():
         output_path=args.out_file,
         input_path=args.image,
         params={'sigma': args.sigma, 'selem_radius': args.selem_radius, 
-                'min_size': args.min_size, 'normalize': args.normalize, 'use_gpu': use_gpu}
+                'min_size': args.min_size, 'normalize': args.normalize,
+                'use_gpu': use_gpu, 'fill_holes': args.fill_holes}
     )
 
 
