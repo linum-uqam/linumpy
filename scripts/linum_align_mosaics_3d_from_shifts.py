@@ -77,6 +77,7 @@ def _build_arg_parser():
                    help='Do not center drift around middle slice.\n'
                         'By default, drift is centered to prevent slices from moving out of volume.')
 
+
     add_overwrite_arg(p)
     return p
 
@@ -92,6 +93,7 @@ def load_slice_config(config_path):
             if use:
                 slices_to_use.add(slice_id)
     return slices_to_use
+
 
 
 def filter_outlier_shifts(shifts_df, max_shift_mm=0.5, method='median', iqr_multiplier=1.5):
@@ -510,7 +512,7 @@ def compute_common_shape(mosaic_files, slice_ids, cumsum_shifts):
         List of slice IDs to process
     cumsum_shifts : dict
         Mapping from slice_id to (cumulative_dx, cumulative_dy)
-        
+
     Returns
     -------
     tuple
@@ -524,18 +526,21 @@ def compute_common_shape(mosaic_files, slice_ids, cumsum_shifts):
 
         # dx, dy represent WHERE the slice should be positioned
         # For numpy array (Z, H, W): shape[-2] is height (Y), shape[-1] is width (X)
+        width = img.shape[-1]
+        height = img.shape[-2]
+
         # So the slice's bounding box:
         #   X: from dx to dx + width
         #   Y: from dy to dy + height
         xmin.append(dx)
-        xmax.append(dx + img.shape[-1])  # width = shape[-1] = X dimension
+        xmax.append(dx + width)
         ymin.append(dy)
-        ymax.append(dy + img.shape[-2])  # height = shape[-2] = Y dimension
+        ymax.append(dy + height)
 
     x0 = min(xmin)
     y0 = min(ymin)
-    nx = int(max(xmax) - x0)
-    ny = int(max(ymax) - y0)
+    nx = int(np.ceil(max(xmax) - x0))
+    ny = int(np.ceil(max(ymax) - y0))
 
     return nx, ny, x0, y0
 
@@ -655,8 +660,12 @@ def main():
     for slice_id in selected_slice_ids:
         mosaic_file = mosaic_files[slice_id]
         img, res = read_omezarr(mosaic_file)
+
+        # Load image data
+        img_data = img[:]
+
         # Reference array shape is (Z, height, width) = (Z, ny, nx)
-        reference = np.zeros((img.shape[0], ny, nx), dtype=img.dtype)
+        reference = np.zeros((img_data.shape[0], ny, nx), dtype=img_data.dtype)
 
         dx, dy = cumsum_shifts[slice_id]
         # Shift data into the common space:
@@ -673,7 +682,7 @@ def main():
         # The function signature is apply_xy_shift(img, ref, dx, dy).
         # To move content to position (dx_shifted, dy_shifted), we pass negative values
         # because the transform moves the sampling grid, not the content.
-        aligned = apply_xy_shift(img[:], reference, -dx_shifted, -dy_shifted)
+        aligned = apply_xy_shift(img_data, reference, -dx_shifted, -dy_shifted)
 
         _, filename = psplit(mosaic_file)
         outfile = pjoin(args.out_directory, filename)

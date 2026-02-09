@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+ #!/usr/bin/env python3
 # Configure thread limits before numpy/scipy imports
 import linumpy._thread_config  # noqa: F401
 
@@ -30,6 +30,9 @@ def _build_arg_parser():
                    help='Values above the ith percentile will be clipped. [%(default)s]')
     p.add_argument('--sigma', type=float, default=1.0,
                    help='Smoothing sigma for estimating the agarose mask. [%(default)s]')
+    p.add_argument('--min_contrast_fraction', type=float, default=0.1,
+                   help='Minimum contrast as fraction of global max to prevent\n'
+                        'over-amplification of weak/bad slices. [%(default)s]')
     return p
 
 
@@ -53,7 +56,9 @@ def main():
     agarose_mask, otsu_threshold = get_agarose_mask(vol_data, args.sigma)
 
     # Normalize using shared function
-    vol_normalized, background_thresholds = normalize_volume(vol_data, agarose_mask, args.percentile_max)
+    vol_normalized, background_thresholds = normalize_volume(
+        vol_data, agarose_mask, args.percentile_max, args.min_contrast_fraction
+    )
 
     # Save
     save_omezarr(da.from_array(vol_normalized), args.out_image, res, n_levels=3)
@@ -66,7 +71,11 @@ def main():
         background_thresholds=background_thresholds,
         output_path=args.out_image,
         input_path=args.in_image,
-        params={'percentile_max': args.percentile_max, 'sigma': args.sigma}
+        params={
+            'percentile_max': args.percentile_max,
+            'sigma': args.sigma,
+            'min_contrast_fraction': args.min_contrast_fraction
+        }
     )
 
 

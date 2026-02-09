@@ -27,6 +27,7 @@ import numpy as np
 from linumpy.io.zarr import read_omezarr, OmeZarrWriter
 from linumpy.utils.mosaic_grid import addVolumeToMosaic
 from linumpy.utils.io import add_overwrite_arg
+from linumpy.utils.metrics import collect_stitch_3d_metrics
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -236,6 +237,18 @@ def main():
             addVolumeToMosaic(tile, pos, writer, blendingMethod=args.blending_method)
 
     writer.finalize(resolution)
+
+    # Collect metrics
+    collect_stitch_3d_metrics(
+        input_shape=volume.shape,
+        output_shape=mosaic_shape,
+        num_tiles=nx * ny,
+        resolution=list(resolution),
+        output_path=str(output_file),
+        input_path=str(input_file),
+        blending_method=args.blending_method
+    )
+
     logger.info(f"Motor-only stitched mosaic saved to {output_file}")
 
 

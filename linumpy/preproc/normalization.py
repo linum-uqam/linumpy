@@ -14,7 +14,8 @@ import numpy as np
 
 def normalize_volume(vol: np.ndarray,
                      agarose_mask: np.ndarray,
-                     percentile_max: float = 99.9) -> Tuple[np.ndarray, np.ndarray]:
+                     percentile_max: float = 99.9,
+                     min_contrast_fraction: float = 0.1) -> Tuple[np.ndarray, np.ndarray]:
     """
     Normalize volume intensities based on agarose background.
 
@@ -29,6 +30,10 @@ def normalize_volume(vol: np.ndarray,
         2D binary mask indicating agarose regions (shape X, Y).
     percentile_max : float
         Values above this percentile will be clipped. Default 99.9.
+    min_contrast_fraction : float
+        Minimum contrast (max-min) as a fraction of the global max.
+        Slices with lower contrast will use this threshold to avoid
+        over-amplification of noise in weak/bad slices. Default 0.1.
 
     Returns
     -------
@@ -54,6 +59,19 @@ def normalize_volume(vol: np.ndarray,
     # Rescale to [0, 1]
     vol = vol - np.min(vol, axis=(1, 2), keepdims=True)
     vmax = np.max(vol, axis=(1, 2))
-    vol[vmax > 0] = vol[vmax > 0] / vmax[:, None, None]
+
+    # Compute minimum acceptable contrast based on global statistics
+    # This prevents over-amplification of slices with very weak signal
+    global_max = np.max(vmax)
+    min_contrast = global_max * min_contrast_fraction
+
+    # For slices with sufficient contrast, normalize normally
+    # For weak slices, use the minimum contrast threshold to avoid over-amplification
+    effective_max = np.maximum(vmax, min_contrast)
+
+    # Apply normalization
+    for i in range(vol.shape[0]):
+        if effective_max[i] > 0:
+            vol[i] = vol[i] / effective_max[i]
 
     return vol, background_thresholds

@@ -150,7 +150,28 @@ By comparing motor-only vs fully-registered stitches:
 - **Systematic offsets**: Stage calibration issue
 - **Random scatter**: Normal registration refinement
 
-### 5. Comprehensive Diagnostics (`linum_diagnose_reconstruction.py`)
+### 5. Aggregated Dilation Analysis (`linum_aggregate_dilation_analysis.py`)
+
+**NEW**: Aggregates dilation analysis from multiple slices to compute recommended scale correction factors.
+
+```bash
+linum_aggregate_dilation_analysis.py \
+    /path/to/dilation_analysis \
+    output_dir
+```
+
+**Output**:
+- `aggregated_dilation_analysis.json`: Summary statistics and correction factors
+- `per_slice_correction_factors.csv`: Per-slice factors for advanced use
+- `aggregated_dilation_report.txt`: Text report with recommendations
+- `aggregated_dilation_analysis.png`: Visualizations across slices
+
+**Interpretation**:
+- **Recommended scale_y, scale_x**: Apply these to compensate for systematic dilation
+- **Deviation from unity**: How much mosaics contract/expand vs expected
+- **Anisotropy**: If X/Y differ, use separate correction factors
+
+### 6. Comprehensive Diagnostics (`linum_diagnose_reconstruction.py`)
 
 Runs all analyses and generates a unified report.
 
@@ -187,10 +208,78 @@ registration_max_rotation = 35.0  // Increase if needed for oblique cuts
 ```
 
 **If dilation is detected**:
-```groovy
-// Motor positions don't match - check overlap assumption
-motor_only_overlap = 0.15  // Try different overlap values
+
+The most common cause of edge misalignment ("overhangs") is systematic tile dilation/contraction.
+The diagnostic analysis reveals that motor positions don't match the actual image positions.
+
+**Solution**: Apply scale correction during 3D assembly:
+
+#### Using Nextflow Pipeline (Recommended)
+
+**Option A: Auto-aggregate and apply** (fully automated):
+```bash
+nextflow run soct_3d_reconst.nf \
+    --input /path/to/data \
+    --scale_correction_enabled true \
+    --aggregate_dilation true
 ```
+This will:
+1. Run dilation analysis on all slices
+2. Aggregate results to compute optimal correction factors
+3. Apply scale correction during common space alignment
+
+**Option B: Use pre-computed correction factors**:
+```bash
+# First run diagnostic mode to generate analysis
+nextflow run soct_3d_reconst.nf \
+    --input /path/to/data \
+    --diagnostic_mode true \
+    --debug_slices "30-40"  # Test subset first
+
+# Then re-run with scale correction using the generated JSON
+nextflow run soct_3d_reconst.nf \
+    --input /path/to/data \
+    --scale_correction_enabled true \
+    --dilation_json /path/to/output/diagnostics/aggregated_dilation/aggregated_dilation_analysis.json
+```
+
+**Option C: Manual scale factors**:
+```bash
+nextflow run soct_3d_reconst.nf \
+    --input /path/to/data \
+    --scale_correction_enabled true \
+    --scale_correction_y 1.031 \
+    --scale_correction_x 1.009
+```
+
+#### Using Command Line (Manual)
+
+```bash
+# Step 1: Aggregate dilation analysis from multiple slices
+linum_aggregate_dilation_analysis.py \
+    sub-18/diagnostics/dilation_analysis \
+    sub-18/diagnostics/aggregated_dilation
+
+# Step 2: Apply correction during 3D alignment
+linum_align_mosaics_3d_from_shifts.py \
+    mosaics_dir \
+    shifts_xy.csv \
+    aligned_output \
+    --dilation_json sub-18/diagnostics/aggregated_dilation/aggregated_dilation_analysis.json
+
+# Or use manual values:
+linum_align_mosaics_3d_from_shifts.py \
+    mosaics_dir \
+    shifts_xy.csv \
+    aligned_output \
+    --scale_y 1.031 \
+    --scale_x 1.009
+```
+
+**Understanding scale factors**:
+- `scale < 1` measured → mosaic is smaller than expected → use correction `> 1` to expand
+- `scale > 1` measured → mosaic is larger than expected → use correction `< 1` to shrink
+- The aggregation script outputs the **correction** factors directly (inverse of measured)
 
 **If specific slices are problematic**:
 ```groovy
@@ -235,18 +324,36 @@ linum_diagnose_reconstruction.py sub-18 sub-18/diagnostics
 
 ## Parameters Reference
 
+### Diagnostic Parameters
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `diagnostic_mode` | false | **Master switch**: enables ALL diagnostics when true |
 | `analyze_rotation_drift` | false | Analyze inter-slice rotation (mosaic-level) |
 | `analyze_tile_dilation` | false | Compare motor vs registration positions (tile-level) |
 | `motor_only_stitch` | false | Create motor-position-only stitches |
+| `motor_only_stack` | false | Create 3D stack using motor positions only |
 | `diagnostic_rotation_threshold` | 2.0 | Flag rotations above this (degrees) |
-| `motor_only_overlap` | 0.1 | Expected tile overlap fraction |
+| `motor_only_overlap` | 0.2 | Expected tile overlap fraction |
 
-**Note**: When `diagnostic_mode=true`, the individual flags (`analyze_rotation_drift`, 
-`analyze_tile_dilation`, `motor_only_stitch`) are automatically enabled. You only need 
-to set individual flags when `diagnostic_mode=false` and you want specific analyses.
+### Tile Stitching Parameters
+
+The pipeline uses motor positions for tile placement by default, which provides better 
+alignment than registration-based positioning. Motor positions are precise and don't 
+introduce the systematic compression seen with image-based registration.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `use_motor_positions_for_stitching` | **true** | Use motor positions for tile placement (recommended) |
+| `stitch_overlap_fraction` | 0.2 | Expected tile overlap fraction (must match acquisition) |
+
+**Why motor positions?** Analysis of registration-based stitching showed systematic compression
+(scale_y ≈ 0.97, scale_x ≈ 0.99), meaning tiles were placed ~3% closer than motor positions
+indicated. This caused "overhang" artifacts when stacking slices. Motor positions are precise
+and don't introduce this compression.
+
+**Note**: When `diagnostic_mode=true`, the individual diagnostic flags (`analyze_rotation_drift`, 
+`analyze_tile_dilation`, `motor_only_stitch`, `motor_only_stack`) are automatically enabled.
 
 ## Output Directory Structure
 

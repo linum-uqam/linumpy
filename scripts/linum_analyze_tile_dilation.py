@@ -32,6 +32,20 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 
+class NumpyEncoder(json.JSONEncoder):
+    """JSON encoder that handles numpy types."""
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
+
+
 def _build_arg_parser():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawTextHelpFormatter)
@@ -332,7 +346,7 @@ def main():
     # Save JSON
     json_path = output_dir / 'dilation_analysis.json'
     with open(json_path, 'w') as f:
-        json.dump(analysis, f, indent=2)
+        json.dump(analysis, f, indent=2, cls=NumpyEncoder)
     logger.info(f"Analysis JSON saved to {json_path}")
 
     # Generate outputs
