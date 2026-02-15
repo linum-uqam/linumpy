@@ -258,8 +258,13 @@ def apply_blend_shift_refinement(tile, refinements_for_tile, overlap_fraction):
     if abs(avg_dy) < 0.1 and abs(avg_dx) < 0.1:
         return tile
 
-    # Apply sub-pixel shift
-    shifted = ndi_shift(tile, (0, avg_dy, avg_dx), order=1, mode='constant', cval=0)
+    # Apply sub-pixel shift with edge value fill to avoid black dots
+    nonzero_vals = tile[tile > 0]
+    if len(nonzero_vals) > 0:
+        cval = float(np.percentile(nonzero_vals, 1))
+    else:
+        cval = 0.0
+    shifted = ndi_shift(tile, (0, avg_dy, avg_dx), order=1, mode='constant', cval=cval)
 
     return shifted
 

@@ -374,22 +374,29 @@ def apply_xy_shift(image, reference, dy, dx, use_gpu=True):
     np.ndarray
         Shifted image
     """
+    # Get a representative non-zero value for out-of-bounds fill
+    nonzero_vals = image[image > 0]
+    if len(nonzero_vals) > 0:
+        cval = float(np.percentile(nonzero_vals, 1))
+    else:
+        cval = 0.0
+
     if use_gpu and GPU_AVAILABLE:
         import cupy as cp
         from cupyx.scipy.ndimage import shift as cp_shift
 
         img_gpu = cp.asarray(image.astype(np.float32))
 
-        # Apply shift
+        # Apply shift with edge value fill to avoid black dots
         if image.ndim == 2:
-            shifted = cp_shift(img_gpu, [dy, dx], order=1)
+            shifted = cp_shift(img_gpu, [dy, dx], order=1, cval=cval)
         else:  # 3D
-            shifted = cp_shift(img_gpu, [0, dy, dx], order=1)
+            shifted = cp_shift(img_gpu, [0, dy, dx], order=1, cval=cval)
 
         return to_cpu(shifted)
     else:
         from scipy.ndimage import shift as scipy_shift
         if image.ndim == 2:
-            return scipy_shift(image, [dy, dx], order=1)
+            return scipy_shift(image, [dy, dx], order=1, cval=cval)
         else:
-            return scipy_shift(image, [0, dy, dx], order=1)
+            return scipy_shift(image, [0, dy, dx], order=1, cval=cval)

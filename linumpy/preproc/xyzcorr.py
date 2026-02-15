@@ -131,6 +131,14 @@ def resampleITK(vol, newshape, interpolator="linear"):
     else:
         resample.SetInterpolator(sitk.sitkLinear)
 
+    # Use a small positive default value instead of zero to avoid black dots
+    nonzero_vals = vol[vol > 0]
+    if len(nonzero_vals) > 0:
+        default_val = float(np.percentile(nonzero_vals, 1))
+    else:
+        default_val = 0.0
+    resample.SetDefaultPixelValue(default_val)
+
     vol_itk = sitk.GetImageFromArray(vol)
     output_itk = resample.Execute(vol_itk)
 
@@ -186,6 +194,14 @@ def shrink(vol, spacing=(1.0, 1.0, 1.0), res=(10.0, 10.0, 10.0)):
     resample.SetInterpolator(sitk.sitkLinear)
     resample.SetOutputSpacing([rz, ry, rx])
     resample.SetSize(outputSize)
+
+    # Use a small positive default value instead of zero to avoid black dots
+    nonzero_vals = vol[vol > 0]
+    if len(nonzero_vals) > 0:
+        default_val = float(np.percentile(nonzero_vals, 1))
+    else:
+        default_val = 0.0
+    resample.SetDefaultPixelValue(default_val)
 
     # Resampling
     return sitk.GetArrayFromImage(resample.Execute(img))

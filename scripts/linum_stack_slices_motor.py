@@ -25,11 +25,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import SimpleITK as sitk
-from scipy.ndimage import correlate
 from tqdm import tqdm
 
 from linumpy.io.zarr import read_omezarr, AnalysisOmeZarrWriter
-from linumpy.utils.mosaic_grid import getDiffusionBlendingWeights
 from linumpy.utils.io import add_overwrite_arg, assert_output_exists
 from linumpy.utils.metrics import collect_stack_metrics
 
@@ -51,6 +49,15 @@ def _build_arg_parser():
     p.add_argument('--transforms_dir', type=str, default=None,
                    help='Directory containing pairwise registration outputs.\n'
                         'If provided, applies rotation/translation refinements.')
+    p.add_argument('--rotation_only', action='store_true',
+                   help='Apply only rotation from registration transforms, ignore translation.\n'
+                        'Use this to prevent XY drift when motor positions are trusted.')
+    p.add_argument('--max_rotation_deg', type=float, default=1.0,
+                   help='Maximum rotation to apply per slice (degrees). Larger rotations\n'
+                        'are clamped to prevent registration errors from causing drift. [%(default)s]')
+    p.add_argument('--no_xy_shift', action='store_true',
+                   help='Skip XY shifting from motor positions.\n'
+                        'Use when slices are already in common space (e.g., from bring_to_common_space).')
 
     # Z-matching parameters
     p.add_argument('--slicing_interval_mm', type=float, default=0.200,
@@ -59,6 +66,8 @@ def _build_arg_parser():
                    help='Search range for Z-matching in mm [%(default)s]')
     p.add_argument('--use_expected_overlap', action='store_true',
                    help='Use expected overlap from slicing_interval instead of correlation')
+    p.add_argument('--moving_z_first_index', type=int, default=8,
+                   help='Starting Z-index in moving volume to skip noisy data [%(default)s]')
 
     # Blending
     p.add_argument('--blend', action='store_true',
@@ -162,18 +171,19 @@ def load_registration_transforms(transforms_dir, slice_ids):
 
             # Load z-offsets if available
             # offsets.txt contains [fixed_z, moving_z]
-            # The overlap is: fixed_z - moving_z (how many voxels from fixed match moving)
-            z_overlap = None
+            # - fixed_z: Z-index in fixed volume where overlap region starts
+            # - moving_z: Z-index in moving volume where overlap region starts
+            # These indicate WHERE the volumes overlap, not how much.
+            fixed_z = None
+            moving_z = None
             if offset_files:
                 offsets = np.loadtxt(str(offset_files[0]))
                 if len(offsets) >= 2:
                     fixed_z = int(offsets[0])
                     moving_z = int(offsets[1])
-                    # Overlap is the number of voxels that overlap between slices
-                    z_overlap = fixed_z - moving_z
-                    logger.debug(f"Slice {slice_id}: fixed_z={fixed_z}, moving_z={moving_z}, overlap={z_overlap}")
+                    logger.debug(f"Slice {slice_id}: fixed_z={fixed_z}, moving_z={moving_z}")
 
-            transforms[slice_id] = (tfm, z_overlap)
+            transforms[slice_id] = (tfm, fixed_z, moving_z)
             logger.debug(f"Loaded transform for slice {slice_id}")
 
         except Exception as e:
@@ -183,7 +193,7 @@ def load_registration_transforms(transforms_dir, slice_ids):
     return transforms
 
 
-def apply_2d_transform(image_2d, transform):
+def apply_2d_transform(image_2d, transform, rotation_only=False, max_rotation_deg=1.0):
     """
     Apply a SimpleITK 2D/3D transform to a 2D image.
 
@@ -193,7 +203,11 @@ def apply_2d_transform(image_2d, transform):
         2D image to transform
     transform : sitk.Transform
         SimpleITK transform (extracts 2D rotation/translation)
-
+    rotation_only : bool
+        If True, apply only rotation, ignore translation
+    max_rotation_deg : float
+        Maximum allowed rotation in degrees. Larger rotations are clamped.
+        Set to 0 to disable clamping.
     Returns
     -------
     np.ndarray
@@ -212,31 +226,65 @@ def apply_2d_transform(image_2d, transform):
             tx = params[3] if len(params) > 3 else 0
             ty = params[4] if len(params) > 4 else 0
 
+            # Clamp rotation if it exceeds max_rotation_deg
+            if max_rotation_deg > 0:
+                max_angle_rad = np.radians(max_rotation_deg)
+                if abs(angle) > max_angle_rad:
+                    logger.warning(f"Clamping rotation {np.degrees(angle):.2f}° to ±{max_rotation_deg}°")
+                    angle = np.clip(angle, -max_angle_rad, max_angle_rad)
+
             center = transform.GetCenter()
             center_2d = [center[0], center[1]]
 
             tfm_2d = sitk.Euler2DTransform()
             tfm_2d.SetCenter(center_2d)
             tfm_2d.SetAngle(angle)
-            tfm_2d.SetTranslation([tx, ty])
+            if rotation_only:
+                tfm_2d.SetTranslation([0, 0])  # Ignore translation
+            else:
+                tfm_2d.SetTranslation([tx, ty])
         else:
             # Try to use as-is or create identity
             tfm_2d = sitk.Euler2DTransform()
+            angle = 0
     else:
         tfm_2d = transform
+        if rotation_only and hasattr(tfm_2d, 'SetTranslation'):
+            tfm_2d.SetTranslation([0, 0])
+        angle = 0
+
+    # Check if transform is essentially identity (skip if very small)
+    # This avoids introducing boundary artifacts from trivial rotations
+    tx_final = 0 if rotation_only else tx
+    ty_final = 0 if rotation_only else ty
+
+    # If rotation is very small (< 0.1 degrees) and translation small (< 1 pixel), skip
+    if abs(angle) < 0.00175 and abs(tx_final) < 1.0 and abs(ty_final) < 1.0:  # 0.1 degrees in radians
+        return image_2d.copy()
 
     # Apply transform
     resampler = sitk.ResampleImageFilter()
     resampler.SetReferenceImage(sitk_img)
     resampler.SetTransform(tfm_2d)
     resampler.SetInterpolator(sitk.sitkLinear)
-    resampler.SetDefaultPixelValue(0)
+
+    # Use nearest neighbor extrapolation at boundaries to avoid black dots
+    # Get a representative non-zero value for the default
+    nonzero_vals = image_2d[image_2d > 0]
+    if len(nonzero_vals) > 0:
+        # Use a small positive value instead of zero to mark extrapolated regions
+        default_val = float(np.percentile(nonzero_vals, 1))
+    else:
+        default_val = 0.0
+    resampler.SetDefaultPixelValue(default_val)
 
     result = resampler.Execute(sitk_img)
-    return sitk.GetArrayFromImage(result)
+    result_arr = sitk.GetArrayFromImage(result)
+
+    return result_arr
 
 
-def apply_transform_to_volume(vol, transform):
+def apply_transform_to_volume(vol, transform, rotation_only=False, max_rotation_deg=1.0):
     """
     Apply 2D transform to each Z-slice of a volume.
 
@@ -246,6 +294,10 @@ def apply_transform_to_volume(vol, transform):
         3D volume (Z, Y, X)
     transform : sitk.Transform
         Transform to apply to each slice
+    rotation_only : bool
+        If True, apply only rotation, ignore translation
+    max_rotation_deg : float
+        Maximum allowed rotation in degrees. Larger rotations are clamped.
 
     Returns
     -------
@@ -254,7 +306,7 @@ def apply_transform_to_volume(vol, transform):
     """
     result = np.zeros_like(vol)
     for z in range(vol.shape[0]):
-        result[z] = apply_2d_transform(vol[z], transform)
+        result[z] = apply_2d_transform(vol[z], transform, rotation_only, max_rotation_deg)
     return result
 
 
@@ -396,20 +448,75 @@ def compute_output_shape(slice_files, cumsum_px, first_vol_shape):
 
 
 def blend_overlap(fixed_region, moving_region):
-    """Blend overlapping Z-region using diffusion weights."""
-    # Create tissue mask for blending
-    fixed_mask = fixed_region > np.percentile(fixed_region, 10)
-    moving_mask = moving_region > np.percentile(moving_region, 10)
+    """Blend overlapping Z-region using linear interpolation along Z-axis.
 
-    # Get blending weights
-    try:
-        alphas = getDiffusionBlendingWeights(fixed_mask, moving_mask, factor=2)
-    except Exception:
-        # Fallback to linear blending
-        nz = fixed_region.shape[0]
-        alphas = np.linspace(0, 1, nz)[:, None, None]
+    For Z-stack blending, we want a smooth transition from fixed (bottom of fixed volume)
+    to moving (top of moving volume) along the Z direction.
 
-    blended = (1 - alphas) * fixed_region + alphas * moving_region
+    At tissue boundaries where only one slice has data, we fade smoothly to that data
+    instead of creating hard cutoffs.
+
+    Parameters
+    ----------
+    fixed_region : np.ndarray
+        3D array (Z, Y, X) from the existing stack (bottom slice's bottom portion)
+    moving_region : np.ndarray
+        3D array (Z, Y, X) from the new slice (top portion to blend in)
+
+    Returns
+    -------
+    np.ndarray
+        Blended region with smooth Z transition
+    """
+    nz = fixed_region.shape[0]
+
+    if nz <= 1:
+        # No blending possible with single slice
+        # Return whichever has more valid data
+        if np.sum(moving_region > 0) >= np.sum(fixed_region > 0):
+            return moving_region
+        else:
+            return fixed_region
+
+    # Create linear weights along Z-axis
+    # At z=0 (top of overlap), we want mostly fixed (alpha=0)
+    # At z=nz-1 (bottom of overlap), we want mostly moving (alpha=1)
+    z_weights = np.linspace(0, 1, nz)
+
+    # Expand weights to match 3D shape (Z, Y, X)
+    alphas = z_weights[:, np.newaxis, np.newaxis]
+    alphas = np.broadcast_to(alphas, fixed_region.shape).copy()
+
+    # Create tissue masks
+    fixed_valid = fixed_region > 0
+    moving_valid = moving_region > 0
+    both_valid = fixed_valid & moving_valid
+    fixed_only = fixed_valid & ~moving_valid
+    moving_only = moving_valid & ~fixed_valid
+
+    # Initialize output (zeros where neither has data)
+    blended = np.zeros_like(moving_region, dtype=np.float32)
+
+    # Where both have data, apply standard weighted blend
+    if np.any(both_valid):
+        blended[both_valid] = ((1 - alphas) * fixed_region + alphas * moving_region)[both_valid]
+
+    # Where only fixed has data, use fixed but fade based on z-position
+    # At the top of overlap (z=0), use full fixed value
+    # At the bottom (z=nz-1), fade to reduce hard edges
+    if np.any(fixed_only):
+        # Use fixed value, weighted by (1-alpha) to fade out towards bottom
+        fade = 1.0 - alphas * 0.5  # Partial fade, don't go to zero
+        blended[fixed_only] = (fixed_region * fade)[fixed_only]
+
+    # Where only moving has data, use moving but fade based on z-position
+    # At the bottom of overlap (z=nz-1), use full moving value
+    # At the top (z=0), fade to reduce hard edges
+    if np.any(moving_only):
+        # Use moving value, weighted by alpha to fade in from top
+        fade = 0.5 + alphas * 0.5  # Partial fade, don't go to zero
+        blended[moving_only] = (moving_region * fade)[moving_only]
+
     return blended
 
 
@@ -463,27 +570,35 @@ def main():
 
     logger.info(f"Resolution: Z={res_z_mm*1000:.2f} µm, Y={res_y_mm*1000:.2f} µm, X={res_x_mm*1000:.2f} µm")
 
-    # Convert shifts (in mm) to pixels: shift_mm / res_mm = pixels
-    cumsum_px = {}
-    for slice_id in available_ids:
-        if slice_id in cumsum_mm:
-            dx_mm, dy_mm = cumsum_mm[slice_id]
-        else:
-            logger.warning(f"No shift for slice {slice_id}, using (0, 0)")
-            dx_mm, dy_mm = 0.0, 0.0
-        # mm / mm = pixels
-        cumsum_px[slice_id] = (dx_mm / res_x_mm, dy_mm / res_y_mm)
+    # Handle XY shifts
+    if args.no_xy_shift:
+        # Slices are already in common space, no XY shifting needed
+        logger.info("Skipping XY shifts (--no_xy_shift specified, slices already in common space)")
+        cumsum_px = {slice_id: (0.0, 0.0) for slice_id in available_ids}
+        out_ny, out_nx = first_vol.shape[1], first_vol.shape[2]
+        x0, y0 = 0, 0
+    else:
+        # Convert shifts (in mm) to pixels: shift_mm / res_mm = pixels
+        cumsum_px = {}
+        for slice_id in available_ids:
+            if slice_id in cumsum_mm:
+                dx_mm, dy_mm = cumsum_mm[slice_id]
+            else:
+                logger.warning(f"No shift for slice {slice_id}, using (0, 0)")
+                dx_mm, dy_mm = 0.0, 0.0
+            # mm / mm = pixels
+            cumsum_px[slice_id] = (dx_mm / res_x_mm, dy_mm / res_y_mm)
 
-    # Center shifts
-    middle_id = available_ids[len(available_ids) // 2]
-    center_dx, center_dy = cumsum_px[middle_id]
-    cumsum_px = {k: (dx - center_dx, dy - center_dy) for k, (dx, dy) in cumsum_px.items()}
+        # Center shifts
+        middle_id = available_ids[len(available_ids) // 2]
+        center_dx, center_dy = cumsum_px[middle_id]
+        cumsum_px = {k: (dx - center_dx, dy - center_dy) for k, (dx, dy) in cumsum_px.items()}
 
-    # Compute output XY shape
-    out_ny, out_nx, x0, y0 = compute_output_shape(slice_files, cumsum_px, first_vol.shape)
+        # Compute output XY shape
+        out_ny, out_nx, x0, y0 = compute_output_shape(slice_files, cumsum_px, first_vol.shape)
 
-    # Adjust shifts by origin
-    cumsum_px = {k: (dx - x0, dy - y0) for k, (dx, dy) in cumsum_px.items()}
+        # Adjust shifts by origin
+        cumsum_px = {k: (dx - x0, dy - y0) for k, (dx, dy) in cumsum_px.items()}
 
     logger.info(f"Output XY shape: {out_ny} x {out_nx}")
 
@@ -504,26 +619,36 @@ def main():
     z_matches = []
     total_z = first_vol.shape[0]
 
+    # Cache volume shapes to avoid re-reading during smoothing
+    volume_shapes = {first_id: first_vol.shape}
+
     prev_vol = first_vol
     prev_id = first_id
 
     for i, slice_id in enumerate(tqdm(available_ids[1:], desc="Z-matching")):
         vol, _ = read_omezarr(str(slice_files[slice_id]), level=0)
         vol = np.array(vol[:])
+        volume_shapes[slice_id] = vol.shape  # Cache shape
 
-        # Check if we have a registration-derived Z-overlap
-        reg_overlap = None
+        # Check if we have registration-derived Z-indices
+        fixed_z = None
+        moving_z = None
         if slice_id in registration_transforms and registration_transforms[slice_id] is not None:
-            _, reg_overlap = registration_transforms[slice_id]
+            _, fixed_z, moving_z = registration_transforms[slice_id]
 
-        if reg_overlap is not None and reg_overlap > 0:
-            # Use registration-derived overlap (fixed_z - moving_z)
-            overlap = reg_overlap
+        if fixed_z is not None:
+            # We have registration-derived indices
+            # fixed_z: Z-index in prev_vol where overlap starts
+            # moving_z: Z-index in vol where overlap starts (skipping noisy initial slices)
+            # The overlap depth is: prev_vol.shape[0] - fixed_z
+            prev_nz = prev_vol.shape[0]
+            overlap = max(0, prev_nz - fixed_z)
             corr = 1.0  # Assume good correlation since registration found it
-            logger.debug(f"Slice {slice_id}: using registration overlap={overlap} voxels")
+            logger.debug(f"Slice {slice_id}: fixed_z={fixed_z}, moving_z={moving_z}, overlap={overlap} voxels")
         elif args.use_expected_overlap:
             # slicing_interval_mm / res_z_mm = overlap in voxels
             overlap = int(args.slicing_interval_mm / res_z_mm)
+            moving_z = args.moving_z_first_index
             corr = 0.0
         else:
             # find_z_overlap expects resolution in µm for its internal calculation
@@ -532,15 +657,21 @@ def main():
                 prev_vol, vol,
                 args.slicing_interval_mm, args.search_range_mm, res_z_um
             )
+            moving_z = args.moving_z_first_index  # Use default
 
         z_matches.append({
             'fixed_id': prev_id,
             'moving_id': slice_id,
             'overlap_voxels': overlap,
+            'moving_z_start': moving_z,  # Z-index in moving volume where to start
             'correlation': corr
         })
 
-        total_z += vol.shape[0] - overlap
+        # Account for moving_z_start when computing total depth
+        # We add (vol_depth - moving_z - overlap) new voxels
+        moving_z_val = moving_z if moving_z is not None else 0
+        contribution = vol.shape[0] - moving_z_val - overlap
+        total_z += max(0, contribution)
         prev_vol = vol
         prev_id = slice_id
 
@@ -548,6 +679,42 @@ def main():
     if args.output_z_matches:
         pd.DataFrame(z_matches).to_csv(args.output_z_matches, index=False)
         logger.info(f"Z-matches saved to {args.output_z_matches}")
+
+    # Smooth Z-overlaps: detect and correct outliers
+    overlaps = np.array([m['overlap_voxels'] for m in z_matches])
+    if len(overlaps) > 3:
+        median_overlap = np.median(overlaps)
+        # Detect outliers (deviates more than 30% from median)
+        # Using 30% to catch more outliers that cause visible jumps
+        outlier_threshold = 0.3 * median_overlap
+        smoothed = False
+        logger.info(f"Z-overlap smoothing: median={median_overlap:.1f}, threshold=±{outlier_threshold:.1f}")
+        for i, match in enumerate(z_matches):
+            deviation = abs(match['overlap_voxels'] - median_overlap)
+            if deviation > outlier_threshold:
+                old_overlap = match['overlap_voxels']
+                # Replace with local median or global median
+                if i > 0 and i < len(z_matches) - 1:
+                    local_median = np.median([z_matches[i-1]['overlap_voxels'],
+                                              z_matches[i+1]['overlap_voxels'] if i+1 < len(z_matches) else median_overlap])
+                    match['overlap_voxels'] = int(local_median)
+                else:
+                    match['overlap_voxels'] = int(median_overlap)
+                logger.warning(f"Slice {match['moving_id']}: corrected outlier overlap {old_overlap} -> {match['overlap_voxels']} voxels (deviation={deviation:.1f})")
+                smoothed = True
+
+        # Recompute total_z after smoothing if any corrections were made
+        if smoothed:
+            # Use cached shapes instead of re-reading volumes
+            total_z = volume_shapes[first_id][0]
+            for match in z_matches:
+                slice_id = match['moving_id']
+                moving_z_val = match.get('moving_z_start', 0) or 0
+                overlap = match['overlap_voxels']
+                vol_nz = volume_shapes[slice_id][0]
+                contribution = vol_nz - moving_z_val - overlap
+                total_z += max(0, contribution)
+            logger.info(f"Recomputed total Z after smoothing: {total_z}")
 
     # Log Z-match summary
     overlaps = [m['overlap_voxels'] for m in z_matches]
@@ -579,15 +746,26 @@ def main():
     for i, match in enumerate(tqdm(z_matches, desc="Stacking")):
         slice_id = match['moving_id']
         overlap = match['overlap_voxels']
+        moving_z_start = match.get('moving_z_start', 0) or 0
 
         vol, _ = read_omezarr(str(slice_files[slice_id]), level=0)
         vol = np.array(vol[:]).astype(np.float32)
 
+        # Skip initial noisy z-slices in moving volume
+        if moving_z_start > 0:
+            vol = vol[moving_z_start:]
+            logger.debug(f"Slice {slice_id}: skipped first {moving_z_start} z-slices")
+
         # Apply registration transform (rotation/small translation refinement) if available
         if slice_id in registration_transforms and registration_transforms[slice_id] is not None:
-            transform, _ = registration_transforms[slice_id]
-            vol = apply_transform_to_volume(vol, transform)
-            logger.debug(f"Applied registration transform to slice {slice_id}")
+            transform, _, _ = registration_transforms[slice_id]
+            vol = apply_transform_to_volume(vol, transform,
+                                           rotation_only=args.rotation_only,
+                                           max_rotation_deg=args.max_rotation_deg)
+            if args.rotation_only:
+                logger.debug(f"Applied rotation-only transform to slice {slice_id} (max_rot={args.max_rotation_deg}°)")
+            else:
+                logger.debug(f"Applied registration transform to slice {slice_id}")
 
         # Apply XY shift (from motor positions)
         dx, dy = cumsum_px[slice_id]
@@ -618,6 +796,26 @@ def main():
                 # Get overlap regions from output and shifted
                 existing = np.array(output[overlap_z_start:overlap_z_end, dst_y0:dst_y1, dst_x0:dst_x1])
                 moving_overlap = shifted[:overlap_depth]
+
+                # Intensity matching: adjust moving slice to match existing in overlap
+                # This reduces visible bands at slice transitions
+                existing_valid = existing > 0
+                moving_valid = moving_overlap > 0
+                both_valid = existing_valid & moving_valid
+
+                if np.sum(both_valid) > 1000:  # Need enough pixels for reliable statistics
+                    existing_median = np.median(existing[both_valid])
+                    moving_median = np.median(moving_overlap[both_valid])
+
+                    if moving_median > 1e-6 and existing_median > 1e-6:
+                        scale = existing_median / moving_median
+                        # Clamp scale to prevent extreme corrections
+                        scale = np.clip(scale, 0.8, 1.25)
+                        if abs(scale - 1.0) > 0.01:
+                            # Apply scaling to the entire shifted volume, not just overlap
+                            shifted = shifted * scale
+                            moving_overlap = shifted[:overlap_depth]
+                            logger.debug(f"Slice {slice_id}: intensity scale={scale:.3f}")
 
                 # Blend
                 blended = blend_overlap(existing, moving_overlap)

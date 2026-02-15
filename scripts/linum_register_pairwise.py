@@ -107,8 +107,8 @@ def find_best_z(fixed_vol, moving_slice, expected_z, search_range, mask=None):
     z_max = min(nz - 1, expected_z + search_range)
 
     if z_min >= z_max:
-        # Return clamped expected_z
-        return max(0, min(nz - 1, expected_z))
+        # Return clamped expected_z with zero correlation
+        return max(0, min(nz - 1, expected_z)), 0.0
 
     # Use center region for matching
     h, w = moving_slice.shape
@@ -141,7 +141,7 @@ def find_best_z(fixed_vol, moving_slice, expected_z, search_range, mask=None):
     logger.info(f"Z-match: expected={expected_z}, found={best_z}, corr={best_corr:.4f}")
 
     # Final safety clamp
-    return max(0, min(nz - 1, best_z))
+    return max(0, min(nz - 1, best_z)), best_corr
 
 
 def register_refinement(fixed, moving, enable_rotation=True,
@@ -159,14 +159,41 @@ def register_refinement(fixed, moving, enable_rotation=True,
     metric : float
         Registration metric value (lower is better for most metrics)
     """
-    # Apply masks
-    if fixed_mask is not None:
-        fixed = fixed * fixed_mask.astype(np.float32)
-    if moving_mask is not None:
-        moving = moving * moving_mask.astype(np.float32)
+    # Check image validity before registration
+    fixed_std = np.std(fixed[fixed > 0]) if np.any(fixed > 0) else 0
+    moving_std = np.std(moving[moving > 0]) if np.any(moving > 0) else 0
 
-    fixed_sitk = sitk.GetImageFromArray(fixed.astype(np.float32))
-    moving_sitk = sitk.GetImageFromArray(moving.astype(np.float32))
+    if fixed_std < 0.01 or moving_std < 0.01:
+        logger.warning(f"Low image variance (fixed={fixed_std:.4f}, moving={moving_std:.4f}), "
+                       "skipping refinement")
+        return 0.0, 0.0, 0.0, 0.0
+
+    # Apply masks (multiply masked regions by intensity)
+    if fixed_mask is not None:
+        fixed_masked = fixed * fixed_mask.astype(np.float32)
+    else:
+        fixed_masked = fixed
+
+    if moving_mask is not None:
+        moving_masked = moving * moving_mask.astype(np.float32)
+    else:
+        moving_masked = moving
+
+    # Log mask coverage
+    if fixed_mask is not None:
+        fixed_coverage = np.mean(fixed_mask)
+        logger.debug(f"Fixed mask coverage: {fixed_coverage*100:.1f}%")
+        if fixed_coverage < 0.1:
+            logger.warning("Fixed mask covers less than 10% of image")
+
+    if moving_mask is not None:
+        moving_coverage = np.mean(moving_mask)
+        logger.debug(f"Moving mask coverage: {moving_coverage*100:.1f}%")
+        if moving_coverage < 0.1:
+            logger.warning("Moving mask covers less than 10% of image")
+
+    fixed_sitk = sitk.GetImageFromArray(fixed_masked.astype(np.float32))
+    moving_sitk = sitk.GetImageFromArray(moving_masked.astype(np.float32))
 
     # Set up transform
     if enable_rotation:
@@ -178,14 +205,16 @@ def register_refinement(fixed, moving, enable_rotation=True,
 
     # Registration
     reg = sitk.ImageRegistrationMethod()
+
+    # Use correlation metric (negative correlation is minimized)
     reg.SetMetricAsCorrelation()
 
-    reg.SetOptimizerAsPowell(
-        numberOfIterations=100,
-        maximumLineIterations=20,
-        stepLength=1.0,
-        stepTolerance=0.001,
-        valueTolerance=0.001
+    # Use gradient descent with more iterations for better convergence
+    reg.SetOptimizerAsGradientDescent(
+        learningRate=1.0,
+        numberOfIterations=200,
+        convergenceMinimumValue=1e-6,
+        convergenceWindowSize=10
     )
     reg.SetOptimizerScalesFromPhysicalShift()
 
@@ -200,13 +229,25 @@ def register_refinement(fixed, moving, enable_rotation=True,
         final = reg.Execute(fixed_sitk, moving_sitk)
         metric = reg.GetMetricValue()
 
+        logger.debug(f"Registration metric value: {metric:.6f}")
+
+        # Handle CompositeTransform from multi-resolution registration
+        # The actual transform is wrapped inside the composite
+        if final.GetName() == 'CompositeTransform':
+            inner_transform = final.GetNthTransform(0)
+            logger.debug(f"Extracted inner transform: {inner_transform.GetName()}")
+        else:
+            inner_transform = final
+
         if enable_rotation:
-            euler = sitk.Euler2DTransform(final)
+            euler = sitk.Euler2DTransform(inner_transform)
             angle_deg = np.degrees(euler.GetAngle())
             tx, ty = euler.GetTranslation()
         else:
-            tx, ty = final.GetOffset()
+            tx, ty = inner_transform.GetOffset()
             angle_deg = 0.0
+
+        logger.debug(f"Raw registration result: tx={tx:.3f}, ty={ty:.3f}, rot={angle_deg:.4f}°")
 
         # Clamp to limits
         mag = np.sqrt(tx**2 + ty**2)
@@ -294,7 +335,14 @@ def main():
     logger.info(f"Searching for match near z={expected_z} in fixed volume (search ±{search_vox})")
 
     # Find best Z match
-    best_z = find_best_z(fixed_vol, moving_slice, expected_z, search_vox, moving_mask)
+    best_z, z_correlation = find_best_z(fixed_vol, moving_slice, expected_z, search_vox, moving_mask)
+
+    logger.info(f"Best Z match: {best_z} (expected: {expected_z}, correlation: {z_correlation:.4f})")
+
+    # Warn if z-match deviates significantly from expected
+    z_deviation = abs(best_z - expected_z)
+    if z_deviation > search_vox // 2:
+        logger.warning(f"Z-match deviation is large ({z_deviation} voxels) - may indicate alignment issues")
 
     # Get fixed slice at best Z
     fixed_slice = np.array(fixed_vol[best_z])
@@ -343,7 +391,9 @@ def main():
             'search_range_mm': args.search_range_mm,
             'enable_rotation': args.enable_rotation,
             'max_rotation_deg': args.max_rotation_deg,
-            'max_translation_px': args.max_translation_px
+            'max_translation_px': args.max_translation_px,
+            'z_correlation': float(z_correlation),
+            'z_deviation': int(z_deviation)
         }
     )
 

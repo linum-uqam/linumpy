@@ -398,7 +398,26 @@ process stitch_3d {
 
     script:
     """
-    linum_stitch_3d.py ${mosaic_grid} ${transform_xy} "slice_z${slice_id}_stitch_3d.ome.zarr"
+    linum_stitch_3d.py ${mosaic_grid} ${transform_xy} "slice_z${slice_id}_stitch_3d.ome.zarr" \
+        --blending_method ${params.stitch_blending_method}
+    """
+}
+
+process stitch_3d_with_refinement {
+    input:
+    tuple val(slice_id), path(mosaic_grid)
+
+    output:
+    tuple val(slice_id), path("slice_z${slice_id}_stitch_3d.ome.zarr")
+
+    script:
+    """
+    linum_stitch_3d_refined.py ${mosaic_grid} "slice_z${slice_id}_stitch_3d.ome.zarr" \
+        --overlap_fraction ${params.stitch_overlap_fraction} \
+        --blending_method ${params.stitch_blending_method} \
+        --refinement_mode blend_shift \
+        --max_refinement_px ${params.max_blend_refinement_px} \
+        -f
     """
 }
 
@@ -605,7 +624,7 @@ process stack_motor {
     publishDir "$params.output/$task.process", mode: 'move'
 
     input:
-    tuple path("slices/*"), path(shifts_file), path("transforms/*"), val(subject_name)
+    tuple path("slices/*"), path(shifts_file), path("transforms/*"), val(subject_name), val(slice_ids_str)
 
     output:
     tuple path("${subject_name}.ome.zarr"), path("${subject_name}.ome.zarr.zip"), path("${subject_name}.png"), path("${subject_name}_annotated.png")
@@ -619,10 +638,23 @@ process stack_motor {
     // Z-matching
     options += " --slicing_interval_mm ${params.registration_slicing_interval_mm}"
     options += " --search_range_mm ${params.registration_allowed_drifting_mm}"
+    options += " --moving_z_first_index ${params.moving_slice_first_index}"
     if (params.use_expected_z_overlap) options += " --use_expected_overlap"
+
+    // Output z-matches for debugging (controlled by analyze_shifts)
+    if (params.analyze_shifts) options += " --output_z_matches z_matches.csv"
 
     // Use registration refinements (rotation + small translation)
     options += " --transforms_dir transforms"
+
+    // Apply only rotation from registration (prevents XY jumps when motor positions are trusted)
+    if (params.apply_rotation_only) options += " --rotation_only"
+
+    // Clamp maximum rotation per slice to prevent registration errors from causing drift
+    options += " --max_rotation_deg ${params.max_rotation_deg}"
+
+    // Skip XY shifting since slices are already in common space (from bring_to_common_space)
+    options += " --no_xy_shift"
 
     // Pyramid configuration
     if (params.pyramid_n_levels != null) {
@@ -645,8 +677,9 @@ process stack_motor {
     # Generate preview
     linum_screenshot_omezarr.py ${subject_name}.ome.zarr ${subject_name}.png
 
-    # Generate annotated preview
+    # Generate annotated preview with actual slice IDs
     linum_screenshot_omezarr_annotated.py ${subject_name}.ome.zarr ${subject_name}_annotated.png \
+        --slice_ids "${slice_ids_str}" \
         --label_every ${params.annotated_label_every} ${show_lines_flag}
     """
 }
@@ -956,19 +989,28 @@ workflow {
     // -------------------------------------------------------------------------
     // Stage 2: XY Stitching
     // -------------------------------------------------------------------------
-    generate_aip(illum_fixed)
-    estimate_xy_transformation(generate_aip.out)
-    stitch_3d(illum_fixed.combine(estimate_xy_transformation.out, by: 0))
+    if (params.use_refined_stitching) {
+        // Use refined stitching with registration-based blend refinement
+        // This helps reduce visible tile seams
+        stitch_3d_with_refinement(illum_fixed)
+        stitched_slices = stitch_3d_with_refinement.out
+    } else {
+        // Use standard stitching with motor-based transform
+        generate_aip(illum_fixed)
+        estimate_xy_transformation(generate_aip.out)
+        stitch_3d(illum_fixed.combine(estimate_xy_transformation.out, by: 0))
+        stitched_slices = stitch_3d.out
+    }
 
     // Generate stitch previews if enabled
     if (params.stitch_preview) {
-        generate_stitch_preview(stitch_3d.out)
+        generate_stitch_preview(stitched_slices)
     }
 
     // -------------------------------------------------------------------------
     // Stage 3: Corrections
     // -------------------------------------------------------------------------
-    beam_profile_correction(stitch_3d.out)
+    beam_profile_correction(stitched_slices)
     crop_interface(beam_profile_correction.out)
     normalize(crop_interface.out)
 
@@ -1084,7 +1126,7 @@ workflow {
             .combine(transforms_collected)
             .map { items ->
                 // items is a flat list: [slice1, slice2, ..., shifts_file, transform1, transform2, ...]
-                // We need to separate them into: tuple(slices, shifts, transforms, subject_name)
+                // We need to separate them into: tuple(slices, shifts, transforms, subject_name, slice_ids_str)
                 def slices = []
                 def shifts = null
                 def transforms = []
@@ -1101,7 +1143,10 @@ workflow {
                     }
                 }
 
-                tuple(slices, shifts, transforms, subject_name)
+                // Extract slice IDs from slice filenames
+                def slice_ids_str = extractSliceIdsString(slices)
+
+                tuple(slices, shifts, transforms, subject_name, slice_ids_str)
             }
 
         stack_motor(motor_stack_input)
@@ -1160,15 +1205,21 @@ workflow {
     }
 
     if (runDilationDiagnostics) {
-        log.info "Running tile dilation analysis..."
-        dilation_input_diag = illum_fixed.combine(estimate_xy_transformation.out, by: 0)
-        analyze_tile_dilation(dilation_input_diag)
+        if (params.use_motor_positions_for_stitching && !params.use_refined_stitching) {
+            log.warn "Tile dilation analysis is not meaningful when use_motor_positions_for_stitching=true"
+            log.warn "  The transform IS motor positions, so no dilation will be detected."
+            log.warn "  Enable use_refined_stitching=true to analyze refinement-induced dilation."
+        } else {
+            log.info "Running tile dilation analysis..."
+            dilation_input_diag = illum_fixed.combine(estimate_xy_transformation.out, by: 0)
+            analyze_tile_dilation(dilation_input_diag)
 
-        if (params.diagnostic_mode) {
-            dilation_json_files_diag = analyze_tile_dilation.out
-                .map { slice_id, json, png, txt -> json }
-                .collect()
-            aggregate_dilation_analysis(dilation_json_files_diag)
+            if (params.diagnostic_mode) {
+                dilation_json_files_diag = analyze_tile_dilation.out
+                    .map { slice_id, json, png, txt -> json }
+                    .collect()
+                aggregate_dilation_analysis(dilation_json_files_diag)
+            }
         }
     }
 

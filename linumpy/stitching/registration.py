@@ -577,7 +577,15 @@ def apply_transform(moving_image, transform):
     resampler = sitk.ResampleImageFilter()
     resampler.SetReferenceImage(moving_image_sitk)  # transforms the image inside its domain
     resampler.SetInterpolator(sitk.sitkLinear)
-    resampler.SetDefaultPixelValue(0)
+
+    # Use edge value instead of zero to avoid black dots at boundaries
+    nonzero_vals = moving_image[moving_image > 0]
+    if len(nonzero_vals) > 0:
+        default_val = float(np.percentile(nonzero_vals, 1))
+    else:
+        default_val = 0.0
+    resampler.SetDefaultPixelValue(default_val)
+
     resampler.SetTransform(transform)
 
     out = resampler.Execute(moving_image_sitk)

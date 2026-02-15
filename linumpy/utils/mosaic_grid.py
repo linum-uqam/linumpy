@@ -497,7 +497,8 @@ class MosaicGrid():
             self.set_affine(initial_overlap)
 
 
-def addVolumeToMosaic(volume, pos, mosaic, blendingMethod='diffusion', factor=3, width=1.0):
+def addVolumeToMosaic(volume, pos, mosaic, blendingMethod='diffusion', factor=3, width=1.0,
+                       match_intensity=False):
     """Add a single volume into a mosaic.
     Parameters
     ----------
@@ -513,6 +514,9 @@ def addVolumeToMosaic(volume, pos, mosaic, blendingMethod='diffusion', factor=3,
         Subsampling factor used by the diffusion blending method.
     width : float, optional
         Blending transition width (between 0 and 1) used by the diffusion blending method, defaults to 1.0.
+    match_intensity : bool, optional
+        If True, adjust incoming tile intensity to match existing mosaic in overlap region.
+        This prevents intensity gradients across the mosaic. Defaults to False.
 
     Returns
     -------
@@ -536,10 +540,49 @@ def addVolumeToMosaic(volume, pos, mosaic, blendingMethod='diffusion', factor=3,
     else:
         wz = 0
 
+    # Use a small positive threshold to detect existing mosaic data
+    # This avoids including near-zero values from numerical precision issues
     if mosaic.ndim == 3 and mosaic.shape[0] != 0:
-        mask = mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny].mean(axis=0) > 0
+        existing_region = mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny]
+        existing_mean = existing_region.mean(axis=0)
+        # Simple threshold: any non-zero values indicate overlap
+        mask = existing_mean > 0
     else:
         mask = np.squeeze(mosaic[wx:wx + nx, wy:wy + ny]) > 0
+
+    # Intensity matching: adjust tile intensity to match existing mosaic in overlap
+    # This prevents intensity gradients across the mosaic with diffusion blending
+    if match_intensity and np.any(mask) and blendingMethod == 'diffusion':
+        # Get overlap regions for both mosaic and volume
+        if mosaic.ndim == 3:
+            mosaic_overlap = mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny]
+        else:
+            mosaic_overlap = mosaic[wx:wx + nx, wy:wy + ny]
+
+        # Use 2D mask expanded to 3D
+        mask_3d = np.tile(mask[np.newaxis, :, :], [nz, 1, 1]) if volume.ndim == 3 else mask
+
+        # Get valid overlap pixels (where both mosaic and tile have data)
+        mosaic_valid = (mosaic_overlap > 0) & mask_3d
+        volume_valid = (volume > 0) & mask_3d
+        both_valid = mosaic_valid & volume_valid
+
+        if np.sum(both_valid) > 100:  # Need enough pixels for reliable statistics
+            # Compute intensity ratio in overlap region using robust statistics
+            mosaic_vals = mosaic_overlap[both_valid]
+            volume_vals = volume[both_valid]
+
+            # Use percentile-based matching (more robust than mean)
+            mosaic_p50 = np.percentile(mosaic_vals, 50)
+            volume_p50 = np.percentile(volume_vals, 50)
+
+            if volume_p50 > 1e-6 and mosaic_p50 > 1e-6:  # Avoid division by zero
+                # Scale volume to match mosaic intensity in overlap
+                scale = mosaic_p50 / volume_p50
+                # Clamp scale to reasonable range to avoid extreme corrections
+                scale = np.clip(scale, 0.5, 2.0)
+                if abs(scale - 1.0) > 0.01:  # Only apply if significant difference
+                    volume = volume * scale
 
     # Computing the blending weights
     if np.any(mask):
@@ -732,6 +775,15 @@ def resampleITK(vol: np.ndarray, newshape: tuple, interpolator: str = 'linear') 
         resample.SetInterpolator(sitk.sitkLinear)
     else:
         resample.SetInterpolator(sitk.sitkLinear)
+
+    # Use a small positive default value instead of zero to avoid black dots
+    # at boundaries during resampling
+    nonzero_vals = vol[vol > 0]
+    if len(nonzero_vals) > 0:
+        default_val = float(np.percentile(nonzero_vals, 1))
+    else:
+        default_val = 0.0
+    resample.SetDefaultPixelValue(default_val)
 
     vol_itk = sitk.GetImageFromArray(vol)
     output_itk = resample.Execute(vol_itk)
