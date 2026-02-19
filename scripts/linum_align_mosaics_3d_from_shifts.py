@@ -69,8 +69,20 @@ def _build_arg_parser():
                    help='Maximum allowed per-step shift in mm. 0 disables. [%(default)s]')
     p.add_argument('--step_window', type=int, default=2,
                    help='Neighbor window for step outlier replacement [%(default)s]')
-    p.add_argument('--step_method', choices=['clamp', 'local_median'], default='local_median',
-                   help='How to handle per-step spikes: clamp or local_median [%(default)s]')
+    p.add_argument('--step_method', choices=['clamp', 'local_median', 'local_mad'],
+                   default='local_median',
+                   help='How to handle per-step spikes:\n'
+                        '  clamp: Limit magnitude to max_step_mm (requires max_step_mm > 0)\n'
+                        '  local_median: Replace steps above max_step_mm with local median '
+                        '(requires max_step_mm > 0)\n'
+                        '  local_mad: Detect AND replace local outliers using MAD-based scoring; '
+                        'no fixed threshold needed, controlled by --step_mad_threshold '
+                        '[%(default)s]')
+    p.add_argument('--step_mad_threshold', type=float, default=3.0,
+                   help='Number of local MADs above the local median that triggers outlier '
+                        'detection (only with --step_method local_mad). A step is flagged '
+                        'when its magnitude exceeds local_median + threshold * local_MAD. '
+                        '[%(default)s]')
 
     # Drift centering
     p.add_argument('--no_center_drift', action='store_true',
@@ -335,32 +347,60 @@ def handle_excluded_slice_shifts(shifts_df, excluded_slice_ids, mode='keep', win
     return df
 
 
-def filter_step_outliers(shifts_df, max_step_mm=0.0, window=2, method='local_median'):
+def filter_step_outliers(shifts_df, max_step_mm=0.0, window=2, method='local_median',
+                         mad_threshold=3.0):
     """
     Fix per-step spikes in shifts, independent of global outlier detection.
 
     Parameters
     ----------
     max_step_mm : float
-        Maximum allowed per-step shift magnitude in mm. 0 disables.
+        Maximum allowed per-step shift magnitude in mm. 0 disables (for clamp/local_median).
+        Ignored when method='local_mad'.
     window : int
-        Neighbor window size for local median replacement.
+        Neighbor window size for detection and replacement.
     method : str
-        'clamp' or 'local_median'.
+        'clamp', 'local_median', or 'local_mad'.
+        - clamp/local_median: use fixed max_step_mm threshold for detection
+        - local_mad: detect outliers by comparing each step to its local MAD neighborhood
+    mad_threshold : float
+        For method='local_mad': number of MADs above local median to flag as outlier.
     """
-    if max_step_mm is None or max_step_mm <= 0:
-        return shifts_df
-
     df = shifts_df.copy()
     shift_mag = np.sqrt(df['x_shift_mm']**2 + df['y_shift_mm']**2)
-    outlier_mask = shift_mag > max_step_mm
 
-    n_outliers = int(outlier_mask.sum())
-    if n_outliers == 0:
-        print(f"No step outliers detected (threshold: {max_step_mm} mm)")
-        return df
-
-    print(f"Detected {n_outliers} step outliers (threshold: {max_step_mm} mm)")
+    if method == 'local_mad':
+        # Local MAD-based outlier detection: compare each step to its local neighbourhood.
+        # A step is flagged when magnitude > local_median + mad_threshold * local_MAD.
+        outlier_mask = pd.Series(False, index=df.index)
+        for i in range(len(df)):
+            lo = max(0, i - window)
+            hi = min(len(df), i + window + 1)
+            # Exclude the current index from its own neighbourhood
+            neighbour_mags = np.concatenate([shift_mag.iloc[lo:i].values,
+                                             shift_mag.iloc[i + 1:hi].values])
+            if len(neighbour_mags) == 0:
+                continue
+            local_med = float(np.median(neighbour_mags))
+            local_mad = float(np.median(np.abs(neighbour_mags - local_med)))
+            # When all neighbours are identical, MAD=0; fall back to a small floor
+            effective_mad = local_mad if local_mad > 0 else 1e-6
+            if shift_mag.iloc[i] > local_med + mad_threshold * effective_mad:
+                outlier_mask.iloc[i] = True
+        n_outliers = int(outlier_mask.sum())
+        if n_outliers == 0:
+            print(f"No step outliers detected (local MAD, threshold={mad_threshold} MADs)")
+            return df
+        print(f"Detected {n_outliers} step outliers (local MAD, threshold={mad_threshold} MADs)")
+    else:
+        if max_step_mm is None or max_step_mm <= 0:
+            return shifts_df
+        outlier_mask = shift_mag > max_step_mm
+        n_outliers = int(outlier_mask.sum())
+        if n_outliers == 0:
+            print(f"No step outliers detected (threshold: {max_step_mm} mm)")
+            return df
+        print(f"Detected {n_outliers} step outliers (threshold: {max_step_mm} mm)")
 
     for idx in df[outlier_mask].index:
         row = df.loc[idx]
@@ -624,13 +664,14 @@ def main():
             iqr_multiplier=args.iqr_multiplier
         )
 
-    if args.max_step_mm and args.max_step_mm > 0:
+    if (args.max_step_mm and args.max_step_mm > 0) or args.step_method == 'local_mad':
         print(f"\nFiltering step outliers (method: {args.step_method})")
         shifts_df = filter_step_outliers(
             shifts_df,
             max_step_mm=args.max_step_mm,
             window=args.step_window,
-            method=args.step_method
+            method=args.step_method,
+            mad_threshold=args.step_mad_threshold
         )
 
     # Validate that shifts file contains required slices

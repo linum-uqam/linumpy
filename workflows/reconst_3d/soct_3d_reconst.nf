@@ -353,6 +353,55 @@ process fix_illumination {
 }
 
 // -----------------------------------------------------------------------------
+// Segment Break Detection & Correction Processes
+// -----------------------------------------------------------------------------
+
+process detect_segment_breaks {
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
+    input:
+    path("slices/*")
+
+    output:
+    path "segment_corrections.json", emit: corrections
+    path "rotations.csv",            emit: rotations
+    path "segment_breaks.png",       emit: plot
+
+    script:
+    def script_name = params.use_gpu ? "linum_detect_segment_breaks_gpu.py" : "linum_detect_segment_breaks.py"
+    def translation_arg = params.segment_break_translation_threshold > 0 ? "--translation_threshold ${params.segment_break_translation_threshold}" : ""
+    def refine_arg = params.segment_break_refine_translations ? "--refine_translations" : ""
+    """
+    ${script_name} slices . \
+        --rotation_threshold ${params.segment_break_rotation_threshold} \
+        --max_rotation_search ${params.segment_break_max_rotation_search} \
+        --local_window ${params.segment_break_local_window} \
+        --metric_threshold ${params.segment_break_metric_threshold} \
+        ${translation_arg} \
+        ${refine_arg} \
+        -f
+    """
+}
+
+process apply_segment_corrections {
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
+    input:
+    path("slices/*")
+    path(corrections)
+
+    output:
+    path "*.ome.zarr"
+
+    script:
+    def script_name = params.use_gpu ? "linum_apply_segment_corrections_gpu.py" : "linum_apply_segment_corrections.py"
+    """
+    ${script_name} slices ${corrections} corrected -f
+    mv corrected/*.ome.zarr .
+    """
+}
+
+// -----------------------------------------------------------------------------
 // Stitching Processes
 // -----------------------------------------------------------------------------
 
@@ -510,7 +559,8 @@ process bring_to_common_space {
         --iqr_multiplier ${params.outlier_iqr_multiplier} \\
         --max_step_mm ${params.common_space_max_step_mm} \\
         --step_window ${params.common_space_step_window} \\
-        --step_method ${params.common_space_step_method}""" : ""
+        --step_method ${params.common_space_step_method} \\
+        --step_mad_threshold ${params.common_space_step_mad_threshold}""" : ""
 
     def excluded_args = params.common_space_excluded_slice_mode ?
         "--excluded_slice_mode ${params.common_space_excluded_slice_mode} --excluded_slice_window ${params.common_space_excluded_slice_window}" : ""
@@ -1028,9 +1078,35 @@ workflow {
 
     bring_to_common_space(common_space_input)
 
-    slices_common_space = bring_to_common_space.out
-        .flatten()
-        .toSortedList { a, b -> a.getName() <=> b.getName() }
+    // =========================================================================
+    // STAGE 4b: SEGMENT BREAK DETECTION & CORRECTION (optional)
+    // =========================================================================
+    // Detects acquisition remounting events (sudden in-plane rotation or
+    // translation jumps) and applies corrective rigid transforms to all slices
+    // in the affected segment before pairwise registration runs.
+    // Enable with --detect_segment_breaks true.
+    if (params.detect_segment_breaks) {
+        log.info "Segment break detection ENABLED " +
+                 "(threshold: ${params.segment_break_rotation_threshold}°, " +
+                 "search range: ±${params.segment_break_max_rotation_search}°)"
+
+        common_slices_collected = bring_to_common_space.out.flatten().collect()
+
+        detect_segment_breaks(common_slices_collected)
+
+        apply_segment_corrections(
+            common_slices_collected,
+            detect_segment_breaks.out.corrections
+        )
+
+        slices_common_space = apply_segment_corrections.out
+            .flatten()
+            .toSortedList { a, b -> a.getName() <=> b.getName() }
+    } else {
+        slices_common_space = bring_to_common_space.out
+            .flatten()
+            .toSortedList { a, b -> a.getName() <=> b.getName() }
+    }
 
     if (params.common_space_preview) {
         preview_input = bring_to_common_space.out
