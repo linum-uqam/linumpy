@@ -55,6 +55,21 @@ def _build_arg_parser():
     p.add_argument('--max_rotation_deg', type=float, default=1.0,
                    help='Maximum rotation to apply per slice (degrees). Larger rotations\n'
                         'are clamped to prevent registration errors from causing drift. [%(default)s]')
+    p.add_argument('--accumulate_translations', action='store_true',
+                   help='Accumulate pairwise translations cumulatively across slices.\n'
+                        'Each slice gets the sum of all preceding pairwise translations.\n'
+                        'This propagates corrections through the stack, fixing cumulative\n'
+                        'drift and motor position errors. Rotation stays per-slice.')
+    p.add_argument('--max_pairwise_translation', type=float, default=0,
+                   help='Maximum reliable pairwise translation magnitude (pixels).\n'
+                        'Translations at or above this value are assumed to be registration\n'
+                        'failures (hitting the optimizer boundary) and excluded from\n'
+                        'accumulation. Set to registration_max_translation. 0 = disabled.\n'
+                        '[%(default)s]')
+    p.add_argument('--smooth_window', type=int, default=0,
+                   help='Smooth cumulative translations with a moving average of this window\n'
+                        'size (in slices). Reduces XY jitter between consecutive slices,\n'
+                        'improving blend quality. 0 disables smoothing. [%(default)s]')
     p.add_argument('--no_xy_shift', action='store_true',
                    help='Skip XY shifting from motor positions.\n'
                         'Use when slices are already in common space (e.g., from bring_to_common_space).')
@@ -335,7 +350,9 @@ def find_z_overlap(fixed_vol, moving_vol, slicing_interval_mm, search_range_mm, 
         Correlation score
     """
     # Convert to voxels
-    expected_overlap_vox = int((slicing_interval_mm * 1000) / resolution_um)
+    # Expected overlap = volume_depth - slicing_interval (not the interval itself)
+    interval_vox = int((slicing_interval_mm * 1000) / resolution_um)
+    expected_overlap_vox = min(fixed_vol.shape[0], moving_vol.shape[0]) - interval_vox
     search_range_vox = int((search_range_mm * 1000) / resolution_um)
 
     # Search range
@@ -501,21 +518,16 @@ def blend_overlap(fixed_region, moving_region):
     if np.any(both_valid):
         blended[both_valid] = ((1 - alphas) * fixed_region + alphas * moving_region)[both_valid]
 
-    # Where only fixed has data, use fixed but fade based on z-position
-    # At the top of overlap (z=0), use full fixed value
-    # At the bottom (z=nz-1), fade to reduce hard edges
+    # Where only one slice has data, apply symmetric linear fade.
+    # Fixed data fades out toward the bottom of overlap (moving side).
+    # Moving data fades in from the top of overlap (fixed side).
+    # This smooths tissue boundary transitions without the asymmetric
+    # intensity bands from the old approach (fixed: 1.0→0.75, moving: 0.5→1.0).
     if np.any(fixed_only):
-        # Use fixed value, weighted by (1-alpha) to fade out towards bottom
-        fade = 1.0 - alphas * 0.5  # Partial fade, don't go to zero
-        blended[fixed_only] = (fixed_region * fade)[fixed_only]
+        blended[fixed_only] = (fixed_region * (1 - alphas))[fixed_only]
 
-    # Where only moving has data, use moving but fade based on z-position
-    # At the bottom of overlap (z=nz-1), use full moving value
-    # At the top (z=0), fade to reduce hard edges
     if np.any(moving_only):
-        # Use moving value, weighted by alpha to fade in from top
-        fade = 0.5 + alphas * 0.5  # Partial fade, don't go to zero
-        blended[moving_only] = (moving_region * fade)[moving_only]
+        blended[moving_only] = (moving_region * alphas)[moving_only]
 
     return blended
 
@@ -614,6 +626,91 @@ def main():
         else:
             logger.warning(f"Transforms directory not found: {transforms_dir}")
 
+    # Accumulate translations cumulatively if requested
+    # Translations are moved from the transforms into cumsum_px so that:
+    # 1. The output canvas is sized to accommodate the cumulative shifts
+    # 2. Transforms only apply rotation (no content lost at slice edges)
+    if args.accumulate_translations and registration_transforms:
+        # First pass: extract all pairwise translations
+        pairwise_translations = {}
+        for slice_id in available_ids[1:]:
+            if slice_id in registration_transforms and registration_transforms[slice_id] is not None:
+                transform, fixed_z, moving_z = registration_transforms[slice_id]
+                params = list(transform.GetParameters())
+                tx = params[3] if len(params) > 3 else 0
+                ty = params[4] if len(params) > 4 else 0
+                pairwise_translations[slice_id] = (tx, ty)
+
+        # Filter unreliable translations before accumulation
+        # Translations at the registration boundary are optimizer failures, not real corrections
+        if pairwise_translations and args.max_pairwise_translation > 0:
+            boundary = args.max_pairwise_translation * 0.95  # 95% of boundary = likely clamped
+            n_excluded = 0
+            for slice_id in list(pairwise_translations.keys()):
+                tx, ty = pairwise_translations[slice_id]
+                mag = np.sqrt(tx**2 + ty**2)
+                if mag >= boundary:
+                    logger.warning(f"Slice {slice_id}: excluding boundary translation "
+                                   f"tx={tx:.1f}, ty={ty:.1f} (mag={mag:.1f} >= {boundary:.1f})")
+                    pairwise_translations[slice_id] = (0.0, 0.0)
+                    n_excluded += 1
+            n_total = len(pairwise_translations)
+            logger.info(f"Translation filter: excluded {n_excluded}/{n_total} pairs "
+                        f"at boundary (>= {boundary:.1f} px)")
+
+        # Second pass: accumulate filtered translations
+        cumulative_tx, cumulative_ty = 0.0, 0.0
+        n_accumulated = 0
+        for slice_id in available_ids[1:]:
+            if slice_id in pairwise_translations:
+                tx, ty = pairwise_translations[slice_id]
+                cumulative_tx += tx
+                cumulative_ty += ty
+                if tx != 0 or ty != 0:
+                    n_accumulated += 1
+                logger.debug(f"Slice {slice_id}: pairwise tx={tx:.2f}, ty={ty:.2f} -> "
+                             f"cumulative tx={cumulative_tx:.2f}, ty={cumulative_ty:.2f}")
+            # Every slice from this point gets the current cumulative correction
+            # Sign is negated: SimpleITK tx=+N shifts content LEFT (fetches from x+N),
+            # but cumsum_px dx=+N places content RIGHT. To achieve the same effect
+            # as the transform, we subtract.
+            prev_dx, prev_dy = cumsum_px[slice_id]
+            cumsum_px[slice_id] = (prev_dx - cumulative_tx, prev_dy - cumulative_ty)
+        logger.info(f"Accumulated translations for {n_accumulated} slices "
+                     f"(final cumulative: tx={cumulative_tx:.2f}, ty={cumulative_ty:.2f})")
+
+        # Smooth cumulative translations to reduce per-slice XY jitter
+        if args.smooth_window > 0:
+            ids_list = sorted(cumsum_px.keys())
+            x_vals = np.array([cumsum_px[sid][0] for sid in ids_list])
+            y_vals = np.array([cumsum_px[sid][1] for sid in ids_list])
+
+            w = args.smooth_window
+            kernel = np.ones(w) / w
+            x_smooth = np.convolve(x_vals, kernel, mode='same')
+            y_smooth = np.convolve(y_vals, kernel, mode='same')
+
+            # Keep original values at edges where the kernel doesn't fully overlap
+            half_w = w // 2
+            x_smooth[:half_w] = x_vals[:half_w]
+            x_smooth[-half_w:] = x_vals[-half_w:]
+            y_smooth[:half_w] = y_vals[:half_w]
+            y_smooth[-half_w:] = y_vals[-half_w:]
+
+            max_correction = 0.0
+            for j, sid in enumerate(ids_list):
+                correction = np.sqrt((x_smooth[j] - x_vals[j])**2 + (y_smooth[j] - y_vals[j])**2)
+                max_correction = max(max_correction, correction)
+                cumsum_px[sid] = (float(x_smooth[j]), float(y_smooth[j]))
+
+            logger.info(f"Smoothed translations with window={w} "
+                        f"(max correction: {max_correction:.1f} px)")
+
+        # Recompute output XY shape to fit the shifted slices
+        out_ny, out_nx, x0, y0 = compute_output_shape(slice_files, cumsum_px, first_vol.shape)
+        cumsum_px = {k: (dx - x0, dy - y0) for k, (dx, dy) in cumsum_px.items()}
+        logger.info(f"Adjusted output XY shape for accumulated translations: {out_ny} x {out_nx}")
+
     # First pass: find Z overlaps (use registration z-offsets if available)
     logger.info("Finding Z-overlaps between consecutive slices...")
     z_matches = []
@@ -636,7 +733,18 @@ def main():
         if slice_id in registration_transforms and registration_transforms[slice_id] is not None:
             _, fixed_z, moving_z = registration_transforms[slice_id]
 
-        if fixed_z is not None:
+        if args.use_expected_overlap:
+            # Expected overlap from known slicing interval and volume depth
+            # overlap = trimmed_volume_depth - slicing_interval_in_voxels
+            # This ensures each slice contributes exactly slicing_interval new voxels
+            moving_z = moving_z if moving_z is not None else args.moving_z_first_index
+            interval_voxels = int(args.slicing_interval_mm / res_z_mm)
+            overlap = vol.shape[0] - (moving_z or 0) - interval_voxels
+            overlap = max(0, overlap)
+            corr = 0.0
+            logger.debug(f"Slice {slice_id}: expected overlap={overlap} voxels "
+                         f"(vol_depth={vol.shape[0]}, moving_z={moving_z}, interval={interval_voxels})")
+        elif fixed_z is not None:
             # We have registration-derived indices
             # fixed_z: Z-index in prev_vol where overlap starts
             # moving_z: Z-index in vol where overlap starts (skipping noisy initial slices)
@@ -645,11 +753,6 @@ def main():
             overlap = max(0, prev_nz - fixed_z)
             corr = 1.0  # Assume good correlation since registration found it
             logger.debug(f"Slice {slice_id}: fixed_z={fixed_z}, moving_z={moving_z}, overlap={overlap} voxels")
-        elif args.use_expected_overlap:
-            # slicing_interval_mm / res_z_mm = overlap in voxels
-            overlap = int(args.slicing_interval_mm / res_z_mm)
-            moving_z = args.moving_z_first_index
-            corr = 0.0
         else:
             # find_z_overlap expects resolution in µm for its internal calculation
             res_z_um = res_z_mm * 1000
@@ -759,10 +862,13 @@ def main():
         # Apply registration transform (rotation/small translation refinement) if available
         if slice_id in registration_transforms and registration_transforms[slice_id] is not None:
             transform, _, _ = registration_transforms[slice_id]
+            # When accumulating translations, they're handled via cumsum_px;
+            # only rotation is applied from the transform
+            use_rotation_only = args.rotation_only or args.accumulate_translations
             vol = apply_transform_to_volume(vol, transform,
-                                           rotation_only=args.rotation_only,
+                                           rotation_only=use_rotation_only,
                                            max_rotation_deg=args.max_rotation_deg)
-            if args.rotation_only:
+            if use_rotation_only:
                 logger.debug(f"Applied rotation-only transform to slice {slice_id} (max_rot={args.max_rotation_deg}°)")
             else:
                 logger.debug(f"Applied registration transform to slice {slice_id}")
@@ -810,7 +916,9 @@ def main():
                     if moving_median > 1e-6 and existing_median > 1e-6:
                         scale = existing_median / moving_median
                         # Clamp scale to prevent extreme corrections
-                        scale = np.clip(scale, 0.8, 1.25)
+                        # Range (0.7, 1.5) accommodates OCT depth attenuation
+                        # while limiting oscillation between slices
+                        scale = np.clip(scale, 0.7, 1.5)
                         if abs(scale - 1.0) > 0.01:
                             # Apply scaling to the entire shifted volume, not just overlap
                             shifted = shifted * scale

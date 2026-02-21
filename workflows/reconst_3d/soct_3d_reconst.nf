@@ -695,13 +695,25 @@ process stack_motor {
     if (params.analyze_shifts) options += " --output_z_matches z_matches.csv"
 
     // Use registration refinements (rotation + small translation)
-    options += " --transforms_dir transforms"
+    if (params.apply_pairwise_transforms) {
+        options += " --transforms_dir transforms"
 
-    // Apply only rotation from registration (prevents XY jumps when motor positions are trusted)
-    if (params.apply_rotation_only) options += " --rotation_only"
+        // Apply only rotation from registration (prevents XY jumps when motor positions are trusted)
+        if (params.apply_rotation_only) options += " --rotation_only"
 
-    // Clamp maximum rotation per slice to prevent registration errors from causing drift
-    options += " --max_rotation_deg ${params.max_rotation_deg}"
+        // Clamp maximum rotation per slice to prevent registration errors from causing drift
+        options += " --max_rotation_deg ${params.max_rotation_deg}"
+    }
+
+    // Accumulate pairwise translations cumulatively across slices
+    if (params.stack_accumulate_translations) {
+        options += " --accumulate_translations"
+        // Pass registration boundary so accumulation can filter clamped translations
+        options += " --max_pairwise_translation ${params.registration_max_translation}"
+    }
+
+    // Smooth cumulative translations to reduce XY jitter
+    if (params.stack_smooth_window > 0) options += " --smooth_window ${params.stack_smooth_window}"
 
     // Skip XY shifting since slices are already in common space (from bring_to_common_space)
     options += " --no_xy_shift"
