@@ -70,6 +70,19 @@ def _build_arg_parser():
                    help='Smooth cumulative translations with a moving average of this window\n'
                         'size (in slices). Reduces XY jitter between consecutive slices,\n'
                         'improving blend quality. 0 disables smoothing. [%(default)s]')
+    p.add_argument('--skip_error_transforms', action='store_true',
+                   help='Skip registration transforms flagged as overall_status="error"\n'
+                        'in pairwise_registration_metrics.json.  Error-status registrations\n'
+                        'are typically spurious (e.g. registered against an interpolated\n'
+                        'slice) and applying them introduces large rotation/translation\n'
+                        'artifacts at those slice boundaries.')
+    p.add_argument('--skip_warning_transforms', action='store_true',
+                   help='Also skip transforms with overall_status="warning".\n'
+                        'Warning-status registrations hit the optimizer boundary (e.g. large\n'
+                        'translation clamped at max_translation_px), making their fixed_z/\n'
+                        'moving_z Z-offsets unreliable. Discarding them falls back to the\n'
+                        'default moving_z_first_index, preventing Z gaps caused by bad\n'
+                        'Z-overlap estimates from failed registrations.')
     p.add_argument('--no_xy_shift', action='store_true',
                    help='Skip XY shifting from motor positions.\n'
                         'Use when slices are already in common space (e.g., from bring_to_common_space).')
@@ -140,7 +153,9 @@ def load_shifts(shifts_path):
     return cumsum, all_ids
 
 
-def load_registration_transforms(transforms_dir, slice_ids):
+def load_registration_transforms(transforms_dir, slice_ids,
+                                 skip_error_status=False,
+                                 skip_warning_status=False):
     """
     Load pairwise registration transforms from directory.
 
@@ -150,12 +165,25 @@ def load_registration_transforms(transforms_dir, slice_ids):
         Directory containing registration outputs (subdirs per slice)
     slice_ids : list
         List of slice IDs to load transforms for
+    skip_error_status : bool
+        If True, discard transforms whose pairwise_registration_metrics.json
+        reports overall_status == 'error'.  These are typically registrations
+        that failed (e.g. registered against an interpolated/synthetic slice)
+        and would introduce spurious rotations into the stack.
+    skip_warning_status : bool
+        If True, also discard transforms with overall_status == 'warning'.
+        Warning-status registrations hit the optimizer boundary (e.g. large
+        translation or rotation) and their Z-offsets (fixed_z/moving_z) are
+        unreliable, causing incorrect Z-overlap computation during stacking.
+        Discarding them falls back to the default moving_z_first_index.
 
     Returns
     -------
     dict
         Mapping from slice_id to (transform, z_offset) tuple
     """
+    import json
+
     transforms_dir = Path(transforms_dir)
     transforms = {}
 
@@ -182,6 +210,23 @@ def load_registration_transforms(transforms_dir, slice_ids):
             continue
 
         try:
+            # Check registration quality status before loading the transform
+            if skip_error_status or skip_warning_status:
+                metrics_files = list(transform_dir.glob("pairwise_registration_metrics.json"))
+                if metrics_files:
+                    with open(metrics_files[0]) as f:
+                        metrics = json.load(f)
+                    status = metrics.get("overall_status", "ok")
+                    should_skip = (status == "error" and skip_error_status) or \
+                                  (status == "warning" and skip_warning_status)
+                    if should_skip:
+                        logger.warning(
+                            f"Slice {slice_id}: skipping transform with "
+                            f"overall_status='{status}' (unreliable registration)"
+                        )
+                        transforms[slice_id] = None
+                        continue
+
             tfm = sitk.ReadTransform(str(tfm_files[0]))
 
             # Load z-offsets if available
@@ -208,7 +253,8 @@ def load_registration_transforms(transforms_dir, slice_ids):
     return transforms
 
 
-def apply_2d_transform(image_2d, transform, rotation_only=False, max_rotation_deg=1.0):
+def apply_2d_transform(image_2d, transform, rotation_only=False, max_rotation_deg=1.0,
+                       override_rotation=None):
     """
     Apply a SimpleITK 2D/3D transform to a 2D image.
 
@@ -223,6 +269,9 @@ def apply_2d_transform(image_2d, transform, rotation_only=False, max_rotation_de
     max_rotation_deg : float
         Maximum allowed rotation in degrees. Larger rotations are clamped.
         Set to 0 to disable clamping.
+    override_rotation : float or None
+        If provided, use this rotation angle (radians) instead of the one
+        extracted from the transform. Already clamped by the caller.
     Returns
     -------
     np.ndarray
@@ -241,8 +290,11 @@ def apply_2d_transform(image_2d, transform, rotation_only=False, max_rotation_de
             tx = params[3] if len(params) > 3 else 0
             ty = params[4] if len(params) > 4 else 0
 
-            # Clamp rotation if it exceeds max_rotation_deg
-            if max_rotation_deg > 0:
+            if override_rotation is not None:
+                # Use pre-smoothed rotation; skip per-slice clamping (already done)
+                angle = override_rotation
+            elif max_rotation_deg > 0:
+                # Clamp rotation if it exceeds max_rotation_deg
                 max_angle_rad = np.radians(max_rotation_deg)
                 if abs(angle) > max_angle_rad:
                     logger.warning(f"Clamping rotation {np.degrees(angle):.2f}° to ±{max_rotation_deg}°")
@@ -299,7 +351,8 @@ def apply_2d_transform(image_2d, transform, rotation_only=False, max_rotation_de
     return result_arr
 
 
-def apply_transform_to_volume(vol, transform, rotation_only=False, max_rotation_deg=1.0):
+def apply_transform_to_volume(vol, transform, rotation_only=False, max_rotation_deg=1.0,
+                              override_rotation=None):
     """
     Apply 2D transform to each Z-slice of a volume.
 
@@ -313,6 +366,9 @@ def apply_transform_to_volume(vol, transform, rotation_only=False, max_rotation_
         If True, apply only rotation, ignore translation
     max_rotation_deg : float
         Maximum allowed rotation in degrees. Larger rotations are clamped.
+    override_rotation : float or None
+        If provided, use this rotation angle (radians) for all slices
+        instead of extracting it from the transform.
 
     Returns
     -------
@@ -321,7 +377,8 @@ def apply_transform_to_volume(vol, transform, rotation_only=False, max_rotation_
     """
     result = np.zeros_like(vol)
     for z in range(vol.shape[0]):
-        result[z] = apply_2d_transform(vol[z], transform, rotation_only, max_rotation_deg)
+        result[z] = apply_2d_transform(vol[z], transform, rotation_only, max_rotation_deg,
+                                       override_rotation)
     return result
 
 
@@ -470,8 +527,8 @@ def blend_overlap(fixed_region, moving_region):
     For Z-stack blending, we want a smooth transition from fixed (bottom of fixed volume)
     to moving (top of moving volume) along the Z direction.
 
-    At tissue boundaries where only one slice has data, we fade smoothly to that data
-    instead of creating hard cutoffs.
+    At tissue boundaries where only one slice has data, we use full intensity
+    (no fading) since there is only one contribution.
 
     Parameters
     ----------
@@ -518,16 +575,13 @@ def blend_overlap(fixed_region, moving_region):
     if np.any(both_valid):
         blended[both_valid] = ((1 - alphas) * fixed_region + alphas * moving_region)[both_valid]
 
-    # Where only one slice has data, apply symmetric linear fade.
-    # Fixed data fades out toward the bottom of overlap (moving side).
-    # Moving data fades in from the top of overlap (fixed side).
-    # This smooths tissue boundary transitions without the asymmetric
-    # intensity bands from the old approach (fixed: 1.0→0.75, moving: 0.5→1.0).
+    # Where only one slice has data, use full intensity.
+    # No fading needed — there's only one contribution, so we preserve it as-is.
     if np.any(fixed_only):
-        blended[fixed_only] = (fixed_region * (1 - alphas))[fixed_only]
+        blended[fixed_only] = fixed_region[fixed_only]
 
     if np.any(moving_only):
-        blended[moving_only] = (moving_region * alphas)[moving_only]
+        blended[moving_only] = moving_region[moving_only]
 
     return blended
 
@@ -620,7 +674,10 @@ def main():
         transforms_dir = Path(args.transforms_dir)
         if transforms_dir.exists():
             logger.info(f"Loading registration transforms from {transforms_dir}")
-            registration_transforms = load_registration_transforms(transforms_dir, available_ids)
+            registration_transforms = load_registration_transforms(
+                transforms_dir, available_ids,
+                skip_error_status=args.skip_error_transforms,
+                skip_warning_status=args.skip_warning_transforms)
             n_loaded = sum(1 for v in registration_transforms.values() if v is not None)
             logger.info(f"Loaded {n_loaded} transforms for refinement")
         else:
@@ -710,6 +767,42 @@ def main():
         out_ny, out_nx, x0, y0 = compute_output_shape(slice_files, cumsum_px, first_vol.shape)
         cumsum_px = {k: (dx - x0, dy - y0) for k, (dx, dy) in cumsum_px.items()}
         logger.info(f"Adjusted output XY shape for accumulated translations: {out_ny} x {out_nx}")
+
+    # Smooth per-slice rotations to reduce jitter from isolated correction outliers.
+    # Rotations are applied independently per slice, so alternating ±1-2° corrections
+    # (or a single large outlier like z27 at -2.1° surrounded by ~0° slices) create
+    # visible notching at tissue boundaries throughout the whole volume.
+    # This runs regardless of accumulate_translations.
+    smoothed_rotations = {}
+    if args.smooth_window > 0 and registration_transforms:
+        ids_with_tfm = [sid for sid in available_ids
+                        if sid in registration_transforms
+                        and registration_transforms[sid] is not None]
+        if ids_with_tfm:
+            angle_ids = sorted(ids_with_tfm)
+            raw_angles = []
+            for sid in angle_ids:
+                tfm_tuple = registration_transforms[sid]
+                tfm, _, _ = tfm_tuple
+                params = list(tfm.GetParameters())
+                a = params[2] if len(params) > 2 else 0.0
+                # Clamp before smoothing (same cap as apply_2d_transform)
+                if args.max_rotation_deg > 0:
+                    max_rad = np.radians(args.max_rotation_deg)
+                    a = float(np.clip(a, -max_rad, max_rad))
+                raw_angles.append(a)
+            raw_angles = np.array(raw_angles)
+            w = args.smooth_window
+            kernel = np.ones(w) / w
+            smooth_angles = np.convolve(raw_angles, kernel, mode='same')
+            half_w = w // 2
+            smooth_angles[:half_w] = raw_angles[:half_w]
+            smooth_angles[-half_w:] = raw_angles[-half_w:]
+            max_rot_corr = float(np.max(np.abs(smooth_angles - raw_angles)))
+            logger.info(f"Smoothed rotations with window={w} "
+                        f"(max correction: {np.degrees(max_rot_corr):.3f}°)")
+            for j, sid in enumerate(angle_ids):
+                smoothed_rotations[sid] = float(smooth_angles[j])
 
     # First pass: find Z overlaps (use registration z-offsets if available)
     logger.info("Finding Z-overlaps between consecutive slices...")
@@ -865,9 +958,11 @@ def main():
             # When accumulating translations, they're handled via cumsum_px;
             # only rotation is applied from the transform
             use_rotation_only = args.rotation_only or args.accumulate_translations
+            override_rot = smoothed_rotations.get(slice_id)  # None if no smoothing
             vol = apply_transform_to_volume(vol, transform,
                                            rotation_only=use_rotation_only,
-                                           max_rotation_deg=args.max_rotation_deg)
+                                           max_rotation_deg=args.max_rotation_deg,
+                                           override_rotation=override_rot)
             if use_rotation_only:
                 logger.debug(f"Applied rotation-only transform to slice {slice_id} (max_rot={args.max_rotation_deg}°)")
             else:
@@ -916,9 +1011,7 @@ def main():
                     if moving_median > 1e-6 and existing_median > 1e-6:
                         scale = existing_median / moving_median
                         # Clamp scale to prevent extreme corrections
-                        # Range (0.7, 1.5) accommodates OCT depth attenuation
-                        # while limiting oscillation between slices
-                        scale = np.clip(scale, 0.7, 1.5)
+                        scale = np.clip(scale, 0.5, 2.0)
                         if abs(scale - 1.0) > 0.01:
                             # Apply scaling to the entire shifted volume, not just overlap
                             shifted = shifted * scale

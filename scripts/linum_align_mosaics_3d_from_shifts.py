@@ -140,13 +140,20 @@ def filter_outlier_shifts(shifts_df, max_shift_mm=0.5, method='median', iqr_mult
 
     # Find outliers based on method
     if method == 'iqr':
-        # IQR-based outlier detection
+        # IQR-based outlier detection with max_shift_mm floor.
+        # The IQR threshold alone may be too low (e.g. 0.66 mm) and incorrectly
+        # flag genuine large shifts from sample remounting events.  Using
+        # max(iqr_bound, max_shift_mm) ensures that shifts within the user's
+        # configured tolerance are never treated as outliers.
         q1 = shift_mag.quantile(0.25)
         q3 = shift_mag.quantile(0.75)
         iqr = q3 - q1
-        upper_bound = q3 + iqr_multiplier * iqr
+        iqr_bound = q3 + iqr_multiplier * iqr
+        upper_bound = max(iqr_bound, max_shift_mm)
         outlier_mask = shift_mag > upper_bound
-        print(f"IQR-based detection: Q1={q1:.3f}, Q3={q3:.3f}, IQR={iqr:.3f}, threshold={upper_bound:.3f} mm")
+        print(f"IQR-based detection: Q1={q1:.3f}, Q3={q3:.3f}, IQR={iqr:.3f}, "
+              f"iqr_bound={iqr_bound:.3f}, max_shift_mm={max_shift_mm:.3f}, "
+              f"effective_threshold={upper_bound:.3f} mm")
     else:
         outlier_mask = shift_mag > max_shift_mm
 

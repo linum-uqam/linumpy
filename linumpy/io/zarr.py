@@ -173,7 +173,17 @@ def generate_axes_dict(ndims=3, unit="millimeter"):
 
 def create_directory(store_path, overwrite=False):
     directory = Path(store_path)
-    if directory.exists():
+    # Check for symlink first: is_symlink() is True even for dangling symlinks,
+    # while exists() follows the link and returns False for dangling ones.
+    # shutil.rmtree raises OSError on symlinks, so handle them separately.
+    if directory.is_symlink():
+        if overwrite:
+            directory.unlink()  # Remove the symlink only; target is NOT deleted
+        else:
+            raise FileExistsError('Path {} already exists as a symlink. '
+                                  'Set overwrite=True to overwrite.'
+                                  .format(directory.as_posix()))
+    elif directory.exists():
         if overwrite:
             shutil.rmtree(directory)
         else:

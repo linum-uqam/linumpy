@@ -353,55 +353,6 @@ process fix_illumination {
 }
 
 // -----------------------------------------------------------------------------
-// Segment Break Detection & Correction Processes
-// -----------------------------------------------------------------------------
-
-process detect_segment_breaks {
-    publishDir "${params.output}/${task.process}", mode: 'copy'
-
-    input:
-    path("slices/*")
-
-    output:
-    path "segment_corrections.json", emit: corrections
-    path "rotations.csv",            emit: rotations
-    path "segment_breaks.png",       emit: plot
-
-    script:
-    def script_name = params.use_gpu ? "linum_detect_segment_breaks_gpu.py" : "linum_detect_segment_breaks.py"
-    def translation_arg = params.segment_break_translation_threshold > 0 ? "--translation_threshold ${params.segment_break_translation_threshold}" : ""
-    def refine_arg = params.segment_break_refine_translations ? "--refine_translations" : ""
-    """
-    ${script_name} slices . \
-        --rotation_threshold ${params.segment_break_rotation_threshold} \
-        --max_rotation_search ${params.segment_break_max_rotation_search} \
-        --local_window ${params.segment_break_local_window} \
-        --metric_threshold ${params.segment_break_metric_threshold} \
-        ${translation_arg} \
-        ${refine_arg} \
-        -f
-    """
-}
-
-process apply_segment_corrections {
-    publishDir "${params.output}/${task.process}", mode: 'copy'
-
-    input:
-    path("slices/*")
-    path(corrections)
-
-    output:
-    path "*.ome.zarr"
-
-    script:
-    def script_name = params.use_gpu ? "linum_apply_segment_corrections_gpu.py" : "linum_apply_segment_corrections.py"
-    """
-    ${script_name} slices ${corrections} corrected -f
-    mv corrected/*.ome.zarr .
-    """
-}
-
-// -----------------------------------------------------------------------------
 // Stitching Processes
 // -----------------------------------------------------------------------------
 
@@ -671,7 +622,12 @@ process register_pairwise {
 
 // Motor-position-based stacking (uses shifts_xy.csv for XY alignment + optional refinements)
 process stack_motor {
-    publishDir "$params.output/$task.process", mode: 'move'
+    // Only publish zip and png files; the zarr directory stays in the work dir
+    // so downstream processes (normalize_z_intensity, generate_report) can
+    // access it via symlink. mode:'move' on a zarr would break those symlinks.
+    publishDir "$params.output/$task.process", mode: 'move', saveAs: { fn ->
+        fn.endsWith('.ome.zarr') ? null : fn
+    }
 
     input:
     tuple path("slices/*"), path(shifts_file), path("transforms/*"), val(subject_name), val(slice_ids_str)
@@ -703,6 +659,12 @@ process stack_motor {
 
         // Clamp maximum rotation per slice to prevent registration errors from causing drift
         options += " --max_rotation_deg ${params.max_rotation_deg}"
+
+        // Skip transforms with overall_status="error" (registered against interpolated slices, etc.)
+        if (params.skip_error_transforms) options += " --skip_error_transforms"
+
+        // Skip transforms with overall_status="warning" (optimizer hit boundary → bad Z-offsets)
+        if (params.skip_warning_transforms) options += " --skip_warning_transforms"
     }
 
     // Accumulate pairwise translations cumulatively across slices
@@ -748,7 +710,10 @@ process stack_motor {
 
 // Traditional pairwise-registration-based stacking
 process stack {
-    publishDir "$params.output/$task.process", mode: 'move'
+    // Only publish zip and png files; zarr stays in work dir for downstream access.
+    publishDir "$params.output/$task.process", mode: 'move', saveAs: { fn ->
+        fn.endsWith('.ome.zarr') ? null : fn
+    }
 
     input:
     tuple path("mosaics/*"), path("transforms/*"), val(subject_name), val(slice_ids_str)
@@ -777,7 +742,7 @@ process stack {
         if (!valid_resolutions.contains(base_res)) valid_resolutions = [base_res] + valid_resolutions
         def pyramid_res_str = valid_resolutions.collect { it.toString() }.join(' ')
         options += " --pyramid_resolutions ${pyramid_res_str}"
-        options += params.pyramid_make_isotropic ? " --make_isotropic" : " --no-make_isotropic"
+        options += params.pyramid_make_isotropic ? " --make_isotropic" : " --no_isotropic"
     }
 
     def show_lines_flag = params.annotated_show_lines ? '--show_lines' : ''
@@ -792,6 +757,43 @@ process stack {
         --slice_ids "${slice_ids_str}" \
         --label_every ${params.annotated_label_every} \
         ${show_lines_flag}
+    """
+}
+
+// Post-stacking Z-direction intensity normalization
+process normalize_z_intensity {
+    // Only publish zip and png files; zarr stays in work dir for generate_report.
+    publishDir "$params.output/$task.process", mode: 'move', saveAs: { fn ->
+        fn.endsWith('.ome.zarr') ? null : fn
+    }
+
+    input:
+    tuple path(stacked_zarr), val(subject_name), val(n_slices), val(slice_ids_str)
+
+    output:
+    tuple path("${subject_name}.ome.zarr"), path("${subject_name}.ome.zarr.zip"), path("${subject_name}.png"), path("${subject_name}_annotated.png")
+
+    script:
+    def n_slices_opt = n_slices > 0 ? "--n_serial_slices ${n_slices}" : ""
+    def show_lines_flag = params.annotated_show_lines ? '--show_lines' : ''
+    def znorm_mode_opts = ""
+    if (params.znorm_mode == 'histogram') {
+        znorm_mode_opts = "--mode histogram --strength ${params.znorm_strength} --tissue_threshold ${params.znorm_tissue_threshold}"
+    } else {
+        znorm_mode_opts = "--mode percentile --smooth_sigma ${params.znorm_smooth_sigma} --percentile ${params.znorm_percentile} --max_scale ${params.znorm_max_scale} --min_scale ${params.znorm_min_scale} --strength ${params.znorm_strength}"
+    }
+    """
+    linum_normalize_z_intensity.py ${stacked_zarr} ${subject_name}.ome.zarr \
+        ${n_slices_opt} \
+        ${znorm_mode_opts}
+
+    zip -r ${subject_name}.ome.zarr.zip ${subject_name}.ome.zarr
+
+    linum_screenshot_omezarr.py ${subject_name}.ome.zarr ${subject_name}.png
+
+    linum_screenshot_omezarr_annotated.py ${subject_name}.ome.zarr ${subject_name}_annotated.png \
+        --slice_ids "${slice_ids_str}" \
+        --label_every ${params.annotated_label_every} ${show_lines_flag}
     """
 }
 
@@ -1090,35 +1092,9 @@ workflow {
 
     bring_to_common_space(common_space_input)
 
-    // =========================================================================
-    // STAGE 4b: SEGMENT BREAK DETECTION & CORRECTION (optional)
-    // =========================================================================
-    // Detects acquisition remounting events (sudden in-plane rotation or
-    // translation jumps) and applies corrective rigid transforms to all slices
-    // in the affected segment before pairwise registration runs.
-    // Enable with --detect_segment_breaks true.
-    if (params.detect_segment_breaks) {
-        log.info "Segment break detection ENABLED " +
-                 "(threshold: ${params.segment_break_rotation_threshold}°, " +
-                 "search range: ±${params.segment_break_max_rotation_search}°)"
-
-        common_slices_collected = bring_to_common_space.out.flatten().collect()
-
-        detect_segment_breaks(common_slices_collected)
-
-        apply_segment_corrections(
-            common_slices_collected,
-            detect_segment_breaks.out.corrections
-        )
-
-        slices_common_space = apply_segment_corrections.out
-            .flatten()
-            .toSortedList { a, b -> a.getName() <=> b.getName() }
-    } else {
-        slices_common_space = bring_to_common_space.out
-            .flatten()
-            .toSortedList { a, b -> a.getName() <=> b.getName() }
-    }
+    slices_common_space = bring_to_common_space.out
+        .flatten()
+        .toSortedList { a, b -> a.getName() <=> b.getName() }
 
     if (params.common_space_preview) {
         preview_input = bring_to_common_space.out
@@ -1239,6 +1215,9 @@ workflow {
 
         stack_motor(motor_stack_input)
         stack_output = stack_motor.out
+        stack_metadata = motor_stack_input.map { slices, shifts, transforms, name, ids_str ->
+            tuple(name, ids_str.split(',').size(), ids_str)
+        }
 
     } else {
         // Traditional pairwise-registration-based stacking
@@ -1256,17 +1235,34 @@ workflow {
 
         stack(stack_input)
         stack_output = stack.out
+        stack_metadata = stack_input.map { slices, transforms, name, ids_str ->
+            tuple(name, ids_str.split(',').size(), ids_str)
+        }
     }
 
     // =========================================================================
-    // STAGE 8: REPORT GENERATION
+    // STAGE 8: Z-INTENSITY NORMALIZATION (optional)
+    // =========================================================================
+    if (params.normalize_z_slices) {
+        log.info "Normalizing Z-direction intensity drift (sigma=${params.znorm_smooth_sigma} slices)"
+        znorm_input = stack_output
+            .combine(stack_metadata)
+            .map { zarr, zip, png, annotated, name, n, ids_str -> tuple(zarr, name, n, ids_str) }
+        normalize_z_intensity(znorm_input)
+        final_stack_output = normalize_z_intensity.out
+    } else {
+        final_stack_output = stack_output
+    }
+
+    // =========================================================================
+    // STAGE 9: REPORT GENERATION
     // =========================================================================
     if (params.generate_report) {
-        generate_report(stack_output, subject_name)
+        generate_report(final_stack_output, subject_name)
     }
 
     // =========================================================================
-    // STAGE 9: DIAGNOSTIC ANALYSES (optional)
+    // STAGE 10: DIAGNOSTIC ANALYSES (optional)
     // =========================================================================
     // Enable with diagnostic_mode=true or individual flags
 
@@ -1274,6 +1270,7 @@ workflow {
     def runMotorOnlyStitch = params.diagnostic_mode || params.motor_only_stitch
     def runMotorOnlyStack = params.diagnostic_mode || params.motor_only_stack
     def runDilationDiagnostics = params.diagnostic_mode || params.analyze_tile_dilation
+    def runAcquisitionRotation = params.diagnostic_mode || params.analyze_acquisition_rotation
 
     if (params.diagnostic_mode) {
         log.info "DIAGNOSTIC MODE enabled:"
@@ -1284,7 +1281,7 @@ workflow {
         log.info "  - Motor-only stacking (3D volume)"
     }
 
-    if (params.diagnostic_mode) {
+    if (runAcquisitionRotation) {
         analyze_acquisition_rotation(shifts_xy, register_pairwise.out.collect())
     }
 
@@ -1293,10 +1290,13 @@ workflow {
     }
 
     if (runDilationDiagnostics) {
-        if (params.use_motor_positions_for_stitching && !params.use_refined_stitching) {
+        if (params.use_refined_stitching) {
+            // estimate_xy_transformation is not run in the refined stitching path,
+            // so there is no XY transform output to analyze for dilation.
+            log.warn "Tile dilation analysis skipped: requires use_refined_stitching=false (needs XY transform output)"
+        } else if (params.use_motor_positions_for_stitching) {
             log.warn "Tile dilation analysis is not meaningful when use_motor_positions_for_stitching=true"
             log.warn "  The transform IS motor positions, so no dilation will be detected."
-            log.warn "  Enable use_refined_stitching=true to analyze refinement-induced dilation."
         } else {
             log.info "Running tile dilation analysis..."
             dilation_input_diag = illum_fixed.combine(estimate_xy_transformation.out, by: 0)
