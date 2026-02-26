@@ -31,6 +31,21 @@ process create_mosaic_grid {
     """
 }
 
+process generate_aip {
+    publishDir "$params.output/aips", mode: 'move'
+
+    input:
+        tuple val(slice_id), path(mosaic_grid)
+    output:
+        tuple val(slice_id), path("aip_z${slice_id}.png")
+    script:
+    String script_name = params.use_gpu ? "linum_aip_gpu.py" : "linum_aip_png.py"
+    String gpu_opts = params.use_gpu ? "--use_gpu" : ""
+    """
+    ${script_name} ${mosaic_grid} aip_z${slice_id}.png ${gpu_opts}
+    """
+}
+
 process generate_mosaic_preview {
     publishDir "$params.output/previews", mode: 'move'
     
@@ -114,6 +129,11 @@ workflow {
 
     // Generate a 3D mosaic grid at full resolution
     create_mosaic_grid(inputSlices)
+
+    // [Optional] Generate AIP images from mosaic grids for QC visualization
+    if (params.generate_aips) {
+        generate_aip(create_mosaic_grid.out)
+    }
 
     // [Optional] Generate orthogonal view previews of mosaic grids
     if (params.generate_previews) {
