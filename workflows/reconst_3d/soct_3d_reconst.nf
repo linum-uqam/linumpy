@@ -670,8 +670,24 @@ process stack_motor {
     // Accumulate pairwise translations cumulatively across slices
     if (params.stack_accumulate_translations) {
         options += " --accumulate_translations"
-        // Pass registration boundary so accumulation can filter clamped translations
-        options += " --max_pairwise_translation ${params.registration_max_translation}"
+        // Optionally filter clamped (optimizer-boundary) translations from accumulation.
+        // Use stack_max_pairwise_translation > 0 to enable; 0 = disabled (accumulate all).
+        // When skip_error_transforms=false, large pairwise translations at re-homing boundaries
+        // provide approximate segment corrections — set to 0 to preserve them.
+        if (params.stack_max_pairwise_translation > 0)
+            options += " --max_pairwise_translation ${params.stack_max_pairwise_translation}"
+    }
+
+    // Targeted re-homing correction: apply pairwise translations only at large motor-shift boundaries
+    if (params.stitch_rehoming_enabled) {
+        options += " --stitch_rehoming"
+        options += " --rehoming_threshold_mm ${params.stitch_rehoming_threshold_mm}"
+        if (params.stitch_rehoming_use_motor) {
+            options += " --stitch_rehoming_use_motor"
+        } else {
+            // Pass registration boundary to skip optimizer-clamped (unreliable) corrections
+            options += " --max_pairwise_translation ${params.registration_max_translation}"
+        }
     }
 
     // Smooth cumulative translations to reduce XY jitter

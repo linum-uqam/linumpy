@@ -86,6 +86,25 @@ def _build_arg_parser():
     p.add_argument('--no_xy_shift', action='store_true',
                    help='Skip XY shifting from motor positions.\n'
                         'Use when slices are already in common space (e.g., from bring_to_common_space).')
+    p.add_argument('--stitch_rehoming', action='store_true',
+                   help='Apply corrections at re-homing boundaries to align acquisition segments.\n'
+                        'Identifies slices with large motor shifts (>= --rehoming_threshold_mm) and\n'
+                        'applies a segment canvas offset to counteract the motor re-homing displacement.\n'
+                        'By default uses pairwise registration (requires --transforms_dir); use\n'
+                        '--stitch_rehoming_use_motor for motor-position-based corrections instead.\n'
+                        'Compatible with --no_xy_shift.')
+    p.add_argument('--stitch_rehoming_use_motor', action='store_true',
+                   help='Use motor positions from the shifts CSV instead of pairwise registration\n'
+                        'transforms for re-homing boundary corrections. Motor positions are directly\n'
+                        'measured by stage encoders and are more reliable than image-based registration\n'
+                        'when slices at the two sides of a boundary image different anatomy (making\n'
+                        'registration ambiguous) or when the displacement exceeds the registration\n'
+                        'optimizer limit. Axis mapping: x_shift_mm -> image ty, y_shift_mm -> image tx.\n'
+                        'Does not require --transforms_dir.')
+    p.add_argument('--rehoming_threshold_mm', type=float, default=0.7,
+                   help='Motor shift magnitude threshold to identify re-homing events (mm).\n'
+                        'Pairs with shift magnitude >= this value are treated as re-homing\n'
+                        'boundaries and corrected. [%(default)s]')
 
     # Z-matching parameters
     p.add_argument('--slicing_interval_mm', type=float, default=0.200,
@@ -768,6 +787,146 @@ def main():
         cumsum_px = {k: (dx - x0, dy - y0) for k, (dx, dy) in cumsum_px.items()}
         logger.info(f"Adjusted output XY shape for accumulated translations: {out_ny} x {out_nx}")
 
+    # rehoming_slices is populated by whichever stitch_rehoming code path runs below.
+    # It is used at render time to suppress pairwise translation warps at boundary slices
+    # (where the canvas stitch offset already handles the gross correction).
+    rehoming_slices = set()
+
+    # Targeted re-homing correction: apply pairwise translations only at re-homing segment boundaries.
+    # This counteracts the motor's re-homing displacement (large mid-acquisition XY jumps) by
+    # applying the pairwise registration measured offset as a one-time segment canvas correction.
+    # Unlike accumulate_translations, small within-segment pairwise translations are NOT accumulated —
+    # only the re-homing boundary corrections propagate forward through the stack.
+    if args.stitch_rehoming and args.transforms_dir and not args.stitch_rehoming_use_motor:
+        rehoming_df = pd.read_csv(args.in_shifts)
+        for _, row in rehoming_df.iterrows():
+            mag = np.sqrt(row['x_shift_mm']**2 + row['y_shift_mm']**2)
+            if mag >= args.rehoming_threshold_mm:
+                rehoming_slices.add(int(row['moving_id']))
+        logger.info(f"Re-homing boundaries (>= {args.rehoming_threshold_mm} mm): "
+                    f"{sorted(rehoming_slices)}")
+
+        # Load re-homing boundary transforms without error/warning filtering.
+        # Re-homing registrations are flagged error due to large translation magnitude,
+        # but that is exactly the correction we need — load them unconditionally.
+        rehoming_dir = Path(args.transforms_dir)
+        if rehoming_dir.exists():
+            rehoming_transforms = load_registration_transforms(
+                rehoming_dir, available_ids,
+                skip_error_status=False,
+                skip_warning_status=False)
+
+            max_bound = (args.max_pairwise_translation * 0.95
+                         if args.max_pairwise_translation > 0 else np.inf)
+
+            # Walk segments in order; corrections are cumulative across boundaries.
+            cumulative_correction_tx = 0.0
+            cumulative_correction_ty = 0.0
+
+            for slice_id in available_ids:
+                if slice_id in rehoming_slices:
+                    if (slice_id in rehoming_transforms
+                            and rehoming_transforms[slice_id] is not None):
+                        transform, _, _ = rehoming_transforms[slice_id]
+                        params = list(transform.GetParameters())
+                        tx = params[3] if len(params) > 3 else 0.0
+                        ty = params[4] if len(params) > 4 else 0.0
+                        mag = np.sqrt(tx**2 + ty**2)
+                        if mag < max_bound:
+                            cumulative_correction_tx += tx
+                            cumulative_correction_ty += ty
+                            logger.info(
+                                f"Re-homing correction at z{slice_id:02d}: "
+                                f"tx={tx:.1f} px, ty={ty:.1f} px (mag={mag:.1f} px) — applied")
+                        else:
+                            logger.warning(
+                                f"Re-homing z{slice_id:02d}: optimizer boundary hit "
+                                f"({mag:.1f} px >= {max_bound:.1f} px) — correction skipped; "
+                                f"consider increasing registration_max_translation")
+                    else:
+                        logger.warning(
+                            f"Re-homing z{slice_id:02d}: no transform found — correction skipped")
+
+                # Apply cumulative segment correction to every slice from the first
+                # re-homing slice onward (sign negated: SimpleITK tx=+N shifts content
+                # left/up; cumsum_px dx=+N places the canvas window right/down).
+                if cumulative_correction_tx != 0.0 or cumulative_correction_ty != 0.0:
+                    prev_dx, prev_dy = cumsum_px[slice_id]
+                    cumsum_px[slice_id] = (
+                        prev_dx - cumulative_correction_tx,
+                        prev_dy - cumulative_correction_ty,
+                    )
+
+            # Recompute output canvas to accommodate the shifted slice positions.
+            out_ny, out_nx, x0_rh, y0_rh = compute_output_shape(
+                slice_files, cumsum_px, first_vol.shape)
+            cumsum_px = {k: (dx - x0_rh, dy - y0_rh) for k, (dx, dy) in cumsum_px.items()}
+            logger.info(f"Adjusted output shape for segment stitching: {out_ny} x {out_nx}")
+
+    # Motor-position-based re-homing correction (--stitch_rehoming_use_motor).
+    # Derives segment canvas offsets from the motor encoder readings in shifts_xy.csv
+    # instead of pairwise image registration.  More reliable when anatomy changes
+    # across the re-homing boundary (registration is ambiguous) or when the
+    # displacement exceeds the registration optimizer limit.
+    # Axis mapping: same convention as cumsum_px and bring_to_common_space.
+    #   x_shift_mm → image X (dx / columns) → correction_tx = x_shift_mm / res_x_mm
+    #   y_shift_mm → image Y (dy / rows)    → correction_ty = y_shift_mm / res_y_mm
+    # NOTE: an earlier version had these swapped (motor X → image Y), based on an
+    # incorrect axis-mapping claim in the investigation notes.  The pairwise
+    # registration at z29 shows tx=-174 px (image X) ≈ motor x_shift=-171 px,
+    # and bring_to_common_space maps x_shift_mm → image X, confirming the correct
+    # convention above.
+    if args.stitch_rehoming and args.stitch_rehoming_use_motor:
+        rehoming_df = pd.read_csv(args.in_shifts).sort_values('moving_id')
+
+        cumulative_correction_tx = 0.0
+        cumulative_correction_ty = 0.0
+
+        # First pass: identify re-homing boundaries and their per-step corrections.
+        # Skip the very first transition (fixed_id == first available slice): this is
+        # the initial stage positioning already encoded in bring_to_common_space.
+        # Including it would double-correct that displacement and misalign z01+ vs z00.
+        first_available_id = min(available_ids)
+        motor_corrections = {}
+        for _, row in rehoming_df.iterrows():
+            moving_id = int(row['moving_id'])
+            if int(row['fixed_id']) == first_available_id:
+                continue  # skip initial positioning, not a mid-scan re-homing
+            mag = np.sqrt(row['x_shift_mm'] ** 2 + row['y_shift_mm'] ** 2)
+            if mag >= args.rehoming_threshold_mm:
+                rehoming_slices.add(moving_id)
+                correction_tx = row['x_shift_mm'] / res_x_mm
+                correction_ty = row['y_shift_mm'] / res_y_mm
+                motor_corrections[moving_id] = (correction_tx, correction_ty)
+                logger.info(
+                    f"Re-homing (motor) at z{moving_id:02d}: "
+                    f"motor_x={row['x_shift_mm']:.3f} mm → tx={correction_tx:.1f} px, "
+                    f"motor_y={row['y_shift_mm']:.3f} mm → ty={correction_ty:.1f} px — applied"
+                )
+
+        logger.info(f"Re-homing boundaries (>= {args.rehoming_threshold_mm} mm): "
+                    f"{sorted(rehoming_slices)}")
+
+        # Second pass: apply cumulative corrections to all slices from each boundary onward.
+        for slice_id in available_ids:
+            if slice_id in motor_corrections:
+                dtx, dty = motor_corrections[slice_id]
+                cumulative_correction_tx += dtx
+                cumulative_correction_ty += dty
+
+            if cumulative_correction_tx != 0.0 or cumulative_correction_ty != 0.0:
+                prev_dx, prev_dy = cumsum_px[slice_id]
+                cumsum_px[slice_id] = (
+                    prev_dx - cumulative_correction_tx,
+                    prev_dy - cumulative_correction_ty,
+                )
+
+        # Recompute output canvas to accommodate the shifted slice positions.
+        out_ny, out_nx, x0_rh, y0_rh = compute_output_shape(
+            slice_files, cumsum_px, first_vol.shape)
+        cumsum_px = {k: (dx - x0_rh, dy - y0_rh) for k, (dx, dy) in cumsum_px.items()}
+        logger.info(f"Adjusted output shape for motor segment stitching: {out_ny} x {out_nx}")
+
     # Smooth per-slice rotations to reduce jitter from isolated correction outliers.
     # Rotations are applied independently per slice, so alternating ±1-2° corrections
     # (or a single large outlier like z27 at -2.1° surrounded by ~0° slices) create
@@ -955,9 +1114,16 @@ def main():
         # Apply registration transform (rotation/small translation refinement) if available
         if slice_id in registration_transforms and registration_transforms[slice_id] is not None:
             transform, _, _ = registration_transforms[slice_id]
-            # When accumulating translations, they're handled via cumsum_px;
-            # only rotation is applied from the transform
-            use_rotation_only = args.rotation_only or args.accumulate_translations
+            # At re-homing boundary slices force rotation-only: the stitch canvas offset already
+            # handles the gross XY correction; applying the pairwise translation on top would
+            # double-correct by the same ~100-260 px.
+            # For all other slices allow the full transform (rotation + small translation) so
+            # that inter-slice pairwise corrections improve cross-section continuity — partially
+            # replicating what accumulate_translations did without the cumulative drift.
+            if args.stitch_rehoming and slice_id in rehoming_slices:
+                use_rotation_only = True
+            else:
+                use_rotation_only = args.rotation_only or args.accumulate_translations
             override_rot = smoothed_rotations.get(slice_id)  # None if no smoothing
             vol = apply_transform_to_volume(vol, transform,
                                            rotation_only=use_rotation_only,
