@@ -23,6 +23,7 @@ nextflow.enable.dsl = 2
  *   9. Missing slice interpolation (optional)
  *  10. Pairwise registration
  *  11. 3D volume stacking
+ *  12. Atlas registration to Allen Mouse Brain Atlas (optional)
  * =============================================================================
  */
 
@@ -813,6 +814,38 @@ process normalize_z_intensity {
     """
 }
 
+// Atlas registration to Allen Mouse Brain Atlas
+process align_to_ras {
+    // Only publish zip and non-zarr files; zarr dir stays in work dir.
+    publishDir "$params.output/$task.process", mode: 'move', saveAs: { fn ->
+        fn.endsWith('.ome.zarr') ? null : fn
+    }
+
+    input:
+    tuple path(stacked_zarr), path(zarr_zip), path(png), path(annotated_png)
+    val subject_name
+
+    output:
+    path "${subject_name}_ras.ome.zarr"
+    path "${subject_name}_ras.ome.zarr.zip"
+    path "${subject_name}_ras_transform.tfm", optional: true
+    path "${subject_name}_ras_preview.png", optional: true
+
+    script:
+    def orientation_arg = params.ras_input_orientation ? "--input-orientation ${params.ras_input_orientation}" : ""
+    def rotation_arg = params.ras_initial_rotation ? "--initial-rotation ${params.ras_initial_rotation}" : ""
+    def preview_arg = params.allen_preview ? "--preview ${subject_name}_ras_preview.png" : ""
+    """
+    linum_align_to_ras.py ${stacked_zarr} ${subject_name}_ras.ome.zarr \
+        --allen-resolution ${params.allen_resolution} \
+        --metric ${params.allen_metric} \
+        --max-iterations ${params.allen_max_iterations} \
+        --level ${params.allen_registration_level} \
+        ${orientation_arg} ${rotation_arg} ${preview_arg}
+    zip -r ${subject_name}_ras.ome.zarr.zip ${subject_name}_ras.ome.zarr
+    """
+}
+
 // =============================================================================
 // HELPER FUNCTIONS
 // =============================================================================
@@ -1278,7 +1311,15 @@ workflow {
     }
 
     // =========================================================================
-    // STAGE 10: DIAGNOSTIC ANALYSES (optional)
+    // STAGE 10: ATLAS REGISTRATION (optional)
+    // =========================================================================
+    if (params.align_to_ras_enabled) {
+        log.info "Registering to Allen Mouse Brain Atlas (RAS alignment)"
+        align_to_ras(final_stack_output, subject_name)
+    }
+
+    // =========================================================================
+    // STAGE 11: DIAGNOSTIC ANALYSES (optional)
     // =========================================================================
     // Enable with diagnostic_mode=true or individual flags
 

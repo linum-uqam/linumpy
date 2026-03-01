@@ -16,9 +16,11 @@ linumpy provides a comprehensive set of command-line scripts for microscopy data
 3. [Preprocessing](#preprocessing)
 4. [Reconstruction](#reconstruction)
 5. [Registration & Stitching](#registration--stitching)
-6. [Visualization](#visualization)
-7. [Utilities](#utilities)
-8. [GPU-Accelerated Scripts](#gpu-accelerated-scripts)
+6. [Diagnostics](#diagnostics)
+7. [Slice Configuration](#slice-configuration)
+8. [Visualization](#visualization)
+9. [Utilities](#utilities)
+10. [GPU-Accelerated Scripts](#gpu-accelerated-scripts)
 
 ---
 
@@ -262,6 +264,31 @@ General intensity normalization.
 linum_intensity_normalization.py <input> <output>
 ```
 
+### linum_normalize_z_intensity.py
+
+Correct slow intensity drift across serial sections after stacking. Two modes are supported: `histogram` (per-section histogram matching that preserves relative contrast) and `percentile` (linear scaling to a smoothed percentile curve).
+
+```bash
+linum_normalize_z_intensity.py <input.ome.zarr> <output.ome.zarr> \
+    [--mode {histogram,percentile}] \
+    [--strength <0.0-1.0>] \
+    [--tissue_threshold <val>] \
+    [--smooth_sigma <sections>] \
+    [--percentile <pct>] \
+    [--max_scale <val>] \
+    [--min_scale <val>]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--mode` | `histogram` | Normalization mode: `histogram` or `percentile` |
+| `--strength` | `0.5` | Mixing strength (0 = passthrough, 1 = full correction) |
+| `--tissue_threshold` | `0.02` | Minimum intensity to classify as tissue (histogram mode) |
+| `--smooth_sigma` | `10.0` | Smoothing sigma in sections for trend estimation (percentile mode) |
+| `--percentile` | `80.0` | Tissue percentile used as reference intensity (percentile mode) |
+| `--max_scale` | `2.0` | Maximum scale factor |
+| `--min_scale` | `0.5` | Minimum scale factor |
+
 ---
 
 ## Reconstruction
@@ -284,10 +311,41 @@ linum_stitch_2d.py <input.ome.zarr> <output>
 
 ### linum_stitch_3d.py
 
-Stitch 3D tiles into volume.
+Stitch 3D tiles into volume using a pre-computed transform.
 
 ```bash
 linum_stitch_3d.py <mosaic_grid.ome.zarr> <transform.npy> <output.ome.zarr>
+```
+
+### linum_stitch_3d_refined.py
+
+Stitch 3D tiles with image-registration-refined blend transitions to reduce visible tile seams.
+
+```bash
+linum_stitch_3d_refined.py <mosaic_grid.ome.zarr> <output.ome.zarr> \
+    [--overlap_fraction <frac>] \
+    [--blending_method {none,average,diffusion}] \
+    [--refinement_mode blend_shift] \
+    [--max_refinement_px <pixels>] \
+    [--output_refinements <refinements.json>]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--overlap_fraction` | Expected tile overlap fraction (default: 0.2) |
+| `--blending_method` | Tile blending method: `none`, `average`, `diffusion` |
+| `--refinement_mode` | How refinement shifts are used (e.g. `blend_shift`) |
+| `--max_refinement_px` | Maximum sub-pixel refinement shift (pixels) |
+| `--output_refinements` | Optional JSON file to save refinement data |
+
+### linum_stitch_motor_only.py
+
+Stitch tiles using motor encoder positions only (no image registration). Useful for diagnostics and comparing against refined stitching.
+
+```bash
+linum_stitch_motor_only.py <mosaic_grid.ome.zarr> <output.ome.zarr> \
+    [--overlap_fraction <frac>] \
+    [--blending_method {none,average,diffusion}]
 ```
 
 ### linum_stack_slices.py
@@ -328,6 +386,39 @@ linum_stack_slices_3d.py <mosaics_dir> <transforms_dir> <output.ome.zarr> \
    ```
 
 **Note:** Only resolutions ≥ the base resolution will be created. The base resolution is automatically determined from the input data.
+
+### linum_stack_slices_motor.py
+
+Stack slices into a 3D volume using motor positions for XY placement and correlation-based Z matching. This is the primary stacking script used by the `motor` stacking method in the pipeline.
+
+```bash
+linum_stack_slices_motor.py <slices_dir> <shifts_file> <transforms_dir> <output.ome.zarr> \
+    [--blending {none,average,max,feather}] \
+    [--apply_rotation_only] \
+    [--max_rotation_deg <degrees>] \
+    [--skip_error_transforms] \
+    [--rehoming_threshold_mm <mm>] \
+    [--smooth_window <n>]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--blending` | Blending method for overlapping regions |
+| `--apply_rotation_only` | Apply only the rotation component from pairwise registration |
+| `--max_rotation_deg` | Clamp rotations larger than this value |
+| `--skip_error_transforms` | Skip transforms with error status |
+| `--rehoming_threshold_mm` | Motor shift threshold to detect re-homing events |
+| `--smooth_window` | Moving-average window for smoothing per-slice rotations |
+
+### linum_stack_motor_only.py
+
+Stack slices using motor positions only (no pairwise registration). Used for diagnostics to isolate the motor-position contribution.
+
+```bash
+linum_stack_motor_only.py <slices_dir> <shifts_file> <output.ome.zarr> \
+    [--blending {none,average,max,feather}] \
+    [--preview <preview.png>]
+```
 
 ---
 
@@ -462,6 +553,36 @@ linum_create_masks.py <input.ome.zarr> <output.ome.zarr> \
 - `--n_levels`: Number of pyramid levels (default: matches input image)
 - `--preview`: Path to save a preview PNG for visual verification
 
+### linum_align_to_ras.py
+
+Align a 3D brain volume to RAS orientation by rigid registration to the Allen Mouse Brain Atlas (CCF). The result is an OME-Zarr at all pyramid resolutions in RAS space.
+
+```bash
+linum_align_to_ras.py <input.ome.zarr> <output_ras.ome.zarr> \
+    [--allen-resolution {10,25,50,100}] \
+    [--metric {MI,MSE,CC,AntsCC}] \
+    [--max-iterations N] \
+    [--level L] \
+    [--input-orientation <CODE>] \
+    [--initial-rotation RX RY RZ] \
+    [--preview <preview.png>]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--allen-resolution` | `100` | Allen atlas resolution in µm: 10, 25, 50, 100 |
+| `--metric` | `MI` | Registration metric: `MI`, `MSE`, `CC`, `AntsCC` |
+| `--max-iterations` | `1000` | Maximum optimizer iterations |
+| `--level` | `0` | Pyramid level for registration (0 = full) |
+| `--input-orientation` | — | 3-letter orientation code (see below) |
+| `--initial-rotation` | `0 0 0` | Initial rotation hint Rx Ry Rz (degrees) |
+| `--preview` | — | Save a 3-panel alignment comparison image |
+| `--preview-only` | — | Only generate preview without registering |
+| `--store-transform-only` | — | Store transform in metadata without resampling |
+| `--verbose` | — | Print registration progress |
+
+**Orientation codes** — see the [RAS Orientation Lookup Table](NEXTFLOW_WORKFLOWS.md#ras-orientation-lookup-table) for a complete reference.
+
 ---
 
 ## Slice Configuration
@@ -501,6 +622,82 @@ linum_generate_slice_config.py <tiles_dir> <output.csv> --from_tiles \
 | `--detect_galvo` | off | Enable galvo shift detection |
 | `--tiles_dir` | - | Raw tiles directory (if input is shifts file) |
 | `--galvo_threshold` | 0.5 | Confidence threshold for galvo fix |
+
+---
+
+## Diagnostics
+
+Scripts for troubleshooting reconstruction artifacts. These are typically invoked by the pipeline's diagnostic mode but can also be run standalone.
+
+### linum_analyze_registration_transforms.py
+
+Analyze cumulative rotation and translation across pairwise registration transforms to detect drift.
+
+```bash
+linum_analyze_registration_transforms.py <register_pairwise_dir> <output_dir> \
+    [--resolution <um>] \
+    [--rotation_threshold <degrees>]
+```
+
+### linum_analyze_acquisition_rotation.py
+
+Analyze acquisition-time rotation from the shifts file combined with registration outputs.
+
+```bash
+linum_analyze_acquisition_rotation.py <shifts_file> <output_dir> \
+    [--registration_dir <register_pairwise_dir>] \
+    [--resolution <um>]
+```
+
+### linum_analyze_tile_dilation.py
+
+Analyze tile position refinements to detect scale drift (mosaic dilation).
+
+```bash
+linum_analyze_tile_dilation.py <mosaic_grid.ome.zarr> <transform.npy> <output_dir> \
+    [--resolution <um>] \
+    [--overlap_fraction <frac>] \
+    [--slice_id <id>]
+```
+
+### linum_aggregate_dilation_analysis.py
+
+Aggregate per-slice tile dilation analysis results across the full sample.
+
+```bash
+linum_aggregate_dilation_analysis.py <input_dir> <output_dir> \
+    [--pattern <glob_pattern>]
+```
+
+### linum_compare_stitching.py
+
+Compare motor-only vs refined stitching side-by-side by computing seam sharpness metrics and generating comparison visualizations.
+
+```bash
+linum_compare_stitching.py <motor_stitch.ome.zarr> <refined_stitch.ome.zarr> <output_dir> \
+    [--label1 <name>] \
+    [--label2 <name>] \
+    [--tile_step <pixels>]
+```
+
+### linum_diagnose_pipeline.py
+
+High-level pipeline diagnostic script. Aggregates metrics and produces a summarized diagnostic report.
+
+```bash
+linum_diagnose_pipeline.py <pipeline_output_dir> <output_dir> \
+    [--resolution <um>]
+```
+
+### linum_diagnose_reconstruction.py
+
+Detailed reconstruction diagnostic script. Checks registration transforms, rotation drift, and alignment quality.
+
+```bash
+linum_diagnose_reconstruction.py <pipeline_output_dir> <output_dir> \
+    [--resolution <um>] \
+    [--rotation_threshold <degrees>]
+```
 
 ---
 
@@ -616,6 +813,55 @@ Organize slices into folder structure.
 
 ```bash
 linum_merge_slices_into_folders.py <input_dir> <output_dir>
+```
+
+### linum_suggest_params.py
+
+Suggest 3D reconstruction pipeline parameters from raw input files. Analyses the motor-positions file (`shifts_xy.csv`) and, optionally, the raw data directory produced by the preprocessing pipeline to automatically estimate suitable `nextflow.config` parameters.
+
+```bash
+linum_suggest_params.py <shifts_file> <output_dir> \
+    [--data_dir <raw_data_dir>] \
+    [--n_calibration_slices N] \
+    [--axial_res_um UM] \
+    [--resolution_um UM] \
+    [-f]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `shifts_file` | (required) | Motor-positions CSV file (`shifts_xy.csv`) |
+| `output_dir` | (required) | Directory for the report and suggested config snippet |
+| `--data_dir` | — | Raw data directory (contains `state.json` and `slice_z##/` subdirectories) |
+| `--n_calibration_slices` | `1` | Leading calibration slices to skip when reading per-slice metadata (`slice_z00` is always calibration) |
+| `--axial_res_um` | `3.5` | OCT axial resolution in µm/pixel |
+| `--resolution_um` | — | Override target pipeline resolution in µm/pixel (derived automatically if omitted) |
+| `-f`, `--overwrite` | — | Overwrite existing output directory |
+
+**Estimated parameters:**
+
+From `shifts_xy.csv`:
+- `stitch_rehoming_threshold_mm` — re-homing boundary threshold (MAD-robust detection)
+- `stitch_rehoming_enabled` — true if re-homing events are detected
+- `stitch_rehoming_use_motor` — always recommended true when re-homing is present
+- `max_shift_mm` — IQR upper bound of normal inter-slice shifts
+- `common_space_max_step_mm` — 95th percentile of consecutive normal shift changes
+
+From `--data_dir` (raw data directory):
+- `registration_slicing_interval_mm` — from `slice_thickness` in `metadata.json` / `state.json`
+- `stitch_overlap_fraction` — from `overlap_fraction` in `metadata.json` / `state.json`
+- `resolution` — smallest standard resolution ≥ native lateral pixel size
+- `crop_interface_out_depth` — estimate based on OCT depth and focus position (must be verified)
+
+**Outputs:**
+- `param_estimation_report.txt` — human-readable analysis report with shift statistics
+- `suggested_params.config` — annotated `nextflow.config` parameter block ready to copy-paste
+
+**Example:**
+```bash
+linum_suggest_params.py /data/sub-01/shifts_xy.csv /tmp/sub-01_params \
+    --data_dir /data/sub-01/raw \
+    --n_calibration_slices 1
 ```
 
 ---

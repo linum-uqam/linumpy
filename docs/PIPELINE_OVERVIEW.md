@@ -188,6 +188,8 @@ estimate_xy_transformation
 stitch_3d
 ```
 - Stitches tiles into 3D slice using estimated transforms
+- By default uses **refined stitching** (`use_refined_stitching = true`): image registration refines blend transitions at tile boundaries for reduced seam visibility
+- Motor-only stitching is available for diagnostics via `motor_only_stitch = true`
 
 #### 7. Beam Profile Correction
 
@@ -263,6 +265,30 @@ stack
 - Stacks all slices into final 3D volume
 - Creates multi-resolution pyramid with analysis-friendly resolutions (10, 25, 50, 100 µm)
 - Optional blending between slices
+- **Two stacking methods** (controlled by `stacking_method`):
+  - **`motor`** (default, recommended): XY positions from motor encoder data (`shifts_xy.csv`), Z from correlation matching between slices. Pairwise registration transforms are applied as rotation-only corrections on top.
+  - **`registration`**: Both XY and Z from pairwise image registration. More fully image-driven but accumulates registration errors.
+
+#### 14. Z-Intensity Normalization (Optional)
+
+```
+normalize_z_intensity
+```
+- Corrects slow intensity drift across serial sections after stacking
+- Enabled by `normalize_z_slices = true`
+- Two modes: `histogram` (preserves relative tissue contrast) or `percentile` (linear scaling)
+- Controlled by `znorm_strength` (0 = passthrough, 1 = full correction)
+
+#### 15. Atlas Registration (Optional)
+
+```
+align_to_ras
+```
+- Registers the final 3D volume to RAS orientation via rigid registration to the Allen Mouse Brain Atlas (CCF)
+- Enabled by `align_to_ras_enabled = true`
+- Atlas data is downloaded automatically at the specified resolution (10/25/50/100 µm)
+- Input volume orientation must be specified via `ras_input_orientation` (see [RAS Orientation Lookup Table](NEXTFLOW_WORKFLOWS.md#ras-orientation-lookup-table))
+- Output is an OME-Zarr at all pyramid resolutions in RAS space
 
 ### Pyramid Resolution Levels
 
@@ -282,22 +308,28 @@ The final 3D volume is stored as an OME-Zarr with multiple resolution levels opt
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `input` | `"."` | Input mosaic grids directory |
-| `shifts_xy` | `"$input/shifts_xy.csv"` | XY shifts file |
+| `shifts_xy` | `""` | XY shifts file (default: `{input}/shifts_xy.csv`) |
 | `slice_config` | `""` | Optional slice config file |
 | `output` | `"."` | Output directory |
 | `resolution` | `10` | Target resolution (µm/pixel) |
 | `clip_percentile_upper` | `99.9` | Upper percentile for clipping |
-| `fix_curvature_enabled` | `true` | Enable focal curvature fix |
+| `fix_curvature_enabled` | `false` | Enable focal curvature fix |
 | `fix_illum_enabled` | `true` | Enable illumination fix |
 | `crop_interface_out_depth` | `600` | Crop depth in microns |
+| `use_motor_positions_for_stitching` | `true` | Use motor encoder positions for tile layout |
+| `stitch_overlap_fraction` | `0.2` | Expected tile overlap fraction |
+| `use_refined_stitching` | `true` | Refine tile blend transitions with image registration |
 | `create_registration_masks` | `true` | Create registration masks |
-| `registration_transform` | `'translation'` | Transform type: 'translation', 'euler', or 'affine' |
-| `registration_metric` | `'CC'` | Registration metric: 'MSE', 'CC', or 'MI' |
-| `registration_max_translation` | `30.0` | Max allowed translation (pixels) |
-| `registration_max_rotation` | `2.0` | Max allowed rotation (degrees) |
-| `stack_blend_enabled` | `false` | Enable blending |
-| `interpolation_blend_method` | `'gaussian'` | Blend method: 'gaussian' (feathered) or 'linear' |
+| `registration_transform` | `'euler'` | Transform type: `euler` (XY + rotation) or `translation` |
+| `registration_max_translation` | `200.0` | Optimizer bound on translation (pixels) |
+| `registration_max_rotation` | `5.0` | Optimizer bound on rotation (degrees) |
+| `stacking_method` | `'motor'` | Stacking method: `motor` (recommended) or `registration` |
+| `stack_blend_enabled` | `true` | Enable blending between slices |
+| `apply_rotation_only` | `true` | Apply only rotation from pairwise registration during stacking |
+| `interpolation_blend_method` | `'gaussian'` | Blend method: `gaussian` (feathered) or `linear` |
+| `normalize_z_slices` | `false` | Enable post-stacking Z-intensity normalization |
 | `pyramid_resolutions` | `[10, 25, 50, 100]` | Pyramid resolution levels (µm) |
+| `pyramid_make_isotropic` | `true` | Resample to isotropic voxel spacing |
 | `use_gpu` | `true` | Enable GPU acceleration (auto-fallback to CPU) |
 
 ### Registration Algorithm
@@ -306,17 +338,17 @@ The pairwise registration uses a two-step approach:
 
 1. **Phase Correlation**: FFT-based estimation of translation between slices. Fast and robust to intensity variations. Uses windowed images to reduce edge effects.
 
-2. **Intensity-Based Refinement**: Gradient descent optimization using the specified metric (CC recommended for OCT data).
+2. **Intensity-Based Refinement**: Gradient descent optimization using the specified transform type (`euler` for rotation + translation, `translation` for XY only).
 
-3. **Masking**: Registration masks created by `create_registration_masks` focus registration on tissue content, reducing sensitivity to background edges.
+3. **Masking**: Registration masks created by `create_registration_masks` focus registration on tissue content, reducing sensitivity to background edges. The `mask_fill_holes` parameter (`none`, `3d`, `slicewise`) controls hole-filling in masks.
 
-4. **Validation**: If the estimated transform exceeds `registration_max_translation` or `registration_max_rotation`, it falls back to identity (no correction).
+4. **Transform application** (motor stacking): When `apply_rotation_only = true` only the rotation component is used during stacking; XY translation comes from motor positions. Rotation is clamped to `max_rotation_deg`. Transforms flagged as `error` are skipped when `skip_error_transforms = true`.
 
 **Recommendations:**
-- Use `translation` transform unless rotation is needed between slices
-- Keep `registration_max_translation` low (20-30 pixels) to trust microscope positions
+- Use `euler` transform to correct small rotations between slices
+- Keep `registration_max_translation` large (optimizer bound only — actual corrections are controlled by `apply_rotation_only` and `max_rotation_deg`)
 - Enable `create_registration_masks` to focus registration on tissue
-- CC (correlation coefficient) is the most robust metric for OCT data
+- Set `registration_slicing_interval_mm` to match your actual slice thickness
 
 
 ---
@@ -525,5 +557,18 @@ output/
 │   ├── 3d_volume.ome.zarr           # Final 3D volume
 │   ├── 3d_volume.ome.zarr.zip       # Compressed volume
 │   └── 3d_volume.png                # Preview image
+├── normalize_z_intensity/           # Z-normalized volume (only when normalize_z_slices = true)
+│   └── 3d_volume_znorm.ome.zarr
+├── align_to_ras/                    # RAS alignment (only when align_to_ras_enabled = true)
+│   ├── {subject}_ras.ome.zarr       # RAS-aligned volume (all pyramid levels)
+│   ├── {subject}_ras_transform.tfm  # Registration transform (SimpleITK)
+│   └── {subject}_ras_preview.png    # 3-panel alignment comparison
+├── diagnostics/                     # (only when diagnostic_mode = true or individual flags set)
+│   ├── rotation_analysis/
+│   ├── acquisition_rotation/
+│   ├── dilation_analysis/
+│   ├── motor_only_stitch/
+│   ├── motor_only_stack/
+│   └── stitch_comparison/
 └── {subject}_quality_report.html     # Quality report
 ```

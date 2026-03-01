@@ -167,55 +167,60 @@ nextflow run soct_3d_reconst.nf \
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `input` | `"."` | Mosaic grids directory |
-| `shifts_xy` | `"$input/shifts_xy.csv"` | XY shifts file |
+| `shifts_xy` | `""` | XY shifts file (default: `{input}/shifts_xy.csv`) |
 | `slice_config` | `""` | Optional slice config |
 | `output` | `"."` | Output directory |
-| `processes` | `1` | Parallel processes |
+| `subject_name` | `""` | Subject identifier (auto-extracted from path) |
+| `processes` | `8` | Parallel Python processes per task |
 
-#### Processing Options
+#### Compute Resources
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `use_gpu` | `true` | Enable GPU acceleration (auto-fallback to CPU) |
+| `enable_cpu_limits` | `true` | Enable CPU limiting |
+| `max_cpus` | `16` | Maximum CPUs to use (0 = no limit) |
+| `reserved_cpus` | `4` | CPUs reserved for system overhead |
+
+#### Resolution & Basic Settings
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `resolution` | `10` | Target resolution (µm/pixel) |
-| `clip_percentile_upper` | `99.9` | Upper percentile for clipping |
-| `fix_curvature_enabled` | `true` | Fix focal curvature |
-| `fix_illum_enabled` | `true` | Fix illumination |
-| `crop_interface_out_depth` | `600` | Crop depth (µm) |
+| `clip_percentile_upper` | `99.9` | Upper percentile for intensity clipping |
+| `fix_curvature_enabled` | `false` | Detect and compensate focal curvature artifacts |
+| `fix_illum_enabled` | `true` | Fix illumination inhomogeneity (BaSiCPy algorithm) |
+| `crop_interface_out_depth` | `600` | Maximum tissue depth after interface crop (µm) |
+| `normalize_min_contrast` | `0.1` | Min contrast fraction to prevent over-amplification of empty slices (0–1) |
 
-#### Registration
+#### Tile Stitching
+
+These parameters control how tiles within each slice are assembled in XY.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `create_registration_masks` | `true` | Create masks |
-| `mask_smoothing_sigma` | `5.0` | Mask smoothing (µm) |
-| `selem_radius` | `1` | Morphological element radius |
-| `min_size` | `100` | Minimum mask component size |
-| `mask_normalize` | `true` | Normalize before masking |
-| `moving_slice_first_index` | `4` | Skip voxels from top |
-| `registration_transform` | `'affine'` | Transform type (`affine`, `euler`, `translation`) |
-| `registration_metric` | `'MSE'` | Registration metric (`MSE`, `CC`, `MI`) |
-| `registration_max_translation` | `50.0` | Max allowed translation (pixels) |
-| `registration_max_rotation` | `2.0` | Max allowed rotation (degrees) |
-| `registration_robustness` | `'normal'` | Robustness level (`conservative`, `normal`, `aggressive`) |
+| `use_motor_positions_for_stitching` | `true` | Use motor encoder positions for tile layout (recommended) |
+| `stitch_overlap_fraction` | `0.2` | Expected tile overlap fraction — should match acquisition settings |
+| `stitch_blending_method` | `'diffusion'` | Tile blending: `'none'`, `'average'`, `'diffusion'` |
+| `use_refined_stitching` | `true` | Use image registration to refine blend transitions; reduces tile seams |
+| `max_blend_refinement_px` | `10` | Maximum sub-pixel refinement shift for blending (pixels) |
 
-**Robustness Levels:**
+#### Common Space Alignment
 
-The `registration_robustness` parameter controls fallback strategies:
-- `conservative`: Trust microscope positions, minimal corrections, uses identity for large translations
-- `normal`: Standard fallback chain (phase correlation → mask fallback → translation-only)
-- `aggressive`: All fallbacks + accepts consistent large translations
-
-
-#### Shift Outlier Filtering (Common Space)
-
-These parameters control outlier detection and filtering for the `bring_to_common_space` step. The shifts file from the microscope may contain erroneous large shifts that cause slices to drift out of alignment.
+Aligns each slice into a shared XY canvas using `shifts_xy.csv` motor positions, with optional outlier and step filtering.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `filter_shift_outliers` | `true` | Enable outlier filtering (strongly recommended) |
-| `outlier_method` | `'iqr'` | Detection method: `clamp`, `median`, `zero`, `local`, or `iqr` |
-| `max_shift_mm` | `0.5` | Max shift threshold in mm (only if method != 'iqr') |
-| `outlier_iqr_multiplier` | `1.5` | IQR multiplier for outlier detection (only with 'iqr' method) |
+| `outlier_method` | `'iqr'` | Detection method: `iqr`, `local`, `median`, `clamp`, or `zero` |
+| `outlier_iqr_multiplier` | `1.5` | IQR multiplier for outlier detection |
+| `max_shift_mm` | `0.5` | Maximum allowed shift (mm) — floor on IQR threshold |
+| `common_space_max_step_mm` | `0.5` | Maximum per-step shift change (mm, 0 = disabled) |
+| `common_space_step_window` | `3` | Window size for step outlier detection |
+| `common_space_step_method` | `'local_median'` | Step correction method: `local_median`, `clamp`, `local_mad` |
+| `common_space_step_mad_threshold` | `3.0` | MADs above local median to flag a step outlier (only with `local_mad`) |
+| `common_space_excluded_slice_mode` | `'local_median'` | Shift interpolation for excluded slices |
+| `common_space_excluded_slice_window` | `2` | Window for excluded slice interpolation |
 
 **Outlier Methods:**
 - `iqr` (recommended): Auto-detect outliers using IQR statistics, replace with local median
@@ -224,40 +229,251 @@ These parameters control outlier detection and filtering for the `bring_to_commo
 - `clamp`: Limit magnitude to `max_shift_mm` while preserving direction
 - `zero`: Replace outliers with zero shift
 
-#### Debugging Options
+#### Pairwise Registration
+
+Computes small corrections (rotation, sub-pixel translation) between consecutive slices. The main XY alignment comes from motor positions; these transforms are refinements applied on top.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `registration_transform` | `'euler'` | Transform type: `euler` (XY + rotation) or `translation` (XY only) |
+| `registration_max_translation` | `200.0` | Optimizer bound on translation (pixels) |
+| `registration_max_rotation` | `5.0` | Optimizer bound on rotation (degrees) |
+| `moving_slice_first_index` | `4` | Starting Z-index in the moving volume |
+| `registration_slicing_interval_mm` | `0.200` | Physical slice thickness (mm) |
+| `registration_allowed_drifting_mm` | `0.100` | Z-search range (mm) |
+
+**Registration Masks:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `create_registration_masks` | `true` | Create tissue masks to focus registration on tissue |
+| `mask_smoothing_sigma` | `5.0` | Gaussian smoothing sigma for mask creation (µm) |
+| `selem_radius` | `1` | Morphological structuring element radius (pixels) |
+| `min_size` | `100` | Minimum mask component size (pixels²) |
+| `mask_normalize` | `true` | Normalize intensities before masking |
+| `mask_fill_holes` | `'slicewise'` | Hole filling: `none`, `3d`, `slicewise` |
+
+#### Stacking & Output
+
+Choose a stacking method with `stacking_method`:
+- **`motor`** (recommended): XY from motor positions (`shifts_xy.csv`), Z from correlation
+- **`registration`**: XY and Z both from pairwise registration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `stacking_method` | `'motor'` | Stacking method: `motor` or `registration` |
+| `stack_blend_enabled` | `true` | Blend overlapping regions between slices |
+
+**Motor stacking (stacking_method = 'motor'):**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `use_expected_z_overlap` | `true` | Use expected Z-overlap instead of correlation-based matching |
+| `apply_pairwise_transforms` | `true` | Apply pairwise registration transforms during stacking |
+| `apply_rotation_only` | `true` | Apply only the rotation component from registration (keeps XY from motor) |
+| `max_rotation_deg` | `5.0` | Clamp rotation values larger than this before application |
+| `skip_error_transforms` | `true` | Skip transforms flagged as `error` status (prevents artifacts near interpolated slices) |
+| `skip_warning_transforms` | `false` | Skip transforms flagged as `warning` status |
+| `stack_accumulate_translations` | `false` | Accumulate pairwise translations as cumulative canvas offsets |
+| `stack_max_pairwise_translation` | `0` | Max pairwise translation (pixels) included in accumulation (0 = include all) |
+| `stitch_rehoming_enabled` | `false` | Apply one-time segment offset at re-homing event boundaries |
+| `stitch_rehoming_threshold_mm` | `0.7` | Motor shift magnitude that identifies a re-homing event (mm) |
+| `stitch_rehoming_use_motor` | `false` | Use motor delta instead of pairwise registration for re-homing corrections |
+| `stack_smooth_window` | `5` | Moving-average window (slices) for smoothing per-slice rotations (0 = disabled) |
+
+**Registration stacking (stacking_method = 'registration'):**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `stack_max_overlap` | `10` | Maximum blending overlap in voxels (-1 = unlimited) |
+| `stack_no_accumulate_transforms` | `true` | Apply each transform independently (recommended when slices are already XY-aligned) |
+
+**Output pyramid:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `pyramid_resolutions` | `[10, 25, 50, 100]` | Target resolutions (µm) for output pyramid levels |
+| `pyramid_n_levels` | `null` | Fixed level count (overrides `pyramid_resolutions`) |
+| `pyramid_make_isotropic` | `true` | Resample to isotropic voxel spacing |
+
+The `pyramid_resolutions` parameter controls the multi-resolution pyramid in the final 3D volume. Instead of power-of-2 downsampling, specific analysis-friendly resolutions are used:
+
+- **10 µm**: High-resolution analysis
+- **25 µm**: Standard analysis resolution
+- **50 µm**: Overview and atlas registration
+- **100 µm**: Quick visualization and large-scale analysis
+
+**Note:** Only resolutions ≥ the base `resolution` parameter will be included. For example, if `resolution = 25`, then only 25, 50, and 100 µm levels will be created.
+
+#### Z-Intensity Normalization
+
+Corrects slow intensity drift across serial sections after stacking. Disabled by default.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `normalize_z_slices` | `false` | Enable post-stacking Z-intensity normalization |
+| `znorm_mode` | `'histogram'` | Normalization mode: `histogram` (preserves contrast) or `percentile` (linear scaling) |
+| `znorm_strength` | `0.5` | Correction mixing strength (0 = passthrough, 1 = full correction) |
+
+**Histogram mode** (`znorm_mode = 'histogram'`):
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `znorm_tissue_threshold` | `0.02` | Minimum intensity to classify as tissue (below this left unchanged) |
+
+**Percentile mode** (`znorm_mode = 'percentile'`):
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `znorm_smooth_sigma` | `10.0` | Gaussian smoothing sigma (sections); ~10 corrects ~2mm drift and preserves anatomy |
+| `znorm_percentile` | `80.0` | Percentile of non-zero tissue voxels used as intensity reference |
+| `znorm_max_scale` | `2.0` | Maximum correction scale factor |
+| `znorm_min_scale` | `0.5` | Minimum correction scale factor |
+
+#### Atlas Registration (RAS Alignment)
+
+Register the final reconstructed volume to the Allen Mouse Brain Atlas (CCF) to produce an RAS-aligned OME-Zarr output. Atlas data is downloaded automatically.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `align_to_ras_enabled` | `false` | Enable Allen atlas registration |
+| `allen_resolution` | `25` | Atlas resolution for registration (µm): 10, 25, 50, 100 |
+| `allen_metric` | `'MI'` | Registration metric: `MI`, `MSE`, `CC`, `AntsCC` |
+| `allen_max_iterations` | `1000` | Maximum registration iterations |
+| `allen_registration_level` | `2` | Pyramid level of input zarr for registration (0 = full; level 2 ≈ 50 µm, fast) |
+| `ras_input_orientation` | `''` | 3-letter orientation code of the INPUT brain volume (see table below) |
+| `ras_initial_rotation` | `''` | Initial rotation hint `'Rx Ry Rz'` in degrees (leave empty for automatic MOMENTS initialization) |
+| `allen_preview` | `true` | Generate a 3-panel alignment comparison image |
+
+**Output:** `align_to_ras/{subject}_ras.ome.zarr` with all pyramid resolutions.
+
+---
+
+#### RAS Orientation Lookup Table
+
+The `ras_input_orientation` parameter is a 3-letter code describing the anatomical direction each axis of the **input ZYX zarr** points toward. The code is interpreted as:
+
+```
+letter 1 → dim0 (zarr Z) = slice stacking direction (perpendicular to cutting plane)
+letter 2 → dim1 (zarr Y) = in-plane row direction
+letter 3 → dim2 (zarr X) = in-plane column direction
+```
+
+Each letter is one of: `R`/`L` (right/left), `A`/`P` (anterior/posterior), `S`/`I` (superior/inferior).
+
+The script `linum_align_to_ras.py` uses the code to permute and flip axes before registration, bringing the volume into approximate RAS space. The `ras_initial_rotation` then seeds the registration optimizer with a coarse rotation, which is essential for oblique cuts.
+
+**Standard setup assumption** used in the table below:
+
+> Brain mounted with dorsal side up. OCT motor rows (zarr Y) scan dorsal→ventral (I). OCT motor columns (zarr X) scan left→right for coronal/axial (R), or posterior→anterior for sagittal (A).
+
+<!--
+Orientation code construction:
+  letter_map: R→axis0(+), L→axis0(−), A→axis1(+), P→axis1(−), S→axis2(+), I→axis2(−)
+  The code permutes/flips zarr ZYX axes so that axis0=R, axis1=A, axis2=S in the output.
+-->
+
+##### Cardinal (in-plane) cutting orientations
+
+| Cutting plane | Stack direction | Row dir (Y) | Col dir (X) | `ras_input_orientation` |
+|---|---|---|---|---|
+| Coronal — anterior→posterior | A→P | Dorsal→Ventral (I) | Left→Right (R) | `PIR` |
+| Coronal — posterior→anterior | P→A | Dorsal→Ventral (I) | Left→Right (R) | `AIR` |
+| Sagittal — left→right | L→R | Dorsal→Ventral (I) | Posterior→Anterior (A) | `RIA` |
+| Sagittal — right→left | R→L | Dorsal→Ventral (I) | Posterior→Anterior (A) | `LIA` |
+| Axial/Horizontal — dorsal→ventral | D→V | Anterior→Posterior (P) | Left→Right (R) | `IPR` |
+| Axial/Horizontal — ventral→dorsal | V→D | Anterior→Posterior (P) | Left→Right (R) | `SPR` |
+
+> **Important:** The in-plane letters (2nd and 3rd) depend on the physical stage motor orientation and brain mounting. If the output looks mirrored or rotated 90°, swap or negate the in-plane letters. Run `linum_align_to_ras.py --preview-only` to inspect the raw volume orientation before registering.
+
+##### 45° oblique cutting orientations
+
+For cuts between two cardinal planes, use the closest cardinal code plus `ras_initial_rotation` to seed the registration with the approximate tilt angle. The sign depends on which specific diagonal direction the cut follows — verify with `--preview` after registration.
+
+| Cutting plane | Between planes | `ras_input_orientation` | `ras_initial_rotation`¹ | Rotation axis |
+|---|---|---|---|---|
+| Corono-sagittal 45° | Coronal ↔ Sagittal | `PIR` | `'0 0 ±45'` | Around RAS Superior-Inferior (Rz) |
+| Corono-axial 45° | Coronal ↔ Axial | `PIR` | `'±45 0 0'` | Around RAS Right-Left (Rx) |
+| Sagitto-axial 45° | Sagittal ↔ Axial | `RIA` | `'0 ±45 0'` | Around RAS Anterior-Posterior (Ry) |
+
+¹ Sign (+ or −) depends on the specific oblique direction. Start with +45 and inspect the preview; negate if the alignment is worse.
+
+**Rotation axis guide** (applied in the approximately-RAS frame after orientation correction):
+- `Rx` — tilts the A-P axis toward/away from S-I (e.g., pitch)
+- `Ry` — tilts the R-L axis toward/away from S-I (e.g., roll)
+- `Rz` — rotates in the axial plane, mixing R-L and A-P (e.g., yaw)
+
+**Example config (coronal A→P, standard setup):**
+```groovy
+align_to_ras_enabled    = true
+ras_input_orientation   = 'PIR'
+ras_initial_rotation    = ''        // automatic MOMENTS initialization
+allen_resolution        = 25
+allen_registration_level = 2        // ~50 µm pyramid level for speed
+```
+
+**Example config (corono-sagittal 45° oblique cut):**
+```groovy
+align_to_ras_enabled    = true
+ras_input_orientation   = 'PIR'
+ras_initial_rotation    = '0 0 45'  // adjust sign after checking preview
+allen_resolution        = 25
+allen_registration_level = 2
+```
+
+---
+
+#### Previews & Reports
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `stitch_preview` | `true` | Generate stitched slice preview images |
+| `common_space_preview` | `false` | Generate common space alignment previews |
+| `interpolation_preview` | `false` | Generate interpolated slice previews |
+| `generate_report` | `true` | Generate HTML quality report after stacking |
+| `report_verbose` | `false` | Include detailed per-slice metrics in report |
+| `annotated_label_every` | `1` | Label every Nth slice in annotated preview (1 = all slices) |
+| `annotated_show_lines` | `false` | Draw slice boundary lines on annotated preview |
+
+#### Debugging
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `analyze_shifts` | `false` | Generate shifts analysis report and drift plots |
-| `mask_preview` | `false` | Generate preview images for masks |
-| `common_space_preview` | `true` | Generate preview images after common space alignment |
+| `mask_preview` | `false` | Save mask preview images alongside mask zarrs |
+| `debug_slices` | `""` | Comma-separated slice IDs or ranges to process (e.g. `"25,26"` or `"25-29"`); leave empty to process all |
 
 The `analyze_shifts` option runs drift analysis on the shifts file before processing, producing:
 - A text report with statistics and outlier detection
 - A PNG plot showing drift patterns
 - A filtered shifts CSV file
 
-#### Stacking
+#### Diagnostic Mode
+
+Diagnostic mode enables additional analysis processes for troubleshooting reconstruction artifacts (edge mismatches, overhangs, alignment issues).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `stack_blend_enabled` | `false` | Enable blending |
-| `stack_max_overlap` | `-1` | Max overlap (-1 = all) |
+| `diagnostic_mode` | `false` | Master switch: enables all diagnostic analyses |
+| `analyze_rotation_drift` | `false` | Analyze cumulative rotation between slices |
+| `analyze_acquisition_rotation` | `false` | Analyze acquisition-time rotation from shifts + registration |
+| `analyze_tile_dilation` | `false` | Analyze tile position refinements for scale drift (requires `use_refined_stitching=false`) |
+| `motor_only_stitch` | `false` | Stitch slices using motor positions only (no image registration) |
+| `motor_only_stack` | `false` | Stack slices using motor positions only (no pairwise registration) |
+| `compare_stitching` | `false` | Compare motor-only vs refined stitching side-by-side |
 
-#### Pyramid Resolutions
+Diagnostic parameters:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `pyramid_resolutions` | `[10, 25, 50, 100]` | Target resolutions (µm) for output pyramid levels |
+| `motor_only_overlap` | `0.2` | Expected tile overlap for motor-only diagnostics (matches `stitch_overlap_fraction`) |
+| `motor_only_stitch_blending` | `'diffusion'` | Blending for motor-only stitching: `none`, `average`, `diffusion` |
+| `motor_only_stack_blending` | `'none'` | Blending for motor-only stacking: `none`, `average`, `max`, `feather` |
+| `diagnostic_rotation_threshold` | `2.0` | Rotation warning threshold (degrees) |
+| `save_refinement_data` | `false` | Save refined stitching transform data as JSON |
+| `comparison_tile_step` | `60` | Tile step for seam detection in stitching comparison |
 
-The `pyramid_resolutions` parameter controls the multi-resolution pyramid in the final 3D volume. Instead of power-of-2 downsampling, specific analysis-friendly resolutions are used:
-
-- **10 µm**: High-resolution analysis
-- **25 µm**: Standard analysis resolution  
-- **50 µm**: Overview and atlas registration
-- **100 µm**: Quick visualization and large-scale analysis
-
-**Note:** Only resolutions ≥ the base `resolution` parameter will be included. For example, if `resolution = 25`, then only 25, 50, and 100 µm levels will be created.
+Diagnostic outputs are written to `{output}/diagnostics/` and include rotation plots, dilation reports, motor-only stitch results, and side-by-side comparisons.
 
 #### GPU Acceleration
 
@@ -282,10 +498,25 @@ output/
 ├── bring_to_common_space/
 ├── create_registration_masks/
 ├── register_pairwise/
-└── stack/
-    ├── 3d_volume.ome.zarr
-    ├── 3d_volume.ome.zarr.zip
-    └── 3d_volume.png
+├── stack/
+│   ├── 3d_volume.ome.zarr
+│   ├── 3d_volume.ome.zarr.zip
+│   └── 3d_volume.png
+├── normalize_z_intensity/              # Only when normalize_z_slices = true
+│   └── 3d_volume_znorm.ome.zarr
+├── align_to_ras/                       # Only when align_to_ras_enabled = true
+│   ├── {subject}_ras.ome.zarr          # RAS-aligned volume (all pyramid levels)
+│   ├── {subject}_ras_transform.tfm     # Registration transform (SimpleITK)
+│   └── {subject}_ras_preview.png       # 3-panel alignment comparison
+├── diagnostics/                        # Only when diagnostic_mode = true or individual flags set
+│   ├── rotation_analysis/
+│   ├── acquisition_rotation/
+│   ├── dilation_analysis/
+│   ├── aggregated_dilation/
+│   ├── motor_only_stitch/
+│   ├── motor_only_stack/
+│   └── stitch_comparison/
+└── {subject}_quality_report.html
 ```
 
 ---

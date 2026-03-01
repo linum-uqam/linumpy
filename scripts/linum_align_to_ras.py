@@ -106,25 +106,33 @@ def parse_orientation_code(orientation: str) -> tuple[tuple, tuple]:
     ----------
     orientation : str
         3-letter code (R/L, A/P, S/I) describing what each axis points to.
-        Example: 'PIR' means dim0→Posterior, dim1→Inferior, dim2→Right
+        Example: 'AIR' means dim0→Anterior, dim1→Inferior, dim2→Right
 
     Returns
     -------
     axis_permutation : tuple of int
-        Source indices for each target dimension to achieve RAS
+        Source indices for each target dimension, such that after
+        np.transpose(volume, axis_permutation) the numpy dims are (S, R, A).
+        This matches the numpy_to_sitk_image convention where:
+          - numpy dim0 → SITK Z → Allen S (Superior)
+          - numpy dim1 → SITK X → Allen R (Right)
+          - numpy dim2 → SITK Y → Allen A (Anterior)
     axis_flips : tuple of int
-        Sign for each axis (-1 to flip, 1 to keep)
+        Sign for each axis after permutation (-1 to flip, 1 to keep)
     """
     if len(orientation) != 3:
         raise ValueError(f"Orientation code must be 3 letters, got '{orientation}'")
 
     orientation = orientation.upper()
 
-    # Map letters to RAS axis and direction: (axis_index, sign)
+    # Map each letter to the TARGET numpy dimension and direction.
+    # numpy dim0 → SITK Z → should be S (Superior)
+    # numpy dim1 → SITK X → should be R (Right)
+    # numpy dim2 → SITK Y → should be A (Anterior)
     letter_map = {
-        'R': (0, 1), 'L': (0, -1),   # X axis
-        'A': (1, 1), 'P': (1, -1),   # Y axis
-        'S': (2, 1), 'I': (2, -1),   # Z axis
+        'R': (1, 1), 'L': (1, -1),   # numpy dim 1 (SITK X → Allen R)
+        'A': (2, 1), 'P': (2, -1),   # numpy dim 2 (SITK Y → Allen A)
+        'S': (0, 1), 'I': (0, -1),   # numpy dim 0 (SITK Z → Allen S)
     }
 
     source_to_target = {}
@@ -417,45 +425,43 @@ def compute_centered_reference_and_transform(
         (0, size[1]-1, size[2]-1), (size[0]-1, size[1]-1, size[2]-1),
     ]
 
-    # Transform corners to target (RAS) space using the registration transform
+    # Map brain corners to FIXED/RAS space.
+    # The registration transform maps fixed→moving (ResampleImageFilter convention),
+    # so we use its inverse (moving→fixed) to find where the brain corners land
+    # in the fixed (RAS/Allen) coordinate system.
+    inv_transform = transform.GetInverse()
     transformed_pts = []
     for idx in corners:
         phys = moving_sitk.TransformContinuousIndexToPhysicalPoint(idx)
-        transformed_pts.append(transform.TransformPoint(phys))
+        transformed_pts.append(inv_transform.TransformPoint(phys))
 
     pts = np.array(transformed_pts)
     pts_min = pts.min(axis=0)
     pts_max = pts.max(axis=0)
-    pts_center = (pts_min + pts_max) / 2.0
 
-    # Compute output size to cover transformed volume
+    # Compute output size to cover the full transformed brain extent
     spacing = np.array(output_spacing)
     extent = pts_max - pts_min
     new_size = np.ceil(extent / spacing).astype(int)
 
-    # Create reference image with origin at (0,0,0) 
-    # The volume will span from origin to origin + size*spacing
+    # Reference image: origin at (0,0,0), spanning [0, new_size*spacing].
+    # Output voxel p maps to fixed-space coordinate (p + pts_min).
     ref = sitk.Image([int(s) for s in new_size], moving_sitk.GetPixelIDValue())
     ref.SetSpacing(tuple(spacing))
     ref.SetOrigin((0.0, 0.0, 0.0))
     ref.SetDirection((1, 0, 0, 0, 1, 0, 0, 0, 1))  # Identity direction (RAS)
 
-    # Compute the center of the output volume in physical coordinates
-    output_center = np.array(ref.GetOrigin()) + (np.array(new_size) * spacing) / 2.0
-
-    # We need a translation that shifts pts_center to output_center
-    # The composite transform will be: T_shift ∘ T_registration
-    # Where T_shift translates from transformed space to centered output space
-    shift = output_center - pts_center
-
-    # Create a translation transform
+    # Shift transform: output space → fixed space (translate by pts_min).
+    # This maps output origin (0,0,0) to the brain's fixed-space bounding box minimum.
     shift_transform = sitk.TranslationTransform(3)
-    shift_transform.SetOffset(tuple(shift))
+    shift_transform.SetOffset(tuple(pts_min))
 
-    # Compose: first apply registration, then shift
+    # Composite transform for resampling:
+    #   output point → (shift) → fixed space → (T) → moving space
+    # SimpleITK CompositeTransform applies transforms in the order added (first = first applied).
     composite = sitk.CompositeTransform(3)
-    composite.AddTransform(transform)
-    composite.AddTransform(shift_transform)
+    composite.AddTransform(shift_transform)  # output → fixed
+    composite.AddTransform(transform)         # fixed → moving
 
     return ref, composite
 
@@ -464,7 +470,6 @@ def apply_transform_to_zarr(
     input_path: str,
     output_path: str,
     transform: sitk.Transform,
-    base_resolution: tuple,
     chunks: Optional[tuple] = None,
     n_levels: Optional[int] = None,
     orientation_permutation: Optional[tuple] = None,
@@ -486,8 +491,6 @@ def apply_transform_to_zarr(
         Path to output OME-Zarr
     transform : sitk.Transform
         Transform to apply
-    base_resolution : tuple
-        Voxel spacing in mm (z, x, y)
     chunks : tuple, optional
         Chunk size for output
     n_levels : int, optional
@@ -503,8 +506,10 @@ def apply_transform_to_zarr(
         if pbar:
             pbar.update(1)
 
-    # Load volume
-    vol_zarr, _ = read_omezarr(input_path, level=0)
+    # Load volume at full resolution (level 0) and capture its actual spacing.
+    # base_resolution comes from the downsampled registration level, so we must
+    # read the level-0 spacing from the file to get the correct physical extent.
+    vol_zarr, level0_resolution = read_omezarr(input_path, level=0)
     if chunks is None:
         chunks = getattr(vol_zarr, 'chunks', None)
 
@@ -513,13 +518,14 @@ def apply_transform_to_zarr(
     update_pbar()
 
     # Apply orientation correction
-    resolution = base_resolution
+    resolution = level0_resolution
     if orientation_permutation is not None:
         vol = apply_orientation_transform(vol, orientation_permutation, orientation_flips)
         resolution = reorder_resolution(resolution, orientation_permutation)
 
     # Convert to SimpleITK
     vol_sitk = allen.numpy_to_sitk_image(vol, resolution, cast_dtype=np.float32)
+    del vol  # free original volume before resampling
     update_pbar()
 
     # Compute reference image and modified transform that centers the output
@@ -533,7 +539,9 @@ def apply_transform_to_zarr(
     resampler.SetTransform(centered_transform)
 
     transformed_sitk = resampler.Execute(vol_sitk)
+    del vol_sitk  # free input before allocating output array
     transformed = sitk.GetArrayFromImage(transformed_sitk)
+    del transformed_sitk  # free SimpleITK image after extracting numpy array
     update_pbar()
 
     # Convert from SITK (Z, Y, X) to our (Z, X, Y) ordering
@@ -857,6 +865,7 @@ def main():
 
     print(f"Registration complete: {stop_condition}")
     print(f"Final metric value: {error:.6f}")
+    del vol  # free registration-level volume before loading full-resolution data
 
     # Apply or store transform
     if args.store_transform_only:
@@ -867,7 +876,6 @@ def main():
             str(input_path),
             str(output_path),
             transform,
-            zarr_resolution,
             chunks=tuple(args.chunks) if args.chunks else None,
             n_levels=args.n_levels,
             orientation_permutation=orientation_permutation,
