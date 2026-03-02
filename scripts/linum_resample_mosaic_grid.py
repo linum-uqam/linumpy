@@ -4,11 +4,9 @@
 import linumpy._thread_config  # noqa: F401
 
 import argparse
-import numpy as np
-import itertools
 
-from skimage.transform import rescale
-from linumpy.io import read_omezarr, OmeZarrWriter
+from linumpy.io import read_omezarr
+from linumpy.preproc.resampling import resample_mosaic_grid
 
 
 def _build_arg_parser():
@@ -30,32 +28,7 @@ def main():
     args = parser.parse_args()
 
     vol, source_res = read_omezarr(args.in_mosaic)
-    target_res = args.resolution / 1000.0  # conversion um to mm
-
-    tile_shape = vol.chunks
-    scaling_factor = np.asarray(source_res) / target_res
-    tile_00 = vol[:tile_shape[0], :tile_shape[1], :tile_shape[2]]
-
-    # process first tile to get output shape
-    out_tile00 = rescale(tile_00, scaling_factor, order=1,
-                         preserve_range=True, anti_aliasing=True)
-    out_tile_shape = out_tile00.shape
-
-    nx = vol.shape[1] // tile_shape[1]
-    ny = vol.shape[2] // tile_shape[2]
-
-    out_shape = (out_tile_shape[0], nx*out_tile_shape[1], ny*out_tile_shape[2])
-    out_zarr = OmeZarrWriter(args.out_mosaic, out_shape, out_tile_shape,
-                             dtype=vol.dtype, overwrite=True)
-    for i, j in itertools.product(range(nx), range(ny)):
-        current_vol = vol[:, i*tile_shape[1]:(i + 1)*tile_shape[1],
-                          j*tile_shape[2]:(j + 1)*tile_shape[2]]
-        out_zarr[:, i*out_tile_shape[1]:(i + 1)*out_tile_shape[1],
-                 j*out_tile_shape[2]:(j + 1)*out_tile_shape[2]] =\
-            rescale(current_vol, scaling_factor, order=1,
-                    preserve_range=True, anti_aliasing=True)
-
-    out_zarr.finalize([target_res] * 3, args.n_levels)
+    resample_mosaic_grid(vol, source_res, args.resolution, n_levels=args.n_levels, out_path=args.out_mosaic)
 
 
 if __name__ == '__main__':

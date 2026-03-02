@@ -10,9 +10,6 @@ estimate suitable nextflow.config parameters.
 Estimable parameters
 --------------------
 From shifts_xy.csv:
-  stitch_rehoming_threshold_mm    — midpoint between max-normal and min-rehoming shift
-  stitch_rehoming_enabled         — true if re-homing events are detected
-  stitch_rehoming_use_motor       — always recommended true when re-homing is present
   max_shift_mm                    — IQR upper bound of normal inter-slice shifts
   common_space_max_step_mm        — 95th percentile of consecutive normal shift changes
   interpolate_missing_slices      — true when gaps (moving_id - fixed_id > 1) are found
@@ -158,16 +155,6 @@ def analyze_shifts(df: pd.DataFrame) -> dict:
 
     is_rehoming = detect_rehoming(mag)
     normal_mag = mag[~is_rehoming]
-    rehoming_mag = mag[is_rehoming]
-
-    # stitch_rehoming_threshold_mm: 60 % of the gap from max-normal to min-rehoming.
-    # Positioned closer to the normal side for a comfortable safety margin.
-    if is_rehoming.any():
-        max_normal = normal_mag.max()
-        min_rehoming = rehoming_mag.min()
-        threshold = max_normal + 0.6 * (min_rehoming - max_normal)
-    else:
-        threshold = None
 
     # max_shift_mm: IQR upper bound of the normal (non-rehoming) shifts.
     if len(normal_mag) >= 4:
@@ -197,7 +184,6 @@ def analyze_shifts(df: pd.DataFrame) -> dict:
         'normal_rows': df[~is_rehoming],
         'n_rehoming': int(is_rehoming.sum()),
         'has_rehoming': bool(is_rehoming.any()),
-        'rehoming_threshold_mm': threshold,
         'max_shift_mm': max_shift,
         'max_step_mm': max_step,
         'gaps': gaps,
@@ -465,14 +451,13 @@ def build_report(shift_stats: dict, acq: dict, shifts_path: str) -> str:
             "",
             f"  Max normal magnitude : {normal['magnitude_mm'].max():.3f} mm",
             f"  Min re-homing mag    : {rh['magnitude_mm'].min():.3f} mm",
-            f"  → suggested stitch_rehoming_threshold_mm = "
-            f"{shift_stats['rehoming_threshold_mm']:.3f} mm",
+            "  → Note: skip_error_transforms=false allows pairwise accumulation",
+            "    to steer the viewing plane across re-homing boundaries.",
         ]
     else:
         lines += [
             "",
             "NO RE-HOMING EVENTS DETECTED",
-            "  stitch_rehoming_enabled = false",
         ]
 
     if shift_stats['has_gaps']:
@@ -611,27 +596,13 @@ def build_config_snippet(shift_stats: dict, acq: dict, args) -> str:
 
     if shift_stats['has_rehoming']:
         rh = shift_stats['rehoming_rows']
-        thresh = ceil_to(shift_stats['rehoming_threshold_mm'], 0.05)
         slice_ids = ", ".join(str(int(r['moving_id'])) for _, r in rh.iterrows())
         lines += [
             "",
-            "// ── Re-homing correction ─────────────────────────────────────",
-            "stitch_rehoming_enabled = true",
-            "stitch_rehoming_use_motor = true",
-            "  // Re-homing events are large FOV jumps encoded in the motor",
-            "  // positions. Image-based registration is ambiguous at these",
-            "  // boundaries; motor values are more reliable.",
-            f"stitch_rehoming_threshold_mm = {thresh:.2f}",
-            f"  // 60 % between largest normal shift "
-            f"({shift_stats['normal_rows']['magnitude_mm'].max():.3f} mm)",
-            f"  // and smallest re-homing event ({rh['magnitude_mm'].min():.3f} mm).",
-            f"  // Boundaries at slices: {slice_ids}",
-        ]
-    else:
-        lines += [
-            "",
-            "// ── Re-homing correction ─────────────────────────────────────",
-            "stitch_rehoming_enabled = false  // no re-homing events detected",
+            f"// ── Re-homing events detected at slices: {slice_ids} ──────────",
+            "// Large mid-acquisition motor jumps. Consider skip_error_transforms=false",
+            "// with stack_accumulate_translations=true to steer the viewing plane",
+            "// across re-homing boundaries via pairwise registration accumulation.",
         ]
 
     return "\n".join(lines)

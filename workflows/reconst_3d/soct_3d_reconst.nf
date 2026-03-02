@@ -641,6 +641,7 @@ process stack_motor {
 
     // Blending
     if (params.stack_blend_enabled) options += " --blend"
+    if (params.blend_refinement_px > 0) options += " --blend_refinement_px ${params.blend_refinement_px}"
 
     // Z-matching
     options += " --slicing_interval_mm ${params.registration_slicing_interval_mm}"
@@ -677,18 +678,6 @@ process stack_motor {
         // provide approximate segment corrections — set to 0 to preserve them.
         if (params.stack_max_pairwise_translation > 0)
             options += " --max_pairwise_translation ${params.stack_max_pairwise_translation}"
-    }
-
-    // Targeted re-homing correction: apply pairwise translations only at large motor-shift boundaries
-    if (params.stitch_rehoming_enabled) {
-        options += " --stitch_rehoming"
-        options += " --rehoming_threshold_mm ${params.stitch_rehoming_threshold_mm}"
-        if (params.stitch_rehoming_use_motor) {
-            options += " --stitch_rehoming_use_motor"
-        } else {
-            // Pass registration boundary to skip optimizer-clamped (unreliable) corrections
-            options += " --max_pairwise_translation ${params.registration_max_translation}"
-        }
     }
 
     // Smooth cumulative translations to reduce XY jitter
@@ -1102,13 +1091,14 @@ workflow {
     // -------------------------------------------------------------------------
     // Stage 2: XY Stitching
     // -------------------------------------------------------------------------
-    if (params.use_refined_stitching) {
-        // Use refined stitching with registration-based blend refinement
-        // This helps reduce visible tile seams
+    // Two paths, driven by stacking_method:
+    //   'motor'        → refined stitching (image-registration-based blend refinement)
+    //   'registration' → AIP-based stitching (estimate XY transform from AIP, then stitch)
+    if (params.stacking_method == 'motor') {
         stitch_3d_with_refinement(illum_fixed)
         stitched_slices = stitch_3d_with_refinement.out
     } else {
-        // Use standard stitching with motor-based transform
+        // registration path: generate AIP, estimate XY transform, stitch
         generate_aip(illum_fixed)
         estimate_xy_transformation(generate_aip.out)
         stitch_3d(illum_fixed.combine(estimate_xy_transformation.out, by: 0))
@@ -1347,10 +1337,10 @@ workflow {
     }
 
     if (runDilationDiagnostics) {
-        if (params.use_refined_stitching) {
-            // estimate_xy_transformation is not run in the refined stitching path,
+        if (params.stacking_method == 'motor') {
+            // estimate_xy_transformation is not run in the motor path,
             // so there is no XY transform output to analyze for dilation.
-            log.warn "Tile dilation analysis skipped: requires use_refined_stitching=false (needs XY transform output)"
+            log.warn "Tile dilation analysis skipped: requires stacking_method='registration' (needs XY transform output)"
         } else if (params.use_motor_positions_for_stitching) {
             log.warn "Tile dilation analysis is not meaningful when use_motor_positions_for_stitching=true"
             log.warn "  The transform IS motor positions, so no dilation will be detected."

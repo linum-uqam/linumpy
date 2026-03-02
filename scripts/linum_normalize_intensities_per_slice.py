@@ -10,10 +10,8 @@ defined by the `percentile_max` argument.
 """
 import argparse
 from linumpy.io.zarr import read_omezarr, save_omezarr
-from linumpy.preproc.normalization import normalize_volume
+from linumpy.preproc.normalization import normalize_volume, get_agarose_mask
 from linumpy.utils.metrics import collect_normalization_metrics
-from skimage.filters import threshold_otsu
-from scipy.ndimage import gaussian_filter
 
 import dask.array as da
 import numpy as np
@@ -34,15 +32,6 @@ def _build_arg_parser():
                    help='Minimum contrast as fraction of global max to prevent\n'
                         'over-amplification of weak/bad slices. [%(default)s]')
     return p
-
-
-def get_agarose_mask(vol, smoothing_sigma):
-    """Compute agarose mask using Otsu thresholding."""
-    reference = np.mean(vol, axis=0)
-    reference_smooth = gaussian_filter(reference, sigma=smoothing_sigma)
-    threshold = threshold_otsu(reference_smooth[reference > 0])
-    agarose_mask = np.logical_and(reference_smooth < threshold, reference > 0)
-    return agarose_mask, threshold
 
 
 def main():

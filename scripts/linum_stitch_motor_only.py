@@ -28,6 +28,7 @@ from linumpy.io.zarr import read_omezarr, OmeZarrWriter
 from linumpy.utils.mosaic_grid import addVolumeToMosaic
 from linumpy.utils.io import add_overwrite_arg
 from linumpy.utils.metrics import collect_stitch_3d_metrics
+from linumpy.stitching.motor import compute_motor_positions, compare_motor_vs_registration
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -59,42 +60,6 @@ def _build_arg_parser():
     return p
 
 
-def compute_motor_positions(nx, ny, tile_shape, overlap_fraction, scale_factor=1.0, rotation_deg=0.0):
-    """
-    Compute tile positions based on motor grid (ideal positions).
-
-    This assumes a regular grid where tiles are spaced by (1 - overlap) * tile_size.
-    """
-    tile_height, tile_width = tile_shape[1], tile_shape[2]  # Assuming [z, y, x] or [z, row, col]
-
-    # Effective step between tiles
-    step_y = int(tile_height * (1.0 - overlap_fraction))
-    step_x = int(tile_width * (1.0 - overlap_fraction))
-
-    # Apply scale factor (to test dilation hypothesis)
-    step_y = int(step_y * scale_factor)
-    step_x = int(step_x * scale_factor)
-
-    # Rotation matrix (for global grid rotation)
-    theta = np.radians(rotation_deg)
-    cos_t, sin_t = np.cos(theta), np.sin(theta)
-    rotation_matrix = np.array([[cos_t, -sin_t], [sin_t, cos_t]])
-
-    positions = []
-    for i in range(nx):
-        for j in range(ny):
-            # Base position in grid
-            pos = np.array([i * step_y, j * step_x])
-
-            # Apply rotation if specified
-            if rotation_deg != 0.0:
-                pos = np.dot(rotation_matrix, pos)
-
-            positions.append(pos.astype(int))
-
-    return positions
-
-
 def compute_registration_positions(nx, ny, transform):
     """Compute tile positions using registration transform."""
     positions = []
@@ -103,58 +68,6 @@ def compute_registration_positions(nx, ny, transform):
             pos = np.dot(transform, [i, j]).astype(int)
             positions.append(pos)
     return positions
-
-
-def compare_positions(motor_positions, reg_positions, output_path=None):
-    """Compare motor-based positions with registration-based positions."""
-    import json
-
-    motor_arr = np.array(motor_positions)
-    reg_arr = np.array(reg_positions)
-
-    # Compute differences
-    diff = reg_arr - motor_arr
-
-    # Statistics
-    comparison = {
-        'n_tiles': len(motor_positions),
-        'mean_diff_y': float(np.mean(diff[:, 0])),
-        'mean_diff_x': float(np.mean(diff[:, 1])),
-        'std_diff_y': float(np.std(diff[:, 0])),
-        'std_diff_x': float(np.std(diff[:, 1])),
-        'max_diff_y': float(np.max(np.abs(diff[:, 0]))),
-        'max_diff_x': float(np.max(np.abs(diff[:, 1]))),
-        'mean_magnitude': float(np.mean(np.sqrt(diff[:, 0]**2 + diff[:, 1]**2))),
-        'max_magnitude': float(np.max(np.sqrt(diff[:, 0]**2 + diff[:, 1]**2))),
-    }
-
-    # Check for systematic offset (would indicate motor calibration issue)
-    if abs(comparison['mean_diff_y']) > 5 or abs(comparison['mean_diff_x']) > 5:
-        comparison['systematic_offset'] = True
-        comparison['offset_warning'] = f"Systematic offset detected: ({comparison['mean_diff_y']:.1f}, {comparison['mean_diff_x']:.1f}) pixels"
-    else:
-        comparison['systematic_offset'] = False
-
-    # Check for scaling/dilation (increasing error with tile index)
-    tile_indices = np.arange(len(motor_positions))
-    diff_magnitude = np.sqrt(diff[:, 0]**2 + diff[:, 1]**2)
-
-    # Correlation between tile index and error magnitude
-    if len(tile_indices) > 10:
-        correlation = np.corrcoef(tile_indices, diff_magnitude)[0, 1]
-        comparison['index_error_correlation'] = float(correlation)
-        if abs(correlation) > 0.5:
-            comparison['dilation_indicator'] = True
-            comparison['dilation_warning'] = f"Error increases with tile index (r={correlation:.2f}), suggesting dilation/scaling"
-        else:
-            comparison['dilation_indicator'] = False
-
-    if output_path:
-        with open(output_path, 'w') as f:
-            json.dump(comparison, f, indent=2)
-        logger.info(f"Comparison saved to {output_path}")
-
-    return comparison
 
 
 def main():
@@ -195,7 +108,7 @@ def main():
     if args.compare_transform:
         transform = np.load(args.compare_transform)
         reg_positions = compute_registration_positions(nx, ny, transform)
-        comparison = compare_positions(motor_positions, reg_positions, args.output_comparison)
+        comparison = compare_motor_vs_registration(motor_positions, reg_positions, args.output_comparison)
 
         logger.info("Position comparison summary:")
         logger.info(f"  Mean offset: ({comparison['mean_diff_y']:.1f}, {comparison['mean_diff_x']:.1f}) px")

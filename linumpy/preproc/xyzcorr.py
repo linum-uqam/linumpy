@@ -996,3 +996,99 @@ def fix_galvo_shift(vol: np.ndarray, shift: int = 0, axis: int = 1) -> np.ndarra
     if shift == 0:
         return vol
     return np.roll(vol, shift, axis=axis)
+
+
+
+def detect_interface_z(vol: np.ndarray,
+                       sigma_xy: float = 3.0,
+                       sigma_z: float = 2.0,
+                       use_log: bool = False) -> int:
+    """Detect water/tissue interface along Z using gradient-based method.
+
+    Applies Gaussian smoothing then finds the peak of the first-order
+    Z-derivative to locate the tissue surface.
+
+    Parameters
+    ----------
+    vol : np.ndarray
+        Volume with shape (X, Y, Z) — already transposed from OME-Zarr (Z, X, Y).
+    sigma_xy : float
+        Gaussian smoothing sigma in XY before Z-gradient.
+    sigma_z : float
+        Gaussian smoothing sigma for Z-gradient computation.
+    use_log : bool
+        Apply log transform before gradient detection.
+
+    Returns
+    -------
+    int
+        Estimated interface depth in Z voxels.
+    """
+    from scipy.ndimage import gaussian_filter, gaussian_filter1d
+
+    vol_f = np.log(vol + 1e-6) if use_log else vol.astype(np.float32)
+
+    pad_width = int(np.round(sigma_z * 4))
+    vol_padded = np.pad(vol_f, ((0, 0), (0, 0), (pad_width, 0)), mode='wrap')
+    vol_padded = gaussian_filter(vol_padded, (sigma_xy, sigma_xy, 0))
+    dz = gaussian_filter1d(vol_padded, sigma=sigma_z, axis=-1, order=1)
+    avg_dz = np.sum(dz, axis=(0, 1))
+
+    avg_iface = max(int(np.argmax(avg_dz)) - pad_width, 0)
+    return avg_iface
+
+
+def crop_below_interface(vol_zxy: np.ndarray,
+                         depth_um: float,
+                         resolution_um: float,
+                         sigma_xy: float = 3.0,
+                         sigma_z: float = 2.0,
+                         crop_before_interface: bool = False,
+                         percentile_clip: float = None) -> np.ndarray:
+    """Crop an OME-Zarr volume to a specified depth below the tissue interface.
+
+    Detects the water/tissue interface using gradient analysis, then crops
+    the volume to retain only  microns below the interface.
+
+    Parameters
+    ----------
+    vol_zxy : np.ndarray
+        Volume with shape (Z, X, Y) as returned by read_omezarr.
+    depth_um : float
+        Target depth below interface in microns.
+    resolution_um : float
+        Z resolution in microns per voxel.
+    sigma_xy : float
+        XY smoothing sigma for interface detection.
+    sigma_z : float
+        Z smoothing sigma for interface detection.
+    crop_before_interface : bool
+        If True, also crop the volume above the detected interface.
+    percentile_clip : float or None
+        If provided, clip values above this percentile before interface detection.
+
+    Returns
+    -------
+    np.ndarray
+        Cropped volume (Z', X, Y).
+    int
+        Detected interface depth in Z voxels.
+    """
+    vol_f = np.abs(vol_zxy) if np.iscomplexobj(vol_zxy) else vol_zxy.astype(np.float32)
+
+    # Reorder to (X, Y, Z) for gradient computation
+    vol_xyz = np.transpose(vol_f, (1, 2, 0))
+
+    if percentile_clip is not None:
+        vol_xyz = np.clip(vol_xyz, None, np.percentile(vol_xyz, percentile_clip))
+
+    avg_iface = detect_interface_z(vol_xyz, sigma_xy=sigma_xy, sigma_z=sigma_z)
+
+    depth_px = int(round(depth_um / resolution_um))
+    surface_idx = max(0, min(avg_iface, vol_zxy.shape[0] - 1))
+    end_idx = surface_idx + depth_px
+
+    start_idx = surface_idx if crop_before_interface else 0
+    vol_crop = vol_zxy[start_idx:end_idx, :, :]
+
+    return vol_crop, avg_iface

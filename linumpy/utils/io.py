@@ -87,3 +87,32 @@ def add_verbose_arg(parser):
                         help='Produces verbose output depending on '
                              'the provided level. \nDefault level is warning, '
                              'default when using -v is info.')
+
+
+def detect_shift_units(resolution):
+    """Detect whether OME-Zarr resolution is in mm or µm, return (res_x_um, res_y_um).
+
+    OME-Zarr resolution can be in mm (OME-NGFF standard) or µm depending on the writer.
+    Detects by magnitude: values < 1.0 are assumed mm, >= 1.0 are assumed µm.
+
+    Parameters
+    ----------
+    resolution : sequence
+        Resolution tuple from read_omezarr (res_z, res_y, res_x).
+
+    Returns
+    -------
+    res_x_um, res_y_um : float
+        XY resolution in microns per pixel.
+    """
+    res_x_raw = resolution[-1]
+    res_y_raw = resolution[-2] if len(resolution) >= 2 else res_x_raw
+
+    if res_x_raw < 1.0:
+        res_x_um = res_x_raw * 1000.0
+        res_y_um = res_y_raw * 1000.0
+    else:
+        res_x_um = float(res_x_raw)
+        res_y_um = float(res_y_raw)
+
+    return res_x_um, res_y_um

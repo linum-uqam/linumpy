@@ -28,8 +28,13 @@ import SimpleITK as sitk
 from tqdm import tqdm
 
 from linumpy.io.zarr import read_omezarr, AnalysisOmeZarrWriter
+from linumpy.stitching.stacking import (
+    find_z_overlap, apply_2d_transform, apply_transform_to_volume,
+    apply_xy_shift, blend_overlap_z, refine_z_blend_overlap
+)
 from linumpy.utils.io import add_overwrite_arg, assert_output_exists
 from linumpy.utils.metrics import collect_stack_metrics
+from linumpy.utils.shifts import load_shifts_csv
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -86,26 +91,6 @@ def _build_arg_parser():
     p.add_argument('--no_xy_shift', action='store_true',
                    help='Skip XY shifting from motor positions.\n'
                         'Use when slices are already in common space (e.g., from bring_to_common_space).')
-    p.add_argument('--stitch_rehoming', action='store_true',
-                   help='Apply corrections at re-homing boundaries to align acquisition segments.\n'
-                        'Identifies slices with large motor shifts (>= --rehoming_threshold_mm) and\n'
-                        'applies a segment canvas offset to counteract the motor re-homing displacement.\n'
-                        'By default uses pairwise registration (requires --transforms_dir); use\n'
-                        '--stitch_rehoming_use_motor for motor-position-based corrections instead.\n'
-                        'Compatible with --no_xy_shift.')
-    p.add_argument('--stitch_rehoming_use_motor', action='store_true',
-                   help='Use motor positions from the shifts CSV instead of pairwise registration\n'
-                        'transforms for re-homing boundary corrections. Motor positions are directly\n'
-                        'measured by stage encoders and are more reliable than image-based registration\n'
-                        'when slices at the two sides of a boundary image different anatomy (making\n'
-                        'registration ambiguous) or when the displacement exceeds the registration\n'
-                        'optimizer limit. Axis mapping: x_shift_mm -> image ty, y_shift_mm -> image tx.\n'
-                        'Does not require --transforms_dir.')
-    p.add_argument('--rehoming_threshold_mm', type=float, default=0.7,
-                   help='Motor shift magnitude threshold to identify re-homing events (mm).\n'
-                        'Pairs with shift magnitude >= this value are treated as re-homing\n'
-                        'boundaries and corrected. [%(default)s]')
-
     # Z-matching parameters
     p.add_argument('--slicing_interval_mm', type=float, default=0.200,
                    help='Physical slice thickness in mm [%(default)s]')
@@ -121,6 +106,11 @@ def _build_arg_parser():
                    help='Blend overlapping regions using diffusion method')
     p.add_argument('--blend_depth', type=int, default=None,
                    help='Number of z-slices to blend (default: auto from overlap)')
+    p.add_argument('--blend_refinement_px', type=float, default=0,
+                   help='Enable Z-blend refinement: phase-correlation-based XY shift\n'
+                        'correction applied in the overlap zone before blending, analogous\n'
+                        'to stitch_3d_with_refinement for tiles. Set to the maximum\n'
+                        'allowed shift in pixels (e.g. 10). 0 disables. [%(default)s]')
 
     # Output options
     p.add_argument('--pyramid_resolutions', type=float, nargs='+',
@@ -138,38 +128,6 @@ def _build_arg_parser():
 
     add_overwrite_arg(p)
     return p
-
-
-def load_shifts(shifts_path):
-    """Load shifts CSV and compute cumulative XY shifts."""
-    df = pd.read_csv(shifts_path)
-
-    # Get all slice IDs
-    all_ids = sorted(set(df['fixed_id'].tolist() + df['moving_id'].tolist()))
-
-    # Build shift lookup
-    shift_lookup = {}
-    for _, row in df.iterrows():
-        fixed_id = int(row['fixed_id'])
-        moving_id = int(row['moving_id'])
-        shift_lookup[(fixed_id, moving_id)] = (row['x_shift_mm'], row['y_shift_mm'])
-
-    # Compute cumulative shifts
-    cumsum = {all_ids[0]: (0.0, 0.0)}
-    for i in range(len(all_ids) - 1):
-        fixed_id = all_ids[i]
-        moving_id = all_ids[i + 1]
-
-        if (fixed_id, moving_id) in shift_lookup:
-            dx_mm, dy_mm = shift_lookup[(fixed_id, moving_id)]
-        else:
-            logger.warning(f"No shift for {fixed_id} -> {moving_id}, using 0")
-            dx_mm, dy_mm = 0.0, 0.0
-
-        prev_dx, prev_dy = cumsum[fixed_id]
-        cumsum[moving_id] = (prev_dx + dx_mm, prev_dy + dy_mm)
-
-    return cumsum, all_ids
 
 
 def load_registration_transforms(transforms_dir, slice_ids,
@@ -272,255 +230,6 @@ def load_registration_transforms(transforms_dir, slice_ids,
     return transforms
 
 
-def apply_2d_transform(image_2d, transform, rotation_only=False, max_rotation_deg=1.0,
-                       override_rotation=None):
-    """
-    Apply a SimpleITK 2D/3D transform to a 2D image.
-
-    Parameters
-    ----------
-    image_2d : np.ndarray
-        2D image to transform
-    transform : sitk.Transform
-        SimpleITK transform (extracts 2D rotation/translation)
-    rotation_only : bool
-        If True, apply only rotation, ignore translation
-    max_rotation_deg : float
-        Maximum allowed rotation in degrees. Larger rotations are clamped.
-        Set to 0 to disable clamping.
-    override_rotation : float or None
-        If provided, use this rotation angle (radians) instead of the one
-        extracted from the transform. Already clamped by the caller.
-    Returns
-    -------
-    np.ndarray
-        Transformed 2D image
-    """
-    # Convert to SimpleITK
-    sitk_img = sitk.GetImageFromArray(image_2d.astype(np.float32))
-
-    # Create 2D transform from 3D if needed
-    if transform.GetDimension() == 3:
-        # Extract 2D parameters from 3D Euler transform
-        if isinstance(transform, sitk.Euler3DTransform) or transform.GetName() == 'Euler3DTransform':
-            params = transform.GetParameters()
-            # Euler3D: [rotX, rotY, rotZ, transX, transY, transZ]
-            angle = params[2] if len(params) > 2 else 0  # rotZ
-            tx = params[3] if len(params) > 3 else 0
-            ty = params[4] if len(params) > 4 else 0
-
-            if override_rotation is not None:
-                # Use pre-smoothed rotation; skip per-slice clamping (already done)
-                angle = override_rotation
-            elif max_rotation_deg > 0:
-                # Clamp rotation if it exceeds max_rotation_deg
-                max_angle_rad = np.radians(max_rotation_deg)
-                if abs(angle) > max_angle_rad:
-                    logger.warning(f"Clamping rotation {np.degrees(angle):.2f}° to ±{max_rotation_deg}°")
-                    angle = np.clip(angle, -max_angle_rad, max_angle_rad)
-
-            center = transform.GetCenter()
-            center_2d = [center[0], center[1]]
-
-            tfm_2d = sitk.Euler2DTransform()
-            tfm_2d.SetCenter(center_2d)
-            tfm_2d.SetAngle(angle)
-            if rotation_only:
-                tfm_2d.SetTranslation([0, 0])  # Ignore translation
-            else:
-                tfm_2d.SetTranslation([tx, ty])
-        else:
-            # Try to use as-is or create identity
-            tfm_2d = sitk.Euler2DTransform()
-            angle = 0
-    else:
-        tfm_2d = transform
-        if rotation_only and hasattr(tfm_2d, 'SetTranslation'):
-            tfm_2d.SetTranslation([0, 0])
-        angle = 0
-
-    # Check if transform is essentially identity (skip if very small)
-    # This avoids introducing boundary artifacts from trivial rotations
-    tx_final = 0 if rotation_only else tx
-    ty_final = 0 if rotation_only else ty
-
-    # If rotation is very small (< 0.1 degrees) and translation small (< 1 pixel), skip
-    if abs(angle) < 0.00175 and abs(tx_final) < 1.0 and abs(ty_final) < 1.0:  # 0.1 degrees in radians
-        return image_2d.copy()
-
-    # Apply transform
-    resampler = sitk.ResampleImageFilter()
-    resampler.SetReferenceImage(sitk_img)
-    resampler.SetTransform(tfm_2d)
-    resampler.SetInterpolator(sitk.sitkLinear)
-
-    # Use nearest neighbor extrapolation at boundaries to avoid black dots
-    # Get a representative non-zero value for the default
-    nonzero_vals = image_2d[image_2d > 0]
-    if len(nonzero_vals) > 0:
-        # Use a small positive value instead of zero to mark extrapolated regions
-        default_val = float(np.percentile(nonzero_vals, 1))
-    else:
-        default_val = 0.0
-    resampler.SetDefaultPixelValue(default_val)
-
-    result = resampler.Execute(sitk_img)
-    result_arr = sitk.GetArrayFromImage(result)
-
-    return result_arr
-
-
-def apply_transform_to_volume(vol, transform, rotation_only=False, max_rotation_deg=1.0,
-                              override_rotation=None):
-    """
-    Apply 2D transform to each Z-slice of a volume.
-
-    Parameters
-    ----------
-    vol : np.ndarray
-        3D volume (Z, Y, X)
-    transform : sitk.Transform
-        Transform to apply to each slice
-    rotation_only : bool
-        If True, apply only rotation, ignore translation
-    max_rotation_deg : float
-        Maximum allowed rotation in degrees. Larger rotations are clamped.
-    override_rotation : float or None
-        If provided, use this rotation angle (radians) for all slices
-        instead of extracting it from the transform.
-
-    Returns
-    -------
-    np.ndarray
-        Transformed volume
-    """
-    result = np.zeros_like(vol)
-    for z in range(vol.shape[0]):
-        result[z] = apply_2d_transform(vol[z], transform, rotation_only, max_rotation_deg,
-                                       override_rotation)
-    return result
-
-
-def find_z_overlap(fixed_vol, moving_vol, slicing_interval_mm, search_range_mm, resolution_um):
-    """
-    Find optimal Z-overlap between consecutive slices using correlation.
-
-    Parameters
-    ----------
-    fixed_vol : np.ndarray
-        Bottom (fixed) slice volume
-    moving_vol : np.ndarray
-        Top (moving) slice volume
-    slicing_interval_mm : float
-        Expected physical slice thickness
-    search_range_mm : float
-        Search range around expected position
-    resolution_um : float
-        Z resolution in microns
-
-    Returns
-    -------
-    int
-        Optimal overlap in z-voxels
-    float
-        Correlation score
-    """
-    # Convert to voxels
-    # Expected overlap = volume_depth - slicing_interval (not the interval itself)
-    interval_vox = int((slicing_interval_mm * 1000) / resolution_um)
-    expected_overlap_vox = min(fixed_vol.shape[0], moving_vol.shape[0]) - interval_vox
-    search_range_vox = int((search_range_mm * 1000) / resolution_um)
-
-    # Search range
-    min_overlap = max(1, expected_overlap_vox - search_range_vox)
-    max_overlap = min(fixed_vol.shape[0], moving_vol.shape[0],
-                      expected_overlap_vox + search_range_vox)
-
-    if min_overlap >= max_overlap:
-        return expected_overlap_vox, 0.0
-
-    # Use middle XY region for correlation (faster and more robust)
-    h, w = fixed_vol.shape[1], fixed_vol.shape[2]
-    margin = min(h, w) // 4
-    y_slice = slice(margin, h - margin)
-    x_slice = slice(margin, w - margin)
-
-    best_overlap = expected_overlap_vox
-    best_corr = -np.inf
-
-    for overlap in range(min_overlap, max_overlap + 1):
-        # Get overlapping regions
-        fixed_region = fixed_vol[-overlap:, y_slice, x_slice]
-        moving_region = moving_vol[:overlap, y_slice, x_slice]
-
-        # Normalize
-        fixed_norm = (fixed_region - fixed_region.mean()) / (fixed_region.std() + 1e-8)
-        moving_norm = (moving_region - moving_region.mean()) / (moving_region.std() + 1e-8)
-
-        # Correlation
-        corr = np.mean(fixed_norm * moving_norm)
-
-        if corr > best_corr:
-            best_corr = corr
-            best_overlap = overlap
-
-    return best_overlap, best_corr
-
-
-def apply_xy_shift(vol, dx_px, dy_px, output_shape):
-    """
-    Compute the destination region for placing a shifted volume.
-
-    Returns the (possibly cropped) volume data and destination coordinates,
-    without allocating a full-size output array.
-
-    Parameters
-    ----------
-    vol : np.ndarray
-        3D volume (Z, Y, X)
-    dx_px, dy_px : float
-        Shift in pixels
-    output_shape : tuple
-        (out_ny, out_nx) - output canvas size
-
-    Returns
-    -------
-    cropped_vol : np.ndarray or None
-        The cropped volume data to write
-    dst_coords : tuple or None
-        (y_start, y_end, x_start, x_end) in output coordinates
-    """
-    out_ny, out_nx = output_shape
-
-    # Integer part of shift
-    dx_int, dy_int = int(round(dx_px)), int(round(dy_px))
-
-    # Compute destination coordinates
-    dst_y_start = dy_int
-    dst_x_start = dx_int
-    dst_y_end = dst_y_start + vol.shape[1]
-    dst_x_end = dst_x_start + vol.shape[2]
-
-    # Compute source crop if destination is out of bounds
-    src_y_start = max(0, -dst_y_start)
-    src_y_end = vol.shape[1] - max(0, dst_y_end - out_ny)
-    src_x_start = max(0, -dst_x_start)
-    src_x_end = vol.shape[2] - max(0, dst_x_end - out_nx)
-
-    # Clip destination to output bounds
-    dst_y_start = max(0, dst_y_start)
-    dst_y_end = min(out_ny, dst_y_end)
-    dst_x_start = max(0, dst_x_start)
-    dst_x_end = min(out_nx, dst_x_end)
-
-    # Check if there's any valid region
-    if src_y_end > src_y_start and src_x_end > src_x_start:
-        cropped = vol[:, src_y_start:src_y_end, src_x_start:src_x_end]
-        return cropped, (dst_y_start, dst_y_end, dst_x_start, dst_x_end)
-    else:
-        return None, None
-
-
 def compute_output_shape(slice_files, cumsum_px, first_vol_shape):
     """Compute output volume shape to fit all slices."""
     xmin, xmax, ymin, ymax = [0], [first_vol_shape[2]], [0], [first_vol_shape[1]]
@@ -538,71 +247,6 @@ def compute_output_shape(slice_files, cumsum_px, first_vol_shape):
     ny = int(np.ceil(max(ymax) - y0))
 
     return ny, nx, x0, y0
-
-
-def blend_overlap(fixed_region, moving_region):
-    """Blend overlapping Z-region using linear interpolation along Z-axis.
-
-    For Z-stack blending, we want a smooth transition from fixed (bottom of fixed volume)
-    to moving (top of moving volume) along the Z direction.
-
-    At tissue boundaries where only one slice has data, we use full intensity
-    (no fading) since there is only one contribution.
-
-    Parameters
-    ----------
-    fixed_region : np.ndarray
-        3D array (Z, Y, X) from the existing stack (bottom slice's bottom portion)
-    moving_region : np.ndarray
-        3D array (Z, Y, X) from the new slice (top portion to blend in)
-
-    Returns
-    -------
-    np.ndarray
-        Blended region with smooth Z transition
-    """
-    nz = fixed_region.shape[0]
-
-    if nz <= 1:
-        # No blending possible with single slice
-        # Return whichever has more valid data
-        if np.sum(moving_region > 0) >= np.sum(fixed_region > 0):
-            return moving_region
-        else:
-            return fixed_region
-
-    # Create linear weights along Z-axis
-    # At z=0 (top of overlap), we want mostly fixed (alpha=0)
-    # At z=nz-1 (bottom of overlap), we want mostly moving (alpha=1)
-    z_weights = np.linspace(0, 1, nz)
-
-    # Expand weights to match 3D shape (Z, Y, X)
-    alphas = z_weights[:, np.newaxis, np.newaxis]
-    alphas = np.broadcast_to(alphas, fixed_region.shape).copy()
-
-    # Create tissue masks
-    fixed_valid = fixed_region > 0
-    moving_valid = moving_region > 0
-    both_valid = fixed_valid & moving_valid
-    fixed_only = fixed_valid & ~moving_valid
-    moving_only = moving_valid & ~fixed_valid
-
-    # Initialize output (zeros where neither has data)
-    blended = np.zeros_like(moving_region, dtype=np.float32)
-
-    # Where both have data, apply standard weighted blend
-    if np.any(both_valid):
-        blended[both_valid] = ((1 - alphas) * fixed_region + alphas * moving_region)[both_valid]
-
-    # Where only one slice has data, use full intensity.
-    # No fading needed — there's only one contribution, so we preserve it as-is.
-    if np.any(fixed_only):
-        blended[fixed_only] = fixed_region[fixed_only]
-
-    if np.any(moving_only):
-        blended[moving_only] = moving_region[moving_only]
-
-    return blended
 
 
 def main():
@@ -640,7 +284,7 @@ def main():
 
     # Load shifts
     logger.info(f"Loading shifts from {args.in_shifts}")
-    cumsum_mm, all_shift_ids = load_shifts(args.in_shifts)
+    cumsum_mm, all_shift_ids = load_shifts_csv(args.in_shifts)
 
     # Get resolution from first slice
     # NOTE: read_omezarr returns resolution in MILLIMETERS (OME-NGFF standard)
@@ -786,146 +430,6 @@ def main():
         out_ny, out_nx, x0, y0 = compute_output_shape(slice_files, cumsum_px, first_vol.shape)
         cumsum_px = {k: (dx - x0, dy - y0) for k, (dx, dy) in cumsum_px.items()}
         logger.info(f"Adjusted output XY shape for accumulated translations: {out_ny} x {out_nx}")
-
-    # rehoming_slices is populated by whichever stitch_rehoming code path runs below.
-    # It is used at render time to suppress pairwise translation warps at boundary slices
-    # (where the canvas stitch offset already handles the gross correction).
-    rehoming_slices = set()
-
-    # Targeted re-homing correction: apply pairwise translations only at re-homing segment boundaries.
-    # This counteracts the motor's re-homing displacement (large mid-acquisition XY jumps) by
-    # applying the pairwise registration measured offset as a one-time segment canvas correction.
-    # Unlike accumulate_translations, small within-segment pairwise translations are NOT accumulated —
-    # only the re-homing boundary corrections propagate forward through the stack.
-    if args.stitch_rehoming and args.transforms_dir and not args.stitch_rehoming_use_motor:
-        rehoming_df = pd.read_csv(args.in_shifts)
-        for _, row in rehoming_df.iterrows():
-            mag = np.sqrt(row['x_shift_mm']**2 + row['y_shift_mm']**2)
-            if mag >= args.rehoming_threshold_mm:
-                rehoming_slices.add(int(row['moving_id']))
-        logger.info(f"Re-homing boundaries (>= {args.rehoming_threshold_mm} mm): "
-                    f"{sorted(rehoming_slices)}")
-
-        # Load re-homing boundary transforms without error/warning filtering.
-        # Re-homing registrations are flagged error due to large translation magnitude,
-        # but that is exactly the correction we need — load them unconditionally.
-        rehoming_dir = Path(args.transforms_dir)
-        if rehoming_dir.exists():
-            rehoming_transforms = load_registration_transforms(
-                rehoming_dir, available_ids,
-                skip_error_status=False,
-                skip_warning_status=False)
-
-            max_bound = (args.max_pairwise_translation * 0.95
-                         if args.max_pairwise_translation > 0 else np.inf)
-
-            # Walk segments in order; corrections are cumulative across boundaries.
-            cumulative_correction_tx = 0.0
-            cumulative_correction_ty = 0.0
-
-            for slice_id in available_ids:
-                if slice_id in rehoming_slices:
-                    if (slice_id in rehoming_transforms
-                            and rehoming_transforms[slice_id] is not None):
-                        transform, _, _ = rehoming_transforms[slice_id]
-                        params = list(transform.GetParameters())
-                        tx = params[3] if len(params) > 3 else 0.0
-                        ty = params[4] if len(params) > 4 else 0.0
-                        mag = np.sqrt(tx**2 + ty**2)
-                        if mag < max_bound:
-                            cumulative_correction_tx += tx
-                            cumulative_correction_ty += ty
-                            logger.info(
-                                f"Re-homing correction at z{slice_id:02d}: "
-                                f"tx={tx:.1f} px, ty={ty:.1f} px (mag={mag:.1f} px) — applied")
-                        else:
-                            logger.warning(
-                                f"Re-homing z{slice_id:02d}: optimizer boundary hit "
-                                f"({mag:.1f} px >= {max_bound:.1f} px) — correction skipped; "
-                                f"consider increasing registration_max_translation")
-                    else:
-                        logger.warning(
-                            f"Re-homing z{slice_id:02d}: no transform found — correction skipped")
-
-                # Apply cumulative segment correction to every slice from the first
-                # re-homing slice onward (sign negated: SimpleITK tx=+N shifts content
-                # left/up; cumsum_px dx=+N places the canvas window right/down).
-                if cumulative_correction_tx != 0.0 or cumulative_correction_ty != 0.0:
-                    prev_dx, prev_dy = cumsum_px[slice_id]
-                    cumsum_px[slice_id] = (
-                        prev_dx - cumulative_correction_tx,
-                        prev_dy - cumulative_correction_ty,
-                    )
-
-            # Recompute output canvas to accommodate the shifted slice positions.
-            out_ny, out_nx, x0_rh, y0_rh = compute_output_shape(
-                slice_files, cumsum_px, first_vol.shape)
-            cumsum_px = {k: (dx - x0_rh, dy - y0_rh) for k, (dx, dy) in cumsum_px.items()}
-            logger.info(f"Adjusted output shape for segment stitching: {out_ny} x {out_nx}")
-
-    # Motor-position-based re-homing correction (--stitch_rehoming_use_motor).
-    # Derives segment canvas offsets from the motor encoder readings in shifts_xy.csv
-    # instead of pairwise image registration.  More reliable when anatomy changes
-    # across the re-homing boundary (registration is ambiguous) or when the
-    # displacement exceeds the registration optimizer limit.
-    # Axis mapping: same convention as cumsum_px and bring_to_common_space.
-    #   x_shift_mm → image X (dx / columns) → correction_tx = x_shift_mm / res_x_mm
-    #   y_shift_mm → image Y (dy / rows)    → correction_ty = y_shift_mm / res_y_mm
-    # NOTE: an earlier version had these swapped (motor X → image Y), based on an
-    # incorrect axis-mapping claim in the investigation notes.  The pairwise
-    # registration at z29 shows tx=-174 px (image X) ≈ motor x_shift=-171 px,
-    # and bring_to_common_space maps x_shift_mm → image X, confirming the correct
-    # convention above.
-    if args.stitch_rehoming and args.stitch_rehoming_use_motor:
-        rehoming_df = pd.read_csv(args.in_shifts).sort_values('moving_id')
-
-        cumulative_correction_tx = 0.0
-        cumulative_correction_ty = 0.0
-
-        # First pass: identify re-homing boundaries and their per-step corrections.
-        # Skip the very first transition (fixed_id == first available slice): this is
-        # the initial stage positioning already encoded in bring_to_common_space.
-        # Including it would double-correct that displacement and misalign z01+ vs z00.
-        first_available_id = min(available_ids)
-        motor_corrections = {}
-        for _, row in rehoming_df.iterrows():
-            moving_id = int(row['moving_id'])
-            if int(row['fixed_id']) == first_available_id:
-                continue  # skip initial positioning, not a mid-scan re-homing
-            mag = np.sqrt(row['x_shift_mm'] ** 2 + row['y_shift_mm'] ** 2)
-            if mag >= args.rehoming_threshold_mm:
-                rehoming_slices.add(moving_id)
-                correction_tx = row['x_shift_mm'] / res_x_mm
-                correction_ty = row['y_shift_mm'] / res_y_mm
-                motor_corrections[moving_id] = (correction_tx, correction_ty)
-                logger.info(
-                    f"Re-homing (motor) at z{moving_id:02d}: "
-                    f"motor_x={row['x_shift_mm']:.3f} mm → tx={correction_tx:.1f} px, "
-                    f"motor_y={row['y_shift_mm']:.3f} mm → ty={correction_ty:.1f} px — applied"
-                )
-
-        logger.info(f"Re-homing boundaries (>= {args.rehoming_threshold_mm} mm): "
-                    f"{sorted(rehoming_slices)}")
-
-        # Second pass: apply cumulative corrections to all slices from each boundary onward.
-        for slice_id in available_ids:
-            if slice_id in motor_corrections:
-                dtx, dty = motor_corrections[slice_id]
-                cumulative_correction_tx += dtx
-                cumulative_correction_ty += dty
-
-            if cumulative_correction_tx != 0.0 or cumulative_correction_ty != 0.0:
-                prev_dx, prev_dy = cumsum_px[slice_id]
-                cumsum_px[slice_id] = (
-                    prev_dx - cumulative_correction_tx,
-                    prev_dy - cumulative_correction_ty,
-                )
-
-        # Recompute output canvas to accommodate the shifted slice positions.
-        out_ny, out_nx, x0_rh, y0_rh = compute_output_shape(
-            slice_files, cumsum_px, first_vol.shape)
-        cumsum_px = {k: (dx - x0_rh, dy - y0_rh) for k, (dx, dy) in cumsum_px.items()}
-        logger.info(f"Adjusted output shape for motor segment stitching: {out_ny} x {out_nx}")
 
     # Smooth per-slice rotations to reduce jitter from isolated correction outliers.
     # Rotations are applied independently per slice, so alternating ±1-2° corrections
@@ -1114,16 +618,7 @@ def main():
         # Apply registration transform (rotation/small translation refinement) if available
         if slice_id in registration_transforms and registration_transforms[slice_id] is not None:
             transform, _, _ = registration_transforms[slice_id]
-            # At re-homing boundary slices force rotation-only: the stitch canvas offset already
-            # handles the gross XY correction; applying the pairwise translation on top would
-            # double-correct by the same ~100-260 px.
-            # For all other slices allow the full transform (rotation + small translation) so
-            # that inter-slice pairwise corrections improve cross-section continuity — partially
-            # replicating what accumulate_translations did without the cumulative drift.
-            if args.stitch_rehoming and slice_id in rehoming_slices:
-                use_rotation_only = True
-            else:
-                use_rotation_only = args.rotation_only or args.accumulate_translations
+            use_rotation_only = args.rotation_only or args.accumulate_translations
             override_rot = smoothed_rotations.get(slice_id)  # None if no smoothing
             vol = apply_transform_to_volume(vol, transform,
                                            rotation_only=use_rotation_only,
@@ -1184,8 +679,16 @@ def main():
                             moving_overlap = shifted[:overlap_depth]
                             logger.debug(f"Slice {slice_id}: intensity scale={scale:.3f}")
 
+                # Z-blend refinement: correct residual XY misalignment in the overlap zone
+                if args.blend_refinement_px > 0:
+                    moving_overlap, ref_mag = refine_z_blend_overlap(
+                        existing, moving_overlap, args.blend_refinement_px
+                    )
+                    if ref_mag > 0:
+                        logger.debug(f"Slice {slice_id}: z-blend XY refinement {ref_mag:.2f} px")
+
                 # Blend
-                blended = blend_overlap(existing, moving_overlap)
+                blended = blend_overlap_z(existing, moving_overlap)
                 output[overlap_z_start:overlap_z_end, dst_y0:dst_y1, dst_x0:dst_x1] = blended
 
                 # Add non-overlapping part

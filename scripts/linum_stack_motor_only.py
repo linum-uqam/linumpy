@@ -22,10 +22,11 @@ import re
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 
 from linumpy.io.zarr import read_omezarr, AnalysisOmeZarrWriter
+from linumpy.stitching.stacking import apply_xy_shift, blend_overlap_xy
 from linumpy.utils.io import add_overwrite_arg, assert_output_exists
+from linumpy.utils.shifts import center_shifts, convert_shifts_to_pixels, load_shifts_csv
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -69,68 +70,6 @@ def _build_arg_parser():
     return p
 
 
-def load_shifts(shifts_path):
-    """Load shifts CSV and build cumulative shift lookup."""
-    df = pd.read_csv(shifts_path)
-
-    # Build cumulative shifts
-    # The shifts file contains pairwise shifts: fixed_id -> moving_id
-    # We need to accumulate these to get absolute positions
-
-    # Get all unique slice IDs
-    all_ids = sorted(set(df['fixed_id'].tolist() + df['moving_id'].tolist()))
-
-    # Build shift lookup
-    shift_lookup = {}
-    for _, row in df.iterrows():
-        fixed_id = int(row['fixed_id'])
-        moving_id = int(row['moving_id'])
-        shift_lookup[(fixed_id, moving_id)] = (row['x_shift_mm'], row['y_shift_mm'])
-
-    # Compute cumulative shifts (first slice is at origin)
-    cumsum = {all_ids[0]: (0.0, 0.0)}
-    for i in range(len(all_ids) - 1):
-        fixed_id = all_ids[i]
-        moving_id = all_ids[i + 1]
-
-        if (fixed_id, moving_id) in shift_lookup:
-            dx_mm, dy_mm = shift_lookup[(fixed_id, moving_id)]
-        else:
-            logger.warning(f"No shift found for {fixed_id} -> {moving_id}, using 0")
-            dx_mm, dy_mm = 0.0, 0.0
-
-        prev_dx, prev_dy = cumsum[fixed_id]
-        cumsum[moving_id] = (prev_dx + dx_mm, prev_dy + dy_mm)
-
-    return cumsum, all_ids
-
-
-def convert_shifts_to_pixels(cumsum, resolution_um):
-    """Convert mm shifts to pixel shifts."""
-    # resolution_um is in microns per pixel
-    mm_to_px = 1000.0 / resolution_um
-
-    return {
-        slice_id: (dx_mm * mm_to_px, dy_mm * mm_to_px)
-        for slice_id, (dx_mm, dy_mm) in cumsum.items()
-    }
-
-
-def center_shifts(cumsum_px, slice_ids):
-    """Center shifts around the middle slice."""
-    if not slice_ids:
-        return cumsum_px
-
-    middle_idx = len(slice_ids) // 2
-    middle_id = slice_ids[middle_idx]
-    center_dx, center_dy = cumsum_px.get(middle_id, (0, 0))
-
-    return {
-        slice_id: (dx - center_dx, dy - center_dy)
-        for slice_id, (dx, dy) in cumsum_px.items()
-    }
-
-
 def compute_output_shape(slice_files, cumsum_px, overlap_slices=0):
     """Compute the output volume shape to fit all slices."""
     xmin, xmax, ymin, ymax = [], [], [], []
@@ -161,76 +100,6 @@ def compute_output_shape(slice_files, cumsum_px, overlap_slices=0):
     ny = int(np.ceil(max(ymax) - y0))
 
     return (total_z, ny, nx), (x0, y0)
-
-
-def apply_shift_to_slice(slice_data, dx, dy, output_shape_yx):
-    """
-    Compute the output region and source region for placing a shifted slice.
-
-    Returns the slice data and the destination coordinates, without allocating
-    a full-size output array.
-
-    Returns
-    -------
-    slice_data : np.ndarray
-        The (possibly cropped) slice data to write
-    dst_coords : tuple
-        (y_start, y_end, x_start, x_end) in output coordinates
-    """
-    out_ny, out_nx = output_shape_yx
-
-    # Compute destination coordinates
-    dst_x_start = int(round(dx))
-    dst_y_start = int(round(dy))
-    dst_x_end = dst_x_start + slice_data.shape[2]
-    dst_y_end = dst_y_start + slice_data.shape[1]
-
-    # Compute source crop if destination is out of bounds
-    src_x_start = max(0, -dst_x_start)
-    src_y_start = max(0, -dst_y_start)
-    src_x_end = slice_data.shape[2] - max(0, dst_x_end - out_nx)
-    src_y_end = slice_data.shape[1] - max(0, dst_y_end - out_ny)
-
-    # Clip destination to output bounds
-    dst_x_start = max(0, dst_x_start)
-    dst_y_start = max(0, dst_y_start)
-    dst_x_end = min(out_nx, dst_x_end)
-    dst_y_end = min(out_ny, dst_y_end)
-
-    # Crop the source data
-    if src_x_end > src_x_start and src_y_end > src_y_start:
-        cropped = slice_data[:, src_y_start:src_y_end, src_x_start:src_x_end]
-        return cropped, (dst_y_start, dst_y_end, dst_x_start, dst_x_end)
-    else:
-        return None, None
-
-
-def blend_overlap(existing, new_data, method='none'):
-    """Blend overlapping regions."""
-    if method == 'none':
-        # New data overwrites existing (where new data is non-zero)
-        mask = new_data != 0
-        existing[mask] = new_data[mask]
-        return existing
-
-    elif method == 'average':
-        # Average where both have data
-        both_valid = (existing != 0) & (new_data != 0)
-        only_new = (existing == 0) & (new_data != 0)
-        existing[both_valid] = (existing[both_valid] + new_data[both_valid]) / 2
-        existing[only_new] = new_data[only_new]
-        return existing
-
-    elif method == 'max':
-        # Take maximum
-        return np.maximum(existing, new_data)
-
-    elif method == 'feather':
-        # Feathered blending (simple version based on distance from edge)
-        # TODO: Implement proper distance-based feathering
-        return blend_overlap(existing, new_data, 'average')
-
-    return existing
 
 
 def generate_preview(volume, output_path):
@@ -387,7 +256,7 @@ def main():
 
     # Load shifts
     logger.info(f"Loading shifts from {shifts_path}")
-    cumsum_mm, all_shift_ids = load_shifts(shifts_path)
+    cumsum_mm, all_shift_ids = load_shifts_csv(shifts_path)
 
     # Get resolution from first slice
     # NOTE: read_omezarr returns resolution in MILLIMETERS (OME-NGFF standard)
@@ -458,7 +327,7 @@ def main():
         dx, dy = cumsum_px[slice_id]
 
         # Get the cropped slice and destination coordinates
-        shifted, dst_coords = apply_shift_to_slice(vol_data, dx, dy, (output_shape[1], output_shape[2]))
+        shifted, dst_coords = apply_xy_shift(vol_data, dx, dy, (output_shape[1], output_shape[2]))
 
         if shifted is None:
             logger.warning(f"Slice {slice_id} is entirely outside output bounds, skipping")
@@ -487,7 +356,7 @@ def main():
             else:
                 # Read existing region, blend, write back
                 existing = np.array(output[z_start:z_end, dst_y_start:dst_y_end, dst_x_start:dst_x_end])
-                blended = blend_overlap(existing, shifted, args.blending)
+                blended = blend_overlap_xy(existing, shifted, args.blending)
                 output[z_start:z_end, dst_y_start:dst_y_end, dst_x_start:dst_x_end] = blended
 
         z_cursor = z_end
