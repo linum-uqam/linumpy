@@ -171,7 +171,22 @@ def register_3d_rigid_to_allen(moving_image: np.ndarray, moving_spacing: tuple,
     # Convert moving image to SimpleITK format
     moving_sitk = numpy_to_sitk_image(moving_image, moving_spacing)
 
-    # Resample moving image to match Allen atlas spacing and size for better registration
+    # Compute a preliminary brain centre BEFORE any resampling.
+    # This is used as the fallback only when needs_resample=False (images already
+    # share the same physical space).  When resampling IS needed, this value is
+    # overwritten below with the centroid of the clipped brain within the Allen
+    # domain, because the full-brain geometric centre can be tens of mm outside
+    # the Allen atlas extent and would produce a translation that maps every
+    # Allen voxel outside the resampled moving image buffer.
+    original_moving_size = moving_sitk.GetSize()
+    original_moving_center_idx = [s / 2.0 for s in original_moving_size]
+    original_moving_center = np.array(
+        moving_sitk.TransformContinuousIndexToPhysicalPoint(original_moving_center_idx)
+    )
+
+    # Resample moving image to match Allen atlas spacing and size for better registration.
+    # NOTE: we deliberately keep the original moving center computed above so that the
+    # centre-aligned fallback initialisation is always correct even after resampling.
     allen_spacing = allen_atlas.GetSpacing()
     allen_size = allen_atlas.GetSize()
     moving_spacing_sitk = moving_sitk.GetSpacing()
@@ -194,6 +209,27 @@ def register_3d_rigid_to_allen(moving_image: np.ndarray, moving_spacing: tuple,
         resampler.SetInterpolator(sitk.sitkLinear)
         resampler.SetDefaultPixelValue(0)
         moving_sitk = resampler.Execute(moving_sitk)
+
+        # Recompute the effective brain centre from the RESAMPLED image.
+        # The pre-resampling centre can lie far outside the Allen domain (e.g. a
+        # large 25 µm brain whose geometric centre is at ~37 mm, while the Allen
+        # atlas only spans ~11 mm).  Using that centre directly gives a translation
+        # of +31 mm, which maps every Allen voxel outside the moving image buffer.
+        # Instead, use the centroid of the non-zero (brain-tissue) voxels that
+        # survived the clipping into the Allen domain.
+        moving_arr = sitk.GetArrayFromImage(moving_sitk)  # shape (Z, Y, X) in numpy
+        nonzero_idx = np.argwhere(moving_arr > 0)          # rows are (z, y, x)
+        if len(nonzero_idx) > 0:
+            centroid_zyx = nonzero_idx.mean(axis=0)
+            # SITK index order is (x, y, z), reverse of numpy (z, y, x)
+            centroid_xyz = [float(centroid_zyx[2]), float(centroid_zyx[1]), float(centroid_zyx[0])]
+            original_moving_center = np.array(
+                moving_sitk.TransformContinuousIndexToPhysicalPoint(centroid_xyz)
+            )
+            if verbose:
+                print(f"Resampled brain centroid (physical): {original_moving_center} mm")
+        # If all voxels are zero (brain entirely outside Allen domain), keep
+        # the pre-resampling centre and accept a potentially poor initialization.
 
     # Normalize images for better registration
     fixed_image = sitk.Normalize(allen_atlas)
@@ -246,23 +282,22 @@ def register_3d_rigid_to_allen(moving_image: np.ndarray, moving_spacing: tuple,
     registration_method.SetSmoothingSigmasPerLevel([4, 2, 1, 0])
     registration_method.SmoothingSigmasAreSpecifiedInPhysicalUnitsOn()
 
-    # Initialize rigid transform with guaranteed overlap
-    # Strategy: First do a quick translation-only registration to align centers,
-    # then use that as starting point for full rigid registration
+    # Initialize rigid transform with guaranteed overlap.
+    # Use the ORIGINAL moving image centre (before any resampling) so that
+    # the centre-aligned fallback always produces a meaningful initial translation
+    # regardless of the resolution/size relationship between the two images.
     initial_transform = sitk.Euler3DTransform()
 
-    # Calculate image centers in physical space
+    # Calculate image centres in physical space
     fixed_size = fixed_image.GetSize()
-    moving_size = moving_image_sitk.GetSize()
-
     fixed_center_idx = [s / 2.0 for s in fixed_size]
-    moving_center_idx = [s / 2.0 for s in moving_size]
-
     fixed_center = np.array(fixed_image.TransformContinuousIndexToPhysicalPoint(fixed_center_idx))
-    moving_center = np.array(moving_image_sitk.TransformContinuousIndexToPhysicalPoint(moving_center_idx))
 
-    # Calculate translation to align centers (ensures initial overlap)
-    translation = fixed_center - moving_center
+    # Translation to align brain centre with Allen centre (ensures initial overlap).
+    # ITK transform maps fixed→moving: T(p) = R(p − c) + c + t
+    # For identity rotation and c=fixed_center: T(fixed_center) = fixed_center + t
+    # We need T(fixed_center) = original_moving_center, so t = moving_center − fixed_center.
+    translation = tuple(original_moving_center - fixed_center)
 
     # Set center of rotation to fixed image center
     initial_transform.SetCenter(fixed_center)
@@ -277,14 +312,19 @@ def register_3d_rigid_to_allen(moving_image: np.ndarray, moving_spacing: tuple,
     initial_transform.SetRotation(rx_rad, ry_rad, rz_rad)
 
     if verbose:
-        print(f"Initial center alignment: fixed={fixed_center}, moving={moving_center}")
+        print(f"Initial center alignment: fixed={fixed_center}, moving (original)={original_moving_center}")
         print(f"Translation to align centers: {translation}")
         if any(r != 0 for r in initial_rotation_deg):
             print(f"Initial rotation (deg): {initial_rotation_deg}")
 
     # Only try MOMENTS initialization if no initial rotation was specified
-    # (user-specified rotation takes precedence)
-    if all(r == 0 for r in initial_rotation_deg):
+    # (user-specified rotation takes precedence) and the image was NOT resampled
+    # into the Allen domain.  After resampling, the brain occupies only a small
+    # corner of the 640³ Allen image; sitk.Normalize then gives the large
+    # zero-padded background a uniform negative value that dominates the
+    # centre-of-mass computation, producing translation ≈ 0 which places every
+    # sample point outside the brain buffer.
+    if all(r == 0 for r in initial_rotation_deg) and not needs_resample:
         try:
             # Use MOMENTS initialization which is more robust
             init_transform = sitk.Euler3DTransform()

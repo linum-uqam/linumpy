@@ -25,6 +25,11 @@ from tqdm.auto import tqdm
 
 from linumpy.io import allen
 from linumpy.io.zarr import read_omezarr, AnalysisOmeZarrWriter
+from linumpy.utils.orientation import (
+    parse_orientation_code,
+    apply_orientation_transform,
+    reorder_resolution,
+)
 
 matplotlib.use('Agg')  # Non-interactive backend
 
@@ -95,98 +100,9 @@ def _build_arg_parser():
 
 
 # =============================================================================
-# Orientation utilities
+# Orientation utilities — imported from linumpy.utils.orientation
+# (parse_orientation_code, apply_orientation_transform, reorder_resolution)
 # =============================================================================
-
-def parse_orientation_code(orientation: str) -> tuple[tuple, tuple]:
-    """
-    Parse an orientation code and return axis permutation and flips for RAS alignment.
-
-    Parameters
-    ----------
-    orientation : str
-        3-letter code (R/L, A/P, S/I) describing what each axis points to.
-        Example: 'AIR' means dim0→Anterior, dim1→Inferior, dim2→Right
-
-    Returns
-    -------
-    axis_permutation : tuple of int
-        Source indices for each target dimension, such that after
-        np.transpose(volume, axis_permutation) the numpy dims are (S, R, A).
-        This matches the numpy_to_sitk_image convention where:
-          - numpy dim0 → SITK Z → Allen S (Superior)
-          - numpy dim1 → SITK X → Allen R (Right)
-          - numpy dim2 → SITK Y → Allen A (Anterior)
-    axis_flips : tuple of int
-        Sign for each axis after permutation (-1 to flip, 1 to keep)
-    """
-    if len(orientation) != 3:
-        raise ValueError(f"Orientation code must be 3 letters, got '{orientation}'")
-
-    orientation = orientation.upper()
-
-    # Map each letter to the TARGET numpy dimension and direction.
-    # numpy dim0 → SITK Z → should be S (Superior)
-    # numpy dim1 → SITK X → should be R (Right)
-    # numpy dim2 → SITK Y → should be A (Anterior)
-    letter_map = {
-        'R': (1, 1), 'L': (1, -1),   # numpy dim 1 (SITK X → Allen R)
-        'A': (2, 1), 'P': (2, -1),   # numpy dim 2 (SITK Y → Allen A)
-        'S': (0, 1), 'I': (0, -1),   # numpy dim 0 (SITK Z → Allen S)
-    }
-
-    source_to_target = {}
-    axes_used = set()
-
-    for source_dim, letter in enumerate(orientation):
-        if letter not in letter_map:
-            raise ValueError(f"Invalid orientation letter '{letter}'. Use R/L, A/P, S/I.")
-        target_dim, sign = letter_map[letter]
-        if target_dim in axes_used:
-            raise ValueError(f"Duplicate axis in orientation code '{orientation}'")
-        axes_used.add(target_dim)
-        source_to_target[source_dim] = (target_dim, sign)
-
-    if axes_used != {0, 1, 2}:
-        raise ValueError(f"Orientation must specify all 3 axes, got '{orientation}'")
-
-    # Build target_dim -> (source_dim, sign)
-    target_to_source = {v[0]: (k, v[1]) for k, v in source_to_target.items()}
-
-    axis_permutation = tuple(target_to_source[i][0] for i in range(3))
-    axis_flips = tuple(target_to_source[i][1] for i in range(3))
-
-    return axis_permutation, axis_flips
-
-
-def apply_orientation_transform(volume: np.ndarray, permutation: tuple, flips: tuple) -> np.ndarray:
-    """
-    Apply axis permutation and flips to reorient a volume.
-
-    Parameters
-    ----------
-    volume : np.ndarray
-        Input 3D volume
-    permutation : tuple
-        Axis permutation (source indices for each target dimension)
-    flips : tuple
-        Sign for each axis (-1 to flip, 1 to keep)
-
-    Returns
-    -------
-    np.ndarray
-        Reoriented volume
-    """
-    result = np.transpose(volume, permutation)
-    for axis, flip in enumerate(flips):
-        if flip < 0:
-            result = np.flip(result, axis=axis)
-    return result
-
-
-def reorder_resolution(resolution: tuple, permutation: tuple) -> tuple:
-    """Reorder resolution tuple according to axis permutation."""
-    return tuple(resolution[permutation[i]] for i in range(3))
 
 
 def create_registration_progress_callback(
@@ -720,15 +636,19 @@ def create_alignment_preview(
         return 0, 1
 
     def find_content_center_slices(vol):
-        """Find slices through the center of mass of non-zero content."""
-        # Find center of mass of non-zero region
-        nonzero_coords = np.argwhere(vol > np.percentile(vol, 10))
-        if len(nonzero_coords) == 0:
-            # Fall back to geometric center
-            return get_center_slices(vol)
+        """Find the slice with maximum content independently for each axis.
 
-        center = nonzero_coords.mean(axis=0).astype(int)
-        z, x, y = np.clip(center, [0, 0, 0], np.array(vol.shape) - 1)
+        Using a shared 3D centroid for all three views fails when the brain is
+        asymmetric (e.g. cut at 45°): the centroid lands near the cut boundary,
+        so one or more of the orthogonal slice views passes through the cut plane
+        and shows a black stripe.  Instead, pick each index independently as the
+        slice with the highest total signal along that axis.
+        """
+        if vol.max() == 0:
+            return get_center_slices(vol)
+        z = int(np.argmax(vol.sum(axis=(1, 2))))
+        x = int(np.argmax(vol.sum(axis=(0, 2))))
+        y = int(np.argmax(vol.sum(axis=(0, 1))))
         return vol[z, :, :], vol[:, x, :], vol[:, :, y]
 
     # Get slices - use content-centered slices for aligned volume
