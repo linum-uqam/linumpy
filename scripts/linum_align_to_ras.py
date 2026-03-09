@@ -76,6 +76,14 @@ def _build_arg_parser():
         "--n-levels", type=int, default=None,
         help="Number of pyramid levels for output (default: use Allen atlas resolutions)"
     )
+    p.add_argument(
+        "--pyramid_resolutions", type=float, nargs="+", default=None,
+        help="Target pyramid resolution levels in µm (e.g. 10 25 50 100).\n"
+             "If omitted, inherits levels from input zarr metadata or uses Allen resolutions."
+    )
+    p.add_argument("--make_isotropic", action="store_true", default=True,
+                   help="Resample to isotropic voxels at each pyramid level.")
+    p.add_argument("--no_isotropic", dest="make_isotropic", action="store_false")
     p.add_argument("--verbose", action="store_true", help="Print registration progress")
     p.add_argument(
         "--preview", type=str, default=None,
@@ -95,6 +103,17 @@ def _build_arg_parser():
     p.add_argument(
         "--preview-only", action="store_true",
         help="Only generate preview of input volume (no registration)"
+    )
+    p.add_argument(
+        "--orientation-preview", type=str, default=None,
+        metavar="PATH",
+        help="Save a 3-panel preview of the volume after --input-orientation and\n"
+             "--initial-rotation are applied. Use to verify these parameters\n"
+             "before committing to a full registration run."
+    )
+    p.add_argument(
+        "--orientation-preview-only", action="store_true",
+        help="Generate --orientation-preview and exit without running registration."
     )
     return p
 
@@ -388,6 +407,8 @@ def apply_transform_to_zarr(
     transform: sitk.Transform,
     chunks: Optional[tuple] = None,
     n_levels: Optional[int] = None,
+    pyramid_resolutions: Optional[list] = None,
+    make_isotropic: bool = True,
     orientation_permutation: Optional[tuple] = None,
     orientation_flips: Optional[tuple] = None,
     pbar: Optional[tqdm] = None
@@ -471,14 +492,6 @@ def apply_transform_to_zarr(
     else:
         transformed = transformed.astype(original_dtype)
 
-    # Determine pyramid resolutions
-    target_resolutions = None
-    if n_levels is None:
-        # Try to use source pyramid resolutions, fall back to Allen resolutions
-        target_resolutions = get_pyramid_resolutions_from_zarr(Path(input_path))
-        if target_resolutions is None:
-            target_resolutions = list(allen.AVAILABLE_RESOLUTIONS)
-
     # Write output
     writer = AnalysisOmeZarrWriter(
         output_path,
@@ -492,7 +505,15 @@ def apply_transform_to_zarr(
     if n_levels is not None:
         writer.finalize(list(resolution), n_levels=n_levels)
     else:
-        writer.finalize(list(resolution), target_resolutions_um=target_resolutions)
+        if pyramid_resolutions is not None:
+            target_resolutions = pyramid_resolutions
+        else:
+            # Fallback: inherit levels from input zarr metadata, or use Allen resolutions
+            target_resolutions = get_pyramid_resolutions_from_zarr(Path(input_path))
+            if target_resolutions is None:
+                target_resolutions = list(allen.AVAILABLE_RESOLUTIONS)
+        writer.finalize(list(resolution), target_resolutions_um=target_resolutions,
+                        make_isotropic=make_isotropic)
 
     update_pbar()
 
@@ -705,6 +726,111 @@ def create_alignment_preview(
 # Main entry point
 # =============================================================================
 
+def create_orientation_preview(
+    input_path: str,
+    preview_path: str,
+    level: int = 0,
+    orientation_permutation: Optional[tuple] = None,
+    orientation_flips: Optional[tuple] = None,
+    initial_rotation_deg: tuple = (0.0, 0.0, 0.0),
+):
+    """
+    Save a 3-panel orthogonal preview of the volume after orientation correction
+    and initial rotation are applied.
+
+    Axes are labelled in RAS space (Z=S, X=R, Y=A) so the result can be
+    inspected directly against the Allen atlas orientation.
+
+    Parameters
+    ----------
+    input_path : str
+        Path to input OME-Zarr.
+    preview_path : str
+        Output PNG path.
+    level : int
+        Pyramid level to load (lower = higher resolution but slower).
+    orientation_permutation : tuple, optional
+        Axis permutation from ``parse_orientation_code``.
+    orientation_flips : tuple, optional
+        Axis flips from ``parse_orientation_code``.
+    initial_rotation_deg : tuple of float
+        (Rx, Ry, Rz) initial rotation angles in degrees applied after orientation.
+    """
+    vol_zarr, resolution = read_omezarr(input_path, level=level)
+    vol = np.asarray(vol_zarr[:]).astype(np.float32)
+
+    # Apply orientation permutation + flips
+    if orientation_permutation is not None:
+        vol = apply_orientation_transform(vol, orientation_permutation, orientation_flips)
+        resolution = list(reorder_resolution(tuple(resolution), orientation_permutation))
+
+    # Apply initial rotation via SimpleITK (same path as the registration uses)
+    if any(r != 0.0 for r in initial_rotation_deg):
+        vol_sitk = allen.numpy_to_sitk_image(vol, resolution, cast_dtype=np.float32)
+        center = vol_sitk.TransformContinuousIndexToPhysicalPoint(
+            [s / 2.0 for s in vol_sitk.GetSize()])
+        rx, ry, rz = [np.deg2rad(a) for a in initial_rotation_deg]
+        t = sitk.Euler3DTransform()
+        t.SetCenter(center)
+        t.SetRotation(rx, ry, rz)
+        resampler = sitk.ResampleImageFilter()
+        resampler.SetReferenceImage(vol_sitk)
+        resampler.SetTransform(t.GetInverse())
+        resampler.SetInterpolator(sitk.sitkLinear)
+        vol = sitk.GetArrayFromImage(resampler.Execute(vol_sitk))
+
+    # Display range from non-zero voxels
+    nonzero = vol[vol > 0]
+    vmin, vmax = np.percentile(nonzero if len(nonzero) else vol.ravel(), [1, 99])
+
+    # Build title
+    applied = []
+    if orientation_permutation is not None:
+        applied.append(f"orientation")
+    if any(r != 0.0 for r in initial_rotation_deg):
+        applied.append(f"rotation {list(initial_rotation_deg)}°")
+    subtitle = f"({', '.join(applied)} applied)" if applied else "(no corrections applied)"
+
+    z_mid = vol.shape[0] // 2
+    x_mid = vol.shape[1] // 2
+    y_mid = vol.shape[2] // 2
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    fig.suptitle(
+        f"Orientation Preview — {subtitle}\n"
+        f"Shape: {vol.shape}  |  After corrections: Z=S (Superior), X=R (Right), Y=A (Anterior)",
+        fontsize=11
+    )
+
+    # Axial (mid-Z): rows=Y (A), cols=X (R)
+    axes[0].imshow(vol[z_mid, :, :].T, cmap='gray', origin='lower', vmin=vmin, vmax=vmax)
+    axes[0].set_title(f'Axial  (Z={z_mid})')
+    axes[0].set_xlabel('X  (← L    R →)')
+    axes[0].set_ylabel('Y  (← P    A →)')
+
+    # Sagittal (mid-X): rows=Z (S, flipped), cols=Y (A)
+    axes[1].imshow(vol[::-1, x_mid, :], cmap='gray', origin='lower', vmin=vmin, vmax=vmax)
+    axes[1].set_title(f'Sagittal  (X={x_mid})')
+    axes[1].set_xlabel('Y  (← P    A →)')
+    axes[1].set_ylabel('Z  (← I    S →)')
+
+    # Coronal (mid-Y): rows=Z (S, flipped), cols=X (R)
+    axes[2].imshow(vol[::-1, :, y_mid], cmap='gray', origin='lower', vmin=vmin, vmax=vmax)
+    axes[2].set_title(f'Coronal  (Y={y_mid})')
+    axes[2].set_xlabel('X  (← L    R →)')
+    axes[2].set_ylabel('Z  (← I    S →)')
+
+    plt.tight_layout()
+    Path(preview_path).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(preview_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Orientation preview saved to: {preview_path}")
+
+
+# =============================================================================
+# Main entry point
+# =============================================================================
+
 def main():
     """Main entry point: parse arguments and run alignment workflow."""
     parser = _build_arg_parser()
@@ -733,6 +859,20 @@ def main():
             print(f"  Axis flips: {orientation_flips}")
         except ValueError as e:
             parser.error(str(e))
+
+    # Orientation + initial-rotation preview (can exit before registration)
+    if args.orientation_preview or args.orientation_preview_only:
+        preview_out = args.orientation_preview or "orientation_preview.png"
+        create_orientation_preview(
+            str(input_path),
+            preview_out,
+            level=args.level,
+            orientation_permutation=orientation_permutation,
+            orientation_flips=orientation_flips,
+            initial_rotation_deg=tuple(args.initial_rotation),
+        )
+        if args.orientation_preview_only:
+            return
 
     # Load input volume
     vol_zarr, zarr_resolution = read_omezarr(str(input_path), level=args.level)
@@ -798,6 +938,8 @@ def main():
             transform,
             chunks=tuple(args.chunks) if args.chunks else None,
             n_levels=args.n_levels,
+            pyramid_resolutions=args.pyramid_resolutions,
+            make_isotropic=args.make_isotropic,
             orientation_permutation=orientation_permutation,
             orientation_flips=orientation_flips,
             pbar=pbar,

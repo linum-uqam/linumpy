@@ -103,7 +103,7 @@ def _build_arg_parser():
 
     # Blending
     p.add_argument('--blend', action='store_true',
-                   help='Blend overlapping regions using diffusion method')
+                   help='Blend overlapping regions using a cosine (Hann) ramp')
     p.add_argument('--blend_depth', type=int, default=None,
                    help='Number of z-slices to blend (default: auto from overlap)')
     p.add_argument('--blend_refinement_px', type=float, default=0,

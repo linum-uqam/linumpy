@@ -52,9 +52,8 @@ linum_normalize_z_intensity.py input.ome.zarr output.ome.zarr \\
 import argparse
 
 import numpy as np
-import dask.array as da
 
-from linumpy.io.zarr import read_omezarr, save_omezarr
+from linumpy.io.zarr import read_omezarr, AnalysisOmeZarrWriter
 from linumpy.preproc.normalization import (
     _robust_percentile, _smooth_weighted, _chunk_boundaries,
     compute_scale_factors, _build_cdf, _match_chunk_to_reference,
@@ -109,6 +108,15 @@ def _build_arg_parser():
                         'default is too aggressive. [%(default)s]')
     p.add_argument('--plot', type=str, default=None,
                    help='Optional path to save a diagnostic PNG.')
+    p.add_argument('--pyramid_resolutions', type=float, nargs='+',
+                   default=[10, 25, 50, 100],
+                   help='Target pyramid resolution levels in µm. [%(default)s]')
+    p.add_argument('--n_levels', type=int, default=None,
+                   help='Fixed number of power-of-2 pyramid levels (overrides '
+                        '--pyramid_resolutions). [%(default)s]')
+    p.add_argument('--make_isotropic', action='store_true', default=True,
+                   help='Resample to isotropic voxels at each pyramid level.')
+    p.add_argument('--no_isotropic', dest='make_isotropic', action='store_false')
     return p
 
 
@@ -209,7 +217,12 @@ def main():
         vol = np.clip(vol, 0.0, 1.0)
 
     print(f"Saving to {args.out_zarr} ...")
-    save_omezarr(da.from_array(vol), args.out_zarr, res)
+    writer = AnalysisOmeZarrWriter(args.out_zarr, vol.shape, chunk_shape=(128, 128, 128), dtype=vol.dtype)
+    writer[:] = vol
+    writer.finalize(res,
+                    target_resolutions_um=args.pyramid_resolutions,
+                    n_levels=args.n_levels,
+                    make_isotropic=args.make_isotropic)
     print("Done.")
 
 

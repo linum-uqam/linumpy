@@ -731,10 +731,22 @@ process normalize_z_intensity {
     } else {
         znorm_mode_opts = "--mode percentile --smooth_sigma ${params.znorm_smooth_sigma} --percentile ${params.znorm_percentile} --max_scale ${params.znorm_max_scale} --min_scale ${params.znorm_min_scale} --strength ${params.znorm_strength}"
     }
+    def znorm_pyramid_opts = ""
+    if (params.pyramid_n_levels != null) {
+        znorm_pyramid_opts += " --n_levels ${params.pyramid_n_levels}"
+    } else {
+        def base_res = params.resolution > 0 ? params.resolution : 10
+        def valid_resolutions = params.pyramid_resolutions.findAll { it >= base_res }.sort()
+        if (!valid_resolutions.contains(base_res)) valid_resolutions = [base_res] + valid_resolutions
+        def pyramid_res_str = valid_resolutions.collect { it.toString() }.join(' ')
+        znorm_pyramid_opts += " --pyramid_resolutions ${pyramid_res_str}"
+        znorm_pyramid_opts += params.pyramid_make_isotropic ? " --make_isotropic" : " --no_isotropic"
+    }
     """
     linum_normalize_z_intensity.py ${stacked_zarr} ${subject_name}.ome.zarr \
         ${n_slices_opt} \
-        ${znorm_mode_opts}
+        ${znorm_mode_opts} \
+        ${znorm_pyramid_opts}
 
     zip -r ${subject_name}.ome.zarr.zip ${subject_name}.ome.zarr
 
@@ -761,18 +773,32 @@ process align_to_ras {
     path "${subject_name}_ras.ome.zarr.zip"
     path "${subject_name}_ras_transform.tfm", optional: true
     path "${subject_name}_ras_preview.png", optional: true
+    path "${subject_name}_ras_orientation_preview.png", optional: true
 
     script:
     def orientation_arg = params.ras_input_orientation ? "--input-orientation ${params.ras_input_orientation}" : ""
     def rotation_arg = params.ras_initial_rotation ? "--initial-rotation ${params.ras_initial_rotation}" : ""
     def preview_arg = params.allen_preview ? "--preview ${subject_name}_ras_preview.png" : ""
+    def orientation_preview_arg = params.ras_orientation_preview ? "--orientation-preview ${subject_name}_ras_orientation_preview.png" : ""
+    def ras_pyramid_opts = ""
+    if (params.pyramid_n_levels != null) {
+        ras_pyramid_opts += " --n-levels ${params.pyramid_n_levels}"
+    } else {
+        def base_res = params.resolution > 0 ? params.resolution : 10
+        def valid_resolutions = params.pyramid_resolutions.findAll { it >= base_res }.sort()
+        if (!valid_resolutions.contains(base_res)) valid_resolutions = [base_res] + valid_resolutions
+        def pyramid_res_str = valid_resolutions.collect { it.toString() }.join(' ')
+        ras_pyramid_opts += " --pyramid_resolutions ${pyramid_res_str}"
+        ras_pyramid_opts += params.pyramid_make_isotropic ? " --make_isotropic" : " --no_isotropic"
+    }
     """
     linum_align_to_ras.py ${stacked_zarr} ${subject_name}_ras.ome.zarr \
         --allen-resolution ${params.allen_resolution} \
         --metric ${params.allen_metric} \
         --max-iterations ${params.allen_max_iterations} \
         --level ${params.allen_registration_level} \
-        ${orientation_arg} ${rotation_arg} ${preview_arg}
+        ${orientation_arg} ${rotation_arg} ${preview_arg} ${orientation_preview_arg} \
+        ${ras_pyramid_opts}
     zip -r ${subject_name}_ras.ome.zarr.zip ${subject_name}_ras.ome.zarr
     """
 }

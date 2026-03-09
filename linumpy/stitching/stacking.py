@@ -240,9 +240,12 @@ def apply_xy_shift(vol: np.ndarray,
 
 def blend_overlap_z(fixed_region: np.ndarray,
                     moving_region: np.ndarray) -> np.ndarray:
-    """Blend overlapping Z-region using linear interpolation along Z-axis.
+    """Blend overlapping Z-region using a cosine (Hann) ramp along Z-axis.
 
-    At tissue boundaries where only one slice has data, uses full intensity.
+    The weight ramp has zero slope at both endpoints, so there is no abrupt
+    intensity change at either boundary of the overlap zone.  At tissue
+    boundaries where only one slice has data the full intensity of that slice
+    is used unchanged.
 
     Parameters
     ----------
@@ -261,7 +264,9 @@ def blend_overlap_z(fixed_region: np.ndarray,
     if nz <= 1:
         return moving_region if np.sum(moving_region > 0) >= np.sum(fixed_region > 0) else fixed_region
 
-    z_weights = np.linspace(0, 1, nz)
+    # Cosine (Hann) ramp: 0 → 1 with zero slope at both ends
+    t = np.linspace(0, np.pi, nz)
+    z_weights = 0.5 * (1 - np.cos(t))
     alphas = np.broadcast_to(z_weights[:, np.newaxis, np.newaxis], fixed_region.shape).copy()
 
     fixed_valid = fixed_region > 0
