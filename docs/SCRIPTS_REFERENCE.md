@@ -432,43 +432,6 @@ Estimate XY transformation from mosaic grid.
 linum_estimate_transform.py <aip.ome.zarr> <output_transform.npy>
 ```
 
-### linum_estimate_transform_pairwise.py
-
-Pairwise registration between consecutive slices. Uses phase correlation for initial alignment followed by intensity-based refinement.
-
-```bash
-linum_estimate_transform_pairwise.py <fixed.ome.zarr> <moving.ome.zarr> <output_dir> \
-    [--moving_slice_index <idx>] \
-    [--transform <type>] \
-    [--metric <metric>] \
-    [--max_translation <pixels>] \
-    [--max_rotation <degrees>] \
-    [--use_masks] \
-    [--moving_mask <mask>] \
-    [--fixed_mask <mask>]
-```
-
-**Key Options:**
-- `--transform`: `translation` (default, recommended), `euler`, or `affine`
-- `--metric`: `CC` (default, recommended), `MSE`, or `MI`
-- `--max_translation`: Maximum allowed translation in pixels (default: 50.0)
-- `--max_rotation`: Maximum allowed rotation in degrees (default: 2.0)
-- `--use_masks`: Use tissue masks to focus registration on tissue regions
-
-**Example:**
-
-```bash
-# Translation-only registration with masks (recommended)
-linum_estimate_transform_pairwise.py fixed.ome.zarr moving.ome.zarr output/ \
-    --transform translation --metric CC \
-    --use_masks --moving_mask moving_mask.ome.zarr --fixed_mask fixed_mask.ome.zarr \
-    --max_translation 30
-
-# Simple registration without masks
-linum_estimate_transform_pairwise.py fixed.ome.zarr moving.ome.zarr output/ \
-    --transform translation --metric CC
-```
-
 ### linum_estimate_xy_shift_from_metadata.py
 
 Estimate XY shifts from tile metadata.

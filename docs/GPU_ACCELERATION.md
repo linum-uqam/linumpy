@@ -148,6 +148,9 @@ linum_diagnose_pipeline.py --benchmark
 | `linum_create_mosaic_grid_3d_gpu.py` | `linum_create_mosaic_grid_3d.py` | 5-12x |
 | `linum_resample_mosaic_grid_gpu.py` | `linum_resample_mosaic_grid.py` | 5-12x |
 | `linum_normalize_intensities_per_slice_gpu.py` | `linum_normalize_intensities_per_slice.py` | 4-10x |
+| `linum_fix_illumination_3d_gpu.py` | `linum_fix_illumination_3d.py` | 2-5x |
+| `linum_assess_slice_quality_gpu.py` | `linum_assess_slice_quality.py` | 3-8x |
+| `linum_aip_gpu.py` | `linum_aip_png.py` | ≤1x (mean projection; transfer overhead dominates for typical sizes) |
 
 ### Usage
 

@@ -16,6 +16,7 @@ import linumpy._thread_config  # noqa: F401
 import argparse
 import itertools
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from tqdm import tqdm
@@ -77,6 +78,56 @@ def rescale_gpu(image, scale, order=1, use_gpu=True):
     return resize(image, output_shape, order=order, anti_aliasing=True, use_gpu=use_gpu)
 
 
+def _read_tile(vol, i, j, tile_shape):
+    """Read one tile from the input zarr array (I/O stage of the pipeline)."""
+    return np.asarray(vol[:, i * tile_shape[1]:(i + 1) * tile_shape[1],
+                          j * tile_shape[2]:(j + 1) * tile_shape[2]])
+
+
+def _run_pipelined(vol, out_zarr, tile_iter, tile_shape, out_tile_shape,
+                   scaling_factor, use_gpu):
+    """Process tiles with a prefetch pipeline.
+
+    A background thread reads the next tile from the input zarr while the
+    main thread runs GPU resize and writes the current tile to the output
+    zarr, hiding zarr read latency behind GPU compute:
+
+        zarr_read(i+1) ║ GPU_resize(i) + zarr_write(i)
+    """
+    if not tile_iter:
+        return
+
+    cupy_available = False
+    if use_gpu:
+        try:
+            import cupy as cp
+            cupy_available = True
+        except Exception:
+            pass
+
+    with ThreadPoolExecutor(max_workers=1) as prefetch_executor:
+        i0, j0 = tile_iter[0]
+        pending_load = prefetch_executor.submit(_read_tile, vol, i0, j0, tile_shape)
+
+        for k, (i, j) in enumerate(tqdm(tile_iter, desc="Resampling tiles", unit="tile")):
+            # Wait for current tile to be loaded from disk.
+            tile = pending_load.result()
+
+            # Fire off the next zarr read before GPU work so they overlap.
+            if k + 1 < len(tile_iter):
+                ni, nj = tile_iter[k + 1]
+                pending_load = prefetch_executor.submit(_read_tile, vol, ni, nj, tile_shape)
+
+            # GPU resize + zarr write (concurrent with prefetch of tile k+1).
+            resampled = rescale_gpu(tile, scaling_factor, order=1, use_gpu=use_gpu)
+            out_zarr[:, i * out_tile_shape[1]:(i + 1) * out_tile_shape[1],
+                     j * out_tile_shape[2]:(j + 1) * out_tile_shape[2]] = resampled
+
+            # Periodically free the GPU memory pool to avoid fragmentation.
+            if cupy_available and k % 10 == 9:
+                cp.get_default_memory_pool().free_all_blocks()
+
+
 def main():
     parser = _build_arg_parser()
     args = parser.parse_args()
@@ -119,10 +170,8 @@ def main():
     print(f"  Target resolution: {args.resolution} µm")
     print(f"  Scale factor: {scaling_factor}")
 
-    # Load and process first tile to get output shape
-    tile_00 = np.asarray(vol[:tile_shape[0], :tile_shape[1], :tile_shape[2]])
-    out_tile00 = rescale_gpu(tile_00, scaling_factor, order=1, use_gpu=use_gpu)
-    out_tile_shape = out_tile00.shape
+    # Compute output tile shape analytically — no need to load a tile just for shape info.
+    out_tile_shape = tuple(int(round(s * sc)) for s, sc in zip(tile_shape, scaling_factor))
 
     nx = vol.shape[1] // tile_shape[1]
     ny = vol.shape[2] // tile_shape[2]
@@ -134,38 +183,9 @@ def main():
     out_zarr = OmeZarrWriter(args.out_mosaic, out_shape, out_tile_shape,
                              dtype=vol.dtype, overwrite=True)
 
-    # Write first tile (already processed)
-    out_zarr[:, 0:out_tile_shape[1], 0:out_tile_shape[2]] = out_tile00
-
-    # Free memory
-    del tile_00, out_tile00
-    if use_gpu:
-        try:
-            import cupy as cp
-            cp.get_default_memory_pool().free_all_blocks()
-        except Exception:
-            pass
-
-    # Process remaining tiles with progress bar
+    # Process all tiles with the prefetch pipeline.
     tile_iter = list(itertools.product(range(nx), range(ny)))
-    tile_iter = [(i, j) for i, j in tile_iter if not (i == 0 and j == 0)]
-
-    for i, j in tqdm(tile_iter, desc="Resampling tiles", unit="tile"):
-        current_vol = np.asarray(vol[:, i * tile_shape[1]:(i + 1) * tile_shape[1],
-                                     j * tile_shape[2]:(j + 1) * tile_shape[2]])
-
-        resampled = rescale_gpu(current_vol, scaling_factor, order=1, use_gpu=use_gpu)
-
-        out_zarr[:, i * out_tile_shape[1]:(i + 1) * out_tile_shape[1],
-                 j * out_tile_shape[2]:(j + 1) * out_tile_shape[2]] = resampled
-
-        # Free GPU memory periodically
-        if use_gpu and (i * ny + j) % 10 == 0:
-            try:
-                import cupy as cp
-                cp.get_default_memory_pool().free_all_blocks()
-            except Exception:
-                pass
+    _run_pipelined(vol, out_zarr, tile_iter, tile_shape, out_tile_shape, scaling_factor, use_gpu)
 
     print("Building pyramid...")
     out_zarr.finalize([target_res] * 3, args.n_levels)

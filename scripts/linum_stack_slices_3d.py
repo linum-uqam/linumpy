@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Stack 3D mosaics on top of each other in a single 3D volume using the
-transforms from `linum_estimate_transform_pairwise.py`. Expects all 3D
-mosaics to be in the same space (same dimensions for last two axes).
+Stack 3D mosaics on top of each other in a single 3D volume using pairwise
+registration transforms. Expects all 3D mosaics to be in the same space
+(same dimensions for last two axes).
 """
 # Configure thread limits before numpy/scipy imports
 import linumpy._thread_config  # noqa: F401

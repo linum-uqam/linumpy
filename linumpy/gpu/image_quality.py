@@ -311,23 +311,29 @@ def assess_slice_quality_gpu(vol: np.ndarray,
     if weights is None:
         weights = {'ssim': 0.5, 'edge': 0.3, 'variance': 0.2}
 
+    depth = vol.shape[0] if vol.ndim == 3 else 1
     metrics: Dict[str, Any] = {
         'ssim_before': 0.0,
         'ssim_after': 0.0,
         'ssim_mean': 0.0,
         'edge_score': 0.0,
         'variance_score': 0.0,
-        'depth': vol.shape[0] if vol.ndim == 3 else 1,
+        'depth': depth,
         'has_data': True,
     }
 
-    # Check if slice has meaningful data
-    if vol.max() == vol.min() or np.std(vol) < 1e-6:
+    # Check if slice has meaningful data by sampling a single centre z-plane.
+    # zarr.Array supports integer indexing (returns numpy), so no full-volume I/O.
+    z_check = depth // 2 if vol.ndim == 3 else 0
+    check_plane = np.asarray(vol[z_check])
+    if check_plane.max() == check_plane.min() or np.std(check_plane) < 1e-6:
         metrics['has_data'] = False
         metrics['overall'] = 0.0
         return 0.0, metrics
 
-    # Compute SSIM with neighbors
+    # Compute SSIM with neighbours.
+    # compute_ssim_3d_gpu internally accesses vol[z] one plane at a time, so
+    # zarr arrays are handled without loading the whole volume.
     ssim_scores = []
     if vol_before is not None:
         metrics['ssim_before'] = compute_ssim_3d_gpu(vol, vol_before, sample_depth=sample_depth)
@@ -339,23 +345,32 @@ def assess_slice_quality_gpu(vol: np.ndarray,
     if ssim_scores:
         metrics['ssim_mean'] = float(np.mean(ssim_scores))
 
-    # Create reference from neighbors
+    # Build sampled numpy arrays for edge and variance scores.
+    # Read only sample_depth z-planes via zarr integer indexing to avoid loading
+    # the full volume (compute_variance_score_gpu would otherwise call
+    # cp.asarray on the whole array).
+    n_planes = max(1, min(sample_depth, depth) if sample_depth > 0 else depth)
+    z_indices = np.linspace(0, depth - 1, n_planes, dtype=int)
+    vol_s = np.stack([np.asarray(vol[int(z)], dtype=np.float32) for z in z_indices])
+
+    ref_s = None
     if vol_before is not None and vol_after is not None:
-        ref = 0.5 * vol_before.astype(np.float32) + 0.5 * vol_after.astype(np.float32)
+        ref_s = (
+            0.5 * np.stack([np.asarray(vol_before[int(z)], dtype=np.float32) for z in z_indices])
+            + 0.5 * np.stack([np.asarray(vol_after[int(z)], dtype=np.float32) for z in z_indices])
+        )
     elif vol_before is not None:
-        ref = vol_before.astype(np.float32)
+        ref_s = np.stack([np.asarray(vol_before[int(z)], dtype=np.float32) for z in z_indices])
     elif vol_after is not None:
-        ref = vol_after.astype(np.float32)
-    else:
-        ref = None
+        ref_s = np.stack([np.asarray(vol_after[int(z)], dtype=np.float32) for z in z_indices])
 
     # Compute edge preservation score
-    if ref is not None:
-        metrics['edge_score'] = compute_edge_score_gpu(vol, ref)
+    if ref_s is not None:
+        metrics['edge_score'] = compute_edge_score_gpu(vol_s, ref_s)
 
     # Compute variance consistency
-    if ref is not None:
-        metrics['variance_score'] = compute_variance_score_gpu(vol, ref)
+    if ref_s is not None:
+        metrics['variance_score'] = compute_variance_score_gpu(vol_s, ref_s)
 
     # Compute overall score
     overall = (

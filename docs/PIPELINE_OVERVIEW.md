@@ -26,6 +26,9 @@ Raw Tiles (tile_x*_y*_z*)
 │ • Create 3D mosaic grids      │
 │ • Estimate XY shifts          │
 │ • Generate slice config       │
+│ • [opt] Generate AIPs         │
+│ • [opt] Assess slice quality  │
+│ • [opt] Generate previews     │
 └───────────────────────────────┘
         ↓
 Mosaic Grids (*.ome.zarr) + shifts_xy.csv + slice_config.csv
@@ -34,16 +37,21 @@ Mosaic Grids (*.ome.zarr) + shifts_xy.csv + slice_config.csv
 │   3D RECONSTRUCTION PIPELINE  │
 │   soct_3d_reconst.nf          │
 ├───────────────────────────────┤
-│ • Resample mosaic grids       │
-│ • Fix focal curvature         │
-│ • Fix illumination            │
+│ • [opt] Resample mosaic grids │
+│ • [opt] Fix focal curvature   │
+│ • [opt] Fix illumination      │
+│ • Generate AIP                │
+│ • Estimate XY transforms      │
 │ • Stitch tiles in 3D          │
-│ • PSF correction              │
+│ • Beam profile correction     │
 │ • Crop at interface           │
 │ • Normalize intensities       │
 │ • Align to common space       │
+│ • [opt] Create reg. masks     │
 │ • Pairwise registration       │
 │ • Stack into 3D volume        │
+│ • [opt] Z-intensity normalize │
+│ • [opt] Register to atlas     │
 └───────────────────────────────┘
         ↓
 3D Volume (3d_volume.ome.zarr)
@@ -74,25 +82,36 @@ Converts raw OCT tiles into organized mosaic grids and extracts metadata for sub
 |-----------|---------|-------------|
 | `input` | (required) | Raw tiles directory |
 | `output` | `"output"` | Output directory |
-| `processes` | `1` | Number of parallel processes |
+| `use_gpu` | `true` | Enable GPU acceleration (auto-fallback to CPU) |
+| `processes` | `1` | Parallel Python processes per task (CPU mode only) |
 | `max_cpus` | `null` | Maximum CPUs to use (null = auto) |
 | `reserved_cpus` | `2` | CPUs to keep free for overhead |
-| `axial_resolution` | `1.5` | Axial resolution in microns |
-| `resolution` | `-1` | Output resolution (-1 = full) |
+| `max_mosaic_forks` | `4` | Max concurrent `create_mosaic_grid` GPU jobs |
+| `max_aip_forks` | `4` | Max concurrent `generate_aip` GPU jobs |
+| `max_quality_forks` | `2` | Max concurrent `assess_slice_quality` GPU jobs |
+| `axial_resolution` | `1.36` | Axial resolution in microns |
+| `resolution` | `-1` | Output resolution (-1 = full native resolution) |
 | `sharding_factor` | `4` | Zarr sharding factor |
 | `fix_galvo_shift` | `true` | Enable galvo shift detection and correction |
 | `fix_camera_shift` | `false` | Correct camera shifts (old data) |
 | `galvo_confidence_threshold` | `0.6` | Minimum confidence to apply galvo fix |
 | `generate_slice_config` | `true` | Generate slice_config.csv |
-| `generate_previews` | `false` | Generate orthogonal view previews |
-| `detect_galvo` | `false` | Include galvo detection in slice_config.csv |
-| `use_gpu` | `true` | Enable GPU acceleration (auto-fallback to CPU) |
+| `exclude_first_slices` | `1` | Number of leading slices to mark as excluded in slice_config |
+| `detect_galvo` | `false` | Include galvo detection results in slice_config.csv |
+| `generate_previews` | `false` | Generate orthogonal view previews of mosaic grids |
+| `generate_aips` | `false` | Generate AIP images from mosaic grids for QC |
+| `assess_quality` | `false` | Run quality assessment and update slice_config |
+| `min_quality_score` | `0.2` | Minimum quality score to include slice (0 = report only) |
+| `quality_sample_depth` | `10` | Z-planes sampled per slice during quality assessment |
 
 ### Processes
 
 1. **create_mosaic_grid**: Creates 3D OME-Zarr mosaic from raw tiles
 2. **estimate_xy_shifts_from_metadata**: Extracts XY shifts from tile metadata
 3. **generate_slice_config**: Creates slice configuration file
+4. **generate_aip** *(optional, `generate_aips = true`)*: Generates AIP images for QC visualisation
+5. **generate_mosaic_preview** *(optional, `generate_previews = true`)*: Generates orthogonal view previews
+6. **assess_slice_quality** *(optional, `assess_quality = true`)*: Runs GPU-accelerated quality assessment and updates slice_config
 
 ### Galvo Shift Correction
 
@@ -104,7 +123,7 @@ The galvo mirror in OCT systems can introduce horizontal banding artifacts. Duri
 - It looks for **intensity discontinuities** at the galvo return region boundaries
 - Detection uses **absolute intensity difference** (the return region can be brighter OR darker)
 - A **confidence score** (0-1) indicates how certain the artifact is present
-- The correction is **only applied if confidence ≥ threshold** (default 0.3)
+- The correction is **only applied if confidence ≥ threshold** (default 0.6)
 
 **Detection algorithm details:**
 - Computes three metrics: boundary contrast (50%), edge sharpness (30%), anomaly score (20%)
@@ -188,7 +207,7 @@ estimate_xy_transformation
 stitch_3d
 ```
 - Stitches tiles into 3D slice using estimated transforms
-- By default uses **refined stitching** (`use_refined_stitching = true`): image registration refines blend transitions at tile boundaries for reduced seam visibility
+- Tile blending is controlled by `stitch_blending_method` (default: `'diffusion'`); sub-pixel refinement by `max_blend_refinement_px`
 - Motor-only stitching is available for diagnostics via `motor_only_stitch = true`
 
 #### 7. Beam Profile Correction
@@ -251,8 +270,9 @@ create_registration_masks
 register_pairwise
 ```
 - Registers consecutive slices to align them in 3D
-- Uses phase correlation for robust initial translation estimate
-- Refines with intensity-based optimization (translation, rotation, or affine)
+- Finds the best matching Z-plane using zero-lag NCC (Pearson correlation) over a centre-cropped ROI
+- XY alignment is seeded from motor positions; only small corrections are computed
+- Refines with SimpleITK gradient descent (translation, or rotation + translation via `euler` transform)
 - Falls back to identity transform if registration exceeds thresholds
 
 The `bring_to_common_space` step (step 10) provides initial XY alignment using microscope metadata, while pairwise registration fine-tunes the alignment between adjacent slices.
@@ -318,7 +338,8 @@ The final 3D volume is stored as an OME-Zarr with multiple resolution levels opt
 | `crop_interface_out_depth` | `600` | Crop depth in microns |
 | `use_motor_positions_for_stitching` | `true` | Use motor encoder positions for tile layout |
 | `stitch_overlap_fraction` | `0.2` | Expected tile overlap fraction |
-| `use_refined_stitching` | `true` | Refine tile blend transitions with image registration |
+| `stitch_blending_method` | `'diffusion'` | Tile blending: `'none'`, `'average'`, `'diffusion'` |
+| `max_blend_refinement_px` | `10` | Maximum sub-pixel refinement shift during blending (pixels) |
 | `create_registration_masks` | `true` | Create registration masks |
 | `registration_transform` | `'euler'` | Transform type: `euler` (XY + rotation) or `translation` |
 | `registration_max_translation` | `200.0` | Optimizer bound on translation (pixels) |
@@ -336,9 +357,9 @@ The final 3D volume is stored as an OME-Zarr with multiple resolution levels opt
 
 The pairwise registration uses a two-step approach:
 
-1. **Phase Correlation**: FFT-based estimation of translation between slices. Fast and robust to intensity variations. Uses windowed images to reduce edge effects.
+1. **Z-Plane Matching**: The best-matching Z-plane in the fixed volume is found by scanning a search range around the expected position and scoring each candidate with zero-lag NCC (Pearson correlation) computed on a centre-cropped ROI. XY initial alignment comes from motor encoder positions.
 
-2. **Intensity-Based Refinement**: Gradient descent optimization using the specified transform type (`euler` for rotation + translation, `translation` for XY only).
+2. **Intensity-Based Refinement**: SimpleITK gradient descent with a Pearson correlation metric (`SetMetricAsCorrelation`) using a multiscale pyramid. The transform type is controlled by `registration_transform`: `euler` (rotation + translation) or `translation` (XY only).
 
 3. **Masking**: Registration masks created by `create_registration_masks` focus registration on tissue content, reducing sensitivity to background edges. The `mask_fill_holes` parameter (`none`, `3d`, `slicewise`) controls hole-filling in masks.
 
@@ -362,8 +383,12 @@ Both pipelines support optional GPU acceleration using NVIDIA CUDA via CuPy. GPU
 | Pipeline | Process | GPU Operations |
 |----------|---------|----------------|
 | Preprocessing | `create_mosaic_grid` | Galvo detection, volume resize |
-| 3D Reconstruction | `generate_aip` | Mean projection |
+| Preprocessing | `generate_aip` | Mean projection |
+| Preprocessing | `assess_slice_quality` | SSIM, edge detection (Sobel) |
+| 3D Reconstruction | `resample_mosaic_grid` | Volume resize |
+| 3D Reconstruction | `fix_illumination` | BaSiCPy background correction (JAX on GPU) |
 | 3D Reconstruction | `estimate_xy_transformation` | Phase correlation (FFT) |
+| 3D Reconstruction | `normalize` | Intensity normalization, percentile clipping |
 | 3D Reconstruction | `create_registration_masks` | Filtering, morphology |
 
 ### Running with GPU

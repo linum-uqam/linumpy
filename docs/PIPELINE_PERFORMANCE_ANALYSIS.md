@@ -23,7 +23,6 @@ However, the 8x slowdown (4-6h → 32h) suggests **additional factors** may be a
 **Impact**: Each `register_pairwise` process can spawn 48+ threads, leading to massive thread oversubscription when multiple slices are processed.
 
 **Fix Applied**: Added `configure_all_libraries()` calls after SimpleITK import in:
-- `linum_estimate_transform_pairwise.py`
 - `linum_estimate_transform.py`
 - `linum_estimate_transform_gpu.py`
 - `linum_interpolate_missing_slice.py`

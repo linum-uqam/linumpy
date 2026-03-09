@@ -142,11 +142,29 @@ def load_single_tile(params: dict) -> tuple:
     return (params, vol)
 
 
-def process_tile_gpu(proc_params: dict):
-    """Process a tile with GPU acceleration and add it to the mosaic.
-    
-    Uses ThreadPoolExecutor for parallel I/O when loading multiple tiles
-    in a shard, then processes each with GPU-accelerated resize.
+def _load_shard_data(proc_params: dict) -> list:
+    """Load all tiles for a shard from disk (I/O stage of the pipeline).
+
+    For shards with multiple tiles (sharding_factor > 1) loads them in
+    parallel with a ThreadPoolExecutor; otherwise loads the single tile
+    directly to avoid threading overhead.
+
+    Returns a list of (params, volume) tuples, one per tile.
+    """
+    tiles_params = proc_params['params']
+    n_tiles = len(tiles_params)
+    if n_tiles > 1:
+        with ThreadPoolExecutor(max_workers=min(4, n_tiles)) as executor:
+            return list(executor.map(load_single_tile, tiles_params))
+    else:
+        return [load_single_tile(tiles_params[0])]
+
+
+def _resize_and_write_shard(proc_params: dict, loaded_tiles: list):
+    """GPU-resize pre-loaded tiles and write the shard to zarr (compute/write stage).
+
+    Separated from disk I/O so that _run_pipelined can overlap loading the
+    next shard with GPU work on the current one.
     """
     global _USE_GPU
 
@@ -157,31 +175,16 @@ def process_tile_gpu(proc_params: dict):
 
     shard = np.zeros(shard_shape, dtype=mosaic.dtype)
 
-    mx_min = min([p["tile_pos"][0] for p in tiles_params])
-    my_min = min([p["tile_pos"][1] for p in tiles_params])
+    mx_min = min(p["tile_pos"][0] for p in tiles_params)
+    my_min = min(p["tile_pos"][1] for p in tiles_params)
 
-    # Parallel I/O: Load all tiles in this shard concurrently
-    # This significantly speeds up I/O-bound tile loading
-    n_tiles = len(tiles_params)
-    if n_tiles > 1:
-        # Use ThreadPoolExecutor for parallel disk I/O
-        with ThreadPoolExecutor(max_workers=min(4, n_tiles)) as executor:
-            loaded_tiles = list(executor.map(load_single_tile, tiles_params))
-    else:
-        # Single tile, no need for threading overhead
-        loaded_tiles = [load_single_tile(tiles_params[0])]
-
-    # Process loaded tiles with GPU resize
-    vol = None  # Track last volume for shape info
-    tile_size = None
+    vol = None
     for params, vol in loaded_tiles:
         mx, my = params["tile_pos"]
         tile_size = params["tile_size"]
 
-        # GPU-accelerated resize (tile_size must be tuple for CuPy)
         tile_size_tuple = tuple(tile_size)
         if np.iscomplexobj(vol):
-            # Handle complex data
             real_resized = resize(vol.real, tile_size_tuple, order=1,
                                   anti_aliasing=True, use_gpu=use_gpu)
             imag_resized = resize(vol.imag, tile_size_tuple, order=1,
@@ -190,7 +193,6 @@ def process_tile_gpu(proc_params: dict):
         else:
             vol = resize(vol, tile_size_tuple, order=1, anti_aliasing=True, use_gpu=use_gpu)
 
-        # Compute the tile position
         rmin = (mx - mx_min) * vol.shape[1]
         cmin = (my - my_min) * vol.shape[2]
         rmax = rmin + vol.shape[1]
@@ -198,14 +200,59 @@ def process_tile_gpu(proc_params: dict):
 
         shard[0:tile_size[0], rmin:rmax, cmin:cmax] = vol
 
-    # tile index to mosaic grid position
     mx_min *= vol.shape[1]
     my_min *= vol.shape[2]
-    # write the whole shard to disk
     output_extent_x = min(shard_shape[1], mosaic.shape[1] - mx_min)
     output_extent_y = min(shard_shape[2], mosaic.shape[2] - my_min)
     mosaic[0:tile_size[0], mx_min:mx_min + output_extent_x, my_min:my_min + output_extent_y] = shard[
         :, :output_extent_x, :output_extent_y]
+
+
+def _run_pipelined(params: list):
+    """Process shards with a prefetch pipeline.
+
+    A single background thread fetches the next shard's tiles from disk
+    while the main thread runs GPU resize and zarr write for the current
+    shard.  This hides most of the per-tile disk I/O latency behind GPU
+    compute and largely eliminates the three-way sequential stall of
+
+        disk read → GPU → zarr write → disk read → GPU → zarr write …
+
+    replacing it with the overlapped pattern
+
+        disk(i+1) ║ GPU+write(i)
+    """
+    if not params:
+        return
+
+    with ThreadPoolExecutor(max_workers=1) as prefetch_executor:
+        # Submit the first shard's I/O immediately so it can start before
+        # the loop begins.
+        pending_load = prefetch_executor.submit(_load_shard_data, params[0])
+
+        for i, p in enumerate(tqdm(params)):
+            # Block until current shard's tiles are in RAM.
+            loaded_tiles = pending_load.result()
+
+            # Fire off disk I/O for the next shard before doing any GPU
+            # work, so they overlap as much as possible.
+            if i + 1 < len(params):
+                pending_load = prefetch_executor.submit(_load_shard_data, params[i + 1])
+
+            # GPU resize + zarr write for the current shard.
+            # This runs concurrently with the prefetch of params[i+1].
+            _resize_and_write_shard(p, loaded_tiles)
+
+
+def process_tile_gpu(proc_params: dict):
+    """Process a shard: load tiles from disk, GPU resize, write to zarr.
+
+    This is the entry point used by the CPU multiprocessing pool.  For GPU
+    mode the pipelined path (_run_pipelined) is preferred because it
+    overlaps disk I/O with GPU work across shards.
+    """
+    loaded_tiles = _load_shard_data(proc_params)
+    _resize_and_write_shard(proc_params, loaded_tiles)
 
 
 def main():
@@ -350,8 +397,6 @@ def main():
               for j in range(nb_shards_xy[1])
               if params_grid[i, j] is not None]
 
-    # Note: For GPU processing, single-threaded is often faster due to
-    # GPU context switching overhead. Use n_cpus=1 for pure GPU processing.
     if n_cpus > 1 and not _USE_GPU:
         # CPU parallel processing
         from linumpy._thread_config import worker_initializer
@@ -359,9 +404,9 @@ def main():
             results = tqdm(pool.imap(process_tile_gpu, params), total=len(params))
             tuple(results)
     else:
-        # Sequential processing (better for GPU)
-        for p in tqdm(params):
-            process_tile_gpu(p)
+        # GPU mode: pipeline disk I/O with GPU compute + zarr write so that
+        # reading the next shard from disk overlaps with GPU work on the current one.
+        _run_pipelined(params)
 
     # Convert to ome-zarr
     writer.finalize(output_resolution, args.n_levels)

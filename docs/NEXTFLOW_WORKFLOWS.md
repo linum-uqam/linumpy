@@ -84,7 +84,7 @@ nextflow run preproc_rawtiles.nf \
     --output /path/to/output \
     --processes 8 \
     --resolution 10 \
-    --axial_resolution 1.5
+    --axial_resolution 1.36
 ```
 
 ### Parameters
@@ -94,14 +94,25 @@ nextflow run preproc_rawtiles.nf \
 | `input` | (required) | Raw tiles directory |
 | `output` | `"output"` | Output directory |
 | `use_old_folder_structure` | `false` | Use flat folder structure |
-| `processes` | `1` | Parallel processes per task |
-| `axial_resolution` | `1.5` | Axial resolution (µm) |
-| `resolution` | `-1` | Output resolution (-1 = full) |
+| `use_gpu` | `true` | Enable GPU acceleration (auto-fallback to CPU) |
+| `processes` | `1` | Parallel Python processes per task (CPU mode only) |
+| `max_mosaic_forks` | `4` | Max concurrent `create_mosaic_grid` GPU jobs |
+| `max_aip_forks` | `4` | Max concurrent `generate_aip` GPU jobs |
+| `max_quality_forks` | `2` | Max concurrent `assess_slice_quality` GPU jobs |
+| `axial_resolution` | `1.36` | Axial resolution (µm) |
+| `resolution` | `-1` | Output resolution (-1 = full native resolution) |
 | `sharding_factor` | `4` | Zarr sharding (NxN chunks/shard) |
 | `fix_galvo_shift` | `true` | Correct galvo shifts |
 | `fix_camera_shift` | `false` | Correct camera shifts |
+| `galvo_confidence_threshold` | `0.6` | Minimum confidence to apply galvo fix |
 | `generate_slice_config` | `true` | Generate slice_config.csv |
-| `use_gpu` | `true` | Enable GPU acceleration |
+| `exclude_first_slices` | `1` | Number of leading slices to mark as excluded |
+| `detect_galvo` | `false` | Include galvo detection results in slice_config.csv |
+| `generate_previews` | `false` | Generate orthogonal view previews of mosaic grids |
+| `generate_aips` | `false` | Generate AIP images from mosaic grids for QC |
+| `assess_quality` | `false` | Run quality assessment and update slice_config |
+| `min_quality_score` | `0.2` | Minimum quality score to include slice (0 = report only) |
+| `quality_sample_depth` | `10` | Z-planes sampled per slice during quality assessment |
 
 ### Outputs
 
@@ -111,7 +122,13 @@ output/
 ├── mosaic_grid_3d_z01.ome.zarr/
 ├── ...
 ├── shifts_xy.csv
-└── slice_config.csv
+├── slice_config.csv
+├── aips/                          # Only when generate_aips = true
+│   ├── aip_z00.png
+│   └── ...
+└── previews/                      # Only when generate_previews = true
+    ├── mosaic_grid_z00_preview.png
+    └── ...
 ```
 
 ---
@@ -202,7 +219,6 @@ These parameters control how tiles within each slice are assembled in XY.
 | `use_motor_positions_for_stitching` | `true` | Use motor encoder positions for tile layout (recommended) |
 | `stitch_overlap_fraction` | `0.2` | Expected tile overlap fraction — should match acquisition settings |
 | `stitch_blending_method` | `'diffusion'` | Tile blending: `'none'`, `'average'`, `'diffusion'` |
-| `use_refined_stitching` | `true` | Use image registration to refine blend transitions; reduces tile seams |
 | `max_blend_refinement_px` | `10` | Maximum sub-pixel refinement shift for blending (pixels) |
 
 #### Common Space Alignment
@@ -457,7 +473,7 @@ Diagnostic mode enables additional analysis processes for troubleshooting recons
 | `diagnostic_mode` | `false` | Master switch: enables all diagnostic analyses |
 | `analyze_rotation_drift` | `false` | Analyze cumulative rotation between slices |
 | `analyze_acquisition_rotation` | `false` | Analyze acquisition-time rotation from shifts + registration |
-| `analyze_tile_dilation` | `false` | Analyze tile position refinements for scale drift (requires `use_refined_stitching=false`) |
+| `analyze_tile_dilation` | `false` | Analyze tile position refinements for scale drift (works best with `max_blend_refinement_px = 0`) |
 | `motor_only_stitch` | `false` | Stitch slices using motor positions only (no image registration) |
 | `motor_only_stack` | `false` | Stack slices using motor positions only (no pairwise registration) |
 | `compare_stitching` | `false` | Compare motor-only vs refined stitching side-by-side |
@@ -530,8 +546,12 @@ Both workflows support GPU acceleration using NVIDIA CUDA via CuPy. GPU processi
 | Workflow | Process | GPU Operations |
 |----------|---------|----------------|
 | `preproc_rawtiles.nf` | `create_mosaic_grid` | Galvo detection, volume resize |
-| `soct_3d_reconst.nf` | `generate_aip` | Mean projection |
+| `preproc_rawtiles.nf` | `generate_aip` | Mean projection |
+| `preproc_rawtiles.nf` | `assess_slice_quality` | SSIM, edge detection (Sobel) |
+| `soct_3d_reconst.nf` | `resample_mosaic_grid` | Volume resize |
+| `soct_3d_reconst.nf` | `fix_illumination` | BaSiCPy background correction (JAX on GPU) |
 | `soct_3d_reconst.nf` | `estimate_xy_transformation` | Phase correlation (FFT) |
+| `soct_3d_reconst.nf` | `normalize` | Intensity normalization, percentile clipping |
 | `soct_3d_reconst.nf` | `create_registration_masks` | Gaussian filter, morphology |
 
 ### Usage

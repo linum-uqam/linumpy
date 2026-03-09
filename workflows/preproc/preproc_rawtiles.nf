@@ -9,7 +9,6 @@ nextflow.enable.dsl = 2
 // Parameters are defined in nextflow.config
 
 process create_mosaic_grid {
-    cpus params.processes
     publishDir "$params.output", mode: 'link'  // Hard link: no duplication, file stays accessible
     
     input:
@@ -152,10 +151,13 @@ workflow {
 
         // [Optional] Assess quality and update slice config
         if (params.assess_quality) {
-            // Wait for all mosaics to be created, then run quality assessment
+            // Collect all mosaic outputs so quality assessment waits for every
+            // mosaic to be published before it starts scanning the output dir.
             all_mosaics_done = create_mosaic_grid.out.collect()
             quality_input = generate_slice_config.out
                 .combine(output_dir_channel)
+                .combine(all_mosaics_done.map { _ -> 'ready' })
+                .map { config, dir, _ready -> tuple(config, dir) }
             assess_slice_quality(quality_input)
         }
     }
