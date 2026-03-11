@@ -262,14 +262,17 @@ process generate_report {
     val subject_name
 
     output:
-    path "${subject_name}_quality_report.html"
+    path "${subject_name}_quality_report.${params.report_format ?: 'html'}"
 
     script:
+    def fmt          = params.report_format ?: 'html'
     def verbose_flag = params.report_verbose ? "--verbose" : ""
+    def overview_arg = png          ? "--overview_png ${png}"          : ""
+    def annotated_arg = annotated_png ? "--annotated_png ${annotated_png}" : ""
     """
-    linum_generate_pipeline_report.py ${params.output} ${subject_name}_quality_report.html \
+    linum_generate_pipeline_report.py ${params.output} ${subject_name}_quality_report.${fmt} \
         --title "Quality Report: ${subject_name}" \
-        --format html ${verbose_flag}
+        --format ${fmt} ${verbose_flag} ${overview_arg} ${annotated_arg}
     """
 }
 
@@ -344,11 +347,14 @@ process generate_aip {
 }
 
 process estimate_xy_transformation {
+    publishDir "${params.output}/${task.process}", mode: 'copy', pattern: "*_metrics.json"
+
     input:
     tuple val(slice_id), path(aip)
 
     output:
-    tuple val(slice_id), path("z${slice_id}_transform_xy.npy")
+    tuple val(slice_id), path("z${slice_id}_transform_xy.npy"), emit: transform
+    path("*_metrics.json"), optional: true, emit: metrics
 
     script:
     def script_name = params.use_gpu ? "linum_estimate_transform_gpu.py" : "linum_estimate_transform.py"
@@ -362,11 +368,14 @@ process estimate_xy_transformation {
 }
 
 process stitch_3d {
+    publishDir "${params.output}/${task.process}", mode: 'copy', pattern: "*_metrics.json"
+
     input:
     tuple val(slice_id), path(mosaic_grid), path(transform_xy)
 
     output:
-    tuple val(slice_id), path("slice_z${slice_id}_stitch_3d.ome.zarr")
+    tuple val(slice_id), path("slice_z${slice_id}_stitch_3d.ome.zarr"), emit: stitched
+    path("*_metrics.json"), optional: true, emit: metrics
 
     script:
     """
@@ -414,11 +423,14 @@ process generate_stitch_preview {
 // -----------------------------------------------------------------------------
 
 process beam_profile_correction {
+    publishDir "${params.output}/${task.process}", mode: 'copy', pattern: "*_metrics.json"
+
     input:
     tuple val(slice_id), path(slice_3d)
 
     output:
-    tuple val(slice_id), path("slice_z${slice_id}_axial_corr.ome.zarr")
+    tuple val(slice_id), path("slice_z${slice_id}_axial_corr.ome.zarr"), emit: corrected
+    path("*_metrics.json"), optional: true, emit: metrics
 
     script:
     """
@@ -428,11 +440,14 @@ process beam_profile_correction {
 }
 
 process crop_interface {
+    publishDir "${params.output}/${task.process}", mode: 'copy', pattern: "*_metrics.json"
+
     input:
     tuple val(slice_id), path(image)
 
     output:
-    tuple val(slice_id), path("slice_z${slice_id}_crop_interface.ome.zarr")
+    tuple val(slice_id), path("slice_z${slice_id}_crop_interface.ome.zarr"), emit: cropped
+    path("*_metrics.json"), optional: true, emit: metrics
 
     script:
     """
@@ -444,11 +459,14 @@ process crop_interface {
 }
 
 process normalize {
+    publishDir "${params.output}/${task.process}", mode: 'copy', pattern: "*_metrics.json"
+
     input:
     tuple val(slice_id), path(image)
 
     output:
-    tuple val(slice_id), path("slice_z${slice_id}_normalize.ome.zarr")
+    tuple val(slice_id), path("slice_z${slice_id}_normalize.ome.zarr"), emit: normalized
+    path("*_metrics.json"), optional: true, emit: metrics
 
     script:
     def script_name = params.use_gpu ? "linum_normalize_intensities_per_slice_gpu.py" : "linum_normalize_intensities_per_slice.py"
@@ -546,6 +564,7 @@ process create_registration_masks {
     output:
     path("mask_slice_z${slice_id}.ome.zarr"), emit: masks
     path("mask_slice_z${slice_id}_preview.png"), optional: true, emit: previews
+    path("*_metrics.json"), optional: true, emit: metrics
 
     script:
     def script_name = params.use_gpu ? "linum_create_masks_gpu.py" : "linum_create_masks.py"
@@ -603,7 +622,8 @@ process stack_motor {
     tuple path("slices/*"), path(shifts_file), path("transforms/*"), val(subject_name), val(slice_ids_str)
 
     output:
-    tuple path("${subject_name}.ome.zarr"), path("${subject_name}.ome.zarr.zip"), path("${subject_name}.png"), path("${subject_name}_annotated.png")
+    tuple path("${subject_name}.ome.zarr"), path("${subject_name}.ome.zarr.zip"), path("${subject_name}.png"), path("${subject_name}_annotated.png"), emit: volume
+    path("*_metrics.json"), optional: true, emit: metrics
 
     script:
     def options = ""
@@ -675,7 +695,8 @@ process stack {
     tuple path("mosaics/*"), path("transforms/*"), val(subject_name), val(slice_ids_str)
 
     output:
-    tuple path("${subject_name}.ome.zarr"), path("${subject_name}.ome.zarr.zip"), path("${subject_name}.png"), path("${subject_name}_annotated.png")
+    tuple path("${subject_name}.ome.zarr"), path("${subject_name}.ome.zarr.zip"), path("${subject_name}.png"), path("${subject_name}_annotated.png"), emit: volume
+    path("*_metrics.json"), optional: true, emit: metrics
 
     script:
     def options = ""
@@ -1022,8 +1043,8 @@ workflow {
     } else {
         generate_aip(illum_fixed)
         estimate_xy_transformation(generate_aip.out)
-        stitch_3d(illum_fixed.combine(estimate_xy_transformation.out, by: 0))
-        stitched_slices = stitch_3d.out
+        stitch_3d(illum_fixed.combine(estimate_xy_transformation.out.transform, by: 0))
+        stitched_slices = stitch_3d.out.stitched
     }
 
     if (params.stitch_preview) {
@@ -1032,11 +1053,11 @@ workflow {
 
     // Stage 3: Corrections
     beam_profile_correction(stitched_slices)
-    crop_interface(beam_profile_correction.out)
-    normalize(crop_interface.out)
+    crop_interface(beam_profile_correction.out.corrected)
+    normalize(crop_interface.out.cropped)
 
     // Stage 4: Common Space Alignment
-    common_space_input = normalize.out
+    common_space_input = normalize.out.normalized
         .toSortedList { a, b -> a[0] <=> b[0] }
         .flatten()
         .collate(2)
@@ -1151,7 +1172,7 @@ workflow {
             }
 
         stack_motor(motor_stack_input)
-        stack_output = stack_motor.out
+        stack_output = stack_motor.out.volume
         stack_metadata = motor_stack_input.map { slices, shifts, transforms, name, ids_str ->
             tuple(name, ids_str.split(',').size(), ids_str)
         }
@@ -1170,7 +1191,7 @@ workflow {
             }
 
         stack(stack_input)
-        stack_output = stack.out
+        stack_output = stack.out.volume
         stack_metadata = stack_input.map { slices, transforms, name, ids_str ->
             tuple(name, ids_str.split(',').size(), ids_str)
         }
@@ -1232,7 +1253,7 @@ workflow {
             log.warn "  The transform IS motor positions, so no dilation will be detected."
         } else {
             log.info "Running tile dilation analysis..."
-            dilation_input_diag = illum_fixed.combine(estimate_xy_transformation.out, by: 0)
+            dilation_input_diag = illum_fixed.combine(estimate_xy_transformation.out.transform, by: 0)
             analyze_tile_dilation(dilation_input_diag)
 
             if (params.diagnostic_mode) {
@@ -1249,7 +1270,7 @@ workflow {
     }
 
     if (runMotorOnlyStack) {
-        motor_only_stack_input = normalize.out
+        motor_only_stack_input = normalize.out.normalized
             .map { slice_id, file -> file }
             .collect()
         stack_motor_only(motor_only_stack_input, shifts_xy)
