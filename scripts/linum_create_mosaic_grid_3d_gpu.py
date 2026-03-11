@@ -166,8 +166,6 @@ def _resize_and_write_shard(proc_params: dict, loaded_tiles: list):
     Separated from disk I/O so that _run_pipelined can overlap loading the
     next shard with GPU work on the current one.
     """
-    global _USE_GPU
-
     mosaic = proc_params['mosaic']
     shard_shape = proc_params['shard_shape']
     tiles_params = proc_params['params']
