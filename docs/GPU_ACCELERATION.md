@@ -70,7 +70,7 @@ These exact versions are only available in **specific pinned versions** of the `
 
 ```bash
 # Run the fix script - handles everything
-source scripts/fix_jax_cuda_plugin.sh
+source shell_scripts/fix_jax_cuda_plugin.sh
 ```
 
 This script:
@@ -240,7 +240,7 @@ linum_gpu_info.py
 
 ```bash
 # Run the fix script
-source scripts/fix_jax_cuda_plugin.sh
+source shell_scripts/fix_jax_cuda_plugin.sh
 
 # Or check diagnostics
 linum_diagnose_pipeline.py --debug-cuda

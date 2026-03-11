@@ -13,8 +13,10 @@ The linumpy library provides Python modules for microscopy data processing. This
 
 ```
 linumpy/
+├── _thread_config.py      # CPU thread management
 ├── __init__.py
 ├── io/                    # Input/Output modules
+├── gpu/                   # GPU acceleration modules
 ├── microscope/            # Microscope-specific modules
 ├── preproc/               # Preprocessing modules
 ├── psf/                   # Point spread function
@@ -251,6 +253,23 @@ The galvo mirror in OCT systems can cause horizontal banding artifacts when the 
 - Validates using peak dominance, boundary gradient ranking, and intensity contrast
 - Default threshold: 0.6 (configurable via `galvo_threshold` parameter)
 
+### resampling.py - Mosaic Grid Resampling
+
+Resample mosaic grid volumes to a target isotropic resolution, processing tile-by-tile to avoid loading the full volume into memory.
+
+```python
+from linumpy.preproc.resampling import resample_mosaic_grid
+
+# Resample to 10 µm isotropic
+resample_mosaic_grid(
+    vol,                # Dask/Zarr array with chunk structure (Z, nx*h, ny*w)
+    source_res,         # Source resolution (res_z, res_y, res_x)
+    target_res_um=10.0, # Target isotropic resolution in µm
+    n_levels=5,         # Number of output pyramid levels
+    out_path="output.ome.zarr"
+)
+```
+
 ---
 
 ## PSF Module (`linumpy.psf`)
@@ -329,6 +348,54 @@ from linumpy.stitching.topology import (
     build_topology_graph,
     find_optimal_path
 )
+```
+
+### motor.py - Motor-Position Tile Placement
+
+Compute tile pixel positions from motor grid geometry (regular grid with configurable overlap, scale, and rotation).
+
+```python
+from linumpy.stitching.motor import compute_motor_positions
+
+positions, step_y, step_x = compute_motor_positions(
+    nx=3,                   # Number of tiles in X
+    ny=3,                   # Number of tiles in Y
+    tile_shape=(100, 512, 512),
+    overlap_fraction=0.2,
+    scale_factor=1.0,       # Scale step size (default: no scaling)
+    rotation_deg=0.0        # Global grid rotation
+)
+# positions: list of (row_pos, col_pos) pixel positions
+```
+
+### stacking.py - 3D Slice Stacking Utilities
+
+Z-overlap detection between consecutive slices using normalized cross-correlation.
+
+```python
+from linumpy.stitching.stacking import find_z_overlap
+
+best_overlap, best_corr = find_z_overlap(
+    fixed_vol,               # Bottom (fixed) slice volume (Z, Y, X)
+    moving_vol,              # Top (moving) slice volume (Z, Y, X)
+    slicing_interval_mm=0.05,
+    search_range_mm=0.1,
+    resolution_um=3.5
+)
+# best_overlap: optimal overlap in Z voxels
+# best_corr: correlation score at optimal overlap
+```
+
+### interpolation.py - Missing Slice Interpolation
+
+Compute the affine transform halfway between two images for morphing-based slice interpolation.
+
+```python
+from linumpy.stitching.interpolation import compute_half_affine_transform
+
+half_transform = compute_half_affine_transform(full_transform)
+# full_transform: sitk.Transform from image A to image B
+# Returns: sitk.AffineTransform representing half the transformation
 ```
 
 ### manual_registration.py - Manual Registration
@@ -481,6 +548,98 @@ summary = compute_summary_statistics(aggregated['pairwise_registration'])
 | `rms_residual` | 5.0 | 15.0 | No |
 | `z_offset_std` | 10.0 | 25.0 | No |
 | `z_offset_range` | 15.0 | 30.0 | No |
+
+### shifts.py - XY Shift Utilities
+
+Load and process XY shift CSV files for inter-slice alignment.
+
+```python
+from linumpy.utils.shifts import load_shifts_csv, detect_shift_units
+
+# Load shifts and compute cumulative positions
+cumsum, all_ids = load_shifts_csv("shifts_xy.csv")
+# cumsum: {slice_id: (cumulative_dx_mm, cumulative_dy_mm)}
+# all_ids: sorted list of all slice IDs
+
+# Detect resolution units (mm vs µm)
+res_x_um, res_y_um = detect_shift_units(resolution)
+```
+
+### orientation.py - Volume Orientation
+
+Parse 3-letter orientation codes and compute axis permutations/flips for RAS alignment.
+
+```python
+from linumpy.utils.orientation import parse_orientation_code
+
+# Parse orientation for RAS alignment
+axis_permutation, axis_flips = parse_orientation_code('PIR')
+# axis_permutation: source indices for each target dimension
+# axis_flips: +1 (keep) or -1 (flip) per axis after permutation
+
+# Example: PIR → (1, 2, 0), (-1, 1, -1)
+# Example: SRA → (0, 1, 2), (1, 1, 1)  # identity
+```
+
+**Supported letters:** R/L (Right/Left), A/P (Anterior/Posterior), S/I (Superior/Inferior)
+
+### image_quality.py - Image Quality Assessment
+
+CPU-based image quality metrics for slice analysis.
+
+```python
+from linumpy.utils.image_quality import (
+    compute_ssim_2d,
+    compute_ssim_3d,
+    compute_edge_score,
+    compute_variance_score,
+    assess_slice_quality,
+)
+
+# Compare two 3D volumes
+ssim = compute_ssim_3d(vol1, vol2)
+
+# Assess overall quality of a slice relative to its neighbors
+quality, metrics = assess_slice_quality(
+    vol,        # The slice to assess
+    vol_before, # Previous slice
+    vol_after   # Next slice
+)
+# quality: float in [0, 1]
+# metrics: dict with ssim, edge_score, variance_score, etc.
+```
+
+For GPU-accelerated versions see `linumpy.gpu.image_quality`.
+
+### visualization.py - Orthogonal View Screenshots
+
+Save orthogonal (XY, XZ, YZ) views of a 3D volume as a figure.
+
+```python
+from linumpy.utils.visualization import save_orthogonal_views, save_annotated_views
+
+# Basic orthogonal view
+save_orthogonal_views(
+    image,              # 3D volume (Z, X, Y)
+    "view.png",
+    z_slice=None,       # Default: center
+    x_slice=None,
+    y_slice=None,
+    cmap='magma',
+    percentile_max=99.9
+)
+
+# Annotated view with Z-slice index labels
+save_annotated_views(
+    image,
+    "annotated_view.png",
+    n_slices=50,        # Number of input slices (for label spacing)
+    slice_ids=None,     # Optional explicit slice IDs
+    font_size=7,
+    label_every=1,
+    show_lines=False
+)
+```
 
 ---
 

@@ -209,10 +209,10 @@ python scripts/linum_diagnose_pipeline.py --benchmark
 python scripts/linum_diagnose_pipeline.py --output diagnosis.json
 ```
 
-### 2. `diagnose_server.sh`
-Bash script for quick server verification:
+### 2. Server Checks
+Quick server verification commands:
 ```bash
-bash scripts/diagnose_server.sh
+nproc && nvidia-smi && python -c "import cupy; print('CuPy OK')"
 ```
 
 ---

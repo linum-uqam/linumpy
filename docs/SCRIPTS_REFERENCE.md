@@ -123,6 +123,19 @@ Create all 2D mosaic grids from a tiles directory.
 linum_create_all_mosaic_grids_2d.py <tiles_dir> <output_dir>
 ```
 
+### linum_generate_mosaic_aips.py
+
+Generate AIP (Average Intensity Projection) PNG previews from a directory of mosaic grid OME-Zarr files. Useful for quick QC visualization of all slices at once.
+
+```bash
+linum_generate_mosaic_aips.py <mosaics_dir> <output_dir> \
+    [--level <pyramid_level>]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--level` | `0` | Pyramid level to use (higher = faster, lower resolution) |
+
 ### linum_resample_mosaic_grid.py
 
 Resample mosaic grid to different resolution.
@@ -516,6 +529,34 @@ linum_create_masks.py <input.ome.zarr> <output.ome.zarr> \
 - `--n_levels`: Number of pyramid levels (default: matches input image)
 - `--preview`: Path to save a preview PNG for visual verification
 
+### linum_register_pairwise.py
+
+Perform pairwise registration between consecutive slices to compute small rotation and Z-overlap corrections. This is the primary registration script used by the motor-based reconstruction pipeline. It **does not** compute large XY translations (those are handled by motor positions from `shifts_xy.csv`).
+
+Two outputs are produced per pair:
+- `transform.tfm`: SimpleITK transform (rotation + sub-pixel translation)
+- `offsets.txt`: Z-index correspondence between fixed and moving slices
+- `metrics.json`: Registration quality metrics
+
+```bash
+linum_register_pairwise.py <fixed.ome.zarr> <moving.ome.zarr> <output_dir> \
+    [--slicing_interval_mm <mm>] \
+    [--search_range_mm <mm>] \
+    [--robustness {0,1,2}] \
+    [--use_mask] \
+    [--mask_dir <dir>]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--slicing_interval_mm` | `0.05` | Expected physical slice thickness in mm |
+| `--search_range_mm` | `0.1` | Z search range around expected overlap |
+| `--robustness` | `1` | Robustness level: 0=fast, 1=balanced, 2=thorough |
+| `--use_mask` | off | Use tissue masks to focus registration on tissue regions |
+| `--mask_dir` | — | Directory containing mask OME-Zarr files |
+
+---
+
 ### linum_align_to_ras.py
 
 Align a 3D brain volume to RAS orientation by rigid registration to the Allen Mouse Brain Atlas (CCF). The result is an OME-Zarr at all pyramid resolutions in RAS space.
@@ -591,6 +632,48 @@ linum_generate_slice_config.py <tiles_dir> <output.csv> --from_tiles \
 ## Diagnostics
 
 Scripts for troubleshooting reconstruction artifacts. These are typically invoked by the pipeline's diagnostic mode but can also be run standalone.
+
+### linum_analyze_shifts.py
+
+Analyze XY shifts from a shifts file and generate a drift analysis report with summary statistics, outlier detection, and cumulative drift visualization.
+
+```bash
+linum_analyze_shifts.py <shifts_xy.csv> <output_dir> \
+    [--resolution <um>] \
+    [--iqr_multiplier <mult>] \
+    [--slice_config <config.csv>]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--resolution` | `10.0` | Resolution in µm/pixel (for mm → pixel conversion) |
+| `--iqr_multiplier` | `1.5` | IQR multiplier for outlier detection |
+| `--slice_config` | — | Optional slice config CSV to filter slices |
+
+### linum_assess_slice_quality.py
+
+Assess mosaic grid slice quality and optionally create or update a slice configuration file. Uses SSIM, edge preservation, and variance consistency metrics.
+
+```bash
+linum_assess_slice_quality.py <mosaics_dir> <output_slice_config.csv> \
+    [--min_quality <0.0-1.0>] \
+    [--exclude_first <n>] \
+    [--update_existing]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--min_quality` | Automatically exclude slices below this quality score |
+| `--exclude_first` | Exclude the first N calibration slices |
+| `--update_existing` | Update an existing slice config with quality info |
+
+### linum_assess_slice_quality_gpu.py
+
+GPU-accelerated version of `linum_assess_slice_quality.py` (3-8x speedup). Accepts the same arguments plus `--use_gpu / --no-use_gpu`.
+
+```bash
+linum_assess_slice_quality_gpu.py <mosaics_dir> <output_slice_config.csv> [options]
+```
 
 ### linum_analyze_registration_transforms.py
 
@@ -698,6 +781,31 @@ Generate screenshot from OME-Zarr.
 linum_screenshot_omezarr.py <input.ome.zarr> <output.png>
 ```
 
+### linum_screenshot_omezarr_annotated.py
+
+Generate annotated orthogonal view screenshots from an OME-Zarr volume. Adds Z-slice index labels to the coronal and sagittal views so each input slice can be easily identified in the reconstruction.
+
+```bash
+linum_screenshot_omezarr_annotated.py <input.ome.zarr> <output.png> \
+    [--x_slice <idx>] \
+    [--y_slice <idx>] \
+    [--n_slices <n>] \
+    [--slice_ids <id1,id2,...>] \
+    [--font_size <size>] \
+    [--label_every <n>] \
+    [--show_lines]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--x_slice` | center | X-axis slice index for ZY view |
+| `--y_slice` | center | Y-axis slice index for ZX view |
+| `--n_slices` | auto | Number of input slices (auto-detected from OME-Zarr metadata) |
+| `--slice_ids` | — | Comma-separated actual slice IDs (e.g. `05,12,18`) |
+| `--font_size` | `7` | Font size for slice labels |
+| `--label_every` | `1` | Label every Nth slice |
+| `--show_lines` | off | Draw horizontal lines at slice boundaries |
+
 ### linum_generate_pipeline_report.py
 
 Generate a quality report from pipeline metrics. Aggregates metrics JSON files from all processing steps and produces an HTML or text report.
@@ -729,6 +837,20 @@ linum_generate_pipeline_report.py <pipeline_output_dir> report.html --title "My 
 
 ## Utilities
 
+
+### linum_extract_pyramid_levels.py
+
+Extract one or more pyramid levels from an OME-Zarr volume and save as NIfTI files. Useful for exporting analysis-specific resolutions without converting the full volume.
+
+```bash
+# List available pyramid levels
+linum_extract_pyramid_levels.py <input.ome.zarr> --list
+
+# Extract specific levels
+linum_extract_pyramid_levels.py <input.ome.zarr> 0 2
+```
+
+Output files are named `<zarr_stem>_level<N>_<resolution>.nii.gz` and saved next to the input.
 
 ### linum_resample.py
 
@@ -924,6 +1046,36 @@ linum_create_mosaic_grid_3d_gpu.py <output.ome.zarr> --from_tiles_list <tiles> [
 | `--galvo_threshold` | Galvo detection threshold (default: 0.6) |
 | `--use_gpu/--no-use_gpu` | Enable/disable GPU |
 
+### linum_normalize_intensities_per_slice_gpu.py
+
+GPU-accelerated normalization of intensities per slice (4-10x speedup).
+
+```bash
+linum_normalize_intensities_per_slice_gpu.py <input.ome.zarr> <output.ome.zarr> \
+    [--percentile_max <pmax>] \
+    [--use_gpu/--no-use_gpu]
+```
+
+### linum_fix_illumination_3d_gpu.py
+
+GPU-accelerated illumination correction using BaSiCPy on JAX (2-5x speedup). Requires JAX GPU setup — see [GPU_ACCELERATION.md](GPU_ACCELERATION.md#jax-gpu-for-basicpy-fix_illumination).
+
+```bash
+linum_fix_illumination_3d_gpu.py <input.ome.zarr> <output.ome.zarr> \
+    [--n_processes <n>] \
+    [--use_gpu/--no-use_gpu]
+```
+
+### linum_generate_mosaic_aips_gpu.py
+
+GPU-accelerated version of `linum_generate_mosaic_aips.py`. Note: mean projection offers no genuine speedup (≤1x); this script is provided for pipeline consistency.
+
+```bash
+linum_generate_mosaic_aips_gpu.py <mosaics_dir> <output_dir> \
+    [--level <pyramid_level>] \
+    [--use_gpu/--no-use_gpu]
+```
+
 ### GPU Script Comparison
 
 | GPU Script | CPU Equivalent | Accelerated Operations |
@@ -931,8 +1083,13 @@ linum_create_mosaic_grid_3d_gpu.py <output.ome.zarr> --from_tiles_list <tiles> [
 | `linum_estimate_transform_gpu.py` | `linum_estimate_transform.py` | FFT (9-47x), phase correlation (8-16x) |
 | `linum_create_masks_gpu.py` | `linum_create_masks.py` | Gaussian filter (7-20x), binary morphology (7-67x) |
 | `linum_create_mosaic_grid_3d_gpu.py` | `linum_create_mosaic_grid_3d.py` | Resize (5-12x) |
+| `linum_resample_mosaic_grid_gpu.py` | `linum_resample_mosaic_grid.py` | Resize (5-12x) |
+| `linum_normalize_intensities_per_slice_gpu.py` | `linum_normalize_intensities_per_slice.py` | Normalization (4-10x) |
+| `linum_fix_illumination_3d_gpu.py` | `linum_fix_illumination_3d.py` | BaSiCPy via JAX (2-5x) |
+| `linum_assess_slice_quality_gpu.py` | `linum_assess_slice_quality.py` | SSIM, morphology (3-8x) |
+| `linum_generate_mosaic_aips_gpu.py` | `linum_generate_mosaic_aips.py` | AIP mean projection (≤1x) |
 
-*Note: `linum_aip_gpu.py` was removed because mean projection is faster on CPU (0.5x speedup = GPU is 2x slower).*
+*Note: `linum_aip_gpu.py` exists but offers no speedup for mean projection (0.5x = GPU is 2x slower due to transfer overhead). Use `linum_aip_png.py` or `linum_generate_mosaic_aips.py` instead.*
 
 ---
 
