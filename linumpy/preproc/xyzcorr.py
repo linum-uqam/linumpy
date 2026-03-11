@@ -926,36 +926,30 @@ def _compute_dark_band_confidence(aip: np.ndarray, boundary_pos: int,
     if before_end <= before_start or after_end <= after_start:
         return 0.0
 
-    # Check intensity drop consistency across B-scan columns
+    # Check intensity drop consistency across B-scan columns (vectorized)
     n_check = min(n_bscans, 20)
     column_indices = np.linspace(0, n_bscans - 1, n_check, dtype=int)
 
-    drop_count = 0
-    significant_drops = 0
-    total_drop = 0.0
-    valid_cols = 0
+    cols = aip[:, column_indices]  # (n_alines, n_check)
+    before_vals = cols[before_start:before_end, :].mean(axis=0)
+    galvo_vals = cols[boundary_pos:boundary_end, :].mean(axis=0)
+    after_vals = cols[after_start:after_end, :].mean(axis=0)
+    surrounding = (before_vals + after_vals) / 2
 
-    for col_idx in column_indices:
-        col = aip[:, col_idx]
-
-        before_val = np.mean(col[before_start:before_end])
-        galvo_val = np.mean(col[boundary_pos:boundary_end])
-        after_val = np.mean(col[after_start:after_end])
-        surrounding = (before_val + after_val) / 2
-
-        if surrounding < 10:  # Skip background columns
-            continue
-
-        valid_cols += 1
-        if galvo_val < surrounding:
-            drop_count += 1
-            rel_drop = (surrounding - galvo_val) / surrounding
-            total_drop += rel_drop
-            if rel_drop > 0.10:
-                significant_drops += 1
+    valid_mask = surrounding >= 10
+    valid_cols = int(np.sum(valid_mask))
 
     if valid_cols == 0:
         return 0.0
+
+    surrounding_v = surrounding[valid_mask]
+    galvo_v = galvo_vals[valid_mask]
+
+    drop_mask = galvo_v < surrounding_v
+    drop_count = int(np.sum(drop_mask))
+    rel_drops = np.where(drop_mask, (surrounding_v - galvo_v) / surrounding_v, 0.0)
+    total_drop = float(np.sum(rel_drops))
+    significant_drops = int(np.sum(rel_drops > 0.10))
 
     # Score: consistency of dark band across columns
     consistency = drop_count / valid_cols

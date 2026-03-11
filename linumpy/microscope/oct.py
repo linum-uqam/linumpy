@@ -84,25 +84,25 @@ class OCT:
         n_z = self.info["bottom_z"] - self.info["top_z"] + 1
 
         # Load the fringe
-        files = list(self.directory.rglob("image_*.bin"))
+        files = list(self.directory.glob("image_*.bin"))
         files.sort()
-        vol = None
+        chunks = []
         for file in files:
             with open(file, "rb") as f:
                 foo = np.fromfile(f, dtype=np.float32)
             n_frames = int(len(foo) / (n_alines_per_bscan * n_z))
             foo = np.reshape(foo, (n_z, n_alines_per_bscan, n_frames), order='F')
-            if vol is None:
-                vol = foo
-            else:
-                vol = np.concatenate((vol, foo), axis=2)
+            chunks.append(foo)
+        vol = np.concatenate(chunks, axis=2) if len(chunks) > 1 else chunks[0]
 
         # Compensate camera shift (required for old acquisitions on polymtl server)
+        aip = None  # cache for vol.mean(axis=0)
         if fix_camera_shift:
-            img = vol.mean(axis=0)
-            pix_max = np.where(img == img.max())
+            aip = vol.mean(axis=0)
+            pix_max = np.where(aip == aip.max())
             cam_shift = pix_max[0][0]
             vol = np.roll(vol, -cam_shift, axis=1)
+            aip = None  # vol was modified; cache is stale
 
             # Replace the saturated pixel value by its neighbor
             vol[:, 0, 0] = vol[:, 1, 0]
@@ -113,8 +113,10 @@ class OCT:
             if n_extra == 0:
                 warnings.warn("Cannot estimate the shift correction as there are no extra a-lines in the file.")
             else:
+                if aip is None:
+                    aip = vol.mean(axis=0)
                 shift, confidence = xyzcorr.detect_galvo_shift(
-                    vol.mean(axis=0), n_pixel_return=n_extra
+                    aip, n_pixel_return=n_extra
                 )
                 # Only apply fix if confidence is high enough (galvo shift is likely present)
                 if confidence >= 0.5:

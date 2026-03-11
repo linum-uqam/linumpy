@@ -134,61 +134,45 @@ def resize(image, output_shape, order=1, anti_aliasing=True, use_gpu=True):
 
 
 def _resize_gpu(image, output_shape, order, anti_aliasing):
-    """GPU implementation of resize using affine transformation."""
+    """GPU implementation of resize using zoom."""
     import cupy as cp
-    from cupyx.scipy.ndimage import affine_transform as cp_affine
+    from cupyx.scipy.ndimage import zoom as cp_zoom
     from cupyx.scipy.ndimage import gaussian_filter as cp_gaussian
 
-    img_gpu = cp.asarray(image.astype(np.float32))
+    img_gpu = cp.asarray(image if image.dtype == np.float32 else image.astype(np.float32))
 
-    # Compute scale factors
+    # Scale factors: input/output for Gaussian sigma, output/input for zoom.
     scale_factors = tuple(i / o for i, o in zip(image.shape, output_shape))
+    zoom_factors = tuple(o / i for i, o in zip(image.shape, output_shape))
 
-    # Anti-aliasing for downsampling
+    # Anti-aliasing: single fused Gaussian call with per-axis sigma vector,
+    # replacing N sequential per-axis kernel launches.
     if anti_aliasing:
-        for axis, factor in enumerate(scale_factors):
-            if factor > 1:
-                # Apply Gaussian blur before downsampling
-                sigma = (factor - 1) / 2
-                # Create per-axis sigma
-                sigmas = [0] * img_gpu.ndim
-                sigmas[axis] = sigma
-                img_gpu = cp_gaussian(img_gpu, sigma=sigmas)
+        sigmas = [(f - 1) / 2 if f > 1 else 0.0 for f in scale_factors]
+        if any(s > 0 for s in sigmas):
+            img_gpu = cp_gaussian(img_gpu, sigma=sigmas)
 
-    # Create transformation matrix (scaling)
-    ndim = img_gpu.ndim
-    matrix = np.diag(list(scale_factors) + [1.0])[:ndim, :ndim]
-    matrix_gpu = cp.asarray(matrix.astype(np.float32))
-
-    result = cp_affine(img_gpu, matrix_gpu, output_shape=output_shape, order=order)
+    result = cp_zoom(img_gpu, zoom_factors, order=order)
 
     return to_cpu(result)
 
 
 def _resize_cpu(image, output_shape, order, anti_aliasing):
-    """CPU fallback for resize using affine transformation."""
-    from scipy.ndimage import affine_transform as scipy_affine
+    """CPU fallback for resize using zoom."""
+    from scipy.ndimage import zoom as scipy_zoom
     from scipy.ndimage import gaussian_filter as scipy_gaussian
 
-    img = image.astype(np.float32)
+    img = image if image.dtype == np.float32 else image.astype(np.float32)
 
-    # Compute scale factors
     scale_factors = tuple(i / o for i, o in zip(image.shape, output_shape))
+    zoom_factors = tuple(o / i for i, o in zip(image.shape, output_shape))
 
-    # Anti-aliasing for downsampling
     if anti_aliasing:
-        for axis, factor in enumerate(scale_factors):
-            if factor > 1:
-                sigma = (factor - 1) / 2
-                sigmas = [0] * img.ndim
-                sigmas[axis] = sigma
-                img = scipy_gaussian(img, sigma=sigmas)
+        sigmas = [(f - 1) / 2 if f > 1 else 0.0 for f in scale_factors]
+        if any(s > 0 for s in sigmas):
+            img = scipy_gaussian(img, sigma=sigmas)
 
-    # Create transformation matrix (scaling)
-    ndim = img.ndim
-    matrix = np.diag(list(scale_factors) + [1.0])[:ndim, :ndim]
-
-    return scipy_affine(img, matrix, output_shape=output_shape, order=order)
+    return scipy_zoom(img, zoom_factors, order=order)
 
 
 def apply_displacement_field(image, displacement_field, use_gpu=True):
