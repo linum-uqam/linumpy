@@ -31,7 +31,7 @@ process create_mosaic_grid {
 }
 
 process generate_aip {
-    publishDir "$params.output/aips", mode: 'copy'
+    publishDir "$params.output/aips", mode: 'move'
 
     input:
         tuple val(slice_id), path(mosaic_grid)
@@ -46,8 +46,8 @@ process generate_aip {
 }
 
 process generate_mosaic_preview {
-    publishDir "$params.output/previews", mode: 'copy'
-
+    publishDir "$params.output/previews", mode: 'move'
+    
     input:
         tuple val(slice_id), path(mosaic_grid)
     output:
@@ -134,16 +134,9 @@ workflow {
         generate_aip(create_mosaic_grid.out)
     }
 
-    // [Optional] Generate orthogonal view previews of mosaic grids.
-    // collect() waits for ALL mosaics to be written before the first screenshot
-    // starts, so reads don't compete with ongoing zarr writes.  maxForks 1 in
-    // the process then keeps the screenshots sequential.
+    // [Optional] Generate orthogonal view previews of mosaic grids
     if (params.generate_previews) {
-        generate_mosaic_preview(
-            create_mosaic_grid.out
-                .collect()       // barrier: wait for every slice
-                .flatMap { it }  // re-emit individually for sequential processing
-        )
+        generate_mosaic_preview(create_mosaic_grid.out)
     }
 
     // Estimate XY shifts from metadata
