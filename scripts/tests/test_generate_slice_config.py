@@ -21,16 +21,16 @@ def test_from_shifts_file(script_runner, tmp_path):
         writer.writerow([2, 3, 12, 7, 0.012, 0.007])
     
     output = tmp_path / 'slice_config.csv'
-    ret = script_runner.run(['linum_generate_slice_config.py', str(shifts_file), 
-                             str(output), '--from_shifts'])
+    ret = script_runner.run(['linum_generate_slice_config.py', str(shifts_file),
+                             str(output), '--from_shifts', '--exclude_first', '0'])
     assert ret.success
     assert output.exists()
-    
+
     # Verify the content
     with open(output, 'r') as f:
         reader = csv.DictReader(f)
         rows = list(reader)
-    
+
     assert len(rows) == 4  # slices 0, 1, 2, 3
     for row in rows:
         assert row['use'] == 'true'
@@ -49,8 +49,9 @@ def test_from_shifts_file_with_exclude(script_runner, tmp_path):
         writer.writerow([2, 3, 12, 7, 0.012, 0.007])
     
     output = tmp_path / 'slice_config.csv'
-    ret = script_runner.run(['linum_generate_slice_config.py', str(shifts_file), 
-                             str(output), '--from_shifts', '--exclude', '1', '2'])
+    ret = script_runner.run(['linum_generate_slice_config.py', str(shifts_file),
+                             str(output), '--from_shifts', '--exclude_first', '0',
+                             '--exclude', '1', '2'])
     assert ret.success
     assert output.exists()
     
