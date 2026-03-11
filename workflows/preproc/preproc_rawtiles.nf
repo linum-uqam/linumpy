@@ -26,7 +26,7 @@ process create_mosaic_grid {
     String script_name = params.use_gpu ? "linum_create_mosaic_grid_3d_gpu.py" : "linum_create_mosaic_grid_3d.py"
     String gpu_opts = params.use_gpu ? "--use_gpu --galvo_threshold ${params.galvo_confidence_threshold}" : ""
     """
-    ${script_name} mosaic_grid_3d_z${slice_id}.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution} --n_levels 0 --sharding_factor ${params.sharding_factor} ${options} ${gpu_opts}
+    ${script_name} mosaic_grid_3d_z${slice_id}.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution} --sharding_factor ${params.sharding_factor} ${options} ${gpu_opts}
     """
 }
 

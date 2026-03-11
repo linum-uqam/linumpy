@@ -44,8 +44,6 @@ def _build_arg_parser():
                            help="Slice to process.")
     options_g.add_argument("--keep_galvo_return", action="store_true",
                            help="Keep the galvo return signal [%(default)s]")
-    options_g.add_argument('--n_levels', type=int, default=5,
-                           help='Number of levels in pyramid representation.')
     options_g.add_argument('--zarr_root',
                            help='Path to parent directory under which the zarr'
                                 ' temporary directory will be created [/tmp/].')
@@ -330,7 +328,7 @@ def main():
             process_tile(p)
 
     # Convert to ome-zarr
-    writer.finalize(output_resolution, args.n_levels)
+    writer.finalize(output_resolution, 0)
 
 
 if __name__ == "__main__":
