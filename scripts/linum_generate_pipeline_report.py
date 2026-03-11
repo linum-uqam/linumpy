@@ -283,9 +283,243 @@ def generate_sparkline_svg(values: list, statuses: Optional[List[str]] = None,
     )
 
 
+def generate_trend_line_svg(values: list, labels: Optional[List[str]] = None,
+                            width: int = 420, height: int = 90,
+                            show_trend: bool = True,
+                            color: str = '#4a90d9') -> str:
+    """Generate an inline SVG line chart for cross-slice trend visualisation."""
+    numeric = [(i, float(v)) for i, v in enumerate(values) if isinstance(v, (int, float))]
+    if len(numeric) < 2:
+        return ''
+
+    xs = [p[0] for p in numeric]
+    ys = [p[1] for p in numeric]
+    min_y, max_y = min(ys), max(ys)
+    y_range = max_y - min_y or 1.0
+    pad_x, pad_y = 30, 10
+
+    def to_svg_x(i):
+        return pad_x + (i / (len(values) - 1)) * (width - 2 * pad_x)
+
+    def to_svg_y(v):
+        return height - pad_y - ((v - min_y) / y_range) * (height - 2 * pad_y)
+
+    # Build polyline points
+    pts = ' '.join(f"{to_svg_x(i):.1f},{to_svg_y(v):.1f}" for i, v in numeric)
+
+    elements = [
+        f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="1.5" stroke-opacity="0.85"/>',
+    ]
+
+    # Dots at each data point
+    for i, v in numeric:
+        elements.append(
+            f'<circle cx="{to_svg_x(i):.1f}" cy="{to_svg_y(v):.1f}" r="2" '
+            f'fill="{color}" opacity="0.7"/>'
+        )
+
+    # Trend line (least squares)
+    if show_trend and len(xs) >= 3:
+        x_arr = np.array(xs, dtype=float)
+        y_arr = np.array(ys, dtype=float)
+        slope = (np.mean(x_arr * y_arr) - np.mean(x_arr) * np.mean(y_arr)) / (
+            np.mean(x_arr ** 2) - np.mean(x_arr) ** 2 + 1e-12)
+        intercept = np.mean(y_arr) - slope * np.mean(x_arr)
+        x0, x1 = xs[0], xs[-1]
+        y0, y1 = slope * x0 + intercept, slope * x1 + intercept
+        elements.append(
+            f'<line x1="{to_svg_x(x0):.1f}" y1="{to_svg_y(y0):.1f}" '
+            f'x2="{to_svg_x(x1):.1f}" y2="{to_svg_y(y1):.1f}" '
+            f'stroke="#e74c3c" stroke-width="1" stroke-dasharray="4 2" opacity="0.7"/>'
+        )
+
+    # Y-axis labels
+    elements.append(
+        f'<text x="{pad_x - 3}" y="{to_svg_y(max_y):.1f}" '
+        f'text-anchor="end" font-size="8" fill="#888">{max_y:.3g}</text>'
+    )
+    elements.append(
+        f'<text x="{pad_x - 3}" y="{to_svg_y(min_y):.1f}" '
+        f'text-anchor="end" font-size="8" fill="#888">{min_y:.3g}</text>'
+    )
+
+    title_text = f"n={len(numeric)}, range [{min_y:.3g}, {max_y:.3g}]"
+    return (
+        f'<svg width="{width}" height="{height}" '
+        f'style="display:block;" title="{title_text}">'
+        + ''.join(elements) + '</svg>'
+    )
+
+
+def compute_cross_slice_trends(aggregated: Dict[str, List[Dict]]) -> Dict:
+    """
+    Compute cross-slice aggregate trends from aggregated metrics.
+
+    Returns a dict with trend groups, each containing:
+      'label', 'description', 'series': [{name, values, unit}]
+    """
+    trends = {}
+
+    def _extract(metrics_list, key):
+        """Extract sorted numerical values for a given metric key."""
+        pairs = []
+        for m in metrics_list:
+            src = m.get('source_file', '')
+            val = m.get('metrics', {}).get(key, {}).get('value')
+            if isinstance(val, (int, float)):
+                pairs.append((src, val))
+        pairs.sort(key=lambda p: p[0])  # sort by source file path
+        return [v for _, v in pairs]
+
+    # XY tile transform: scale and shear across slices
+    if 'xy_transform_estimation' in aggregated:
+        ml = aggregated['xy_transform_estimation']
+        t00 = _extract(ml, 'transform_00')
+        t11 = _extract(ml, 'transform_11')
+        rms = _extract(ml, 'rms_residual')
+        acc_sys = _extract(ml, 'accumulated_systematic_error_px')
+        acc_rnd = _extract(ml, 'accumulated_random_error_px')
+        series = []
+        if t00:
+            series.append({'name': 'Step Y (px)', 'values': t00, 'unit': 'px'})
+        if t11:
+            series.append({'name': 'Step X (px)', 'values': t11, 'unit': 'px'})
+        if rms:
+            series.append({'name': 'RMS residual (px)', 'values': rms, 'unit': 'px'})
+        if acc_sys:
+            series.append({'name': 'Accum. systematic error (px)', 'values': acc_sys, 'unit': 'px'})
+        if acc_rnd:
+            series.append({'name': 'Accum. random error (px)', 'values': acc_rnd, 'unit': 'px'})
+        if series:
+            trends['xy_transform'] = {
+                'label': 'XY Tile Transform Consistency',
+                'description': ('Tile step sizes and fitting residuals across slices. '
+                                'Large variation indicates unstable tile positioning.'),
+                'series': series,
+            }
+
+    # Pairwise registration: cumulative drift
+    if 'pairwise_registration' in aggregated:
+        ml = aggregated['pairwise_registration']
+        tx = _extract(ml, 'translation_x')
+        ty = _extract(ml, 'translation_y')
+        rot = _extract(ml, 'rotation')
+        series = []
+        if tx:
+            cum_tx = list(np.cumsum(tx))
+            series.append({'name': 'Cumulative tx (px)', 'values': cum_tx, 'unit': 'px'})
+        if ty:
+            cum_ty = list(np.cumsum(ty))
+            series.append({'name': 'Cumulative ty (px)', 'values': cum_ty, 'unit': 'px'})
+        if rot:
+            cum_rot = list(np.cumsum(rot))
+            series.append({'name': 'Cumulative rotation (deg)', 'values': cum_rot, 'unit': 'deg'})
+        if series:
+            trends['registration_drift'] = {
+                'label': 'Cumulative Registration Drift',
+                'description': ('Accumulated translation and rotation across all slices. '
+                                'A large net drift indicates systematic 3D volume distortion.'),
+                'series': series,
+            }
+
+    # Interface depth trend
+    if 'crop_interface' in aggregated:
+        ml = aggregated['crop_interface']
+        depth = _extract(ml, 'detected_interface_depth_um')
+        if depth:
+            trends['interface_depth'] = {
+                'label': 'Interface Depth Trend',
+                'description': ('Detected tissue-agarose interface depth across slices. '
+                                'A systematic slope may indicate progressive tissue deformation.'),
+                'series': [{'name': 'Interface depth (µm)', 'values': depth, 'unit': 'µm'}],
+            }
+
+    # Background normalization drift
+    if 'normalize_intensities' in aggregated:
+        ml = aggregated['normalize_intensities']
+        bg = _extract(ml, 'mean_background')
+        if bg:
+            trends['background_drift'] = {
+                'label': 'Background Level Trend',
+                'description': ('Mean agarose background level across slices. '
+                                'A strong trend indicates illumination drift during acquisition.'),
+                'series': [{'name': 'Mean background', 'values': bg, 'unit': ''}],
+            }
+
+    return trends
+
+
 # =============================================================================
-# Image discovery and embedding
+# Diagnostic data discovery
 # =============================================================================
+
+def discover_diagnostic_data(input_dir: Path) -> Dict[str, dict]:
+    """
+    Discover diagnostic outputs in the pipeline output directory.
+
+    Looks for known diagnostic subdirectories and reads their JSON data.
+
+    Returns
+    -------
+    dict
+        Maps diagnostic_name → {'label', 'description', 'json_data': [...], 'images': [Path]}
+    """
+    import json as _json
+    diagnostics: Dict[str, dict] = {}
+
+    diag_dir = input_dir / 'diagnostics'
+    if not diag_dir.exists():
+        return diagnostics
+
+    # Define known diagnostics: (subdir, label, description)
+    known = [
+        ('dilation_analysis', 'Tile Dilation Analysis',
+         'Per-slice scale factors and mosaic positioning accuracy.'),
+        ('aggregated_dilation', 'Aggregated Dilation Analysis',
+         'Cross-slice tile dilation summary.'),
+        ('rotation_analysis', 'Rotation Drift Analysis',
+         'Rotation angle drift across slices.'),
+        ('acquisition_rotation', 'Acquisition Rotation Analysis',
+         'In-plane rotation estimated from acquisition metadata.'),
+        ('motor_only_stitch', 'Motor-Only Stitching (comparison)',
+         'Stitched mosaic using motor positions only (no registration correction).'),
+        ('motor_only_stack', 'Motor-Only Stack (comparison)',
+         'Volume stacked without pairwise registration (motor positions only).'),
+        ('stitch_comparison', 'Stitching Comparison',
+         'Side-by-side comparison of registration-based vs motor-based stitching.'),
+    ]
+
+    for subdir_name, label, description in known:
+        subdir = diag_dir / subdir_name
+        if not subdir.exists():
+            continue
+
+        json_data = []
+        images = []
+
+        # Collect all JSON files (recursively for per-slice diagnostics)
+        for json_file in sorted(subdir.rglob('*.json')):
+            try:
+                with open(json_file) as f:
+                    data = _json.load(f)
+                data['_source'] = str(json_file)
+                json_data.append(data)
+            except Exception:
+                pass
+
+        # Collect PNG images
+        for png_file in sorted(subdir.rglob('*.png')):
+            images.append(png_file)
+
+        if json_data or images:
+            diagnostics[subdir_name] = {
+                'label': label,
+                'description': description,
+                'json_data': json_data,
+                'images': images,
+            }
+
+    return diagnostics
 
 def discover_images(input_dir: Path,
                     overview_png: Optional[Path] = None,
@@ -294,10 +528,11 @@ def discover_images(input_dir: Path,
     Discover preview images in the pipeline output directory.
 
     Returns a dict mapping category → sorted list of image paths:
-      'overview'           – main volume screenshots (up to 2)
-      'stitch_preview'     – per-slice stitched previews
-      'mask_preview'       – per-slice mask previews
-      'common_space_preview' – common-space alignment previews
+      'overview'              – main volume screenshots (up to 2)
+      'stitch_preview'        – per-slice stitched previews
+      'mask_preview'          – per-slice mask previews
+      'common_space_preview'  – common-space alignment previews
+      'diag_*'                – images found in diagnostics/ subdirs
     """
     images: Dict[str, List[Path]] = {
         'overview': [],
@@ -335,6 +570,16 @@ def discover_images(input_dir: Path,
                 if pngs:
                     images['overview'] = pngs[:2]   # at most overview + annotated
                     break
+
+    # Diagnostic images: add one category per diagnostics subdir
+    diag_dir = input_dir / 'diagnostics'
+    if diag_dir.exists():
+        for subdir in sorted(diag_dir.iterdir()):
+            if subdir.is_dir():
+                pngs = sorted(subdir.rglob('*.png'))
+                if pngs:
+                    cat_key = f'diag_{subdir.name}'
+                    images[cat_key] = pngs
 
     return images
 
@@ -502,7 +747,9 @@ def generate_html_report(aggregated: Dict[str, List[Dict]],
                          images: Optional[Dict[str, List[Path]]] = None,
                          image_mode: str = 'embed',
                          max_overview_width: int = 900,
-                         max_thumb_width: int = 380) -> str:
+                         max_thumb_width: int = 380,
+                         trends: Optional[Dict] = None,
+                         diagnostics: Optional[Dict] = None) -> str:
     """Generate an HTML report from aggregated metrics."""
     aggregated = sort_steps(aggregated)
     images = images or {}
@@ -808,6 +1055,84 @@ def generate_html_report(aggregated: Dict[str, List[Dict]],
             margin-top: 4px;
             text-align: center;
         }}
+
+        /* Cross-slice trends section */
+        .trends-section {{
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .trends-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+            gap: 14px;
+            margin-top: 12px;
+        }}
+        .trend-card {{
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            overflow: hidden;
+        }}
+        .trend-card-header {{
+            background: #f8f9fa;
+            padding: 8px 12px;
+            font-weight: 600;
+            font-size: 0.9em;
+            color: #333;
+        }}
+        .trend-card-desc {{
+            font-size: 0.8em;
+            color: #666;
+            padding: 4px 12px 8px;
+        }}
+        .trend-series {{
+            padding: 4px 12px 8px;
+        }}
+        .trend-series-label {{
+            font-size: 0.78em;
+            color: #555;
+            margin-bottom: 2px;
+        }}
+
+        /* Diagnostics section */
+        .diag-section {{
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .diag-item {{
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            margin-top: 12px;
+            overflow: hidden;
+        }}
+        .diag-item-header {{
+            background: #f0f4ff;
+            padding: 10px 15px;
+            font-weight: 600;
+            font-size: 0.95em;
+            color: #3d4db7;
+        }}
+        .diag-item-desc {{
+            font-size: 0.85em;
+            color: #555;
+            padding: 6px 15px 8px;
+        }}
+        .diag-kv-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82em;
+        }}
+        .diag-kv-table td {{
+            padding: 3px 15px;
+            border-bottom: 1px solid #f0f0f0;
+        }}
+        .diag-kv-table td:first-child {{ color: #555; font-weight: 500; width: 40%; }}
+        .diag-kv-table td:last-child  {{ color: #333; font-family: monospace; }}
     </style>
 </head>
 <body>
@@ -863,6 +1188,29 @@ def generate_html_report(aggregated: Dict[str, List[Dict]],
                 f'<img src="{src}" alt="{p.stem}"></a>'
                 f'<figcaption>{p.stem}</figcaption></figure>\n'
             )
+        html += '        </div>\n    </div>\n'
+
+    # Cross-slice trends section
+    if trends:
+        colors = ['#4a90d9', '#e67e22', '#27ae60', '#8e44ad', '#c0392b']
+        html += '\n    <div class="trends-section">\n'
+        html += '        <h2>Cross-Slice Trends</h2>\n'
+        html += ('        <p style="color:#555;font-size:0.9em;">'
+                 'Aggregate quality indicators computed across all slices. '
+                 'Red dashed lines show the linear trend.</p>\n')
+        html += '        <div class="trends-grid">\n'
+        for trend_key, trend in trends.items():
+            html += '            <div class="trend-card">\n'
+            html += f'                <div class="trend-card-header">{trend["label"]}</div>\n'
+            html += f'                <div class="trend-card-desc">{trend["description"]}</div>\n'
+            for ci, series in enumerate(trend['series']):
+                col = colors[ci % len(colors)]
+                svg = generate_trend_line_svg(series['values'], color=col)
+                html += '                <div class="trend-series">\n'
+                html += f'                    <div class="trend-series-label">{series["name"]}</div>\n'
+                html += f'                    {svg}\n'
+                html += '                </div>\n'
+            html += '            </div>\n'
         html += '        </div>\n    </div>\n'
 
     # Generate section for each step
@@ -1005,9 +1353,13 @@ def generate_html_report(aggregated: Dict[str, List[Dict]],
 """
                 html += "            </table>\n        </details>\n"
 
-        # --- Verbose: individual per-slice results ---
+        # --- Verbose: individual per-slice results (collapsible as a unit) ---
         if verbose:
-            html += '\n        <div class="section-label">Individual Results</div>\n'
+            n_items = len(metrics_list)
+            html += f"""
+        <details class="params-details">
+            <summary class="params-summary">Individual Results ({n_items} slices)</summary>
+"""
             for m in metrics_list:
                 source = extract_slice_id(m.get('source_file', 'unknown'))
                 m_status = m.get('overall_status', 'unknown')
@@ -1036,6 +1388,7 @@ def generate_html_report(aggregated: Dict[str, List[Dict]],
                 html += """            </table>
         </details>
 """
+            html += "        </details>\n"
 
         # --- Per-step preview image gallery ---
         preview_category = STEP_PREVIEW_CATEGORY.get(step_name)
@@ -1048,6 +1401,59 @@ def generate_html_report(aggregated: Dict[str, List[Dict]],
                     max_width=max_thumb_width)
 
         html += "    </div>\n"
+
+    # Diagnostics section (only if diagnostic data was found)
+    if diagnostics:
+        html += '\n    <div class="diag-section">\n'
+        html += '        <h2>Diagnostic Outputs</h2>\n'
+        html += ('        <p style="color:#555;font-size:0.9em;">'
+                 'Additional diagnostic analyses enabled in the pipeline configuration.</p>\n')
+        for diag_key, diag in diagnostics.items():
+            label = diag['label']
+            description = diag['description']
+            json_data = diag.get('json_data', [])
+            diag_images = diag.get('images', [])
+
+            html += f'        <div class="diag-item">\n'
+            html += f'            <div class="diag-item-header">{label}</div>\n'
+            html += f'            <div class="diag-item-desc">{description}</div>\n'
+
+            # Render key JSON fields
+            if json_data:
+                # Collect interesting numeric/scalar fields from first entry
+                first = json_data[0]
+                numeric_fields = {}
+                for k, v in first.items():
+                    if k.startswith('_') or k == 'slice_id':
+                        continue
+                    if isinstance(v, (int, float, str, bool)):
+                        numeric_fields[k] = v
+                    elif isinstance(v, dict):
+                        # like scale_factors / residuals / distortions sub-dicts
+                        for sk, sv in v.items():
+                            if isinstance(sv, (int, float, str, bool)):
+                                numeric_fields[f'{k}.{sk}'] = sv
+
+                if numeric_fields:
+                    html += '            <table class="diag-kv-table">\n'
+                    for k, v in list(numeric_fields.items())[:20]:
+                        html += (f'                <tr><td>{k}</td>'
+                                 f'<td>{format_value(v) if isinstance(v, (int, float)) else v}</td></tr>\n')
+                    html += '            </table>\n'
+
+            # Render diagnostic image gallery
+            if diag_images:
+                # In zip mode images are referenced via relative paths; in embed mode as data URIs
+                cat_key = f'diag_{diag_key}'
+                gallery = render_image_gallery_html(
+                    diag_images, mode=image_mode,
+                    category=cat_key,
+                    label=f'{label} Images',
+                    max_width=max_thumb_width)
+                html += gallery
+
+            html += '        </div>\n'
+        html += '    </div>\n'
 
     html += """
 </body>
@@ -1214,6 +1620,24 @@ def main():
     # Zip bundles use relative image links; standalone HTML has no images
     image_mode = 'link'
 
+    # Compute cross-slice aggregate trends
+    trends = compute_cross_slice_trends(aggregated)
+    if trends:
+        n_trend_groups = len(trends)
+        print(f"Computed {n_trend_groups} cross-slice trend group(s)")
+
+    # Discover diagnostic outputs
+    diagnostics = discover_diagnostic_data(input_dir)
+    if diagnostics:
+        print(f"Found {len(diagnostics)} diagnostic output(s): {', '.join(diagnostics.keys())}")
+        # In zip mode, include diagnostic images in the bundle
+        if output_format == 'zip' and not args.no_images:
+            for diag_key, diag in diagnostics.items():
+                cat_key = f'diag_{diag_key}'
+                diag_imgs = diag.get('images', [])
+                if diag_imgs:
+                    images[cat_key] = diag_imgs
+
     # Generate report
     output_file.parent.mkdir(parents=True, exist_ok=True)
     if output_format in ('html', 'zip'):
@@ -1223,6 +1647,8 @@ def main():
             image_mode=image_mode,
             max_overview_width=args.max_overview_width,
             max_thumb_width=args.max_thumb_width,
+            trends=trends if trends else None,
+            diagnostics=diagnostics if diagnostics else None,
         )
         if output_format == 'zip':
             if output_file.suffix.lower() != '.zip':

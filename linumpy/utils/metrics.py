@@ -370,7 +370,9 @@ def collect_xy_transform_metrics(transform: np.ndarray,
                                  residuals: np.ndarray,
                                  output_path: Union[str, Path],
                                  input_paths: Optional[List[str]] = None,
-                                 params: Optional[Dict] = None) -> PipelineMetrics:
+                                 params: Optional[Dict] = None,
+                                 n_tiles_x: Optional[int] = None,
+                                 n_tiles_y: Optional[int] = None) -> PipelineMetrics:
     """
     Collect metrics for XY transform estimation step.
 
@@ -390,6 +392,10 @@ def collect_xy_transform_metrics(transform: np.ndarray,
         List of input image paths.
     params : dict, optional
         Dictionary of parameters used.
+    n_tiles_x : int, optional
+        Number of tiles in the X (column) direction.
+    n_tiles_y : int, optional
+        Number of tiles in the Y (row) direction.
 
     Returns
     -------
@@ -402,6 +408,11 @@ def collect_xy_transform_metrics(transform: np.ndarray,
     if input_paths:
         metrics.add_info('input_images', input_paths, 'Input mosaic images')
     metrics.add_info('tile_shape', list(tile_shape), 'Tile shape in pixels')
+
+    if n_tiles_x is not None:
+        metrics.add_info('n_tiles_x', int(n_tiles_x), 'Number of tiles in X direction')
+    if n_tiles_y is not None:
+        metrics.add_info('n_tiles_y', int(n_tiles_y), 'Number of tiles in Y direction')
 
     if params:
         for key, val in params.items():
@@ -428,11 +439,28 @@ def collect_xy_transform_metrics(transform: np.ndarray,
                        description='Estimated overlap fraction in Y direction')
 
     # Residual error from least squares fit
+    rms_residual = None
     if len(residuals) > 0:
         rms_residual = float(np.sqrt(np.mean(residuals)))
         metrics.add_metric('rms_residual', rms_residual, unit='pixels',
                            description='RMS residual from least squares fit',
                            threshold_name='rms_residual')
+
+    # Accumulated positioning error across the mosaic
+    if n_tiles_x is not None and n_tiles_y is not None:
+        expected_step_y = tile_shape[0] * (1.0 - (params or {}).get('initial_overlap', 0.2))
+        expected_step_x = tile_shape[1] * (1.0 - (params or {}).get('initial_overlap', 0.2))
+        systematic_err_y = abs(float(transform[0, 0]) - expected_step_y) * (n_tiles_y - 1)
+        systematic_err_x = abs(float(transform[1, 1]) - expected_step_x) * (n_tiles_x - 1)
+        accumulated_systematic_px = float(np.sqrt(systematic_err_y**2 + systematic_err_x**2))
+        metrics.add_metric('accumulated_systematic_error_px', accumulated_systematic_px,
+                           unit='pixels',
+                           description='Estimated accumulated systematic positioning error across mosaic')
+        if rms_residual is not None:
+            accumulated_random_px = rms_residual * float(np.sqrt(max(n_tiles_x, n_tiles_y)))
+            metrics.add_metric('accumulated_random_error_px', accumulated_random_px,
+                               unit='pixels',
+                               description='Estimated accumulated random positioning error across mosaic')
 
     metrics.save()
     metrics.log_issues()

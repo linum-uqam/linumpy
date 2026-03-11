@@ -284,6 +284,22 @@ def main():
     np.save(str(output_transform), transform)
     logger.info(f"Transform saved to {output_transform}")
 
+    # Determine grid dimensions for accumulated error computation
+    n_tiles_x = None
+    n_tiles_y = None
+    if args.use_motor_positions:
+        # img may be defined if input was a zarr
+        try:
+            # img.shape[-2] = rows, img.shape[-1] = cols
+            n_tiles_y = img.shape[-2] // tile_shape[0]
+            n_tiles_x = img.shape[-1] // tile_shape[1]
+        except NameError:
+            pass  # non-zarr input; tile counts unknown
+    else:
+        if mosaics:
+            n_tiles_x = mosaics[0].n_tiles_x
+            n_tiles_y = mosaics[0].n_tiles_y
+
     # Collect metrics using helper function
     collect_xy_transform_metrics(
         transform=transform,
@@ -295,7 +311,9 @@ def main():
         params={
             'initial_overlap': args.initial_overlap,
             'use_motor_positions': args.use_motor_positions
-        }
+        },
+        n_tiles_x=n_tiles_x,
+        n_tiles_y=n_tiles_y,
     )
 
 
