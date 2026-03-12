@@ -70,6 +70,12 @@ def compute_ssim_2d(img1: np.ndarray, img2: np.ndarray, win_size: int = 7) -> fl
     float
         SSIM score (0 to 1, higher is better).
     """
+    if img1.shape != img2.shape:
+        min_y = min(img1.shape[0], img2.shape[0])
+        min_x = min(img1.shape[1], img2.shape[1])
+        img1 = img1[:min_y, :min_x]
+        img2 = img2[:min_y, :min_x]
+
     try:
         from skimage.metrics import structural_similarity as ssim
 
@@ -116,8 +122,10 @@ def compute_ssim_3d(vol1: np.ndarray, vol2: np.ndarray,
     """
     if vol1.shape != vol2.shape:
         min_z = min(vol1.shape[0], vol2.shape[0])
-        vol1 = vol1[:min_z]
-        vol2 = vol2[:min_z]
+        min_y = min(vol1.shape[1], vol2.shape[1])
+        min_x = min(vol1.shape[2], vol2.shape[2])
+        vol1 = vol1[:min_z, :min_y, :min_x]
+        vol2 = vol2[:min_z, :min_y, :min_x]
 
     # Sample z-planes if requested
     if sample_depth > 0 and vol1.shape[0] > sample_depth:
@@ -165,6 +173,12 @@ def compute_edge_score(vol: np.ndarray, reference: np.ndarray,
     else:
         v = normalize_image(vol)
         r = normalize_image(reference)
+
+    if v.shape != r.shape:
+        min_y = min(v.shape[0], r.shape[0])
+        min_x = min(v.shape[1], r.shape[1])
+        v = v[:min_y, :min_x]
+        r = r[:min_y, :min_x]
 
     # Compute edges using Sobel
     edges_v = np.sqrt(sobel(v, axis=0) ** 2 + sobel(v, axis=1) ** 2)
@@ -283,7 +297,11 @@ def assess_slice_quality(vol: np.ndarray,
 
     # Create reference from neighbors
     if vol_before is not None and vol_after is not None:
-        ref = 0.5 * vol_before.astype(np.float32) + 0.5 * vol_after.astype(np.float32)
+        min_z = min(vol.shape[0], vol_before.shape[0], vol_after.shape[0])
+        min_y = min(vol.shape[1], vol_before.shape[1], vol_after.shape[1])
+        min_x = min(vol.shape[2], vol_before.shape[2], vol_after.shape[2])
+        ref = (0.5 * vol_before[:min_z, :min_y, :min_x].astype(np.float32)
+               + 0.5 * vol_after[:min_z, :min_y, :min_x].astype(np.float32))
     elif vol_before is not None:
         ref = vol_before.astype(np.float32)
     elif vol_after is not None:

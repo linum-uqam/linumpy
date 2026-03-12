@@ -90,6 +90,12 @@ def compute_ssim_2d_gpu(img1: np.ndarray, img2: np.ndarray,
         from linumpy.utils.image_quality import compute_ssim_2d
         return compute_ssim_2d(img1, img2, win_size)
 
+    if img1.shape != img2.shape:
+        min_y = min(img1.shape[0], img2.shape[0])
+        min_x = min(img1.shape[1], img2.shape[1])
+        img1 = img1[:min_y, :min_x]
+        img2 = img2[:min_y, :min_x]
+
     try:
         # Transfer to GPU
         i1 = _to_gpu(img1)
@@ -153,8 +159,10 @@ def compute_ssim_3d_gpu(vol1: np.ndarray, vol2: np.ndarray,
 
     if vol1.shape != vol2.shape:
         min_z = min(vol1.shape[0], vol2.shape[0])
-        vol1 = vol1[:min_z]
-        vol2 = vol2[:min_z]
+        min_y = min(vol1.shape[1], vol2.shape[1])
+        min_x = min(vol1.shape[2], vol2.shape[2])
+        vol1 = vol1[:min_z, :min_y, :min_x]
+        vol2 = vol2[:min_z, :min_y, :min_x]
 
     # Sample z-planes if requested
     if sample_depth > 0 and vol1.shape[0] > sample_depth:
@@ -203,6 +211,12 @@ def compute_edge_score_gpu(vol: np.ndarray, reference: np.ndarray,
         else:
             v_cpu = vol
             r_cpu = reference
+
+        if v_cpu.shape != r_cpu.shape:
+            min_y = min(v_cpu.shape[0], r_cpu.shape[0])
+            min_x = min(v_cpu.shape[1], r_cpu.shape[1])
+            v_cpu = v_cpu[:min_y, :min_x]
+            r_cpu = r_cpu[:min_y, :min_x]
 
         # Transfer to GPU and normalize
         v = normalize_image_gpu(_to_gpu(v_cpu))
@@ -355,9 +369,11 @@ def assess_slice_quality_gpu(vol: np.ndarray,
 
     ref_s = None
     if vol_before is not None and vol_after is not None:
+        min_y = min(vol_before.shape[1], vol_after.shape[1])
+        min_x = min(vol_before.shape[2], vol_after.shape[2])
         ref_s = (
-            0.5 * np.stack([np.asarray(vol_before[int(z)], dtype=np.float32) for z in z_indices])
-            + 0.5 * np.stack([np.asarray(vol_after[int(z)], dtype=np.float32) for z in z_indices])
+            0.5 * np.stack([np.asarray(vol_before[int(z)], dtype=np.float32)[:min_y, :min_x] for z in z_indices])
+            + 0.5 * np.stack([np.asarray(vol_after[int(z)], dtype=np.float32)[:min_y, :min_x] for z in z_indices])
         )
     elif vol_before is not None:
         ref_s = np.stack([np.asarray(vol_before[int(z)], dtype=np.float32) for z in z_indices])
