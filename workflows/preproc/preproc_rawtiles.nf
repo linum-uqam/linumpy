@@ -135,14 +135,14 @@ workflow {
     }
 
     // [Optional] Generate orthogonal view previews of mosaic grids.
-    // collect() waits for ALL mosaics to be written before the first screenshot
-    // starts, so reads don't compete with ongoing zarr writes.  maxForks 1 in
-    // the process then keeps the screenshots sequential.
+    // The collect() barrier ensures all zarr writes are complete before any
+    // screenshot reads begin. The tuple is reconstructed via map() because
+    // collect() on a tuple channel produces a flat list.
     if (params.generate_previews) {
         generate_mosaic_preview(
             create_mosaic_grid.out
-                .collect()       // barrier: wait for every slice
-                .flatMap { it }  // re-emit individually for sequential processing
+                .combine(create_mosaic_grid.out.collect().map { _ignored -> 'ready' })
+                .map { slice_id, mosaic, _ready -> tuple(slice_id, mosaic) }
         )
     }
 
@@ -163,7 +163,7 @@ workflow {
             all_mosaics_done = create_mosaic_grid.out.collect()
             quality_input = generate_slice_config.out
                 .combine(output_dir_channel)
-                .combine(all_mosaics_done.map { _ -> 'ready' })
+                .combine(all_mosaics_done.map { _ignored -> 'ready' })
                 .map { config, dir, _ready -> tuple(config, dir) }
             assess_slice_quality(quality_input)
         }
