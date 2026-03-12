@@ -46,6 +46,7 @@ process generate_aip {
 }
 
 process generate_mosaic_preview {
+    maxForks 1
     publishDir "$params.output/previews", mode: 'copy'
 
     input:
@@ -135,15 +136,11 @@ workflow {
     }
 
     // [Optional] Generate orthogonal view previews of mosaic grids.
-    // The collect() barrier ensures all zarr writes are complete before any
-    // screenshot reads begin. The tuple is reconstructed via map() because
-    // collect() on a tuple channel produces a flat list.
+    // maxForks 1 on the process keeps screenshots sequential to avoid spawning
+    // 52 concurrent I/O-heavy jobs. Each task depends only on its own zarr
+    // being complete, which Nextflow already guarantees via channel ordering.
     if (params.generate_previews) {
-        generate_mosaic_preview(
-            create_mosaic_grid.out
-                .combine(create_mosaic_grid.out.collect().map { _ignored -> 'ready' })
-                .map { slice_id, mosaic, _ready -> tuple(slice_id, mosaic) }
-        )
+        generate_mosaic_preview(create_mosaic_grid.out)
     }
 
     // Estimate XY shifts from metadata
