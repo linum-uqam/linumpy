@@ -371,14 +371,18 @@ def assess_slice_quality_gpu(vol: np.ndarray,
     if vol_before is not None and vol_after is not None:
         min_y = min(vol_before.shape[1], vol_after.shape[1])
         min_x = min(vol_before.shape[2], vol_after.shape[2])
+        max_z_b = vol_before.shape[0] - 1
+        max_z_a = vol_after.shape[0] - 1
         ref_s = (
-            0.5 * np.stack([np.asarray(vol_before[int(z)], dtype=np.float32)[:min_y, :min_x] for z in z_indices])
-            + 0.5 * np.stack([np.asarray(vol_after[int(z)], dtype=np.float32)[:min_y, :min_x] for z in z_indices])
+            0.5 * np.stack([np.asarray(vol_before[min(int(z), max_z_b)], dtype=np.float32)[:min_y, :min_x] for z in z_indices])
+            + 0.5 * np.stack([np.asarray(vol_after[min(int(z), max_z_a)], dtype=np.float32)[:min_y, :min_x] for z in z_indices])
         )
     elif vol_before is not None:
-        ref_s = np.stack([np.asarray(vol_before[int(z)], dtype=np.float32) for z in z_indices])
+        max_z_b = vol_before.shape[0] - 1
+        ref_s = np.stack([np.asarray(vol_before[min(int(z), max_z_b)], dtype=np.float32) for z in z_indices])
     elif vol_after is not None:
-        ref_s = np.stack([np.asarray(vol_after[int(z)], dtype=np.float32) for z in z_indices])
+        max_z_a = vol_after.shape[0] - 1
+        ref_s = np.stack([np.asarray(vol_after[min(int(z), max_z_a)], dtype=np.float32) for z in z_indices])
 
     # Compute edge preservation score
     if ref_s is not None:
