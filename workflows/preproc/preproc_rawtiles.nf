@@ -89,27 +89,6 @@ process generate_slice_config {
     """
 }
 
-process assess_slice_quality {
-    publishDir "$params.output", mode: 'copy'
-
-    input:
-        tuple path(slice_config), path(mosaics_dir)
-
-    output:
-        path("slice_config.csv")
-
-    script:
-    String script_name = params.use_gpu ? "linum_assess_slice_quality_gpu.py" : "linum_assess_slice_quality.py"
-    String gpu_opts = params.use_gpu ? "--use_gpu" : ""
-    String quality_opts = params.min_quality_score > 0 ? "--min_quality ${params.min_quality_score}" : ""
-    """
-    ${script_name} ${mosaics_dir} slice_config.csv \\
-        --update_existing --existing_config ${slice_config} \\
-        --exclude_first ${params.exclude_first_slices} \\
-        --sample_depth ${params.quality_sample_depth} \\
-        ${quality_opts} ${gpu_opts} -f
-    """
-}
 
 workflow {
     if (params.use_old_folder_structure)
@@ -125,7 +104,6 @@ workflow {
                             .groupTuple()
     }
     input_dir_channel = Channel.fromPath("$params.input", type: 'dir')
-    output_dir_channel = Channel.fromPath("$params.output", type: 'dir')
 
     // Generate a 3D mosaic grid at full resolution
     create_mosaic_grid(inputSlices)
@@ -152,17 +130,5 @@ workflow {
         slice_config_input = estimate_xy_shifts_from_metadata.out
             .combine(input_dir_channel)
         generate_slice_config(slice_config_input)
-
-        // [Optional] Assess quality and update slice config
-        if (params.assess_quality) {
-            // Collect all mosaic outputs so quality assessment waits for every
-            // mosaic to be published before it starts scanning the output dir.
-            all_mosaics_done = create_mosaic_grid.out.collect()
-            quality_input = generate_slice_config.out
-                .combine(output_dir_channel)
-                .combine(all_mosaics_done.map { _ignored -> 'ready' })
-                .map { config, dir, _ready -> tuple(config, dir) }
-            assess_slice_quality(quality_input)
-        }
     }
 }
