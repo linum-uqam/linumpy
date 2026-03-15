@@ -1068,7 +1068,7 @@ def crop_below_interface(vol_zxy: np.ndarray,
     int
         Detected interface depth in Z voxels.
     """
-    vol_f = np.abs(vol_zxy) if np.iscomplexobj(vol_zxy) else vol_zxy.astype(np.float32)
+    vol_f = np.abs(vol_zxy) if np.iscomplexobj(vol_zxy) else np.asarray(vol_zxy, dtype=np.float32)
 
     # Reorder to (X, Y, Z) for gradient computation
     vol_xyz = np.transpose(vol_f, (1, 2, 0))
