@@ -35,6 +35,19 @@ Raw data directory layout (output of the preprocessing pipeline)
       tiles/
         tile_x##_y##_z##/
           info.txt                      # per-tile OCT scan parameters
+
+Cleaned data directory layout (after linum_clean_raw_data.py)
+--------------------------------------------------------------
+  <data_dir>/
+    state.json                          # global acquisition state (unchanged)
+    metadata/
+      slice_z00/
+        metadata.json                   # per-slice acquisition parameters (kept)
+        tiles/
+          tile_x##_y##_z##/
+            info.txt                    # per-tile OCT scan parameters (kept)
+
+Both layouts are detected automatically when --data_dir is provided.
 """
 
 # Configure thread limits before numpy/scipy imports (optional; skipped if
@@ -71,8 +84,11 @@ def _build_arg_parser():
                    help="Directory for the report and suggested config snippet")
     p.add_argument("--data_dir", default=None,
                    help="Raw data directory (contains state.json and\n"
-                        "slice_z##/ subdirectories). Used to read slice\n"
-                        "thickness, tile overlap, and tile dimensions.")
+                        "slice_z##/ subdirectories, or their cleaned\n"
+                        "equivalent with slices under metadata/). Used\n"
+                        "to read slice thickness, tile overlap, and tile\n"
+                        "dimensions. Both raw and cleaned layouts are\n"
+                        "detected automatically.")
     p.add_argument("--n_calibration_slices", type=int, default=1,
                    help="Number of leading calibration slices to skip when\n"
                         "reading per-slice metadata (default: 1, i.e. skip\n"
@@ -251,6 +267,18 @@ def analyze_metadata(data_dir: str, axial_res_um: float,
     # ── 1. Per-slice metadata.json (skip calibration slices) ─────────────────
     slice_meta: dict = {}
     slice_dirs = sorted(data_dir.glob("slice_z*/"))
+
+    # Auto-detect cleaned structure: slices moved to metadata/ subdirectory
+    if not slice_dirs:
+        metadata_subdir = data_dir / "metadata"
+        if metadata_subdir.is_dir():
+            slice_dirs = sorted(metadata_subdir.glob("slice_z*/"))
+            if slice_dirs:
+                result['warnings'].append(
+                    "Detected cleaned data structure: reading slice metadata "
+                    "from metadata/ subdirectory (bin files have been removed)."
+                )
+
     tissue_dirs = slice_dirs[n_calibration_slices:]  # skip leading calibration slices
     if not tissue_dirs:
         result['warnings'].append(
