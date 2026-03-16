@@ -947,7 +947,9 @@ def main():
         print(f"Aligned volume saved to: {output_path}")
 
         # Save transform file
-        transform_path = output_path.parent / f"{output_path.stem}_transform.tfm"
+        # Strip the compound .ome.zarr extension (Path.stem only removes the last suffix)
+        stem = output_path.with_suffix('').with_suffix('').name
+        transform_path = output_path.parent / f"{stem}_transform.tfm"
         sitk.WriteTransform(transform, str(transform_path))
         print(f"Transform saved to: {transform_path}")
         pbar.update(1)
