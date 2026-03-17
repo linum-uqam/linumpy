@@ -298,7 +298,8 @@ def _apply_fix(zarr_root: Path, output_path: Path,
     undo_shift : int
         The roll shift that was applied by the pipeline (undo mode).
     """
-    arr, res, _, _ = _open_level(zarr_root, level=0)
+    arr, res, _, multiscale = _open_level(zarr_root, level=0)
+    n_levels_in = len(multiscale.datasets)
     shape = arr.shape          # (nz, nx_mosaic, ny_mosaic)
     chunk_x = arr.chunks[1]   # OCT tile width in X (A-line axis)
     chunk_y = arr.chunks[2]   # OCT tile height in Y (B-scan axis)
@@ -372,8 +373,11 @@ def _apply_fix(zarr_root: Path, output_path: Path,
 
             writer[0:shape[0], xs:xe, ys:ye] = fixed.astype(dtype)
 
-    print("Regenerating OME-Zarr pyramid levels ...")
-    writer.finalize(res, n_levels=5)
+    if n_levels_in > 1:
+        print(f"Regenerating OME-Zarr pyramid ({n_levels_in} levels) ...")
+    else:
+        print("Input has no pyramid — writing single-level OME-Zarr.")
+    writer.finalize(res, n_levels=n_levels_in)
 
 
 # ---------------------------------------------------------------------------
