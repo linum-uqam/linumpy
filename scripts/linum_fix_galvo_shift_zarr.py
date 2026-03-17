@@ -109,10 +109,96 @@ def _build_arg_parser():
                               help="Slice ID to update in slice_config.csv "
                                    "(required with --update_config).")
 
+    preview_group = p.add_argument_group("Preview")
+    preview_group.add_argument("--preview", metavar="OUT_PNG",
+                               help="Save a before/after comparison PNG after fixing. "
+                                    "Uses the same 3-panel XY/XZ/YZ layout as the pipeline preview.")
+    preview_group.add_argument("--preview_level", type=int, default=2,
+                               help="Pyramid level used for the preview (0=full res). "
+                                    "Default: 2 (4× downsampled, faster). ")
+    preview_group.add_argument("--cmap", default="magma",
+                               help="Colormap for the preview (default: magma).")
+
     p.add_argument("-v", "--verbose", action="store_true",
                    help="Print per-chunk detection results.")
     add_overwrite_arg(p)
     return p
+
+
+# ---------------------------------------------------------------------------
+# Preview
+# ---------------------------------------------------------------------------
+
+def _generate_comparison_preview(before_path: Path, after_path: Path,
+                                 out_png: Path, level: int = 2,
+                                 cmap: str = 'magma') -> None:
+    """Save a side-by-side before/after comparison PNG.
+
+    Layout mirrors the pipeline's ``linum_screenshot_omezarr.py`` output:
+    three panels (XY, XZ, YZ) repeated for before (top row) and after
+    (bottom row).  A shared colour scale derived from the *after* volume
+    is used so the dark band in the before image is clearly visible.
+
+    Parameters
+    ----------
+    before_path, after_path : Path
+        OME-Zarr directories to compare.
+    out_png : Path
+        Output PNG file path.
+    level : int
+        Pyramid level to read (higher = faster, lower res).  Clamped
+        to the number of available levels.
+    cmap : str
+        Matplotlib colourmap.
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    def _read_panels(zarr_path: Path, level: int):
+        arr, _, actual, _ = _open_level(zarr_path, level)
+        vol = np.asarray(arr, dtype=np.float32)
+        z = vol.shape[0] // 2
+        x = vol.shape[1] // 2
+        y = vol.shape[2] // 2
+        xy = np.array(vol[z, :, :]).T          # leftmost: what the pipeline shows
+        xz = np.array(vol[:, x, :])[::-1, ::-1]
+        yz = np.array(vol[:, :, y])[::-1]
+        return xy, xz, yz
+
+    print(f"Reading before zarr for preview (level {level}) ...")
+    before_panels = _read_panels(before_path, level)
+    print(f"Reading after zarr for preview (level {level}) ...")
+    after_panels = _read_panels(after_path, level)
+
+    # Shared colour limits from the after volume (cleaner signal).
+    all_after = np.concatenate([p.ravel() for p in after_panels])
+    vmin = float(np.percentile(all_after, 0.1))
+    vmax = float(np.percentile(all_after, 99.9))
+
+    titles_top = ["BEFORE  –  XY", "BEFORE  –  XZ", "BEFORE  –  YZ"]
+    titles_bot = ["AFTER   –  XY", "AFTER   –  XZ", "AFTER   –  YZ"]
+    width_ratios = [p.shape[1] for p in before_panels]
+
+    fig, axes = plt.subplots(2, 3,
+                             gridspec_kw={'width_ratios': width_ratios,
+                                         'hspace': 0.05, 'wspace': 0.02})
+    fig.set_size_inches(24, 18)
+    fig.set_dpi(200)
+    fig.patch.set_facecolor('black')
+
+    for col, (bpanel, apanel, ttop, tbot) in enumerate(
+            zip(before_panels, after_panels, titles_top, titles_bot)):
+        for row, (panel, title) in enumerate([(bpanel, ttop), (apanel, tbot)]):
+            ax = axes[row, col]
+            ax.imshow(panel, cmap=cmap, origin='lower', vmin=vmin, vmax=vmax,
+                      aspect='auto')
+            ax.set_title(title, color='white', fontsize=11, pad=3)
+            ax.set_axis_off()
+
+    fig.savefig(str(out_png), bbox_inches='tight', facecolor='black')
+    plt.close(fig)
+    print(f"Preview saved → {out_png}")
 
 
 # ---------------------------------------------------------------------------
@@ -445,7 +531,17 @@ def main():
     print(f"Corrected zarr written: {output_path}")
 
     # ------------------------------------------------------------------
-    # Step 4 – optionally update slice_config.csv
+    # Step 4 – optionally generate before/after comparison preview
+    # ------------------------------------------------------------------
+    if args.preview:
+        preview_path = Path(args.preview)
+        _generate_comparison_preview(input_path, output_path,
+                                     preview_path,
+                                     level=args.preview_level,
+                                     cmap=args.cmap)
+
+    # ------------------------------------------------------------------
+    # Step 5 – optionally update slice_config.csv
     # ------------------------------------------------------------------
     if args.update_config:
         if args.slice_id is None:
