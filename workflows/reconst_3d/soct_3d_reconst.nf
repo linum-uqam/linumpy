@@ -631,6 +631,7 @@ process stack_motor {
     // Blending
     if (params.stack_blend_enabled) options += " --blend"
     if (params.blend_refinement_px > 0) options += " --blend_refinement_px ${params.blend_refinement_px}"
+    if (params.stack_blend_z_refine_vox > 0) options += " --blend_z_refine_vox ${params.stack_blend_z_refine_vox}"
 
     // Z-matching
     options += " --slicing_interval_mm ${params.registration_slicing_interval_mm}"
