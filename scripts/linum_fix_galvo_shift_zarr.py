@@ -353,7 +353,9 @@ def _apply_fix(zarr_root: Path, output_path: Path,
         print(f"Regenerating OME-Zarr pyramid ({n_levels_in} levels) ...")
     else:
         print("Input has no pyramid — writing single-level OME-Zarr.")
-    writer.finalize(res, n_levels=n_levels_in)
+    # n_levels in finalize() counts *additional* downsampled levels beyond level 0,
+    # so pass (n_levels_in - 1) to reproduce the same number of levels as the input.
+    writer.finalize(res, n_levels=n_levels_in - 1)
 
 
 # ---------------------------------------------------------------------------
