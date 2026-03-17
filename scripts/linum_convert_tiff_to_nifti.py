@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import os
 import argparse
 import SimpleITK as sitk

@@ -8,6 +8,9 @@ minimum and maximum values to the range [0, 1]. When launched, a matplotlib
 window opens, enabling the user to manipulate the slices as they wish. The
 resulting transformations are saved as soon as the window is closed.
 """
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 import zarr
 import numpy as np

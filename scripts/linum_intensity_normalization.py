@@ -3,6 +3,9 @@
 
 """Normalize the intensity in a given nifty image"""
 
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import nibabel as nib
 import numpy as np
 import numpy as np
