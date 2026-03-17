@@ -306,40 +306,47 @@ def _apply_fix(zarr_root: Path, output_path: Path,
                band_start: int, band_width: int,
                mode: str, undo_shift: int,
                verbose: bool = False):
-    """Write a corrected zarr by rolling each level-0 chunk along the A-line axis.
+    """Write a corrected OME-Zarr, processing each level-0 chunk individually.
+
+    **fix mode**: replaces the dark band at ``[band_start : band_start+band_width]``
+    inside every tile chunk with values linearly interpolated between the last
+    valid column before the band and the first valid column after it.  No
+    rolling is performed — all valid data stays at its original spatial position.
+
+    **undo mode**: reverses a galvo fix that was incorrectly applied during
+    mosaic creation by rolling each chunk back by ``-undo_shift``.  This
+    restores the original spatial ordering, at the cost of making the galvo
+    dark band visible again.  Run with ``--mode fix`` afterwards on the output
+    zarr to also clean up the band.
 
     Parameters
     ----------
     zarr_root : Path
     output_path : Path
     band_start : int
-        Position of the dark band start within a tile (fix mode only).
+        Start column of the dark band within a tile chunk (fix mode).
     band_width : int
-        Width of the dark band in pixels (fix mode only).
+        Width of the dark band in pixels (fix mode).
     mode : str
-        'fix' or 'undo'.
-    undo_shift : int or None
-        The original shift to reverse (undo mode only).
+        ``'fix'`` or ``'undo'``.
+    undo_shift : int
+        The roll shift that was applied by the pipeline (undo mode).
     """
     arr, res, _, _ = _open_level(zarr_root, level=0)
     shape = arr.shape          # (nz, nx_mosaic, ny_mosaic)
-    chunk_x = arr.chunks[1]   # OCT tile width in X
-    chunk_y = arr.chunks[2]   # OCT tile width in Y
+    chunk_x = arr.chunks[1]   # OCT tile width in X (A-line axis)
+    chunk_y = arr.chunks[2]   # OCT tile height in Y (B-scan axis)
     dtype = arr.dtype
 
     n_cx = shape[1] // chunk_x
     n_cy = shape[2] // chunk_y
 
-    # Shift to apply per chunk along axis=1.
-    # Fix: roll so the dark band lands at the END of the tile (positions
-    #      [chunk_x - band_width, chunk_x)), then interpolate.
-    # Undo: roll in the opposite direction by the original shift value.
     if mode == 'fix':
-        roll_shift = chunk_x - band_start - band_width
-    else:  # undo
-        roll_shift = -undo_shift
-
-    print(f"Roll shift per tile chunk: {roll_shift:+d} px  (mode={mode})")
+        band_end = band_start + band_width
+        print(f"In-place interpolation over band columns [{band_start}:{band_end}] "
+              f"in each of the {n_cx}×{n_cy} tile chunks")
+    else:
+        print(f"Rolling each tile chunk by {-undo_shift:+d} px to reverse applied galvo fix")
 
     writer = OmeZarrWriter(
         str(output_path),
@@ -353,37 +360,49 @@ def _apply_fix(zarr_root: Path, output_path: Path,
         xs = kx * chunk_x
         xe = xs + chunk_x
 
-        # Pre-load the leftmost column of the next tile for interpolation.
+        # Pre-fetch the first column of the NEXT tile to use as the right
+        # interpolation anchor when the band is near the tile's right edge.
         if mode == 'fix' and kx < n_cx - 1:
-            right_col_full = np.asarray(arr[:, xe:xe + 1, :], dtype=np.float32)
+            next_col_full = np.asarray(arr[:, xe:xe + 1, :], dtype=np.float32)
         else:
-            right_col_full = None
+            next_col_full = None
 
         for ky in range(n_cy):
             ys = ky * chunk_y
             ye = ys + chunk_y
 
             chunk = np.asarray(arr[:, xs:xe, ys:ye], dtype=np.float32)
-            fixed = np.roll(chunk, roll_shift, axis=1)
 
-            if mode == 'fix' and band_width > 0:
-                # After rolling, the dark band sits at columns
-                # [chunk_x - band_width, chunk_x).
-                # Replace with linear interpolation between the last valid
-                # column inside this tile and the first valid column of the
-                # next tile.
-                left_col = fixed[:, chunk_x - band_width - 1, :]  # (nz, ny_chunk)
+            if mode == 'fix':
+                fixed = chunk.copy()
 
-                if right_col_full is not None:
-                    right_col = right_col_full[:, 0, ys:ye]   # (nz, ny_chunk)
+                # Left anchor: last valid column immediately before the band.
+                # Falls back to the first post-band column if band_start == 0.
+                if band_start > 0:
+                    left_col = fixed[:, band_start - 1, :]      # (nz, ny_chunk)
                 else:
-                    right_col = left_col  # last tile: repeat edge
+                    left_col = fixed[:, band_end, :]
 
+                # Right anchor: first valid column immediately after the band.
+                # If the band reaches the tile edge, use the first column of
+                # the neighbouring tile (pre-fetched above).
+                if band_end < chunk_x:
+                    right_col = fixed[:, band_end, :]
+                elif next_col_full is not None:
+                    right_col = next_col_full[:, 0, ys:ye]
+                else:
+                    right_col = left_col  # last tile column edge — repeat
+
+                # Linear fill across the band (band_start inclusive, band_end exclusive).
+                total = band_width + 1  # denomintor keeps endpoints outside the band
                 for i in range(band_width):
-                    alpha = (i + 1.0) / (band_width + 1.0)
-                    fixed[:, chunk_x - band_width + i, :] = (
+                    alpha = (i + 1.0) / total
+                    fixed[:, band_start + i, :] = (
                         (1.0 - alpha) * left_col + alpha * right_col
                     )
+
+            else:  # undo — roll back the shift applied during mosaic creation
+                fixed = np.roll(chunk, -undo_shift, axis=1)
 
             writer[0:shape[0], xs:xe, ys:ye] = fixed.astype(dtype)
 
@@ -507,9 +526,8 @@ def main():
     print(f"  tile chunks  = ({chunk_x}, {chunk_y}) px in (X, Y)")
     print(f"  tile grid    = {n_cx} × {n_cy} tiles")
     if args.mode == 'fix':
-        computed_roll = chunk_x - band_start - band_width
-        print(f"  roll shift   = chunk_x - band_start - band_width "
-              f"= {chunk_x} - {band_start} - {band_width} = {computed_roll} px")
+        print(f"  band columns = [{band_start}:{band_start + band_width}] px "
+              f"(within each tile chunk of width {chunk_x})")
 
     if args.detect_only:
         print("\n--detect_only: no output written.")
