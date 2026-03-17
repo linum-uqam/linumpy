@@ -139,7 +139,10 @@ def _build_arg_parser():
 
 def _generate_comparison_preview(before_path: Path, after_path: Path,
                                  out_png: Path, level: int = 2,
-                                 cmap: str = 'magma') -> None:
+                                 cmap: str = 'magma',
+                                 band_start: int = None,
+                                 band_width: int = None,
+                                 chunk_x: int = None) -> None:
     """Save a side-by-side before/after comparison PNG.
 
     Layout mirrors the pipeline's ``linum_screenshot_omezarr.py`` output:
@@ -203,6 +206,37 @@ def _generate_comparison_preview(before_path: Path, after_path: Path,
                       aspect='auto')
             ax.set_title(title, color='white', fontsize=11, pad=3)
             ax.set_axis_off()
+
+    # Annotate detected band position on the XY panels with vertical lines,
+    # repeated at every tile chunk so the pattern is visible across the mosaic.
+    if band_start is not None and band_width is not None and chunk_x is not None:
+        xy_w = before_panels[0].shape[1]   # total mosaic X width in zarr pixels
+        n_tiles = xy_w // chunk_x
+        for k in range(n_tiles):
+            x0 = band_start + k * chunk_x
+            x1 = x0 + band_width
+            for row in range(2):
+                ax = axes[row, 0]
+                ax.axvline(x0, color='cyan', linewidth=0.6, linestyle='--', alpha=0.8)
+                ax.axvline(x1, color='deepskyblue', linewidth=0.6,
+                           linestyle=':', alpha=0.8)
+
+        # Scale bar annotation (bottom-left of BEFORE XY panel).
+        fig_w_px = 24 * 200  # fig_width_in * dpi
+        total_ratio = sum(width_ratios)
+        xy_subplot_px = fig_w_px * width_ratios[0] / total_ratio
+        zarr_px_per_preview_px = xy_w / xy_subplot_px
+        note = (f"band [{band_start}:{band_start+band_width}] per tile  "
+                f"| scale ≈ {zarr_px_per_preview_px:.1f} zarr px / preview px  "
+                f"| 1 visible px ≈ {zarr_px_per_preview_px:.0f} zarr px")
+        axes[0, 0].text(0.01, 0.01, note, transform=axes[0, 0].transAxes,
+                        color='cyan', fontsize=7, va='bottom',
+                        bbox=dict(facecolor='black', alpha=0.5, pad=2))
+        print(f"\nPreview scale: {zarr_px_per_preview_px:.1f} zarr px per preview px "
+              f"in the XY panel.")
+        print(f"  → If the band line appears N px off, use "
+              f"--band_offset ±{zarr_px_per_preview_px:.0f}*N  "
+              f"(e.g. 3 px off → --band_offset ±{3*zarr_px_per_preview_px:.0f})")
 
     fig.savefig(str(out_png), bbox_inches='tight', facecolor='black')
     plt.close(fig)
@@ -596,10 +630,14 @@ def main():
     # ------------------------------------------------------------------
     if args.preview:
         preview_path = Path(args.preview)
+        arr0, _, _, _ = _open_level(input_path, level=0)
         _generate_comparison_preview(input_path, output_path,
                                      preview_path,
                                      level=args.preview_level,
-                                     cmap=args.cmap)
+                                     cmap=args.cmap,
+                                     band_start=band_start if args.mode == 'fix' else None,
+                                     band_width=band_width if args.mode == 'fix' else None,
+                                     chunk_x=arr0.chunks[1])
 
     # ------------------------------------------------------------------
     # Step 5 – optionally update slice_config.csv
