@@ -1,5 +1,5 @@
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.widgets import Slider, RadioButtons, RangeSlider
 from scipy.interpolate import RegularGridInterpolator
 
@@ -30,6 +30,7 @@ class ManualImageCorrection():
     custom_ranges: ndarray (nz, 2), optional
         Intensities for rescaling each slice. One (vmin, vmax) per slice.
     """
+
     def __init__(self, data, resolution, downsample_factor,
                  transforms=None, custom_ranges=None):
         # We will work on a dataset rescaled between [0, 1]
@@ -80,7 +81,7 @@ class ManualImageCorrection():
                                     vmin=0.0, vmax=1.0,
                                     interpolation='nearest', cmap='magma')
         aspect_b = resolution[0] / resolution[1]
-        self.axim_b = axs[1].imshow(self.get_view_b(), aspect=1.0/aspect_b,
+        self.axim_b = axs[1].imshow(self.get_view_b(), aspect=1.0 / aspect_b,
                                     vmin=0.0, vmax=1.0,
                                     interpolation='nearest', cmap='magma')
         aspect_c = resolution[1] / resolution[2]
@@ -107,12 +108,12 @@ class ManualImageCorrection():
                                     orientation='vertical')
 
         self.s_offset_a = Slider(ax_offset_a, "Offset left image",
-                                 valmin=-data.shape[2]/2,
-                                 valmax=data.shape[2]/2,
+                                 valmin=-data.shape[2] / 2,
+                                 valmax=data.shape[2] / 2,
                                  valinit=self.transforms[self.current_z, 0])
         self.s_offset_b = Slider(ax_offset_b, "Offset right image",
-                                 valmin=-data.shape[1]/2,
-                                 valmax=data.shape[1]/2,
+                                 valmin=-data.shape[1] / 2,
+                                 valmax=data.shape[1] / 2,
                                  valinit=self.transforms[self.current_z, 1])
         self.s_current_z = Slider(ax_current_z, "Current slice z",
                                   valmin=0, valmax=data.shape[0],
@@ -124,7 +125,7 @@ class ManualImageCorrection():
                                   valmin=0, valmax=data.shape[2],
                                   valinit=self.current_x, valstep=np.arange(data.shape[2]))
         self.s_theta = Slider(ax_theta, 'Rotation',
-                              valmin=-np.pi/6.0, valmax=np.pi/6.0,
+                              valmin=-np.pi / 6.0, valmax=np.pi / 6.0,
                               valinit=self.transforms[self.current_z, 2])
         self.radio_buttons = RadioButtons(ax_ref_z, [NO_REF_LABEL, PREV_REF_LABEL, NEXT_REF_LABEL], 0)
 
@@ -229,14 +230,13 @@ class ManualImageCorrection():
 
         # at this point the data is between [0, 1]
         return data
-    
+
     def draw_cursor(self, data):
         # keeping in mind that axis=0 is the z axis
         cursor_len = int(0.02 * data.shape[-1])
         data[self.current_z, :cursor_len] = 1.0
         data[self.current_z, -cursor_len:] = 1.0
         return data
-
 
     def get_view_a(self):
         view_coords = self.grid_coordinates[:, :, self.current_x, :]
@@ -310,10 +310,10 @@ def apply_transform(ty, tx, theta, coordinates):
     center_y = np.max(coordinates[:, :, 1]) / 2.0
     center_x = np.max(coordinates[:, :, 2]) / 2.0
     coordinates = coordinates - np.reshape([0, center_y, center_x], (1, 1, 3))
-    rotated_y = np.atleast_2d(np.cos(theta)).T*coordinates[..., 1]\
-        - np.atleast_2d(np.sin(theta)).T*coordinates[..., 2]
-    rotated_x = np.atleast_2d(np.sin(theta)).T*coordinates[..., 1]\
-        + np.atleast_2d(np.cos(theta)).T*coordinates[..., 2]
+    rotated_y = np.atleast_2d(np.cos(theta)).T * coordinates[..., 1] \
+                - np.atleast_2d(np.sin(theta)).T * coordinates[..., 2]
+    rotated_x = np.atleast_2d(np.sin(theta)).T * coordinates[..., 1] \
+                + np.atleast_2d(np.cos(theta)).T * coordinates[..., 2]
     coordinates[:, :, 1] = rotated_y + center_y
     coordinates[:, :, 2] = rotated_x + center_x
 

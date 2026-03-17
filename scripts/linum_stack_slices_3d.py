@@ -1,23 +1,31 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Stack 3D mosaics on top of each other in a single 3D volume using the
-transforms from `linum_estimate_transform_pairwise.py`. Expects all 3D
-mosaics to be in the same space (same dimensions for last two axes).
+Stack 3D mosaics on top of each other in a single 3D volume using pairwise
+registration transforms. Expects all 3D mosaics to be in the same space
+(same dimensions for last two axes).
 """
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 import re
 from pathlib import Path
 import numpy as np
-from linumpy.io.zarr import read_omezarr, OmeZarrWriter
+from linumpy.io.zarr import read_omezarr, AnalysisOmeZarrWriter
 from linumpy.stitching.registration import apply_transform
 from linumpy.utils.mosaic_grid import getDiffusionBlendingWeights
+from linumpy.utils.metrics import collect_stack_metrics
 from skimage.filters import threshold_otsu
 from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
 import os
 
 import SimpleITK as sitk
+
+# Configure all libraries (especially SimpleITK) to respect thread limits
+from linumpy._thread_config import configure_all_libraries
+configure_all_libraries()
 
 
 def _build_arg_parser():
@@ -38,6 +46,20 @@ def _build_arg_parser():
     p.add_argument('--overlap', type=int,
                    help='Number of overlapping voxels to keep from bottom of\n'
                         'previous mosaic. By default keeps all.')
+    p.add_argument('--no_accumulate_transforms', action='store_true',
+                   help='Apply each transform independently instead of accumulating.\n'
+                        'Use when slices are already in common space (XY aligned).')
+    p.add_argument('--pyramid_resolutions', type=float, nargs='+',
+                   default=[10, 25, 50, 100],
+                   help='Target resolutions for pyramid levels in microns.\n'
+                        'Default: 10 25 50 100 (for analysis at 10, 25, 50, 100 µm).')
+    p.add_argument('--n_levels', type=int, default=None,
+                   help='Number of pyramid levels (overrides --pyramid_resolutions).\n'
+                        'Uses power-of-2 downsampling if specified.')
+    p.add_argument('--make_isotropic', action='store_true', default=True,
+                   help='Resample anisotropic data to isotropic voxels (default).')
+    p.add_argument('--no-make_isotropic', dest='make_isotropic', action='store_false',
+                   help='Preserve aspect ratio (anisotropic output).')
     return p
 
 
@@ -68,10 +90,10 @@ def get_input(mosaics_dir, transforms_dir, parser):
         if not os.path.exists(current_transform_dir):
             parser.error(f'Transform {current_transform_dir} not found.')
 
-        current_mat_file = list(current_transform_dir.glob('*.mat'))
+        current_mat_file = list(current_transform_dir.glob('*.tfm'))
         current_txt_file = list(current_transform_dir.glob('*.txt'))
         if len(current_mat_file) != 1:
-            parser.error(f'Found {len(current_mat_file)} .mat file under {current_transform_dir.as_posix()}')
+            parser.error(f'Found {len(current_mat_file)} .tfm file under {current_transform_dir.as_posix()}')
         current_mat_file = current_mat_file[0]
         if len(current_txt_file) > 1:
             parser.error(f'Found {len(current_txt_file)} .txt file under {current_transform_dir.as_posix()}')
@@ -138,7 +160,8 @@ def main():
     nz = np.sum(fixed_offsets) + last_vol.shape[0]  # because we add the last volume as a whole
     output_shape = (nz, nr, nc)
 
-    output_vol = OmeZarrWriter(args.out_stack, output_shape, vol.chunks, dtype=vol.dtype)
+    # AnalysisOmeZarrWriter supports both custom resolutions and traditional n_levels
+    output_vol = AnalysisOmeZarrWriter(args.out_stack, output_shape, vol.chunks, dtype=vol.dtype)
 
     if args.normalize:
         vol = normalize(vol)
@@ -152,8 +175,15 @@ def main():
     # assemble volume
     for i in tqdm(range(len(mosaics_sorted)), desc='Apply transforms to volume'):
         vol, res = read_omezarr(mosaics_sorted[i])
-        composite_transform = sitk.CompositeTransform(transforms[i::-1])
-        register_vol = apply_transform(vol, composite_transform)
+
+        # Apply transforms: either accumulate all previous transforms or apply only the current one
+        if args.no_accumulate_transforms:
+            # Slices are already in common space - only apply current transform (typically identity or small correction)
+            register_vol = apply_transform(vol, transforms[i])
+        else:
+            # Traditional mode: accumulate all transforms from first slice to current
+            composite_transform = sitk.CompositeTransform(transforms[i::-1])
+            register_vol = apply_transform(vol, composite_transform)
 
         # cropping the registered volume to make sure it fits in output_vol
         register_vol = register_vol[:min(register_vol.shape[0], output_shape[0]-stack_offset)]
@@ -181,7 +211,25 @@ def main():
             (1-alphas)*output_vol[stack_offset:stack_offset+register_vol.shape[0]]+(alphas)*register_vol[:]
         stack_offset += next_fixed_offset
 
-    output_vol.finalize(res)
+    # Finalize with pyramid
+    # n_levels: traditional power-of-2 downsampling
+    # pyramid_resolutions: custom analysis-friendly resolutions (default)
+    # make_isotropic: resample anisotropic data to isotropic voxels
+    output_vol.finalize(res, 
+                        target_resolutions_um=args.pyramid_resolutions,
+                        n_levels=args.n_levels,
+                        make_isotropic=args.make_isotropic)
+
+    # Collect metrics using helper function
+    collect_stack_metrics(
+        output_shape=output_shape,
+        z_offsets=fixed_offsets,
+        num_slices=len(mosaics_sorted) + 1,
+        resolution=list(res),
+        output_path=args.out_stack,
+        blend_enabled=args.blend,
+        normalize_enabled=args.normalize
+    )
 
 
 if __name__ == "__main__":

@@ -184,3 +184,6 @@ workflows/work/
 
 # Temp code file
 draft.py
+
+# Exculde subject data folders (symlinks)
+sub-*

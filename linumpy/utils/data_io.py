@@ -13,7 +13,6 @@ import re
 import nibabel as nib
 import numpy as np
 from PIL import Image
-from pathlib import Path
 
 
 def listSlicesInDir(directory, extension=".nii", returnIndices=False):
@@ -47,13 +46,13 @@ def getSliceListIndices(slice_list):
 
 
 def load_volume(
-    directory,
-    pos,
-    vol_shape,
-    prefix="volume",
-    extension=".bin",
-    precision="float32",
-    suffix="",
+        directory,
+        pos,
+        vol_shape,
+        prefix="volume",
+        extension=".bin",
+        precision="float32",
+        suffix="",
 ):
     """Load a volume, given its directory and its position in slicer coordinates.
 
@@ -117,7 +116,8 @@ def load_slice(directory, z, prototype="slice_z%d", extension=".nii"):
         return -1
 
 
-def load_volumeByFilename(filename: str, volshape: tuple=(512, 512, 120), precision: str="float32", convert2Bool: bool=True) -> np.ndarray:
+def load_volumeByFilename(filename: str, volshape: tuple = (512, 512, 120), precision: str = "float32",
+                          convert2Bool: bool = True) -> np.ndarray:
     """Load a volume based on its filename.
 
     Parameters
@@ -178,7 +178,7 @@ def load_volumeByFilename(filename: str, volshape: tuple=(512, 512, 120), precis
 
 
 def save_nifti(
-    fname, volume, pixDim=(1, 1, 1), pixelFormat=None, intent=1007, expand_dim=True
+        fname, volume, pixDim=(1, 1, 1), pixelFormat=None, intent=1007, expand_dim=True
 ):
     """Save volume as a nifti format. The origin is assumed to be at the center of the volume.
 

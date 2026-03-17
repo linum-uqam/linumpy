@@ -3,17 +3,16 @@
 """ Collection of functions to fix spatial-related artefacts in raw data """
 import itertools
 
-import numpy as np
 import SimpleITK as sitk
+import numpy as np
 from scipy.interpolate import interp1d
+from scipy.ndimage import binary_closing, binary_fill_holes
 from scipy.ndimage import (
     gaussian_filter,
     gaussian_filter1d,
-    gaussian_gradient_magnitude,
     uniform_filter, median_filter,
 )
 from scipy.ndimage import label
-from scipy.ndimage import binary_closing, binary_fill_holes
 from scipy.optimize import curve_fit
 from scipy.signal import argrelmax
 from skimage.filters import threshold_li, threshold_otsu
@@ -132,6 +131,14 @@ def resampleITK(vol, newshape, interpolator="linear"):
     else:
         resample.SetInterpolator(sitk.sitkLinear)
 
+    # Use a small positive default value instead of zero to avoid black dots
+    nonzero_vals = vol[vol > 0]
+    if len(nonzero_vals) > 0:
+        default_val = float(np.percentile(nonzero_vals, 1))
+    else:
+        default_val = 0.0
+    resample.SetDefaultPixelValue(default_val)
+
     vol_itk = sitk.GetImageFromArray(vol)
     output_itk = resample.Execute(vol_itk)
 
@@ -187,6 +194,14 @@ def shrink(vol, spacing=(1.0, 1.0, 1.0), res=(10.0, 10.0, 10.0)):
     resample.SetInterpolator(sitk.sitkLinear)
     resample.SetOutputSpacing([rz, ry, rx])
     resample.SetSize(outputSize)
+
+    # Use a small positive default value instead of zero to avoid black dots
+    nonzero_vals = vol[vol > 0]
+    if len(nonzero_vals) > 0:
+        default_val = float(np.percentile(nonzero_vals, 1))
+    else:
+        default_val = 0.0
+    resample.SetDefaultPixelValue(default_val)
 
     # Resampling
     return sitk.GetArrayFromImage(resample.Execute(img))
@@ -521,9 +536,7 @@ def removeZ0Outliers(z0map):
         return z0map
 
 
-def applyInterfaceCorrection(
-        vol, interface
-):  # TODO: Test this algorithm to make sure it works well.
+def applyInterfaceCorrection(vol, interface):
     """Apply interface depth correction using linear interpolation.
 
     :param vol: (ndarray) containing the volume to fix.
@@ -701,27 +714,7 @@ def estimateLHProfileParameters(vol, s=25):
     vol_p = uniform_filter(
         vol_p, (s, s, 0)
     )  # Averaging intensities over a small XY neigborhood
-    vol_f = gaussian_filter1d(
-        vol_p, sigma=1, axis=2
-    )  # Smoothing the intensity profiles in Z
-    vol_g = gaussian_gradient_magnitude(
-        vol_p, [0, 0, 1]
-    )  # TODO: Computing gradient in z direction only ?
-
-    # Finding max gradient position
-    z0 = vol_g.argmax(axis=2)
-
-    xx, yy = np.meshgrid(list(range(nx)), list(range(ny)), indexing="ij")
-    I_gmax = vol_p[xx, yy, z0]
-
-    test = np.zeros(vol_p.shape)
-    test[xx, yy, z0] = 1
-    import nibabel as nib
-
-    nib.save(
-        nib.Nifti1Image(test, np.eye(4)),
-        "/home/local/LIOM/jlefebvre/tmp/interface_test.nii",
-    )
+    vol_f = gaussian_filter1d(vol_p, sigma=1, axis=2)
 
     # Preparing variables
     z0 = np.zeros((nx, ny), dtype=np.uint)
@@ -730,7 +723,7 @@ def estimateLHProfileParameters(vol, s=25):
     Ib = np.zeros((nx, ny))
     sigma = np.zeros((nx, ny))
 
-    for x in range(nx):  # TODO: Accelerate this loop (multithreading ?)
+    for x in range(nx):
         for y in range(ny):
             I = vol_p[x, y, :]
             If = vol_f[x, y, :]
@@ -770,46 +763,326 @@ def estimateLHProfileParameters(vol, s=25):
     return z0, dz, I0, Ib, sigma
 
 
-def detect_galvo_shift(aip: np.ndarray, n_pixel_return: int = 40) -> int:
-    """Detects the galvo shift in the AIP.
+def detect_galvo_shift(aip: np.ndarray, n_pixel_return: int = 40) -> tuple:
+    """Detect galvo shift artifact in an average intensity projection.
+
+    The galvo return region creates a dark horizontal band in OCT data.
+    This function locates the band by finding gradient pairs separated by
+    n_pixel_return pixels, then validates using dark band consistency.
+
     Parameters
     ----------
-    aip : ndarray
-        AIP of the OCT volume containing both the image and the galvo return. This assumes that the first axis is the
-        A-line axis, and the second axis is the B-scan axis, and the average was taken over the depth axis.
+    aip : np.ndarray
+        Average intensity projection of shape (n_alines, n_bscans).
     n_pixel_return : int
-        Number of pixels used for the galvo returns.
+        Width of galvo return region in pixels (from acquisition metadata).
+
+    Returns
+    -------
+    tuple
+        (shift, confidence) where shift is the circular shift needed to move
+        the galvo region to the edge, and confidence (0-1) indicates detection
+        reliability. Apply fix when confidence >= 0.5.
+    """
+    n_alines = aip.shape[0]
+
+    # Find galvo position using gradient pair detection
+    profile = median_filter(aip.mean(axis=1), 5)
+    gradient = np.abs(np.diff(profile))
+
+    # Find gradient pairs separated by n_pixel_return (galvo region width)
+    n = len(gradient) - n_pixel_return
+    if n <= 0:
+        return 0, 0.0
+
+    similarities = gradient[:n] * gradient[n_pixel_return:n_pixel_return + n]
+    shift_idx = np.argmax(similarities)
+    shift = n_alines - shift_idx - n_pixel_return
+
+    # Compute galvo region boundaries
+    boundary_pos = shift_idx
+    boundary_end = boundary_pos + n_pixel_return
+
+    # Validate: check for consistent dark band across B-scans
+    confidence = _compute_dark_band_confidence(aip, boundary_pos, boundary_end)
+
+    return int(shift), float(confidence)
+
+
+def detect_galvo_for_slice(tiles: list, n_extra: int, threshold: float = 0.6,
+                           n_samples: int = 5, axial_resolution: float = None,
+                           min_intensity: float = 20.0) -> tuple:
+    """Detect galvo shift for a slice by sampling multiple tiles.
+
+    Parameters
+    ----------
+    tiles : list
+        List of tile paths for the slice.
+    n_extra : int
+        Number of extra A-lines (galvo return pixels) from acquisition metadata.
+    threshold : float
+        Confidence threshold for applying fix (default: 0.6).
+    n_samples : int
+        Maximum number of tiles to sample (default: 5).
+    axial_resolution : float, optional
+        Axial resolution for OCT loading.
+    min_intensity : float
+        Minimum mean intensity for a tile to be considered valid.
+
+    Returns
+    -------
+    tuple
+        (shift, confidence) where shift is 0 if confidence < threshold.
+    """
+    from linumpy.microscope.oct import OCT
+
+    if not tiles or n_extra <= 0:
+        return 0, 0.0
+
+    n_tiles = len(tiles)
+
+    # Sample tiles from center region (more likely to contain tissue)
+    center_start = int(n_tiles * 0.2)
+    center_end = int(n_tiles * 0.8)
+    sample_indices = np.linspace(center_start, max(center_end - 1, center_start),
+                                 min(n_samples, n_tiles), dtype=int)
+    sample_indices = list(dict.fromkeys(sample_indices))  # Remove duplicates
+
+    # Collect detections
+    detections = []
+    for idx in sample_indices:
+        if len(detections) >= n_samples:
+            break
+
+        oct_obj = OCT(tiles[idx], axial_resolution) if axial_resolution else OCT(tiles[idx])
+        vol = oct_obj.load_image(crop=False, fix_galvo_shift=False, fix_camera_shift=False)
+        aip = vol.mean(axis=0)
+
+        if np.mean(aip) < min_intensity:
+            continue
+
+        shift, conf = detect_galvo_shift(aip, n_pixel_return=n_extra)
+        detections.append((shift, conf))
+
+    if not detections:
+        return 0, 0.0
+
+    # Use best detection, penalized by cross-tile consistency
+    shifts = np.array([d[0] for d in detections])
+    confidences = np.array([d[1] for d in detections])
+
+    best_idx = np.argmax(confidences)
+    best_shift = shifts[best_idx]
+    best_confidence = confidences[best_idx]
+
+    # Check shift consistency across tiles
+    if len(shifts) > 1:
+        shift_tolerance = max(n_extra // 4, 5)
+        n_consistent = np.sum(np.abs(shifts - best_shift) <= shift_tolerance)
+        consistency_factor = (n_consistent / len(shifts)) ** 0.5
+        best_confidence *= consistency_factor
+
+    if best_confidence >= threshold:
+        return int(best_shift), float(best_confidence)
+    return 0, float(best_confidence)
+
+
+def _compute_dark_band_confidence(aip: np.ndarray, boundary_pos: int,
+                                  boundary_end: int) -> float:
+    """Compute confidence that a dark band exists at the detected position.
+
+    Real galvo artifacts create a consistent dark horizontal band visible
+    across all B-scans. This is the key discriminator vs tissue boundaries.
+
+    Parameters
+    ----------
+    aip : np.ndarray
+        Average intensity projection of shape (n_alines, n_bscans).
+    boundary_pos : int
+        Start position of detected galvo region.
+    boundary_end : int
+        End position of detected galvo region.
+
+    Returns
+    -------
+    float
+        Confidence score (0-1).
+    """
+    n_alines, n_bscans = aip.shape
+    n_pixel_return = boundary_end - boundary_pos
+
+    # Validate boundaries
+    if boundary_pos < 0 or boundary_end > n_alines or n_pixel_return < 5:
+        return 0.0
+
+    # Define comparison regions
+    margin = max(10, n_pixel_return // 2)
+    before_start = max(0, boundary_pos - margin * 2)
+    before_end = boundary_pos
+    after_start = boundary_end
+    after_end = min(n_alines, boundary_end + margin * 2)
+
+    # Need valid comparison regions
+    if before_end <= before_start or after_end <= after_start:
+        return 0.0
+
+    # Check intensity drop consistency across B-scan columns (vectorized)
+    n_check = min(n_bscans, 20)
+    column_indices = np.linspace(0, n_bscans - 1, n_check, dtype=int)
+
+    cols = aip[:, column_indices]  # (n_alines, n_check)
+    before_vals = cols[before_start:before_end, :].mean(axis=0)
+    galvo_vals = cols[boundary_pos:boundary_end, :].mean(axis=0)
+    after_vals = cols[after_start:after_end, :].mean(axis=0)
+    surrounding = (before_vals + after_vals) / 2
+
+    valid_mask = surrounding >= 10
+    valid_cols = int(np.sum(valid_mask))
+
+    if valid_cols == 0:
+        return 0.0
+
+    surrounding_v = surrounding[valid_mask]
+    galvo_v = galvo_vals[valid_mask]
+
+    drop_mask = galvo_v < surrounding_v
+    drop_count = int(np.sum(drop_mask))
+    rel_drops = np.where(drop_mask, (surrounding_v - galvo_v) / surrounding_v, 0.0)
+    total_drop = float(np.sum(rel_drops))
+    significant_drops = int(np.sum(rel_drops > 0.10))
+
+    # Score: consistency of dark band across columns
+    consistency = drop_count / valid_cols
+    significant_ratio = significant_drops / valid_cols
+    avg_drop = total_drop / max(drop_count, 1)
+
+    # Low consistency = likely not a real artifact
+    if consistency < 0.5:
+        return consistency * 0.3
+
+    # Combine scores
+    score = (
+            consistency * 0.40 +
+            significant_ratio * 0.35 +
+            min(avg_drop / 0.3, 1.0) * 0.25
+    )
+
+    return float(np.clip(score, 0.0, 1.0))
+
+
+def fix_galvo_shift(vol: np.ndarray, shift: int = 0, axis: int = 1) -> np.ndarray:
+    """Apply circular shift to move galvo return region to edge of volume.
+
+    Parameters
+    ----------
+    vol : np.ndarray
+        OCT volume data.
+    shift : int
+        Number of pixels to shift.
+    axis : int
+        Axis along which to shift (default: 1 for A-line axis).
+
+    Returns
+    -------
+    np.ndarray
+        Shifted volume. Crop with vol[:, :n_alines, :] to remove galvo region.
+    """
+    if shift == 0:
+        return vol
+    return np.roll(vol, shift, axis=axis)
+
+
+
+def detect_interface_z(vol: np.ndarray,
+                       sigma_xy: float = 3.0,
+                       sigma_z: float = 2.0,
+                       use_log: bool = False) -> int:
+    """Detect water/tissue interface along Z using gradient-based method.
+
+    Applies Gaussian smoothing then finds the peak of the first-order
+    Z-derivative to locate the tissue surface.
+
+    Parameters
+    ----------
+    vol : np.ndarray
+        Volume with shape (X, Y, Z) — already transposed from OME-Zarr (Z, X, Y).
+    sigma_xy : float
+        Gaussian smoothing sigma in XY before Z-gradient.
+    sigma_z : float
+        Gaussian smoothing sigma for Z-gradient computation.
+    use_log : bool
+        Apply log transform before gradient detection.
+
     Returns
     -------
     int
-        Shift in pixels
+        Estimated interface depth in Z voxels.
     """
-    # Compute the average a-line
-    profile = aip.mean(axis=1)
-    profile = median_filter(profile, 9)
+    from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
-    # Compute the intensity difference between the start and end of the a-line for various shifts.
-    # A wrong shift would result in values close to zero as they would be close by in the actual scan
-    differences = []
-    for s in range(len(profile)):
-        d = np.abs(profile[s] - profile[-1 + s])
-        differences.append(d)
+    vol_f = np.log(vol + 1e-6) if use_log else vol.astype(np.float32)
 
-    # If we find the right shift, both the beginning and the end of galvo return will result in high differences
-    similarities = []
-    for s in range(len(profile) - n_pixel_return):
-        foo = (differences[s] * differences[s + n_pixel_return])
-        similarities.append(foo)
+    pad_width = int(np.round(sigma_z * 4))
+    vol_padded = np.pad(vol_f, ((0, 0), (0, 0), (pad_width, 0)), mode='wrap')
+    vol_padded = gaussian_filter(vol_padded, (sigma_xy, sigma_xy, 0))
+    dz = gaussian_filter1d(vol_padded, sigma=sigma_z, axis=-1, order=1)
+    avg_dz = np.sum(dz, axis=(0, 1))
 
-    shift = np.argmax(similarities)
-    shift = len(profile) - shift - n_pixel_return
+    avg_iface = max(int(np.argmax(avg_dz)) - pad_width, 0)
+    return avg_iface
 
-    return shift
 
-def fix_galvo_shift(vol: np.ndarray, shift: int=0, axis:int=1) -> np.ndarray:
-    """Fix the galvo shift in an OCT volume."""
-    if shift == 0:
-        return vol
-    else:
-        return np.roll(vol, shift, axis=axis)
+def crop_below_interface(vol_zxy: np.ndarray,
+                         depth_um: float,
+                         resolution_um: float,
+                         sigma_xy: float = 3.0,
+                         sigma_z: float = 2.0,
+                         crop_before_interface: bool = False,
+                         percentile_clip: float = None) -> np.ndarray:
+    """Crop an OME-Zarr volume to a specified depth below the tissue interface.
 
+    Detects the water/tissue interface using gradient analysis, then crops
+    the volume to retain only  microns below the interface.
+
+    Parameters
+    ----------
+    vol_zxy : np.ndarray
+        Volume with shape (Z, X, Y) as returned by read_omezarr.
+    depth_um : float
+        Target depth below interface in microns.
+    resolution_um : float
+        Z resolution in microns per voxel.
+    sigma_xy : float
+        XY smoothing sigma for interface detection.
+    sigma_z : float
+        Z smoothing sigma for interface detection.
+    crop_before_interface : bool
+        If True, also crop the volume above the detected interface.
+    percentile_clip : float or None
+        If provided, clip values above this percentile before interface detection.
+
+    Returns
+    -------
+    np.ndarray
+        Cropped volume (Z', X, Y).
+    int
+        Detected interface depth in Z voxels.
+    """
+    vol_f = np.abs(vol_zxy) if np.iscomplexobj(vol_zxy) else np.asarray(vol_zxy, dtype=np.float32)
+
+    # Reorder to (X, Y, Z) for gradient computation
+    vol_xyz = np.transpose(vol_f, (1, 2, 0))
+
+    if percentile_clip is not None:
+        vol_xyz = np.clip(vol_xyz, None, np.percentile(vol_xyz, percentile_clip))
+
+    avg_iface = detect_interface_z(vol_xyz, sigma_xy=sigma_xy, sigma_z=sigma_z)
+
+    depth_px = int(round(depth_um / resolution_um))
+    surface_idx = max(0, min(avg_iface, vol_zxy.shape[0] - 1))
+    end_idx = surface_idx + depth_px
+
+    start_idx = surface_idx if crop_before_interface else 0
+    vol_crop = vol_zxy[start_idx:end_idx, :, :]
+
+    return vol_crop, avg_iface

@@ -1,17 +1,17 @@
 import numpy as np
-from linumpy.preproc.xyzcorr import findTissueInterface
-from linumpy.preproc.icorr import confocalPSF, fit_TissueConfocalModel
-
 from scipy.ndimage import binary_dilation, binary_fill_holes, gaussian_filter
 from scipy.stats import zscore
 from skimage.filters import threshold_li
 from skimage.morphology import disk
 
+from linumpy.preproc.icorr import confocalPSF, fit_TissueConfocalModel
+from linumpy.preproc.xyzcorr import findTissueInterface
+
 
 # TODO: Fine-tune default values for 10x microscope or give heuristic
 # for fixing them.
 def extract_psfParametersFromMosaic(
-    vol, f=0.01, nProfiles=10, zr_0=610.0, res=6.5, nIterations=15
+        vol, f=0.01, nProfiles=10, zr_0=610.0, res=6.5, nIterations=15
 ):
     """Computes the confocal PSF from a slice
 
