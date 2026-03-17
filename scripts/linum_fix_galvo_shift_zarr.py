@@ -117,10 +117,153 @@ def _build_arg_parser():
                               help="Slice ID to update in slice_config.csv "
                                    "(required with --update_config).")
 
+    preview_group = p.add_argument_group("Preview")
+    preview_group.add_argument("--preview", metavar="OUT_PNG",
+                               help="Save a before/after comparison PNG after fixing. "
+                                    "Uses the same 3-panel XY/XZ/YZ layout as the pipeline preview.")
+    preview_group.add_argument("--preview_level", type=int, default=2,
+                               help="Pyramid level used for the preview (0=full res). "
+                                    "Default: 2 (4× downsampled, faster). ")
+    preview_group.add_argument("--cmap", default="magma",
+                               help="Colormap for the preview (default: magma).")
+
+    scan_group = p.add_argument_group(
+        "Band-start scan",
+        "Sweep band_start over a range to visually find the correct value. "
+        "Generates a contact-sheet PNG — no fix is applied. "
+        "Requires --band_width.")
+    scan_group.add_argument("--scan", metavar="OUT_PNG",
+                            help="Output PNG for the band-start contact sheet.")
+    scan_group.add_argument("--scan_range", nargs=3, type=int,
+                            metavar=("START", "STOP", "STEP"),
+                            default=None,
+                            help="Range of band_start values to try, in level-0 pixels. "
+                                 "E.g. --scan_range 50 250 10")
+
     p.add_argument("-v", "--verbose", action="store_true",
                    help="Print per-chunk detection results.")
     add_overwrite_arg(p)
     return p
+
+
+# ---------------------------------------------------------------------------
+# Preview
+# ---------------------------------------------------------------------------
+
+def _generate_comparison_preview(before_path: Path, after_path: Path,
+                                 out_png: Path, level: int = 2,
+                                 cmap: str = 'magma',
+                                 band_start: int = None,
+                                 band_width: int = None,
+                                 chunk_x: int = None) -> None:
+    """Save a side-by-side before/after comparison PNG.
+
+    Layout mirrors the pipeline's ``linum_screenshot_omezarr.py`` output:
+    three panels (XY, XZ, YZ) repeated for before (top row) and after
+    (bottom row).  A shared colour scale derived from the *after* volume
+    is used so the dark band in the before image is clearly visible.
+
+    Parameters
+    ----------
+    before_path, after_path : Path
+        OME-Zarr directories to compare.
+    out_png : Path
+        Output PNG file path.
+    level : int
+        Pyramid level to read (higher = faster, lower res).  Clamped
+        to the number of available levels.
+    cmap : str
+        Matplotlib colourmap.
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    def _read_panels(zarr_path: Path, level: int):
+        arr, _, actual, _ = _open_level(zarr_path, level)
+        vol = np.asarray(arr, dtype=np.float32)
+        # Pick the Z slice with the highest mean signal so tissue is always visible.
+        z_means = vol.mean(axis=(1, 2))
+        z = int(np.argmax(z_means))
+        x = vol.shape[1] // 2
+        y = vol.shape[2] // 2
+        print(f"  XY panel: using Z={z} (peak mean={z_means[z]:.1f}, "
+              f"mid={vol.shape[0]//2} has mean={z_means[vol.shape[0]//2]:.1f})")
+        xy = np.array(vol[z, :, :]).T          # leftmost: what the pipeline shows
+        xz = np.array(vol[:, x, :])[::-1, ::-1]
+        yz = np.array(vol[:, :, y])[::-1]
+        return xy, xz, yz
+
+    print(f"Reading before zarr for preview (level {level}) ...")
+    before_panels = _read_panels(before_path, level)
+    print(f"Reading after zarr for preview (level {level}) ...")
+    after_panels = _read_panels(after_path, level)
+
+    # Shared colour limits from the after volume (cleaner signal).
+    all_after = np.concatenate([p.ravel() for p in after_panels])
+    vmin = float(np.percentile(all_after, 0.1))
+    vmax = float(np.percentile(all_after, 99.9))
+
+    titles_top = ["BEFORE  –  XY", "BEFORE  –  XZ", "BEFORE  –  YZ"]
+    titles_bot = ["AFTER   –  XY", "AFTER   –  XZ", "AFTER   –  YZ"]
+    width_ratios = [p.shape[1] for p in before_panels]
+
+    fig, axes = plt.subplots(2, 3,
+                             gridspec_kw={'width_ratios': width_ratios,
+                                         'hspace': 0.05, 'wspace': 0.02})
+    fig.set_size_inches(24, 18)
+    fig.set_dpi(200)
+    fig.patch.set_facecolor('black')
+
+    for col, (bpanel, apanel, ttop, tbot) in enumerate(
+            zip(before_panels, after_panels, titles_top, titles_bot)):
+        for row, (panel, title) in enumerate([(bpanel, ttop), (apanel, tbot)]):
+            ax = axes[row, col]
+            ax.imshow(panel, cmap=cmap, origin='lower', vmin=vmin, vmax=vmax,
+                      aspect='auto')
+            ax.set_title(title, color='white', fontsize=11, pad=3)
+            ax.set_axis_off()
+
+    # Annotate detected band position on the XY panels with vertical lines,
+    # repeated at every tile chunk so the pattern is visible across the mosaic.
+    if band_start is not None and band_width is not None and chunk_x is not None:
+        xy_w = before_panels[0].shape[1]   # total mosaic X width in zarr pixels
+        n_tiles = xy_w // chunk_x
+
+        for k in range(n_tiles):
+            # BEFORE row: original band position
+            x0_before = band_start + k * chunk_x
+            x1_before = x0_before + band_width
+            axes[0, 0].axvline(x0_before, color='cyan', linewidth=0.6, linestyle='--', alpha=0.8)
+            axes[0, 0].axvline(x1_before, color='deepskyblue', linewidth=0.6,
+                               linestyle=':', alpha=0.8)
+            # AFTER row: residual band now at right edge of each tile
+            x0_after = (k + 1) * chunk_x - band_width
+            x1_after = (k + 1) * chunk_x
+            axes[1, 0].axvline(x0_after, color='cyan', linewidth=0.6, linestyle='--', alpha=0.8)
+            axes[1, 0].axvline(x1_after, color='deepskyblue', linewidth=0.6,
+                               linestyle=':', alpha=0.8)
+
+        # Scale bar annotation (bottom-left of BEFORE XY panel).
+        fig_w_px = 24 * 200  # fig_width_in * dpi
+        total_ratio = sum(width_ratios)
+        xy_subplot_px = fig_w_px * width_ratios[0] / total_ratio
+        zarr_px_per_preview_px = xy_w / xy_subplot_px
+        note = (f"band [{band_start}:{band_start+band_width}] per tile  "
+                f"| scale ≈ {zarr_px_per_preview_px:.1f} zarr px / preview px  "
+                f"| 1 visible px ≈ {zarr_px_per_preview_px:.0f} zarr px")
+        axes[0, 0].text(0.01, 0.01, note, transform=axes[0, 0].transAxes,
+                        color='cyan', fontsize=7, va='bottom',
+                        bbox=dict(facecolor='black', alpha=0.5, pad=2))
+        print(f"\nPreview scale: {zarr_px_per_preview_px:.1f} zarr px per preview px "
+              f"in the XY panel.")
+        print(f"  → If the band line appears N px off, use "
+              f"--band_offset ±{zarr_px_per_preview_px:.0f}*N  "
+              f"(e.g. 3 px off → --band_offset ±{3*zarr_px_per_preview_px:.0f})")
+
+    fig.savefig(str(out_png), bbox_inches='tight', facecolor='black')
+    plt.close(fig)
+    print(f"Preview saved → {out_png}")
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +408,118 @@ def _auto_detect(zarr_root: Path, detection_level: int,
 
 
 # ---------------------------------------------------------------------------
+# Band-start scan (contact sheet)
+# ---------------------------------------------------------------------------
+
+def _scan_band_start(zarr_root: Path, band_width: int,
+                     scan_start: int, scan_stop: int, scan_step: int,
+                     out_png: Path, level: int = 1, cmap: str = 'magma') -> None:
+    """Sweep *band_start* over a range and save a contact-sheet PNG.
+
+    A representative tile (average of several mid-mosaic tiles) is rolled
+    for each candidate value so you can visually identify the correct
+    ``band_start`` without running the full fix.
+
+    Parameters
+    ----------
+    band_width : int
+        Width of the dark band in level-0 pixels (typically ``n_extra``).
+    scan_start, scan_stop, scan_step : int
+        Range in level-0 pixels (Python-style: *scan_stop* is exclusive).
+    out_png : Path
+        Output contact-sheet PNG.
+    level : int
+        Pyramid level to use for speed (images are downsampled).
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    arr, _, actual_level, _ = _open_level(zarr_root, level)
+    scale_factor = 2 ** actual_level
+    chunk_x = arr.chunks[1]
+    chunk_y = arr.chunks[2]
+    n_cx = arr.shape[1] // chunk_x
+    n_cy = arr.shape[2] // chunk_y
+
+    # Scale level-0 parameters to the detection level.
+    bw_ds = max(1, int(round(band_width / scale_factor)))
+    start_ds = max(0, int(round(scan_start / scale_factor)))
+    stop_ds = int(round(scan_stop / scale_factor))
+    step_ds = max(1, int(round(scan_step / scale_factor)))
+
+    # Sample a spread of central tiles.
+    cx_lo = max(0, n_cx // 4)
+    cx_hi = min(n_cx - 1, 3 * n_cx // 4)
+    cy_mid = n_cy // 2
+    n_samples = min(5, cx_hi - cx_lo + 1)
+    cx_indices = list(dict.fromkeys(
+        np.linspace(cx_lo, cx_hi, n_samples, dtype=int).tolist()
+    ))
+
+    tiles = []
+    for cx in cx_indices:
+        chunk = np.asarray(
+            arr[:, cx * chunk_x:(cx + 1) * chunk_x,
+                cy_mid * chunk_y:(cy_mid + 1) * chunk_y],
+            dtype=np.float32
+        )
+        if float(chunk.mean()) > 5.0:
+            tiles.append(chunk.mean(axis=0))   # (chunk_x, chunk_y) AIP
+
+    if not tiles:
+        print("  No tiles with sufficient signal found — cannot generate scan.")
+        return
+
+    avg_tile = np.mean(np.stack(tiles, axis=0), axis=0)   # representative XY view
+
+    vmin = float(np.percentile(avg_tile, 0.5))
+    vmax = float(np.percentile(avg_tile, 99.5))
+
+    candidates_ds = list(range(start_ds, stop_ds, step_ds))
+    n_cand = len(candidates_ds)
+    n_cols = min(8, n_cand + 1)
+    n_rows = (n_cand + 1 + n_cols - 1) // n_cols
+
+    fig, axes = plt.subplots(n_rows, n_cols,
+                             figsize=(n_cols * 3, n_rows * 4))
+    fig.patch.set_facecolor('black')
+    axes_flat = np.array(axes).flatten()
+
+    # First panel: original (no roll applied).
+    axes_flat[0].imshow(avg_tile.T, cmap=cmap, vmin=vmin, vmax=vmax,
+                        aspect='auto', origin='lower')
+    axes_flat[0].set_title('ORIGINAL', color='white', fontsize=8)
+    axes_flat[0].set_axis_off()
+
+    for i, bs_ds in enumerate(candidates_ds):
+        bs_l0 = int(round(bs_ds * scale_factor))
+        roll = chunk_x - bs_ds - bw_ds
+        fixed = np.roll(avg_tile, roll, axis=0)
+        ax = axes_flat[i + 1]
+        ax.imshow(fixed.T, cmap=cmap, vmin=vmin, vmax=vmax,
+                  aspect='auto', origin='lower')
+        roll_l0 = int(round(roll * scale_factor))
+        ax.set_title(f'bs={bs_l0}  r={roll_l0}', color='white', fontsize=7)
+        ax.set_axis_off()
+
+    for j in range(n_cand + 1, len(axes_flat)):
+        axes_flat[j].set_visible(False)
+
+    fig.suptitle(
+        f'band_start scan  |  band_width={band_width}px  '
+        f'|  pyramid level {actual_level} ({scale_factor}× downsampled)',
+        color='white', fontsize=10)
+    plt.tight_layout()
+    fig.savefig(str(out_png), bbox_inches='tight', facecolor='black', dpi=150)
+    plt.close(fig)
+
+    print(f"Scan contact sheet saved → {out_png}")
+    print(f"  {n_cand} candidates in level-0 range [{scan_start}:{scan_stop}:{scan_step}]px")
+    print(f"  Title format: bs=<band_start>  r=<roll_amount>  (level-0 px)")
+
+
+# ---------------------------------------------------------------------------
 # Fix / undo
 # ---------------------------------------------------------------------------
 
@@ -274,16 +529,13 @@ def _apply_fix(zarr_root: Path, output_path: Path,
                verbose: bool = False):
     """Write a corrected OME-Zarr, processing each level-0 chunk individually.
 
-    **fix mode**: replaces the dark band at ``[band_start : band_start+band_width]``
-    inside every tile chunk with values linearly interpolated between the last
-    valid column before the band and the first valid column after it.  No
-    rolling is performed — all valid data stays at its original spatial position.
+    **fix mode**: The galvo desynchronisation means A-lines are out of order within
+    each tile chunk.  A single circular roll by ``chunk_x - band_start - band_width``
+    positions reorders them correctly, moving the dark galvo-return band to the right
+    edge of the tile and placing the two valid sweep segments in the correct order.
 
     **undo mode**: reverses a galvo fix that was incorrectly applied during
-    mosaic creation by rolling each chunk back by ``-undo_shift``.  This
-    restores the original spatial ordering, at the cost of making the galvo
-    dark band visible again.  Run with ``--mode fix`` afterwards on the output
-    zarr to also clean up the band.
+    mosaic creation by rolling each chunk back by ``-undo_shift``.
 
     Parameters
     ----------
@@ -312,8 +564,8 @@ def _apply_fix(zarr_root: Path, output_path: Path,
         band_end = band_start + band_width
         roll_amount = chunk_x - band_start - band_width
         print(f"Rolling each tile chunk by +{roll_amount} px "
-              f"(band [{band_start}:{band_end}] → end of tile) "
-              f"in {n_cx}×{n_cy} tile chunks")
+              f"(band [{band_start}:{band_end}] → right edge of tile) "
+              f"in {n_cx}×{n_cy} tile chunks.")
     else:
         print(f"Rolling each tile chunk by {-undo_shift:+d} px to reverse applied galvo fix")
 
@@ -336,15 +588,8 @@ def _apply_fix(zarr_root: Path, output_path: Path,
             chunk = np.asarray(arr[:, xs:xe, ys:ye], dtype=np.float32)
 
             if mode == 'fix':
-                # Roll valid A-lines after the dark band to the front of the tile.
-                # This mirrors what fix_galvo_shift() does during pipeline assembly:
-                #   np.roll(vol, n_alines - shift_idx - n_extra)
-                # where roll_amount = chunk_x - band_start - band_width.
-                # After rolling the layout becomes [valid_2 | valid_1 | dark_band]
-                # with the dark band pushed to the last band_width columns.
                 fixed = np.roll(chunk, roll_amount, axis=1)
-
-            else:  # undo — roll back the shift applied during mosaic creation
+            else:
                 fixed = np.roll(chunk, -undo_shift, axis=1)
 
             writer[0:shape[0], xs:xe, ys:ye] = fixed.astype(dtype)
@@ -418,6 +663,29 @@ def main():
     output_path = Path(args.output_zarr).resolve()
     if not args.detect_only:
         assert_output_exists(output_path, parser, args)
+
+    # ------------------------------------------------------------------
+    # Step 0 – band-start scan (optional, exits early without writing fix)
+    # ------------------------------------------------------------------
+    if args.scan:
+        if args.scan_range is None:
+            parser.error("--scan requires --scan_range START STOP STEP.")
+        if args.band_width is None:
+            parser.error("--scan requires --band_width.")
+        print(f"Band-start scan: range [{args.scan_range[0]}:{args.scan_range[1]}:{args.scan_range[2]}]px "
+              f"band_width={args.band_width}px "
+              f"(pyramid level {args.detection_level}) ...")
+        _scan_band_start(
+            input_path,
+            band_width=args.band_width,
+            scan_start=args.scan_range[0],
+            scan_stop=args.scan_range[1],
+            scan_step=args.scan_range[2],
+            out_png=Path(args.scan),
+            level=args.detection_level,
+            cmap=args.cmap,
+        )
+        return
 
     # ------------------------------------------------------------------
     # Step 1 – determine band / shift parameters
@@ -506,7 +774,21 @@ def main():
     print(f"Corrected zarr written: {output_path}")
 
     # ------------------------------------------------------------------
-    # Step 4 – optionally update slice_config.csv
+    # Step 4 – optionally generate before/after comparison preview
+    # ------------------------------------------------------------------
+    if args.preview:
+        preview_path = Path(args.preview)
+        arr0, _, _, _ = _open_level(input_path, level=0)
+        _generate_comparison_preview(input_path, output_path,
+                                     preview_path,
+                                     level=args.preview_level,
+                                     cmap=args.cmap,
+                                     band_start=band_start if args.mode == 'fix' else None,
+                                     band_width=band_width if args.mode == 'fix' else None,
+                                     chunk_x=arr0.chunks[1])
+
+    # ------------------------------------------------------------------
+    # Step 5 – optionally update slice_config.csv
     # ------------------------------------------------------------------
     if args.update_config:
         if args.slice_id is None:
