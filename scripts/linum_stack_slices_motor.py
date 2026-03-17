@@ -111,6 +111,12 @@ def _build_arg_parser():
                         'correction applied in the overlap zone before blending, analogous\n'
                         'to stitch_3d_with_refinement for tiles. Set to the maximum\n'
                         'allowed shift in pixels (e.g. 10). 0 disables. [%(default)s]')
+    p.add_argument('--blend_z_refine_vox', type=int, default=0,
+                   help='Z-blend position search: scan N voxels below the expected overlap\n'
+                        'boundary (when --use_expected_overlap) for the best-correlated tissue\n'
+                        'plane and set the blend there. Z-spacing stays fixed at slicing_interval;\n'
+                        'only the blend zone moves. Useful when tissue overlap is smaller than\n'
+                        'the imaging depth implies (e.g. deeper cuts). 0 = disabled. [%(default)s]')
 
     # Output options
     p.add_argument('--pyramid_resolutions', type=float, nargs='+',
@@ -500,6 +506,34 @@ def main():
             corr = 0.0
             logger.debug(f"Slice {slice_id}: expected overlap={overlap} voxels "
                          f"(vol_depth={vol.shape[0]}, moving_z={moving_z}, interval={interval_voxels})")
+            # Optionally search below expected_overlap for the best-correlated tissue
+            # boundary to blend at, while keeping z-spacing fixed at slicing_interval.
+            # This handles cases where the actual tissue overlap is smaller than the
+            # imaging depth implies (i.e. the cut removed more tissue than expected).
+            blend_overlap = overlap
+            if args.blend_z_refine_vox > 0 and overlap > 0:
+                search_vox = args.blend_z_refine_vox
+                min_ov = max(1, overlap - search_vox)
+                max_ov = overlap  # cap at expected to preserve slicing_interval z-spacing
+                crop_z = moving_z or 0
+                h, w = prev_vol.shape[1], prev_vol.shape[2]
+                margin = min(h, w) // 4
+                y_sl = slice(margin, h - margin)
+                x_sl = slice(margin, w - margin)
+                best_ref_corr = -np.inf
+                for ov in range(min_ov, max_ov + 1):
+                    f_reg = prev_vol[-ov:, y_sl, x_sl]
+                    m_reg = vol[crop_z: crop_z + ov, y_sl, x_sl]
+                    if m_reg.shape[0] < ov:
+                        break
+                    f_n = (f_reg - f_reg.mean()) / (f_reg.std() + 1e-8)
+                    m_n = (m_reg - m_reg.mean()) / (m_reg.std() + 1e-8)
+                    c = float(np.mean(f_n * m_n))
+                    if c > best_ref_corr:
+                        best_ref_corr = c
+                        blend_overlap = ov
+                logger.debug(f"Slice {slice_id}: blend_z_refine: expected_overlap={overlap}, "
+                             f"blend_overlap={blend_overlap} (corr={best_ref_corr:.3f})")
         elif fixed_z is not None:
             # We have registration-derived indices
             # fixed_z: Z-index in prev_vol where overlap starts
@@ -507,6 +541,7 @@ def main():
             # The overlap depth is: prev_vol.shape[0] - fixed_z
             prev_nz = prev_vol.shape[0]
             overlap = max(0, prev_nz - fixed_z)
+            blend_overlap = overlap
             corr = 1.0  # Assume good correlation since registration found it
             logger.debug(f"Slice {slice_id}: fixed_z={fixed_z}, moving_z={moving_z}, overlap={overlap} voxels")
         else:
@@ -516,12 +551,14 @@ def main():
                 prev_vol, vol,
                 args.slicing_interval_mm, args.search_range_mm, res_z_um
             )
+            blend_overlap = overlap
             moving_z = args.moving_z_first_index  # Use default
 
         z_matches.append({
             'fixed_id': prev_id,
             'moving_id': slice_id,
             'overlap_voxels': overlap,
+            'blend_overlap_voxels': blend_overlap,
             'moving_z_start': moving_z,  # Z-index in moving volume where to start
             'correlation': corr
         })
@@ -605,6 +642,8 @@ def main():
     for i, match in enumerate(tqdm(z_matches, desc="Stacking")):
         slice_id = match['moving_id']
         overlap = match['overlap_voxels']
+        # blend_overlap may be < overlap when z-blend refinement found a tighter tissue match
+        blend_overlap = min(match.get('blend_overlap_voxels', overlap), overlap)
         moving_z_start = match.get('moving_z_start', 0) or 0
 
         vol, _ = read_omezarr(str(slice_files[slice_id]), level=0)
@@ -648,16 +687,21 @@ def main():
             z_end = output_shape[0]
             shifted = shifted[:z_end - z_start]
 
-        if args.blend and overlap > 0 and z_start < z_cursor:
-            # Blend overlap region
-            overlap_z_start = z_start
-            overlap_z_end = min(z_cursor, z_end)
-            overlap_depth = overlap_z_end - overlap_z_start
+        if args.blend and blend_overlap > 0 and z_start < z_cursor:
+            # Blend the region [z_cursor - blend_overlap, z_cursor].
+            # When blend_overlap == overlap this is the standard behaviour.
+            # When blend_overlap < overlap (z-blend refinement found a tighter tissue
+            # match), the leading part of the overlap [z_start, z_cursor - blend_overlap]
+            # retains the existing fixed-volume data rather than blending non-matching tissue.
+            s_blend_start = overlap - blend_overlap  # index into shifted where blend starts
+            overlap_z_start = z_cursor - blend_overlap
+            overlap_z_end = z_cursor
+            overlap_depth = blend_overlap
 
             if overlap_depth > 0:
                 # Get overlap regions from output and shifted
                 existing = np.array(output[overlap_z_start:overlap_z_end, dst_y0:dst_y1, dst_x0:dst_x1])
-                moving_overlap = shifted[:overlap_depth]
+                moving_overlap = shifted[s_blend_start:s_blend_start + overlap_depth]
 
                 # Intensity matching: adjust moving slice to match existing in overlap
                 # This reduces visible bands at slice transitions
@@ -676,7 +720,7 @@ def main():
                         if abs(scale - 1.0) > 0.01:
                             # Apply scaling to the entire shifted volume, not just overlap
                             shifted = shifted * scale
-                            moving_overlap = shifted[:overlap_depth]
+                            moving_overlap = shifted[s_blend_start:s_blend_start + overlap_depth]
                             logger.debug(f"Slice {slice_id}: intensity scale={scale:.3f}")
 
                 # Z-blend refinement: correct residual XY misalignment in the overlap zone
@@ -691,9 +735,9 @@ def main():
                 blended = blend_overlap_z(existing, moving_overlap)
                 output[overlap_z_start:overlap_z_end, dst_y0:dst_y1, dst_x0:dst_x1] = blended
 
-                # Add non-overlapping part
+                # New contribution (always shifted[overlap:] to preserve z-spacing)
                 if z_end > z_cursor:
-                    output[z_cursor:z_end, dst_y0:dst_y1, dst_x0:dst_x1] = shifted[overlap_depth:]
+                    output[z_cursor:z_end, dst_y0:dst_y1, dst_x0:dst_x1] = shifted[overlap:]
         else:
             # No blending - just write to specific region
             output[z_start:z_end, dst_y0:dst_y1, dst_x0:dst_x1] = shifted
