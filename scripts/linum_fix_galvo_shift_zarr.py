@@ -394,16 +394,13 @@ def _apply_fix(zarr_root: Path, output_path: Path,
                verbose: bool = False):
     """Write a corrected OME-Zarr, processing each level-0 chunk individually.
 
-    **fix mode**: replaces the dark band at ``[band_start : band_start+band_width]``
-    inside every tile chunk with values linearly interpolated between the last
-    valid column before the band and the first valid column after it.  No
-    rolling is performed — all valid data stays at its original spatial position.
+    **fix mode**: The galvo desynchronisation means A-lines are out of order within
+    each tile chunk.  A single circular roll by ``chunk_x - band_start - band_width``
+    positions reorders them correctly, moving the dark galvo-return band to the right
+    edge of the tile and placing the two valid sweep segments in the correct order.
 
     **undo mode**: reverses a galvo fix that was incorrectly applied during
-    mosaic creation by rolling each chunk back by ``-undo_shift``.  This
-    restores the original spatial ordering, at the cost of making the galvo
-    dark band visible again.  Run with ``--mode fix`` afterwards on the output
-    zarr to also clean up the band.
+    mosaic creation by rolling each chunk back by ``-undo_shift``.
 
     Parameters
     ----------
@@ -432,8 +429,8 @@ def _apply_fix(zarr_root: Path, output_path: Path,
         band_end = band_start + band_width
         roll_amount = chunk_x - band_start - band_width
         print(f"Rolling each tile chunk by +{roll_amount} px "
-              f"(band [{band_start}:{band_end}] → end of tile) "
-              f"in {n_cx}×{n_cy} tile chunks")
+              f"(band [{band_start}:{band_end}] → right edge of tile) "
+              f"in {n_cx}×{n_cy} tile chunks.")
     else:
         print(f"Rolling each tile chunk by {-undo_shift:+d} px to reverse applied galvo fix")
 
@@ -456,15 +453,8 @@ def _apply_fix(zarr_root: Path, output_path: Path,
             chunk = np.asarray(arr[:, xs:xe, ys:ye], dtype=np.float32)
 
             if mode == 'fix':
-                # Roll valid A-lines after the dark band to the front of the tile.
-                # This mirrors what fix_galvo_shift() does during pipeline assembly:
-                #   np.roll(vol, n_alines - shift_idx - n_extra)
-                # where roll_amount = chunk_x - band_start - band_width.
-                # After rolling the layout becomes [valid_2 | valid_1 | dark_band]
-                # with the dark band pushed to the last band_width columns.
                 fixed = np.roll(chunk, roll_amount, axis=1)
-
-            else:  # undo — roll back the shift applied during mosaic creation
+            else:
                 fixed = np.roll(chunk, -undo_shift, axis=1)
 
             writer[0:shape[0], xs:xe, ys:ye] = fixed.astype(dtype)
