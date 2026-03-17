@@ -64,7 +64,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from linumpy.io.zarr import OmeZarrWriter
-from linumpy.preproc.xyzcorr import detect_galvo_band_in_tile
+from linumpy.preproc.xyzcorr import detect_galvo_shift, detect_galvo_band_in_tile
 from linumpy.utils.io import add_overwrite_arg, assert_output_exists
 
 
@@ -86,12 +86,20 @@ def _build_arg_parser():
     detect_group = p.add_argument_group(
         "Band detection overrides",
         "Override auto-detection with manual values.")
+    detect_group.add_argument("--n_extra", type=int, default=None,
+                              help="Number of galvo-return pixels (n_extra from acquisition "
+                                   "metadata). When provided, uses the same gradient-pair "
+                                   "detector as the pipeline for reliable detection. "
+                                   "Find this in the tile info.txt files or Nextflow config.")
     detect_group.add_argument("--band_start", type=int, default=None,
                               help="Start position of dark band within a tile (pixels). "
-                                   "Overrides auto-detection.")
+                                   "Fully overrides auto-detection.")
     detect_group.add_argument("--band_width", type=int, default=None,
                               help="Width of dark band (pixels). "
-                                   "Overrides auto-detection.")
+                                   "Fully overrides auto-detection.")
+    detect_group.add_argument("--band_offset", type=int, default=0,
+                              help="Shift detected band_start by ±N pixels to fine-tune "
+                                   "without re-running detection (default: 0).")
     detect_group.add_argument("--shift", type=int, default=None,
                               help="Explicit roll shift for --mode undo. "
                                    "Equals the shift that was applied during pipeline creation.")
@@ -233,10 +241,22 @@ def _open_level(zarr_root: Path, level: int):
     return arr, res, actual_level, multiscale
 
 
-def _auto_detect(zarr_root: Path, detection_level: int, verbose: bool = False):
+def _auto_detect(zarr_root: Path, detection_level: int,
+                 n_extra: int = None, verbose: bool = False):
     """Sample representative chunks and return (band_start, band_width, confidence).
 
     band_start and band_width are expressed in level-0 (full-resolution) pixels.
+
+    When *n_extra* is provided the same gradient-pair detector used by the
+    pipeline (``detect_galvo_shift``) is applied to each chunk AIP — this is
+    much more robust than the threshold-based fallback.  Without *n_extra* the
+    simpler ``detect_galvo_band_in_tile`` is used.
+
+    Parameters
+    ----------
+    n_extra : int or None
+        Number of galvo-return pixels from acquisition metadata (the ``n_extra``
+        field in info.txt / Nextflow config).  Strongly recommended.
     """
     det_arr, _, actual_level, _ = _open_level(zarr_root, detection_level)
     scale_factor = 2 ** actual_level  # ratio between detection level and level 0
@@ -246,12 +266,15 @@ def _auto_detect(zarr_root: Path, detection_level: int, verbose: bool = False):
     n_cx = det_arr.shape[1] // chunk_x
     n_cy = det_arr.shape[2] // chunk_y
 
-    # Sample from the central region (more likely to contain tissue).
+    # n_extra at the downsampled level
+    n_extra_ds = int(round(n_extra / scale_factor)) if n_extra else None
+
+    # Sample a spread of chunks from the central region (more likely tissue).
     cx_lo = max(0, n_cx // 4)
     cx_hi = max(cx_lo, min(n_cx - 1, 3 * n_cx // 4))
     cy_mid = n_cy // 2
 
-    n_samples = min(6, cx_hi - cx_lo + 1)
+    n_samples = min(8, cx_hi - cx_lo + 1)
     cx_indices = list(dict.fromkeys(
         np.linspace(cx_lo, cx_hi, n_samples, dtype=int).tolist()
     ))
@@ -270,26 +293,55 @@ def _auto_detect(zarr_root: Path, detection_level: int, verbose: bool = False):
             continue
 
         tile_aip = chunk.mean(axis=0)  # (chunk_x, chunk_y)
-        bs, bw, conf = detect_galvo_band_in_tile(tile_aip)
-        detections.append((bs, bw, conf))
+
+        if n_extra_ds:
+            # Use the proven gradient-pair detector from the pipeline.
+            # detect_galvo_shift returns (shift, confidence) where
+            #   shift = chunk_x - band_start - n_extra
+            # so band_start = chunk_x - shift - n_extra
+            shift_ds, conf = detect_galvo_shift(tile_aip, n_pixel_return=n_extra_ds)
+            bs_ds = chunk_x - shift_ds - n_extra_ds
+            bw_ds = n_extra_ds
+        else:
+            # Fallback: threshold-based detector (less reliable)
+            bs_ds, bw_ds, conf = detect_galvo_band_in_tile(tile_aip)
 
         if verbose:
-            print(f"  Chunk ({cx}, {cy_mid}): band_start={bs:4d}px, "
-                  f"band_width={bw:3d}px, confidence={conf:.3f}")
+            bs_l0 = int(round(bs_ds * scale_factor))
+            bw_l0 = int(round(bw_ds * scale_factor))
+            print(f"  Chunk ({cx:3d}, {cy_mid}): "
+                  f"band_start={bs_l0:4d}px  band_width={bw_l0:3d}px  "
+                  f"confidence={conf:.3f}"
+                  + ("  [gradient-pair]" if n_extra_ds else "  [threshold fallback]"))
+
+        detections.append((bs_ds, bw_ds, conf))
 
     if not detections:
         return 0, 0, 0.0
 
-    best_conf = float(np.max([d[2] for d in detections]))
-    med_start = float(np.median([d[0] for d in detections]))
-    med_width = float(np.median([d[1] for d in detections]))
+    # Use confidence-weighted median for band_start to reduce outlier influence.
+    confs = np.array([d[2] for d in detections])
+    starts = np.array([d[0] for d in detections])
+    widths = np.array([d[1] for d in detections])
+
+    best_conf = float(confs.max())
+    # Weighted median approximation: sort by start, pick at cumulative weight 0.5
+    order = np.argsort(starts)
+    cum_w = np.cumsum(confs[order])
+    half = cum_w[-1] / 2.0
+    med_idx = int(np.searchsorted(cum_w, half))
+    med_start = float(starts[order[med_idx]])
+    med_width = float(np.median(widths))
 
     # Penalise inconsistency across chunks.
     if len(detections) > 1:
-        starts = np.array([d[0] for d in detections])
-        n_consistent = int(np.sum(np.abs(starts - med_start) <= max(chunk_x * 0.05, 5)))
+        tol = max(chunk_x * 0.04, 3)
+        n_consistent = int(np.sum(np.abs(starts - med_start) <= tol))
         consistency = n_consistent / len(detections)
         best_conf *= consistency ** 0.5
+        if verbose:
+            print(f"  Consistency: {n_consistent}/{len(detections)} chunks within "
+                  f"±{tol:.0f}px → confidence penalty factor {consistency**0.5:.3f}")
 
     # Scale back to level-0 pixels.
     band_start_l0 = int(round(med_start * scale_factor))
@@ -479,18 +531,25 @@ def main():
 
     if args.mode == 'fix':
         if args.band_start is not None and args.band_width is not None:
-            band_start = args.band_start
+            band_start = args.band_start + args.band_offset
             band_width = args.band_width
             confidence = 1.0
-            print(f"[manual] band_start={band_start}px, band_width={band_width}px")
+            print(f"[manual] band_start={band_start}px "
+                  f"(offset applied: {args.band_offset:+d}px), band_width={band_width}px")
         else:
-            print(f"Auto-detecting galvo band "
-                  f"(pyramid level {args.detection_level}) ...")
+            detector = "gradient-pair" if args.n_extra else "threshold fallback"
+            print(f"Auto-detecting galvo band using {detector} detector "
+                  f"(pyramid level {args.detection_level})"
+                  + (f", n_extra={args.n_extra}px" if args.n_extra else "") + " ...")
             band_start, band_width, confidence = _auto_detect(
-                input_path, args.detection_level, verbose=args.verbose)
+                input_path, args.detection_level,
+                n_extra=args.n_extra, verbose=args.verbose)
+
+            band_start += args.band_offset
 
             print(f"\nDetection result (scaled to level-0 pixels):")
-            print(f"  band_start   = {band_start} px")
+            print(f"  band_start   = {band_start} px"
+                  + (f"  (offset: {args.band_offset:+d}px)" if args.band_offset else ""))
             print(f"  band_width   = {band_width} px")
             print(f"  confidence   = {confidence:.3f}")
 
@@ -498,9 +557,11 @@ def main():
                 print(f"\nConfidence {confidence:.3f} is below threshold "
                       f"{args.min_confidence}.")
                 if not args.detect_only:
-                    print("No fix applied.  "
-                          "Use --band_start / --band_width to override detection, "
-                          "or lower --min_confidence.")
+                    print("No fix applied.\n"
+                          "  → Provide --n_extra (galvo return pixels from acquisition "
+                          "metadata) for more reliable detection, or\n"
+                          "  → Use --band_start / --band_width to set position manually, or\n"
+                          "  → Lower --min_confidence.")
                     return
             else:
                 print(f"  → band detected; fix will be applied.")
