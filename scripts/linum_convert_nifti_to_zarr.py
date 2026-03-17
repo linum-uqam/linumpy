@@ -3,6 +3,9 @@
 
 """Convert a nifti volume into a .zarr volume"""
 
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 
 import dask.array as da

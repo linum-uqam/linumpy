@@ -3,6 +3,9 @@
 
 """Compute the average intensity projection of a 3D zarr volume."""
 
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 from pathlib import Path
 import dask.array as da
