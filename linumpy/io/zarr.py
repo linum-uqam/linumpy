@@ -359,9 +359,12 @@ class OmeZarrWriter:
         self.shape = shape
         self.downscale_factor = downscale_factor
 
-        if os.path.exists(store_path):
+        if os.path.exists(store_path) or os.path.islink(store_path):
             if overwrite:
-                shutil.rmtree(store_path)
+                if os.path.islink(store_path):
+                    os.unlink(store_path)
+                else:
+                    shutil.rmtree(store_path)
             else:
                 raise ValueError(f"Overwrite set to False and {store_path} non-empty.")
 
