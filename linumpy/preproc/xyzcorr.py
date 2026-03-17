@@ -763,6 +763,67 @@ def estimateLHProfileParameters(vol, s=25):
     return z0, dz, I0, Ib, sigma
 
 
+def detect_galvo_band_in_tile(tile_aip: np.ndarray, min_drop_ratio: float = 0.40) -> tuple:
+    """Detect a galvo return dark band in the AIP of a single assembled mosaic tile.
+
+    Companion to :func:`detect_galvo_shift` for use when only the assembled
+    OME-Zarr mosaic is available and the raw ``.bin`` tiles no longer exist.
+    Each zarr chunk corresponds to one OCT tile (the zarr chunk shape equals the
+    tile size), so this function can be run per chunk to detect and characterise
+    any unfixed galvo artifact.
+
+    Parameters
+    ----------
+    tile_aip : np.ndarray
+        2-D average intensity projection of a single tile,
+        shape ``(n_alines, n_bscans)``.
+    min_drop_ratio : float
+        Minimum relative intensity drop compared to the surrounding tissue
+        baseline to be classified as a dark band.  Default 0.40 (40 % drop).
+
+    Returns
+    -------
+    tuple
+        ``(band_start, band_width, confidence)`` — pixel coordinates of the
+        detected band within the tile (along the A-line axis) and a confidence
+        score in [0, 1].  Returns ``(0, 0, 0.0)`` when no band is detected.
+    """
+    n_alines = tile_aip.shape[0]
+    profile = median_filter(tile_aip.mean(axis=1), size=5)
+
+    # Robust baseline: 75th percentile is above the dark band but below
+    # saturated highlights.
+    baseline = float(np.percentile(profile, 75))
+    if baseline <= 1.0:
+        return 0, 0, 0.0
+
+    threshold = baseline * (1.0 - min_drop_ratio)
+    dark_mask = profile < threshold
+
+    if not dark_mask.any():
+        return 0, 0, 0.0
+
+    # Merge runs separated by at most 2 pixels into one candidate band.
+    dark_idx = np.where(dark_mask)[0]
+    gaps = np.where(np.diff(dark_idx) > 2)[0]
+    groups = np.split(dark_idx, gaps + 1) if len(gaps) else [dark_idx]
+
+    # Keep the candidate with the largest total intensity deficit.
+    best_group = max(groups,
+                     key=lambda g: float(np.sum(threshold - profile[g].clip(max=threshold))))
+
+    band_start = int(best_group[0])
+    band_end = int(best_group[-1]) + 1
+    band_width = band_end - band_start
+
+    # Sanity check: a real galvo artifact is narrow (< 20 % of tile width).
+    if band_width > n_alines * 0.20:
+        return 0, 0, 0.0
+
+    confidence = _compute_dark_band_confidence(tile_aip, band_start, band_end)
+    return band_start, band_width, float(confidence)
+
+
 def detect_galvo_shift(aip: np.ndarray, n_pixel_return: int = 40) -> tuple:
     """Detect galvo shift artifact in an average intensity projection.
 
