@@ -127,6 +127,19 @@ def _build_arg_parser():
     preview_group.add_argument("--cmap", default="magma",
                                help="Colormap for the preview (default: magma).")
 
+    scan_group = p.add_argument_group(
+        "Band-start scan",
+        "Sweep band_start over a range to visually find the correct value. "
+        "Generates a contact-sheet PNG — no fix is applied. "
+        "Requires --band_width.")
+    scan_group.add_argument("--scan", metavar="OUT_PNG",
+                            help="Output PNG for the band-start contact sheet.")
+    scan_group.add_argument("--scan_range", nargs=3, type=int,
+                            metavar=("START", "STOP", "STEP"),
+                            default=None,
+                            help="Range of band_start values to try, in level-0 pixels. "
+                                 "E.g. --scan_range 50 250 10")
+
     p.add_argument("-v", "--verbose", action="store_true",
                    help="Print per-chunk detection results.")
     add_overwrite_arg(p)
@@ -391,6 +404,118 @@ def _auto_detect(zarr_root: Path, detection_level: int,
 
 
 # ---------------------------------------------------------------------------
+# Band-start scan (contact sheet)
+# ---------------------------------------------------------------------------
+
+def _scan_band_start(zarr_root: Path, band_width: int,
+                     scan_start: int, scan_stop: int, scan_step: int,
+                     out_png: Path, level: int = 1, cmap: str = 'magma') -> None:
+    """Sweep *band_start* over a range and save a contact-sheet PNG.
+
+    A representative tile (average of several mid-mosaic tiles) is rolled
+    for each candidate value so you can visually identify the correct
+    ``band_start`` without running the full fix.
+
+    Parameters
+    ----------
+    band_width : int
+        Width of the dark band in level-0 pixels (typically ``n_extra``).
+    scan_start, scan_stop, scan_step : int
+        Range in level-0 pixels (Python-style: *scan_stop* is exclusive).
+    out_png : Path
+        Output contact-sheet PNG.
+    level : int
+        Pyramid level to use for speed (images are downsampled).
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    arr, _, actual_level, _ = _open_level(zarr_root, level)
+    scale_factor = 2 ** actual_level
+    chunk_x = arr.chunks[1]
+    chunk_y = arr.chunks[2]
+    n_cx = arr.shape[1] // chunk_x
+    n_cy = arr.shape[2] // chunk_y
+
+    # Scale level-0 parameters to the detection level.
+    bw_ds = max(1, int(round(band_width / scale_factor)))
+    start_ds = max(0, int(round(scan_start / scale_factor)))
+    stop_ds = int(round(scan_stop / scale_factor))
+    step_ds = max(1, int(round(scan_step / scale_factor)))
+
+    # Sample a spread of central tiles.
+    cx_lo = max(0, n_cx // 4)
+    cx_hi = min(n_cx - 1, 3 * n_cx // 4)
+    cy_mid = n_cy // 2
+    n_samples = min(5, cx_hi - cx_lo + 1)
+    cx_indices = list(dict.fromkeys(
+        np.linspace(cx_lo, cx_hi, n_samples, dtype=int).tolist()
+    ))
+
+    tiles = []
+    for cx in cx_indices:
+        chunk = np.asarray(
+            arr[:, cx * chunk_x:(cx + 1) * chunk_x,
+                cy_mid * chunk_y:(cy_mid + 1) * chunk_y],
+            dtype=np.float32
+        )
+        if float(chunk.mean()) > 5.0:
+            tiles.append(chunk.mean(axis=0))   # (chunk_x, chunk_y) AIP
+
+    if not tiles:
+        print("  No tiles with sufficient signal found — cannot generate scan.")
+        return
+
+    avg_tile = np.mean(np.stack(tiles, axis=0), axis=0)   # representative XY view
+
+    vmin = float(np.percentile(avg_tile, 0.5))
+    vmax = float(np.percentile(avg_tile, 99.5))
+
+    candidates_ds = list(range(start_ds, stop_ds, step_ds))
+    n_cand = len(candidates_ds)
+    n_cols = min(8, n_cand + 1)
+    n_rows = (n_cand + 1 + n_cols - 1) // n_cols
+
+    fig, axes = plt.subplots(n_rows, n_cols,
+                             figsize=(n_cols * 3, n_rows * 4))
+    fig.patch.set_facecolor('black')
+    axes_flat = np.array(axes).flatten()
+
+    # First panel: original (no roll applied).
+    axes_flat[0].imshow(avg_tile.T, cmap=cmap, vmin=vmin, vmax=vmax,
+                        aspect='auto', origin='lower')
+    axes_flat[0].set_title('ORIGINAL', color='white', fontsize=8)
+    axes_flat[0].set_axis_off()
+
+    for i, bs_ds in enumerate(candidates_ds):
+        bs_l0 = int(round(bs_ds * scale_factor))
+        roll = chunk_x - bs_ds - bw_ds
+        fixed = np.roll(avg_tile, roll, axis=0)
+        ax = axes_flat[i + 1]
+        ax.imshow(fixed.T, cmap=cmap, vmin=vmin, vmax=vmax,
+                  aspect='auto', origin='lower')
+        roll_l0 = int(round(roll * scale_factor))
+        ax.set_title(f'bs={bs_l0}  r={roll_l0}', color='white', fontsize=7)
+        ax.set_axis_off()
+
+    for j in range(n_cand + 1, len(axes_flat)):
+        axes_flat[j].set_visible(False)
+
+    fig.suptitle(
+        f'band_start scan  |  band_width={band_width}px  '
+        f'|  pyramid level {actual_level} ({scale_factor}× downsampled)',
+        color='white', fontsize=10)
+    plt.tight_layout()
+    fig.savefig(str(out_png), bbox_inches='tight', facecolor='black', dpi=150)
+    plt.close(fig)
+
+    print(f"Scan contact sheet saved → {out_png}")
+    print(f"  {n_cand} candidates in level-0 range [{scan_start}:{scan_stop}:{scan_step}]px")
+    print(f"  Title format: bs=<band_start>  r=<roll_amount>  (level-0 px)")
+
+
+# ---------------------------------------------------------------------------
 # Fix / undo
 # ---------------------------------------------------------------------------
 
@@ -534,6 +659,29 @@ def main():
     output_path = Path(args.output_zarr).resolve()
     if not args.detect_only:
         assert_output_exists(output_path, parser, args)
+
+    # ------------------------------------------------------------------
+    # Step 0 – band-start scan (optional, exits early without writing fix)
+    # ------------------------------------------------------------------
+    if args.scan:
+        if args.scan_range is None:
+            parser.error("--scan requires --scan_range START STOP STEP.")
+        if args.band_width is None:
+            parser.error("--scan requires --band_width.")
+        print(f"Band-start scan: range [{args.scan_range[0]}:{args.scan_range[1]}:{args.scan_range[2]}]px "
+              f"band_width={args.band_width}px "
+              f"(pyramid level {args.detection_level}) ...")
+        _scan_band_start(
+            input_path,
+            band_width=args.band_width,
+            scan_start=args.scan_range[0],
+            scan_stop=args.scan_range[1],
+            scan_step=args.scan_range[2],
+            out_png=Path(args.scan),
+            level=args.detection_level,
+            cmap=args.cmap,
+        )
+        return
 
     # ------------------------------------------------------------------
     # Step 1 – determine band / shift parameters
