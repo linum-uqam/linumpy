@@ -182,9 +182,13 @@ def _generate_comparison_preview(before_path: Path, after_path: Path,
     def _read_panels(zarr_path: Path, level: int):
         arr, _, actual, _ = _open_level(zarr_path, level)
         vol = np.asarray(arr, dtype=np.float32)
-        z = vol.shape[0] // 2
+        # Pick the Z slice with the highest mean signal so tissue is always visible.
+        z_means = vol.mean(axis=(1, 2))
+        z = int(np.argmax(z_means))
         x = vol.shape[1] // 2
         y = vol.shape[2] // 2
+        print(f"  XY panel: using Z={z} (peak mean={z_means[z]:.1f}, "
+              f"mid={vol.shape[0]//2} has mean={z_means[vol.shape[0]//2]:.1f})")
         xy = np.array(vol[z, :, :]).T          # leftmost: what the pipeline shows
         xz = np.array(vol[:, x, :])[::-1, ::-1]
         yz = np.array(vol[:, :, y])[::-1]
