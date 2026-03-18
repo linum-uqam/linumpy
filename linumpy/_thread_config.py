@@ -47,21 +47,18 @@ def get_max_threads():
     """
     total_cpus = multiprocessing.cpu_count()
 
-    # Check for explicit max CPUs limit
-    max_cpus = os.environ.get('LINUMPY_MAX_CPUS')
-    if max_cpus is not None:
-        try:
+    try:
+        # Check for explicit max CPUs limit
+        max_cpus = os.environ.get('LINUMPY_MAX_CPUS')
+        if max_cpus is not None:
             return max(1, min(int(max_cpus), total_cpus))
-        except ValueError:
-            pass
 
-    # Check for reserved CPUs
-    reserved = os.environ.get('LINUMPY_RESERVED_CPUS')
-    if reserved is not None:
-        try:
+        # Check for reserved CPUs
+        reserved = os.environ.get('LINUMPY_RESERVED_CPUS')
+        if reserved is not None:
             return max(1, total_cpus - int(reserved))
-        except ValueError:
-            pass
+    except ValueError:
+        pass
 
     # Default: use all CPUs
     return total_cpus
