@@ -212,14 +212,20 @@ def _generate_comparison_preview(before_path: Path, after_path: Path,
     if band_start is not None and band_width is not None and chunk_x is not None:
         xy_w = before_panels[0].shape[1]   # total mosaic X width in zarr pixels
         n_tiles = xy_w // chunk_x
+
         for k in range(n_tiles):
-            x0 = band_start + k * chunk_x
-            x1 = x0 + band_width
-            for row in range(2):
-                ax = axes[row, 0]
-                ax.axvline(x0, color='cyan', linewidth=0.6, linestyle='--', alpha=0.8)
-                ax.axvline(x1, color='deepskyblue', linewidth=0.6,
-                           linestyle=':', alpha=0.8)
+            # BEFORE row: original band position
+            x0_before = band_start + k * chunk_x
+            x1_before = x0_before + band_width
+            axes[0, 0].axvline(x0_before, color='cyan', linewidth=0.6, linestyle='--', alpha=0.8)
+            axes[0, 0].axvline(x1_before, color='deepskyblue', linewidth=0.6,
+                               linestyle=':', alpha=0.8)
+            # AFTER row: residual band now at right edge of each tile
+            x0_after = (k + 1) * chunk_x - band_width
+            x1_after = (k + 1) * chunk_x
+            axes[1, 0].axvline(x0_after, color='cyan', linewidth=0.6, linestyle='--', alpha=0.8)
+            axes[1, 0].axvline(x1_after, color='deepskyblue', linewidth=0.6,
+                               linestyle=':', alpha=0.8)
 
         # Scale bar annotation (bottom-left of BEFORE XY panel).
         fig_w_px = 24 * 200  # fig_width_in * dpi
