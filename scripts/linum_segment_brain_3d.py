@@ -3,6 +3,9 @@
 
 """Segment the brain from a 3D volume using a threshold and morphological operations."""
 
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 from pathlib import Path
 

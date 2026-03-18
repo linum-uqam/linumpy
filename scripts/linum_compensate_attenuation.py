@@ -5,6 +5,9 @@ Compensate the tissue attenuation using a precomputed attenuation
 bias field.
 """
 
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 import dask.array as da
 

@@ -3,6 +3,9 @@
 
 """Convert a zarr file to an ome-zarr file"""
 
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 
 import zarr

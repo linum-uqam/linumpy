@@ -3,6 +3,9 @@
 
 """Resample a nifti volume to a given resolution."""
 
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 from pathlib import Path
 
 import argparse

@@ -5,6 +5,9 @@
 and then use the average attenuation to compensate its effect in
 the OCT reflectivity data.
 """
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 # TODO: Keep the OCT pixel format (which is float32 ?)
 import argparse
 

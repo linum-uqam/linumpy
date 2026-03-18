@@ -3,6 +3,9 @@
 
 """View an OCT tile in 3D using napari."""
 
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 
 import napari
