@@ -373,5 +373,5 @@ def refine_z_blend_overlap(existing: np.ndarray,
         return moving_overlap, 0.0
 
     refined = ndi_shift(moving_overlap.astype(np.float32), [0, dy, dx],
-                        order=1, mode='constant', cval=0)
+                        order=1, mode='nearest')
     return refined, magnitude
