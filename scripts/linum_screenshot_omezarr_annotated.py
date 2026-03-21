@@ -37,6 +37,11 @@ def _build_arg_parser():
                    help='Label every Nth slice (default: 1, label all)')
     p.add_argument('--show_lines', action='store_true',
                    help='Draw horizontal lines at slice boundaries')
+    p.add_argument('--orientation', default=None,
+                   help='3-letter RAS orientation code of the volume (e.g. RIA).\n'
+                        'When provided, panel titles use anatomical plane names\n'
+                        '(Axial/Coronal/Sagittal) and axis labels use the actual\n'
+                        'anatomical direction letters instead of X/Y/Z.')
     return p
 
 
@@ -72,7 +77,8 @@ def main():
                          label_every=args.label_every,
                          show_lines=args.show_lines,
                          slice_ids=slice_ids,
-                         zarr_path=str(in_path))
+                         zarr_path=str(in_path),
+                         orientation=args.orientation)
 
 
 if __name__ == '__main__':

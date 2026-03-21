@@ -685,13 +685,15 @@ process stack_motor {
     }
 
     def show_lines_flag = params.annotated_show_lines ? '--show_lines' : ''
+    def orient = params.ras_input_orientation?.trim()?.replace("'", '') ?: ''
+    def orientation_arg = orient ? "--orientation ${orient}" : ''
     """
     linum_stack_slices_motor.py slices ${shifts_file} ${subject_name}.ome.zarr ${options}
     zip -r ${subject_name}.ome.zarr.zip ${subject_name}.ome.zarr
     linum_screenshot_omezarr.py ${subject_name}.ome.zarr ${subject_name}.png
     linum_screenshot_omezarr_annotated.py ${subject_name}.ome.zarr ${subject_name}_annotated.png \
         --slice_ids "${slice_ids_str}" \
-        --label_every ${params.annotated_label_every} ${show_lines_flag}
+        --label_every ${params.annotated_label_every} ${show_lines_flag} ${orientation_arg}
     """
 }
 
@@ -729,6 +731,8 @@ process stack {
     }
 
     def show_lines_flag = params.annotated_show_lines ? '--show_lines' : ''
+    def orient = params.ras_input_orientation?.trim()?.replace("'", '') ?: ''
+    def orientation_arg = orient ? "--orientation ${orient}" : ''
     """
     linum_stack_slices_3d.py mosaics transforms ${subject_name}.ome.zarr ${options}
     zip -r ${subject_name}.ome.zarr.zip ${subject_name}.ome.zarr
@@ -736,7 +740,7 @@ process stack {
     linum_screenshot_omezarr_annotated.py ${subject_name}.ome.zarr ${subject_name}_annotated.png \
         --slice_ids "${slice_ids_str}" \
         --label_every ${params.annotated_label_every} \
-        ${show_lines_flag}
+        ${show_lines_flag} ${orientation_arg}
     """
 }
 
@@ -756,6 +760,8 @@ process normalize_z_intensity {
     script:
     def n_slices_opt = n_slices > 0 ? "--n_serial_slices ${n_slices}" : ""
     def show_lines_flag = params.annotated_show_lines ? '--show_lines' : ''
+    def orient = params.ras_input_orientation?.trim()?.replace("'", '') ?: ''
+    def orientation_arg = orient ? "--orientation ${orient}" : ''
     def znorm_mode_opts = ""
     if (params.znorm_mode == 'histogram') {
         znorm_mode_opts = "--mode histogram --strength ${params.znorm_strength} --tissue_threshold ${params.znorm_tissue_threshold}"
@@ -785,7 +791,7 @@ process normalize_z_intensity {
 
     linum_screenshot_omezarr_annotated.py ${subject_name}.ome.zarr ${subject_name}_annotated.png \
         --slice_ids "${slice_ids_str}" \
-        --label_every ${params.annotated_label_every} ${show_lines_flag}
+        --label_every ${params.annotated_label_every} ${show_lines_flag} ${orientation_arg}
     """
 }
 
