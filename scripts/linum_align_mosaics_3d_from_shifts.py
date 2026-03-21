@@ -24,7 +24,7 @@ import pandas as pd
 
 from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.utils.io import add_overwrite_arg, assert_output_exists
-from linumpy.utils.shifts import filter_outlier_shifts, filter_step_outliers, build_cumulative_shifts
+from linumpy.utils.shifts import build_cumulative_shifts
 from linumpy.utils_images import apply_xy_shift
 
 
@@ -51,39 +51,6 @@ def _build_arg_parser():
                         '  zero: replace with zero')
     p.add_argument('--excluded_slice_window', type=int, default=2,
                    help='Neighbor window for excluded-slice replacement [%(default)s]')
-
-    # Outlier filtering options
-    p.add_argument('--filter_outliers', action='store_true',
-                   help='Detect and filter outlier shifts that cause excessive drift.')
-    p.add_argument('--max_shift_mm', type=float, default=0.5,
-                   help='Maximum allowed pairwise shift in mm. Larger shifts are clamped. [%(default)s]')
-    p.add_argument('--outlier_method', choices=['clamp', 'median', 'zero', 'local', 'iqr'], default='iqr',
-                   help='How to handle outlier shifts:\n'
-                        '  clamp: Limit to max_shift_mm\n'
-                        '  median: Replace with global median of non-outliers\n'
-                        '  zero: Replace with zero\n'
-                        '  local: Replace with local median of neighbors\n'
-                        '  iqr: Auto-detect outliers using IQR and replace with local median [%(default)s]')
-    p.add_argument('--iqr_multiplier', type=float, default=1.5,
-                   help='IQR multiplier for outlier detection (only with --outlier_method iqr). [%(default)s]')
-    p.add_argument('--max_step_mm', type=float, default=0.0,
-                   help='Maximum allowed per-step shift in mm. 0 disables. [%(default)s]')
-    p.add_argument('--step_window', type=int, default=2,
-                   help='Neighbor window for step outlier replacement [%(default)s]')
-    p.add_argument('--step_method', choices=['clamp', 'local_median', 'local_mad'],
-                   default='local_median',
-                   help='How to handle per-step spikes:\n'
-                        '  clamp: Limit magnitude to max_step_mm (requires max_step_mm > 0)\n'
-                        '  local_median: Replace steps above max_step_mm with local median '
-                        '(requires max_step_mm > 0)\n'
-                        '  local_mad: Detect AND replace local outliers using MAD-based scoring; '
-                        'no fixed threshold needed, controlled by --step_mad_threshold '
-                        '[%(default)s]')
-    p.add_argument('--step_mad_threshold', type=float, default=3.0,
-                   help='Number of local MADs above the local median that triggers outlier '
-                        'detection (only with --step_method local_mad). A step is flagged '
-                        'when its magnitude exceeds local_median + threshold * local_MAD. '
-                        '[%(default)s]')
 
     # Drift centering
     p.add_argument('--no_center_drift', action='store_true',
@@ -312,30 +279,6 @@ def main():
     orig_cumsum_x = shifts_df['x_shift_mm'].cumsum()
     orig_cumsum_y = shifts_df['y_shift_mm'].cumsum()
     print(f"Original total drift (all slices): ({orig_cumsum_x.iloc[-1]:.3f}, {orig_cumsum_y.iloc[-1]:.3f}) mm")
-
-    # Filter outliers if requested
-    # NOTE: Outlier filtering operates on ALL shifts in the file, not just selected slices.
-    # This is intentional: a bad registration between slices A→B where B is excluded
-    # would still affect the cumulative drift for slice C (where A→B→C).
-    # The drift centering (below) DOES use only selected slices.
-    if args.filter_outliers:
-        print(f"\nFiltering outlier shifts (method: {args.outlier_method})")
-        shifts_df = filter_outlier_shifts(
-            shifts_df,
-            max_shift_mm=args.max_shift_mm,
-            method=args.outlier_method,
-            iqr_multiplier=args.iqr_multiplier
-        )
-
-    if (args.max_step_mm and args.max_step_mm > 0) or args.step_method == 'local_mad':
-        print(f"\nFiltering step outliers (method: {args.step_method})")
-        shifts_df = filter_step_outliers(
-            shifts_df,
-            max_step_mm=args.max_step_mm,
-            window=args.step_window,
-            method=args.step_method,
-            mad_threshold=args.step_mad_threshold
-        )
 
     # Validate that shifts file contains required slices
     shifts_slice_ids = set()
