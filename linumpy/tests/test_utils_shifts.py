@@ -10,6 +10,7 @@ from linumpy.shifts.utils import (
     build_cumulative_shifts,
     center_shifts,
     convert_shifts_to_pixels,
+    correct_tile_offset_shifts,
     detect_shift_units,
     filter_outlier_shifts,
     filter_step_outliers,
@@ -209,3 +210,76 @@ def test_build_cumulative_shifts_center_drift():
                                      center_drift=True)
     # Middle slice (index 2) should be (0, 0)
     assert result[2][0] == pytest.approx(0.0, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# correct_tile_offset_shifts
+# ---------------------------------------------------------------------------
+
+def test_correct_tile_offset_single_step():
+    """A step of exactly 1 tile-width is subtracted to recover near-zero drift."""
+    tile_fov = 0.875
+    x = [0.02] * 5 + [tile_fov + 0.01] + [0.02] * 5   # one exact-tile step
+    y = [0.0] * 11
+    df = _make_shifts_df(x, y)
+    result, corrected = correct_tile_offset_shifts(df, tile_fov_x_mm=tile_fov)
+    assert 5 in corrected
+    # Corrected value should be the residual only (~0.01 mm)
+    assert abs(result['x_shift_mm'].iloc[5] - 0.01) < 1e-6
+    # Other rows unchanged
+    assert all(abs(result['x_shift_mm'].iloc[i] - 0.02) < 1e-9 for i in range(5))
+
+
+def test_correct_tile_offset_negative_multiple():
+    """A step of -2 tile-widths is corrected by adding 2 × tile_fov."""
+    tile_fov = 0.875
+    x = [0.02] * 5 + [-2 * tile_fov + 0.005] + [0.02] * 5
+    y = [0.0] * 11
+    df = _make_shifts_df(x, y)
+    result, corrected = correct_tile_offset_shifts(df, tile_fov_x_mm=tile_fov)
+    assert 5 in corrected
+    assert abs(result['x_shift_mm'].iloc[5] - 0.005) < 1e-5
+
+
+def test_correct_tile_offset_consecutive_steps():
+    """Three consecutive +1-tile steps are each individually corrected."""
+    tile_fov = 0.875
+    # Simulates sub-22: slices 21-22, 22-23, 23-24 all have +tile_fov step
+    x = [0.02] * 3 + [tile_fov + 0.015, tile_fov + 0.02, tile_fov + 0.01] + [0.02] * 3
+    y = [0.0] * 9
+    df = _make_shifts_df(x, y)
+    result, corrected = correct_tile_offset_shifts(df, tile_fov_x_mm=tile_fov)
+    assert sorted(corrected) == [3, 4, 5]
+    assert abs(result['x_shift_mm'].iloc[3] - 0.015) < 1e-5
+    assert abs(result['x_shift_mm'].iloc[4] - 0.020) < 1e-5
+    assert abs(result['x_shift_mm'].iloc[5] - 0.010) < 1e-5
+
+
+def test_correct_tile_offset_no_correction_for_normal_step():
+    """Steps well below tile_fov are not modified."""
+    tile_fov = 0.875
+    x = [0.3, 0.1, 0.4, 0.05]
+    y = [0.0] * 4
+    df = _make_shifts_df(x, y)
+    result, corrected = correct_tile_offset_shifts(df, tile_fov_x_mm=tile_fov)
+    assert corrected == []
+    pd.testing.assert_frame_equal(result, df)
+
+
+def test_correct_tile_offset_updates_pixel_column():
+    """The pixel-unit x_shift column is updated in proportion."""
+    tile_fov = 0.875
+    px_per_mm = 170.0
+    x_mm = [tile_fov + 0.02]   # 1 tile + small drift
+    x_px = [x_mm[0] * px_per_mm]
+    df = pd.DataFrame({
+        'fixed_id': [0], 'moving_id': [1],
+        'x_shift_mm': x_mm, 'y_shift_mm': [0.0],
+        'x_shift': x_px, 'y_shift': [0.0],
+    })
+    result, corrected = correct_tile_offset_shifts(df, tile_fov_x_mm=tile_fov)
+    assert 0 in corrected
+    expected_mm = 0.02
+    expected_px = 0.02 * px_per_mm
+    assert abs(result['x_shift_mm'].iloc[0] - expected_mm) < 1e-5
+    assert abs(result['x_shift'].iloc[0] - expected_px) < 1e-2
