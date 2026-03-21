@@ -141,8 +141,9 @@ def center_shifts(cumsum_px: Dict, slice_ids: List) -> Dict:
 
 def filter_outlier_shifts(shifts_df: pd.DataFrame,
                           max_shift_mm: float = 0.5,
-                          method: str = 'iqr',
-                          iqr_multiplier: float = 1.5) -> pd.DataFrame:
+                          method: str = 'rehome',
+                          iqr_multiplier: float = 1.5,
+                          return_fraction: float = 0.4) -> pd.DataFrame:
     """Detect and filter outlier shifts that cause excessive drift.
 
     Parameters
@@ -152,9 +153,25 @@ def filter_outlier_shifts(shifts_df: pd.DataFrame,
     max_shift_mm : float
         Maximum allowed pairwise shift in mm (floor for IQR method)
     method : str
-        'clamp', 'median', 'zero', 'local', or 'iqr'
+        'clamp', 'median', 'zero', 'local', 'iqr', or 'rehome'.
+
+        'rehome' (recommended default): distinguishes genuine re-homing events
+        from encoder glitch spikes.  A step is only corrected if it is large
+        AND approximately self-cancelling with an adjacent step.  Specifically,
+        a step at position i is treated as a spike when
+
+            |step[i] + step[i±1]| < return_fraction * |step[i]|
+
+        i.e. the adjacent step reverses most of the displacement.  Re-homing
+        events (large step followed by small steps that stay at the new
+        position) are left untouched.  This makes the filter safe to enable
+        by default without manual threshold tuning per subject.
     iqr_multiplier : float
-        Multiplier for IQR-based detection (default 1.5)
+        Multiplier for IQR-based detection (only used by 'iqr' method).
+    return_fraction : float
+        For 'rehome': fraction threshold below which a round-trip is
+        considered self-cancelling (default 0.4 — if the adjacent step
+        reverses more than 60 % of a large step, treat as glitch spike).
 
     Returns
     -------
@@ -223,6 +240,62 @@ def filter_outlier_shifts(shifts_df: pd.DataFrame,
                 df.loc[idx, 'x_shift_mm'] = non_outlier['x_shift_mm'].median()
                 df.loc[idx, 'y_shift_mm'] = non_outlier['y_shift_mm'].median()
 
+    elif method == 'rehome':
+        # Only correct steps that are large AND self-cancelling with a neighbour.
+        # A step that stays (re-homing event) has a large neighbour sum; a step
+        # that returns (encoder glitch) has a near-zero neighbour sum.
+        def _is_spike(pos, step_x, step_y, step_mag):
+            for offset in [-1, 1]:
+                nb_pos = pos + offset
+                if 0 <= nb_pos < len(df):
+                    nb_idx = df.index[nb_pos]
+                    nb_x = df.loc[nb_idx, 'x_shift_mm']
+                    nb_y = df.loc[nb_idx, 'y_shift_mm']
+                    roundtrip = np.sqrt((step_x + nb_x) ** 2 + (step_y + nb_y) ** 2)
+                    if roundtrip < return_fraction * step_mag:
+                        return True
+            return False
+
+        for idx in df[outlier_mask].index:
+            pos = df.index.get_loc(idx)
+            step_x = df.loc[idx, 'x_shift_mm']
+            step_y = df.loc[idx, 'y_shift_mm']
+            step_mag = shift_mag[idx]
+
+            if not _is_spike(pos, step_x, step_y, step_mag):
+                # Re-homing event — leave it unchanged
+                continue
+
+            # Glitch spike — replace with local median of non-outlier neighbours
+            neighbor_vals_x, neighbor_vals_y = [], []
+            for offset in [-2, -1, 1, 2]:
+                neighbor_pos = pos + offset
+                if 0 <= neighbor_pos < len(df):
+                    neighbor_idx = df.index[neighbor_pos]
+                    if not outlier_mask[neighbor_idx]:
+                        neighbor_vals_x.append(df.loc[neighbor_idx, 'x_shift_mm'])
+                        neighbor_vals_y.append(df.loc[neighbor_idx, 'y_shift_mm'])
+
+            if not neighbor_vals_x:
+                non_outlier = df[~outlier_mask]
+                neighbor_vals_x = [non_outlier['x_shift_mm'].median()]
+                neighbor_vals_y = [non_outlier['y_shift_mm'].median()]
+
+            df.loc[idx, 'x_shift_mm'] = float(np.median(neighbor_vals_x))
+            df.loc[idx, 'y_shift_mm'] = float(np.median(neighbor_vals_y))
+            if 'x_shift' in df.columns:
+                nb_px_x, nb_px_y = [], []
+                for offset in [-2, -1, 1, 2]:
+                    nb_pos = pos + offset
+                    if 0 <= nb_pos < len(df):
+                        nb_idx = df.index[nb_pos]
+                        if not outlier_mask[nb_idx]:
+                            nb_px_x.append(df.loc[nb_idx, 'x_shift'])
+                            nb_px_y.append(df.loc[nb_idx, 'y_shift'])
+                if nb_px_x:
+                    df.loc[idx, 'x_shift'] = float(np.median(nb_px_x))
+                    df.loc[idx, 'y_shift'] = float(np.median(nb_px_y))
+
     return df
 
 
@@ -230,7 +303,8 @@ def filter_step_outliers(shifts_df: pd.DataFrame,
                          max_step_mm: float = 0.0,
                          window: int = 2,
                          method: str = 'local_median',
-                         mad_threshold: float = 3.0) -> pd.DataFrame:
+                         mad_threshold: float = 3.0,
+                         return_fraction: float = 0.4) -> pd.DataFrame:
     """Fix per-step spikes in shifts, independent of global outlier detection.
 
     Parameters
@@ -245,6 +319,11 @@ def filter_step_outliers(shifts_df: pd.DataFrame,
         'clamp', 'local_median', or 'local_mad'.
     mad_threshold : float
         MADs above local median to flag as outlier (for local_mad method).
+    return_fraction : float
+        For all methods: if a flagged large step is NOT self-cancelling with an
+        adjacent step (round-trip > return_fraction * step_mag), it is treated
+        as a re-homing event and left unchanged.  Set to 0 to disable this
+        guard (legacy behaviour).
 
     Returns
     -------
@@ -281,6 +360,29 @@ def filter_step_outliers(shifts_df: pd.DataFrame,
 
     for idx in df[outlier_mask].index:
         row = df.loc[idx]
+        pos = df.index.get_loc(idx)
+        step_x = df.loc[idx, 'x_shift_mm']
+        step_y = df.loc[idx, 'y_shift_mm']
+        step_mag = shift_mag.iloc[pos] if hasattr(shift_mag, 'iloc') else float(np.sqrt(step_x**2 + step_y**2))
+
+        # Re-homing guard: skip correction if the step is NOT self-cancelling.
+        # A re-homing event has a large neighbour sum (position stays); a glitch
+        # spike returns to baseline (neighbour sum ≈ 0).
+        if return_fraction > 0:
+            is_spike = False
+            for offset in [-1, 1]:
+                nb_pos = pos + offset
+                if 0 <= nb_pos < len(df):
+                    nb_idx = df.index[nb_pos]
+                    nb_x = df.loc[nb_idx, 'x_shift_mm']
+                    nb_y = df.loc[nb_idx, 'y_shift_mm']
+                    roundtrip = np.sqrt((step_x + nb_x) ** 2 + (step_y + nb_y) ** 2)
+                    if roundtrip < return_fraction * step_mag:
+                        is_spike = True
+                        break
+            if not is_spike:
+                continue  # Re-homing event — leave unchanged
+
         if method == 'clamp':
             scale = max_step_mm / shift_mag[idx]
             df.loc[idx, 'x_shift_mm'] *= scale
