@@ -171,6 +171,83 @@ def add_z_slice_labels(ax, n_input_slices: int, img_height: int,
             ax.axhline(y=y_line, color='cyan', alpha=0.3, linewidth=0.5, linestyle='--')
 
 
+# ---------------------------------------------------------------------------
+# Orientation helpers
+# ---------------------------------------------------------------------------
+
+# Map from anatomical letter to target-axis group index (0=S/I, 1=R/L, 2=A/P)
+_LETTER_GROUP = {'S': 0, 'I': 0, 'R': 1, 'L': 1, 'A': 2, 'P': 2}
+
+# Map from pair of axis-group indices to anatomical plane name
+_GROUP_PLANE = {
+    frozenset({1, 2}): 'Axial',
+    frozenset({0, 1}): 'Coronal',
+    frozenset({0, 2}): 'Sagittal',
+}
+
+
+def _panel_labels_from_orientation(orientation: str):
+    """Derive anatomical panel labels from a 3-letter orientation code.
+
+    Validates the code using :func:`linumpy.utils.orientation.parse_orientation_code`
+    then computes panel names and axis labels from the source-dimension letters.
+
+    The volume has shape (Z=dim0, X=dim1, Y=dim2).
+    Panel 1 is ``image[:, x_slice, :]`` — shows (dim0, dim2), fixes dim1.
+    Panel 2 is ``image[:, :, y_slice]``  — shows (dim0, dim1), fixes dim2.
+
+    Parameters
+    ----------
+    orientation : str
+        3-letter RAS-style code, e.g. ``'RIA'`` means dim0→R, dim1→I, dim2→A.
+        Surrounding quotes are stripped automatically.
+
+    Returns
+    -------
+    tuple or None
+        ``(p1_name, p1_xlabel, p1_ylabel, p1_fixed_label,
+           p2_name, p2_xlabel, p2_ylabel, p2_fixed_label)``
+        where *name* is the anatomical plane ('Axial'/'Coronal'/'Sagittal'),
+        *xlabel*/*ylabel* are the axis letters for the plot,
+        and *fixed_label* is the axis letter that is held constant.
+        Returns ``None`` for an invalid code.
+    """
+    from linumpy.utils.orientation import parse_orientation_code
+
+    code = orientation.strip("'\" ").upper()
+    try:
+        parse_orientation_code(code)  # validation only
+    except (ValueError, KeyError):
+        return None
+
+    a0, a1, a2 = code  # anatomical letter for source dim0, dim1, dim2
+    g0, g1, g2 = _LETTER_GROUP[a0], _LETTER_GROUP[a1], _LETTER_GROUP[a2]
+
+    # Panel 1: shows (dim0=Z, dim2=Y), fixes dim1 at x_slice
+    p1_name = _GROUP_PLANE.get(frozenset({g0, g2}), 'ZY')
+    # Panel 2: shows (dim0=Z, dim1=X), fixes dim2 at y_slice
+    p2_name = _GROUP_PLANE.get(frozenset({g0, g1}), 'ZX')
+
+    return (
+        p1_name, a2, a0, a1,   # panel1: xlabel=dim2, ylabel=dim0, fixed=dim1
+        p2_name, a1, a0, a2,   # panel2: xlabel=dim1, ylabel=dim0, fixed=dim2
+    )
+
+
+def _auto_slice_indices(image):
+    """Return (x_slice, y_slice) at the tissue centroid via Z-mean projection.
+
+    Uses a mean projection along axis 0 (Z) to produce a 2-D (X, Y) weight
+    map, then picks the X/Y position with the highest summed weight.  Works
+    with dask-backed arrays — only the 2-D collapsed result is materialised.
+    """
+    import numpy as np
+    z_mean = np.asarray(image.mean(axis=0))          # (X, Y) — dask-friendly
+    x_slice = int(np.argmax(z_mean.sum(axis=1)))     # best X across all Y
+    y_slice = int(np.argmax(z_mean.sum(axis=0)))     # best Y across all X
+    return x_slice, y_slice
+
+
 def save_annotated_views(image, out_path: str,
                          n_input_slices: int = None,
                          x_slice: int = None,
@@ -179,8 +256,9 @@ def save_annotated_views(image, out_path: str,
                          label_every: int = 1,
                          show_lines: bool = False,
                          slice_ids: Optional[List[str]] = None,
-                         zarr_path: str = None) -> None:
-    """Save coronal and sagittal views with Z-slice index annotations.
+                         zarr_path: str = None,
+                         orientation: str = None) -> None:
+    """Save anatomically-labelled orthogonal views with Z-slice index annotations.
 
     Parameters
     ----------
@@ -202,6 +280,11 @@ def save_annotated_views(image, out_path: str,
         Actual slice IDs to display.
     zarr_path : str or None
         If provided, try to auto-detect n_input_slices from metadata.
+    orientation : str or None
+        3-letter RAS orientation code (e.g. ``'RIA'``).
+        When provided, panel titles and axis labels use anatomical names
+        (Axial/Coronal/Sagittal) derived from this code instead of the
+        generic ``'Coronal (ZY)'`` / ``'Sagittal (ZX)'`` defaults.
     """
     import matplotlib
     matplotlib.use('Agg')
@@ -218,8 +301,26 @@ def save_annotated_views(image, out_path: str,
     if slice_ids is not None and n_input_slices is None:
         n_input_slices = len(slice_ids)
 
-    x_slice = x_slice if x_slice is not None else n_rows // 2
-    y_slice = y_slice if y_slice is not None else n_cols // 2
+    if x_slice is None or y_slice is None:
+        auto_x, auto_y = _auto_slice_indices(image)
+        if x_slice is None:
+            x_slice = auto_x
+        if y_slice is None:
+            y_slice = auto_y
+
+    # Derive panel titles and axis labels from orientation when available.
+    _orient = _panel_labels_from_orientation(orientation) if orientation else None
+    if _orient:
+        p1_name, p1_xlabel, p1_ylabel, p1_fixed, p2_name, p2_xlabel, p2_ylabel, p2_fixed = _orient
+        title1 = f'{p1_name} ({p1_ylabel}\u00d7{p1_xlabel}) view at {p1_fixed}={x_slice}'
+        title2 = f'{p2_name} ({p2_ylabel}\u00d7{p2_xlabel}) view at {p2_fixed}={y_slice}'
+        xlabel1, ylabel1 = p1_xlabel, p1_ylabel
+        xlabel2, ylabel2 = p2_xlabel, p2_ylabel
+    else:
+        title1 = f'Coronal (ZY) view at X={x_slice}'
+        title2 = f'Sagittal (ZX) view at Y={y_slice}'
+        xlabel1, ylabel1 = 'Y', 'Z'
+        xlabel2, ylabel2 = 'X', 'Z'
 
     image_zy = np.array(image[:, x_slice, :])
     image_zx = np.array(image[:, :, y_slice])
@@ -233,9 +334,9 @@ def save_annotated_views(image, out_path: str,
         ax.set_facecolor('black')
 
     ax1.imshow(image_zy, cmap='magma', origin='lower', vmin=vmin, vmax=vmax, aspect='equal')
-    ax1.set_title(f'Coronal (ZY) view at X={x_slice}', color='white', fontsize=12, pad=10)
-    ax1.set_xlabel('Y', color='white', fontsize=10)
-    ax1.set_ylabel('Z', color='white', fontsize=10)
+    ax1.set_title(title1, color='white', fontsize=12, pad=10)
+    ax1.set_xlabel(xlabel1, color='white', fontsize=10)
+    ax1.set_ylabel(ylabel1, color='white', fontsize=10)
     ax1.tick_params(colors='white', labelsize=8)
     for spine in ax1.spines.values():
         spine.set_color('white')
@@ -244,9 +345,9 @@ def save_annotated_views(image, out_path: str,
                        show_lines=show_lines, side='left', slice_ids=slice_ids)
 
     ax2.imshow(image_zx, cmap='magma', origin='lower', vmin=vmin, vmax=vmax, aspect='equal')
-    ax2.set_title(f'Sagittal (ZX) view at Y={y_slice}', color='white', fontsize=12, pad=10)
-    ax2.set_xlabel('X', color='white', fontsize=10)
-    ax2.set_ylabel('Z', color='white', fontsize=10)
+    ax2.set_title(title2, color='white', fontsize=12, pad=10)
+    ax2.set_xlabel(xlabel2, color='white', fontsize=10)
+    ax2.set_ylabel(ylabel2, color='white', fontsize=10)
     ax2.tick_params(colors='white', labelsize=8)
     for spine in ax2.spines.values():
         spine.set_color('white')
