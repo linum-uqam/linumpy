@@ -234,20 +234,6 @@ def _panel_labels_from_orientation(orientation: str):
     )
 
 
-def _auto_slice_indices(image):
-    """Return (x_slice, y_slice) at the tissue centroid via Z-mean projection.
-
-    Uses a mean projection along axis 0 (Z) to produce a 2-D (X, Y) weight
-    map, then picks the X/Y position with the highest summed weight.  Works
-    with dask-backed arrays — only the 2-D collapsed result is materialised.
-    """
-    import numpy as np
-    z_mean = np.asarray(image.mean(axis=0))          # (X, Y) — dask-friendly
-    x_slice = int(np.argmax(z_mean.sum(axis=1)))     # best X across all Y
-    y_slice = int(np.argmax(z_mean.sum(axis=0)))     # best Y across all X
-    return x_slice, y_slice
-
-
 def save_annotated_views(image, out_path: str,
                          n_input_slices: int = None,
                          x_slice: int = None,
@@ -301,12 +287,8 @@ def save_annotated_views(image, out_path: str,
     if slice_ids is not None and n_input_slices is None:
         n_input_slices = len(slice_ids)
 
-    if x_slice is None or y_slice is None:
-        auto_x, auto_y = _auto_slice_indices(image)
-        if x_slice is None:
-            x_slice = auto_x
-        if y_slice is None:
-            y_slice = auto_y
+    x_slice = x_slice if x_slice is not None else n_rows // 2
+    y_slice = y_slice if y_slice is not None else n_cols // 2
 
     # Derive panel titles and axis labels from orientation when available.
     _orient = _panel_labels_from_orientation(orientation) if orientation else None
