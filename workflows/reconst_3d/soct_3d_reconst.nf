@@ -482,6 +482,24 @@ process normalize {
 // Alignment Processes
 // -----------------------------------------------------------------------------
 
+process detect_rehoming_events {
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
+    input:
+    path shifts_csv
+
+    output:
+    path "shifts_xy_clean.csv", emit: corrected_shifts
+    path "diagnostics/*",       emit: diagnostics, optional: true
+
+    script:
+    def diag_arg = params.rehoming_diagnostics ? "--diagnostics diagnostics" : ""
+    def frac_arg = params.rehoming_return_fraction ? "--return_fraction ${params.rehoming_return_fraction}" : ""
+    """
+    linum_detect_rehoming.py ${shifts_csv} shifts_xy_clean.csv ${frac_arg} ${diag_arg}
+    """
+}
+
 process bring_to_common_space {
     publishDir "${params.output}/${task.process}", mode: 'copy'
 
@@ -494,21 +512,12 @@ process bring_to_common_space {
     script:
     def slice_config_arg = slice_config.name != 'NO_SLICE_CONFIG' ? "--slice_config ${slice_config}" : ""
 
-    def outlier_args = params.filter_shift_outliers ? """--filter_outliers \\
-        --max_shift_mm ${params.max_shift_mm} \\
-        --outlier_method ${params.outlier_method} \\
-        --iqr_multiplier ${params.outlier_iqr_multiplier} \\
-        --max_step_mm ${params.common_space_max_step_mm} \\
-        --step_window ${params.common_space_step_window} \\
-        --step_method ${params.common_space_step_method} \\
-        --step_mad_threshold ${params.common_space_step_mad_threshold}""" : ""
-
     def excluded_args = params.common_space_excluded_slice_mode ?
         "--excluded_slice_mode ${params.common_space_excluded_slice_mode} --excluded_slice_window ${params.common_space_excluded_slice_window}" : ""
 
     """
     linum_align_mosaics_3d_from_shifts.py inputs shifts_xy.csv common_space \
-        ${slice_config_arg} ${outlier_args} ${excluded_args}
+        ${slice_config_arg} ${excluded_args}
     mv common_space/* .
     """
 }
@@ -1058,13 +1067,21 @@ workflow {
     normalize(crop_interface.out.cropped)
 
     // Stage 4: Common Space Alignment
+    // Optionally correct encoder glitch spikes before alignment.
+    if (params.detect_rehoming) {
+        detect_rehoming_events(shifts_xy)
+        aligned_shifts = detect_rehoming_events.out.corrected_shifts
+    } else {
+        aligned_shifts = shifts_xy
+    }
+
     common_space_input = normalize.out.normalized
         .toSortedList { a, b -> a[0] <=> b[0] }
         .flatten()
         .collate(2)
         .map { _meta, filename -> filename }
         .collect()
-        .merge(shifts_xy) { a, b -> tuple(a, b) }
+        .merge(aligned_shifts) { a, b -> tuple(a, b) }
         .merge(slice_config_channel) { a, b -> tuple(a[0], a[1], b) }
 
     bring_to_common_space(common_space_input)
