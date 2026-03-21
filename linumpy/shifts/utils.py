@@ -299,6 +299,99 @@ def filter_outlier_shifts(shifts_df: pd.DataFrame,
     return df
 
 
+def correct_tile_offset_shifts(
+        shifts_df: pd.DataFrame,
+        tile_fov_x_mm: float,
+        tile_fov_y_mm: float = None,
+        tolerance: float = 0.05,
+        min_step_mm: float = 0.0,
+) -> Tuple[pd.DataFrame, List[int]]:
+    """Correct pairwise shifts that are spurious integer multiples of the tile FOV.
+
+    The XY shifts file records ``xmin_mm[fixed] - xmin_mm[moving]``, where
+    ``xmin_mm[i]`` is the **left-edge position of the mosaic grid** for slice
+    ``i``.  When the acquisition software adds (or removes) a whole tile column
+    at the left boundary of the grid between slices — because the tissue extent
+    changed — ``xmin_mm`` jumps by exactly one tile-FOV.  The resulting shift
+    is therefore ±1 FOV (or ±N FOV for multiple added/removed columns) even
+    though the tissue itself did not move.
+
+    These steps are persistent (not self-cancelling) and therefore survive the
+    spike detector in ``filter_outlier_shifts`` unmodified.  This function
+    strips the integer-tile component from each step, leaving only the true
+    inter-slice tissue drift.
+
+    This function checks each pairwise step independently: if the X component
+    is within ``tolerance`` of N × ``tile_fov_x_mm`` (for integer N ≠ 0), the
+    offset N × tile_fov_x_mm is subtracted, recovering the true tissue drift.
+    The same is done for the Y component independently.
+
+    Parameters
+    ----------
+    shifts_df : pd.DataFrame
+        DataFrame with columns: fixed_id, moving_id, x_shift_mm, y_shift_mm
+        (and optionally x_shift, y_shift in pixels).
+    tile_fov_x_mm : float
+        Tile field-of-view width in X (mm at the mosaic resolution).
+    tile_fov_y_mm : float, optional
+        Tile field-of-view width in Y (mm).  Defaults to ``tile_fov_x_mm``.
+    tolerance : float
+        Fractional tolerance: a component is treated as a tile-multiple when
+        ``|component - N × fov| / fov < tolerance``.  Default 0.05 (5 %).
+    min_step_mm : float
+        Only inspect steps whose magnitude exceeds this value (mm).
+        Default 0 — all steps are checked.
+
+    Returns
+    -------
+    pd.DataFrame
+        Corrected DataFrame.
+    List[int]
+        Indices of rows that were modified.
+    """
+    if tile_fov_y_mm is None:
+        tile_fov_y_mm = tile_fov_x_mm
+
+    df = shifts_df.copy()
+    corrected_indices = []
+
+    for idx in df.index:
+        dx = df.loc[idx, 'x_shift_mm']
+        dy = df.loc[idx, 'y_shift_mm']
+        mag = float(np.sqrt(dx ** 2 + dy ** 2))
+
+        if mag < min_step_mm:
+            continue
+
+        modified = False
+
+        # Check X component
+        if tile_fov_x_mm > 0:
+            nx = int(round(dx / tile_fov_x_mm))
+            if nx != 0 and abs(dx - nx * tile_fov_x_mm) / tile_fov_x_mm < tolerance:
+                offset_x_mm = nx * tile_fov_x_mm
+                if 'x_shift' in df.columns and abs(dx) > 1e-9:
+                    df.loc[idx, 'x_shift'] -= offset_x_mm * (df.loc[idx, 'x_shift'] / dx)
+                df.loc[idx, 'x_shift_mm'] -= offset_x_mm
+                modified = True
+
+        # Check Y component
+        if tile_fov_y_mm > 0:
+            dy_cur = df.loc[idx, 'y_shift_mm']  # may differ from dy if X was corrected
+            ny = int(round(dy_cur / tile_fov_y_mm))
+            if ny != 0 and abs(dy_cur - ny * tile_fov_y_mm) / tile_fov_y_mm < tolerance:
+                offset_y_mm = ny * tile_fov_y_mm
+                if 'y_shift' in df.columns and abs(dy) > 1e-9:
+                    df.loc[idx, 'y_shift'] -= offset_y_mm * (df.loc[idx, 'y_shift'] / dy)
+                df.loc[idx, 'y_shift_mm'] -= offset_y_mm
+                modified = True
+
+        if modified:
+            corrected_indices.append(idx)
+
+    return df, corrected_indices
+
+
 def filter_step_outliers(shifts_df: pd.DataFrame,
                          max_step_mm: float = 0.0,
                          window: int = 2,
