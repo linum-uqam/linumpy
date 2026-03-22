@@ -306,20 +306,30 @@ def correct_tile_offset_shifts(
         tolerance: float = 0.05,
         min_step_mm: float = 0.0,
 ) -> Tuple[pd.DataFrame, List[int]]:
-    """Correct pairwise shifts that are spurious integer multiples of the tile FOV.
+    """Correct pairwise shifts that are spurious integer multiples of an artifact step.
 
     The XY shifts file records ``xmin_mm[fixed] - xmin_mm[moving]``, where
     ``xmin_mm[i]`` is the **left-edge position of the mosaic grid** for slice
-    ``i``.  When the acquisition software adds (or removes) a whole tile column
-    at the left boundary of the grid between slices — because the tissue extent
-    changed — ``xmin_mm`` jumps by exactly one tile-FOV.  The resulting shift
-    is therefore ±1 FOV (or ±N FOV for multiple added/removed columns) even
-    though the tissue itself did not move.
+    ``i``.  After each slice the acquisition software calls ``detect_mosaic`` to
+    find the tissue boundary; if the boundary has moved, ``mosaic_xmin_mm`` is
+    reset to the new position (minus a margin).  This repositioning is recorded
+    in the shifts file as an apparent lateral tissue drift even though the tissue
+    itself did not move.  The magnitude equals however far the detected tissue
+    boundary shifted, which is determined by tissue geometry and the ROI
+    detection algorithm — **not** by the overlap-corrected tile step or any
+    stage hardware quantum.
+
+    .. note::
+        The artifact step ``tile_fov_x_mm`` must be **empirically determined**
+        from the shifts_xy.csv data.  It is **not** equal to
+        ``tile_size_um × (1 - overlap_fraction) / 1000`` (the stitching tile
+        step).  To find the correct value, inspect the x_shift_mm column for a
+        cluster of near-equal large steps; that common value is the artifact step.
 
     These steps are persistent (not self-cancelling) and therefore survive the
     spike detector in ``filter_outlier_shifts`` unmodified.  This function
-    strips the integer-tile component from each step, leaving only the true
-    inter-slice tissue drift.
+    strips the integer-artifact-step component from each shift, leaving only
+    the true inter-slice tissue drift.
 
     This function checks each pairwise step independently: if the X component
     is within ``tolerance`` of N × ``tile_fov_x_mm`` (for integer N ≠ 0), the
@@ -332,7 +342,8 @@ def correct_tile_offset_shifts(
         DataFrame with columns: fixed_id, moving_id, x_shift_mm, y_shift_mm
         (and optionally x_shift, y_shift in pixels).
     tile_fov_x_mm : float
-        Tile field-of-view width in X (mm at the mosaic resolution).
+        Empirically determined artifact step size in X (mm).  Must be found
+        from the shifts data — see note above.
     tile_fov_y_mm : float, optional
         Tile field-of-view width in Y (mm).  Defaults to ``tile_fov_x_mm``.
     tolerance : float

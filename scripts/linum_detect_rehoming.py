@@ -70,15 +70,18 @@ def _build_arg_parser():
                         'displacement.  Lower values are more conservative '
                         '(correct fewer spikes).  [%(default)s]')
     p.add_argument('--tile_fov_mm', type=float, default=None,
-                   help='Tile field-of-view width in mm (at the mosaic resolution).\n'
-                        'When provided, any pairwise step whose X or Y component is\n'
-                        'within 5 %% of an integer multiple of tile_fov_mm is corrected\n'
-                        'by subtracting that multiple, recovering the true tissue drift.\n'
-                        'This handles mosaic grid-expansion artifacts where the\n'
-                        'acquisition software added/removed tile columns at the\n'
-                        'mosaic boundary, shifting xmin_mm by N × tile_FOV even\n'
-                        'though the tissue did not move.  Apply before spike\n'
-                        'detection.  [%(default)s]')
+                   help='Observed artifact step size in mm: the amount xmin_mm shifts\n'
+                        'spuriously at mosaic grid-expansion transitions.\n'
+                        'This value must be determined empirically from the\n'
+                        'shifts_xy.csv data — it is NOT simply tile_size_um × (1-overlap).\n'
+                        'To find it: look for a cluster of near-equal large steps in\n'
+                        'x_shift_mm (e.g. several rows all ≈ +0.875 mm).  The common\n'
+                        'value is the artifact step; its magnitude depends on the mosaic\n'
+                        'grid layout at the time of acquisition.\n'
+                        'When set, any step within tile_fov_tolerance of N × tile_fov_mm\n'
+                        '(N integer ≠ 0) is corrected by subtracting N × tile_fov_mm.\n'
+                        'If unsure, leave unset and inspect the --diagnostics plot.\n'
+                        '[%(default)s]')
     p.add_argument('--tile_fov_tolerance', type=float, default=0.05,
                    help='Fractional tolerance for tile-FOV multiple detection.\n'
                         'Default 0.05 → a 5 %% margin around each integer multiple.'

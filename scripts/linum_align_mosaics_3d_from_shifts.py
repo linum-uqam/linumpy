@@ -57,6 +57,10 @@ def _build_arg_parser():
                    help='Do not center drift around middle slice.\n'
                         'By default, drift is centered to prevent slices from moving out of volume.')
 
+    p.add_argument('--refine_unreliable', action='store_true',
+                   help='For transitions flagged as unreliable (reliable=0 in the shifts CSV),\n'
+                        'replace the metadata-derived shift with a 2-D phase cross-correlation\n'
+                        'estimate computed from the stitched mosaics.  Requires scikit-image.')
 
     add_overwrite_arg(p)
     return p
@@ -215,6 +219,75 @@ def compute_common_shape(mosaic_files, slice_ids, cumsum_shifts):
     return nx, ny, x0, y0
 
 
+def _estimate_shift_by_registration(fixed_path, moving_path):
+    """Estimate the XY shift between two 3D mosaics via 2-D phase cross-correlation.
+
+    Computes a max-projection over the central 20 % of Z-slices for each
+    mosaic, zero-pads both projections to the same shape, then calls
+    ``skimage.registration.phase_cross_correlation``.
+
+    Parameters
+    ----------
+    fixed_path, moving_path : path-like
+        Paths to the two ``.ome.zarr`` mosaics.
+
+    Returns
+    -------
+    dx_mm, dy_mm : float
+        Estimated XY shift in mm (same sign convention as the shifts CSV:
+        positive X means the moving mosaic is to the left of the fixed one).
+    dx_px, dy_px : float
+        Same shift in pixels.
+    """
+    from skimage.registration import phase_cross_correlation
+
+    fixed_vol, res = read_omezarr(fixed_path)
+    moving_vol, _ = read_omezarr(moving_path)
+
+    fixed_data = np.array(fixed_vol)
+    moving_data = np.array(moving_vol)
+
+    def _proj(arr):
+        nz = arr.shape[0]
+        z0 = max(0, nz // 2 - max(1, nz // 10))
+        z1 = min(nz, nz // 2 + max(1, nz // 10))
+        return arr[z0:z1].max(axis=0).astype(np.float32)
+
+    fixed_proj = _proj(fixed_data)
+    moving_proj = _proj(moving_data)
+
+    # Pad both to the same (max) shape so that phase_cross_correlation requirements are met
+    h = max(fixed_proj.shape[0], moving_proj.shape[0])
+    w = max(fixed_proj.shape[1], moving_proj.shape[1])
+
+    def _pad(arr, th, tw):
+        ph = th - arr.shape[0]
+        pw = tw - arr.shape[1]
+        return np.pad(arr, ((ph // 2, ph - ph // 2), (pw // 2, pw - pw // 2)))
+
+    fixed_padded = _pad(fixed_proj, h, w)
+    moving_padded = _pad(moving_proj, h, w)
+
+    shift, _, _ = phase_cross_correlation(fixed_padded, moving_padded, upsample_factor=10)
+
+    # phase_cross_correlation returns (row_shift, col_shift) = (dy, dx) in pixels.
+    # A positive dy means the moving image is shifted downward (larger row index = larger Y).
+    # A positive dx means the moving image is shifted rightward (larger col = larger X).
+    # The CSV convention is shift = fixed_pos - moving_pos, so:
+    #   if moving is to the right by dx_px → x_shift_mm is negative.
+    # The phase_cross_correlation shift[1] already has the right sign for our convention:
+    # it reports how much to translate moving to align to fixed.
+    dy_px, dx_px = float(shift[0]), float(shift[1])
+
+    res_x_mm = res[-1] if res[-1] < 1.0 else res[-1] / 1000.0
+    res_y_mm = res[-2] if res[-2] < 1.0 else res[-2] / 1000.0
+
+    dx_mm = dx_px * res_x_mm
+    dy_mm = dy_px * res_y_mm
+
+    return dx_mm, dy_mm, dx_px, dy_px
+
+
 def main():
     parser = _build_arg_parser()
     args = parser.parse_args()
@@ -274,6 +347,39 @@ def main():
             mode=args.excluded_slice_mode,
             window=args.excluded_slice_window
         )
+
+    # Refine unreliable transitions with image-based registration if requested
+    if args.refine_unreliable and 'reliable' in shifts_df.columns:
+        unreliable_mask = shifts_df['reliable'].astype(int) == 0
+        n_unreliable = int(unreliable_mask.sum())
+        if n_unreliable > 0:
+            print(f"Refining {n_unreliable} unreliable transitions via image registration...")
+            for idx in shifts_df[unreliable_mask].index:
+                fixed_id = int(shifts_df.loc[idx, 'fixed_id'])
+                moving_id = int(shifts_df.loc[idx, 'moving_id'])
+                if fixed_id not in mosaic_files or moving_id not in mosaic_files:
+                    print(f"  Skipping z{fixed_id:02d}→z{moving_id:02d}: mosaic file(s) not found")
+                    continue
+                try:
+                    dx_mm, dy_mm, dx_px, dy_px = _estimate_shift_by_registration(
+                        mosaic_files[fixed_id], mosaic_files[moving_id]
+                    )
+                    print(f"  z{fixed_id:02d}→z{moving_id:02d}: metadata=({shifts_df.loc[idx, 'x_shift_mm']:.3f}, "
+                          f"{shifts_df.loc[idx, 'y_shift_mm']:.3f}) mm → "
+                          f"registered=({dx_mm:.3f}, {dy_mm:.3f}) mm")
+                    shifts_df.loc[idx, 'x_shift_mm'] = dx_mm
+                    shifts_df.loc[idx, 'y_shift_mm'] = dy_mm
+                    if 'x_shift' in shifts_df.columns:
+                        shifts_df.loc[idx, 'x_shift'] = dx_px
+                        shifts_df.loc[idx, 'y_shift'] = dy_px
+                except Exception as exc:
+                    print(f"  Warning: registration failed for z{fixed_id:02d}→z{moving_id:02d} ({exc}); "
+                          f"keeping metadata shift")
+        else:
+            print("No unreliable transitions found in shifts file; --refine_unreliable has no effect")
+    elif args.refine_unreliable:
+        print("Warning: --refine_unreliable requested but shifts CSV has no 'reliable' column; "
+              "re-run linum_estimate_xy_shift_from_metadata.py to generate it")
 
     # Report original cumulative drift
     orig_cumsum_x = shifts_df['x_shift_mm'].cumsum()
