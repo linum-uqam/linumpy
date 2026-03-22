@@ -495,8 +495,9 @@ process detect_rehoming_events {
     script:
     def diag_arg = params.rehoming_diagnostics ? "--diagnostics diagnostics" : ""
     def frac_arg = params.rehoming_return_fraction ? "--return_fraction ${params.rehoming_return_fraction}" : ""
+    def tile_fov_arg = params.tile_fov_mm ? "--tile_fov_mm ${params.tile_fov_mm}" : ""
     """
-    linum_detect_rehoming.py ${shifts_csv} shifts_xy_clean.csv ${frac_arg} ${diag_arg}
+    linum_detect_rehoming.py ${shifts_csv} shifts_xy_clean.csv ${frac_arg} ${tile_fov_arg} ${diag_arg}
     """
 }
 
@@ -515,9 +516,11 @@ process bring_to_common_space {
     def excluded_args = params.common_space_excluded_slice_mode ?
         "--excluded_slice_mode ${params.common_space_excluded_slice_mode} --excluded_slice_window ${params.common_space_excluded_slice_window}" : ""
 
+    def refine_arg = params.common_space_refine_unreliable ? "--refine_unreliable" : ""
+
     """
     linum_align_mosaics_3d_from_shifts.py inputs shifts_xy.csv common_space \
-        ${slice_config_arg} ${excluded_args}
+        ${slice_config_arg} ${excluded_args} ${refine_arg}
     mv common_space/* .
     """
 }
