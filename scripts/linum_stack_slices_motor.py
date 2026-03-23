@@ -610,41 +610,39 @@ def main():
         pd.DataFrame(z_matches).to_csv(args.output_z_matches, index=False)
         logger.info(f"Z-matches saved to {args.output_z_matches}")
 
-    # Smooth Z-overlaps: detect and correct outliers
-    overlaps = np.array([m['overlap_voxels'] for m in z_matches])
-    if len(overlaps) > 3:
-        median_overlap = np.median(overlaps)
-        # Detect outliers (deviates more than 30% from median)
-        # Using 30% to catch more outliers that cause visible jumps
-        outlier_threshold = 0.3 * median_overlap
-        smoothed = False
-        logger.info(f"Z-overlap smoothing: median={median_overlap:.1f}, threshold=±{outlier_threshold:.1f}")
-        for i, match in enumerate(z_matches):
-            deviation = abs(match['overlap_voxels'] - median_overlap)
-            if deviation > outlier_threshold:
-                old_overlap = match['overlap_voxels']
-                # Replace with local median or global median
-                if i > 0 and i < len(z_matches) - 1:
-                    local_median = np.median([z_matches[i-1]['overlap_voxels'],
-                                              z_matches[i+1]['overlap_voxels'] if i+1 < len(z_matches) else median_overlap])
-                    match['overlap_voxels'] = int(local_median)
-                else:
-                    match['overlap_voxels'] = int(median_overlap)
-                logger.warning(f"Slice {match['moving_id']}: corrected outlier overlap {old_overlap} -> {match['overlap_voxels']} voxels (deviation={deviation:.1f})")
-                smoothed = True
-
-        # Recompute total_z after smoothing if any corrections were made
-        if smoothed:
-            # Use cached shapes instead of re-reading volumes
-            total_z = volume_shapes[first_id][0]
-            for match in z_matches:
-                slice_id = match['moving_id']
-                moving_z_val = match.get('moving_z_start', 0) or 0
-                overlap = match['overlap_voxels']
-                vol_nz = volume_shapes[slice_id][0]
-                contribution = vol_nz - moving_z_val - overlap
-                total_z += max(0, contribution)
-            logger.info(f"Recomputed total Z after smoothing: {total_z}")
+    # Enforce Z-consistency: replace outlier overlaps using neighbor interpolation.
+    # High-confidence registrations (confidence >= confidence_high) are protected.
+    confidence_per_slice = {
+        sid: tfm_tuple[3]
+        for sid, tfm_tuple in registration_transforms.items()
+        if tfm_tuple is not None
+    }
+    overlaps_before = [m['overlap_voxels'] for m in z_matches]
+    logger.info(
+        f"Z-overlap consistency check: median={np.median(overlaps_before):.1f}, "
+        f"std={np.std(overlaps_before):.1f} voxels"
+    )
+    z_matches, z_corrections = enforce_z_consistency(
+        z_matches,
+        confidence_per_slice=confidence_per_slice,
+        outlier_threshold_frac=0.30,
+        confidence_protect_threshold=args.confidence_high,
+    )
+    if z_corrections:
+        for c in z_corrections:
+            logger.warning(
+                f"Slice {c['moving_id']}: corrected outlier {c['field']} "
+                f"{c['old_value']} -> {c['new_value']}"
+            )
+        # Recompute total_z after corrections
+        total_z = volume_shapes[first_id][0]
+        for match in z_matches:
+            sid = match['moving_id']
+            mz = match.get('moving_z_start', 0) or 0
+            ov = match['overlap_voxels']
+            vol_nz = volume_shapes[sid][0]
+            total_z += max(0, vol_nz - mz - ov)
+        logger.info(f"Recomputed total Z after consistency enforcement: {total_z}")
 
     # Log Z-match summary
     overlaps = [m['overlap_voxels'] for m in z_matches]
