@@ -501,6 +501,24 @@ process detect_rehoming_events {
     """
 }
 
+process auto_assess_quality {
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
+    input:
+    path "inputs/*"
+
+    output:
+    path "slice_config.csv", emit: slice_config
+
+    script:
+    """
+    linum_assess_slice_quality.py inputs slice_config.csv \\
+        --min_quality ${params.auto_assess_min_quality} \\
+        --exclude_first ${params.auto_assess_exclude_first} \\
+        --overwrite
+    """
+}
+
 process bring_to_common_space {
     publishDir "${params.output}/${task.process}", mode: 'copy'
 
@@ -1122,6 +1140,20 @@ workflow {
     beam_profile_correction(stitched_slices)
     crop_interface(beam_profile_correction.out.corrected)
     normalize(crop_interface.out.cropped)
+
+    // Stage 3.5: Auto slice quality assessment (optional)
+    // Runs after normalization, generates a slice_config.csv that marks
+    // degraded slices. Replaces the static slice_config_channel for
+    // bring_to_common_space when enabled.
+    if (params.auto_assess_quality) {
+        auto_assess_inputs = normalize.out.normalized
+            .map { _id, norm_path -> norm_path }
+            .collect()
+        auto_assess_quality(auto_assess_inputs)
+        effective_slice_config = auto_assess_quality.out.slice_config
+    } else {
+        effective_slice_config = slice_config_channel
+    }
 
     // Stage 4: Common Space Alignment
     // Optionally correct encoder glitch spikes before alignment.
