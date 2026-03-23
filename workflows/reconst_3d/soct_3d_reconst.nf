@@ -1171,7 +1171,7 @@ workflow {
         .map { _meta, filename -> filename }
         .collect()
         .merge(aligned_shifts) { a, b -> tuple(a, b) }
-        .merge(slice_config_channel) { a, b -> tuple(a[0], a[1], b) }
+        .merge(effective_slice_config) { a, b -> tuple(a[0], a[1], b) }
 
     bring_to_common_space(common_space_input)
 
