@@ -34,7 +34,7 @@ from linumpy.stitching.stacking import (
 )
 from linumpy.utils.io import add_overwrite_arg, assert_output_exists
 from linumpy.utils.metrics import collect_stack_metrics
-from linumpy.utils.shifts import load_shifts_csv
+from linumpy.shifts.utils import load_shifts_csv
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)

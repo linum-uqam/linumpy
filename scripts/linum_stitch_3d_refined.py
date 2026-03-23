@@ -27,7 +27,7 @@ from linumpy.io.zarr import read_omezarr, OmeZarrWriter
 from linumpy.stitching.motor import (compute_motor_positions,
                                      compute_registration_refinements,
                                      apply_blend_shift_refinement)
-from linumpy.utils.mosaic_grid import addVolumeToMosaic
+from linumpy.stitching.mosaic_grid import addVolumeToMosaic
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)

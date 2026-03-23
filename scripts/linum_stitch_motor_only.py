@@ -25,7 +25,7 @@ from pathlib import Path
 import numpy as np
 
 from linumpy.io.zarr import read_omezarr, OmeZarrWriter
-from linumpy.utils.mosaic_grid import addVolumeToMosaic
+from linumpy.stitching.mosaic_grid import addVolumeToMosaic
 from linumpy.utils.io import add_overwrite_arg
 from linumpy.utils.metrics import collect_stitch_3d_metrics
 from linumpy.stitching.motor import compute_motor_positions, compare_motor_vs_registration
