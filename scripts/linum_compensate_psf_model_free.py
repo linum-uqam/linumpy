@@ -5,6 +5,9 @@ Axial beam profile correction. The script estimates the beam profile
 from agarose voxels and then applies the inverse profile to each a-line.
 """
 
+# Configure thread limits before numpy/scipy imports
+import linumpy._thread_config  # noqa: F401
+
 import argparse
 
 import numpy as np
@@ -12,6 +15,7 @@ import dask.array as da
 from skimage.filters import threshold_otsu
 from linumpy.io.zarr import save_omezarr, read_omezarr
 from linumpy.preproc.xyzcorr import findTissueInterface, maskUnderInterface
+from linumpy.utils.metrics import collect_psf_compensation_metrics
 
 import matplotlib
 matplotlib.use('Agg')
@@ -111,6 +115,16 @@ def main():
     dask_arr = da.from_array(vol_corr)
     save_omezarr(dask_arr, args.output_zarr, voxel_size=res,
                  chunks=vol.chunks, n_levels=args.n_levels)
+
+    # Collect metrics using helper function
+    agarose_coverage = float(np.sum(agarose_mask)) / agarose_mask.size
+    collect_psf_compensation_metrics(
+        psf=psf,
+        agarose_coverage=agarose_coverage,
+        output_path=args.output_zarr,
+        input_path=args.input_zarr,
+        fit_gaussian=args.fit_gaussian
+    )
 
 
 if __name__ == "__main__":

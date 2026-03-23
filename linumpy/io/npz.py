@@ -1,8 +1,9 @@
-import numpy as np
 from typing import Any, Optional, Tuple
 
+import numpy as np
 
-def write_numpy(npz_path: str, *, data: Optional[Any]=None, metadata: Optional[Any]=None):
+
+def write_numpy(npz_path: str, *, data: Optional[Any] = None, metadata: Optional[Any] = None):
     """
     Writes data and metadata to a compressed numpy (.npz) file.
     Data and metadata are wrapped in a numpy array before being written to the file.
@@ -14,8 +15,8 @@ def write_numpy(npz_path: str, *, data: Optional[Any]=None, metadata: Optional[A
     metadata (Any, optional): The metadata to write to the file. Defaults to None.
     """
     np.savez_compressed(
-        npz_path, 
-        data=np.array([data]), 
+        npz_path,
+        data=np.array([data]),
         metadata=np.array([metadata]),
         types=np.array([{
             'data': type(data),
@@ -72,8 +73,8 @@ def _example_one():
 
     array = skdata.coins()
     write_numpy(
-        './coins.npz', 
-        data=array, 
+        './coins.npz',
+        data=array,
         metadata={
             'example': 'this is an example of metadata'
         }
@@ -92,16 +93,16 @@ def _example_two():
 
         def __repr__(self):
             return f'Person(name={self.name} age={self.age})'
-        
+
     person = Person('John', 30)
     write_numpy(
-        './person.npz', 
-        data=person, 
+        './person.npz',
+        data=person,
         metadata={
             'example': 'this file contains a person object'
         }
     )
-    
+
     data, data_type = read_numpy_data('./person.npz')
     print(data)
     print(data_type)
@@ -109,4 +110,3 @@ def _example_two():
     metadata, metadata_type = read_numpy_metadata('./person.npz')
     print(metadata)
     print(metadata_type)
-

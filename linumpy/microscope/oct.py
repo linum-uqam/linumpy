@@ -22,6 +22,7 @@ class OCT:
     axial_res: float, optional
         Axial resolution of the data in microns.
     """
+
     def __init__(self, directory: str, axial_res=3.5):
         self.directory = Path(directory)
         self.info_filename = self.directory / "info.txt"
@@ -64,10 +65,11 @@ class OCT:
             If crop is True, the galvo returns will be cropped from the volume
         fix_galvo_shift
             If True, the shift caused by the galvo mirror return will be evaluated from the data. If an integer value
-            is given, this value will be used to fix the shift.
+            is given, this value will be used to fix the shift. The fix is only applied if detection confidence >= 0.3.
         fix_camera_shift
-            If True, the camera shift will be evaluated and compoensated from the data. This will detect
+            If True, the camera shift will be evaluated and compensated from the data. This will detect
             the first pixel of the scan that is always overexposed and shift the data to compensate for this.
+            
         Notes
         -----
         * The returned volume is in this order : z (depth), x (a-line), y (b-scan)
@@ -82,40 +84,52 @@ class OCT:
         n_z = self.info["bottom_z"] - self.info["top_z"] + 1
 
         # Load the fringe
-        files = list(self.directory.rglob("image_*.bin"))
+        files = list(self.directory.glob("image_*.bin"))
         files.sort()
-        vol = None
+        chunks = []
         for file in files:
             with open(file, "rb") as f:
                 foo = np.fromfile(f, dtype=np.float32)
             n_frames = int(len(foo) / (n_alines_per_bscan * n_z))
             foo = np.reshape(foo, (n_z, n_alines_per_bscan, n_frames), order='F')
-            if vol is None:
-                vol = foo
-            else:
-                vol = np.concatenate((vol, foo), axis=2)
+            chunks.append(foo)
+        vol = np.concatenate(chunks, axis=2) if len(chunks) > 1 else chunks[0]
 
         # Compensate camera shift (required for old acquisitions on polymtl server)
+        aip = None  # cache for vol.mean(axis=0)
         if fix_camera_shift:
-            img = vol.mean(axis=0)
-            pix_max = np.where(img == img.max())
+            aip = vol.mean(axis=0)
+            pix_max = np.where(aip == aip.max())
             cam_shift = pix_max[0][0]
             vol = np.roll(vol, -cam_shift, axis=1)
+            aip = None  # vol was modified; cache is stale
 
             # Replace the saturated pixel value by its neighbor
             vol[:, 0, 0] = vol[:, 1, 0]
 
         # Estimate the galvo shift
+        galvo_fix_applied = False
         if isinstance(fix_galvo_shift, bool) and fix_galvo_shift is True:
             if n_extra == 0:
                 warnings.warn("Cannot estimate the shift correction as there are no extra a-lines in the file.")
             else:
-                shift = xyzcorr.detect_galvo_shift(vol.mean(axis=0), n_pixel_return=n_extra)
-                vol = xyzcorr.fix_galvo_shift(vol, shift=shift)
-        elif isinstance(fix_galvo_shift, int):
-            vol = xyzcorr.fix_galvo_shift(vol, shift=fix_galvo_shift)
+                if aip is None:
+                    aip = vol.mean(axis=0)
+                shift, confidence = xyzcorr.detect_galvo_shift(
+                    aip, n_pixel_return=n_extra
+                )
+                # Only apply fix if confidence is high enough (galvo shift is likely present)
+                if confidence >= 0.5:
+                    vol = xyzcorr.fix_galvo_shift(vol, shift=shift)
+                    galvo_fix_applied = True
+        elif isinstance(fix_galvo_shift, (int, np.integer)) and fix_galvo_shift != 0:
+            vol = xyzcorr.fix_galvo_shift(vol, shift=int(fix_galvo_shift))
+            galvo_fix_applied = True
 
         # Crop the volume
+        # After galvo fix, the galvo return region is shifted to positions n_alines:n_alines+n_extra
+        # (i.e., at the END), so we crop [0:n_alines] to remove it
+        # Without galvo fix, we also crop [0:n_alines] since galvo return could be anywhere
         if crop:
             vol = vol[:, 0:n_alines, 0:n_bscans]
 

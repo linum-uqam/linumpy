@@ -7,9 +7,10 @@ files, as well as utility functions for preprocessing and tile extraction.
 """
 
 import gc
-from pathlib import Path
 import zipfile
+from pathlib import Path
 from xml.dom.minidom import parse
+
 import numpy as np
 
 
@@ -63,10 +64,10 @@ class ThorOCT:
     """
 
     def __init__(
-        self,
-        path: str = None,
-        compressed_data: zipfile.ZipFile = None,
-        config: PreprocessingConfig = None,
+            self,
+            path: str = None,
+            compressed_data: zipfile.ZipFile = None,
+            config: PreprocessingConfig = None,
     ):
         """
         Initialize the ThorOCT object.
@@ -209,7 +210,7 @@ class ThorOCT:
         stacked_data = []
         for i in range(0, data.shape[0], self.ascan_averaging_value):
             stacked_tile = np.concatenate(
-                data[i : i + self.ascan_averaging_value],
+                data[i: i + self.ascan_averaging_value],
                 axis=0,  # Stack along the z-axis
             )[
                 ::-1
@@ -229,7 +230,7 @@ class ThorOCT:
         return stacked_data
 
     def _crop_z(
-        self, data: np.ndarray, index1: int = 320, index2: int = 750
+            self, data: np.ndarray, index1: int = 320, index2: int = 750
     ) -> np.ndarray:
         """
         Crops the 3D volume along the Z-axis and keeps the data between the specified indices.
@@ -274,8 +275,8 @@ class ThorOCT:
         return raw_data
 
     def _preprocess_data(
-        self,
-        data: np.ndarray,
+            self,
+            data: np.ndarray,
     ) -> np.ndarray:
         """
         Preprocess the data, including cropping, stacking, and converting to magnitude.
@@ -410,7 +411,7 @@ class ThorOCT:
 
         for i, oct_file in enumerate(oct_files):
             angle_index = (
-                i % number_of_angles
+                    i % number_of_angles
             )  # Determine the angle based on file index
             grouped_files[angle_index].append(oct_file)
         print(

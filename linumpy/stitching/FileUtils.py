@@ -675,6 +675,7 @@ class SlicerData:
     def update_gridshape(self):
         self.gridshape = detect_gridshape(self.datadir, self.prototype, self.extension)
 
+
 def detect_gridshape(
         datadir, prototype="volume_x%02.0f_y%02.0f_z%02.0f", extension=".bin"
 ):
@@ -811,7 +812,7 @@ def dataSniffer(datadir: str) -> dict:
 
             prefix.add(b2.group("prefix"))
             suffix.add(b2.group("suffix"))
-            #extension.add(b.group("ext"))
+            # extension.add(b.group("ext"))
             bXY.add(b2.group("bXY"))
             bYZ.add(b2.group("bYZ"))
             lengthPos.add(len(b2.group("x")))

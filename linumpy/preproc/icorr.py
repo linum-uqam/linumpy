@@ -5,23 +5,25 @@
 import itertools
 import multiprocessing
 
-import numpy as np
 import SimpleITK as sitk
+import numpy as np
 from dipy.segment.mask import median_otsu
 from scipy.interpolate import interp1d, interpn
+from scipy.ndimage import binary_erosion, binary_fill_holes
 from scipy.ndimage import (
     gaussian_filter,
     gaussian_filter1d,
     median_filter,
     uniform_filter,
 )
-from scipy.ndimage import binary_erosion, binary_fill_holes
 from scipy.optimize import curve_fit, minimize
 from skimage.filters import threshold_li
 from sklearn import linear_model
 
+from linumpy._thread_config import worker_initializer
 from linumpy.preproc import xyzcorr
 from linumpy.stitching.stitch_utils import getOverlap
+from linumpy.utils.io import get_available_cpus
 
 
 def eqhist(image, nbins=32):
@@ -44,7 +46,7 @@ def eqhist(image, nbins=32):
     Hnorm, binEdges = np.histogram(np.ravel(image), bins=nbins, density=True)
     Hnorm = np.insert(Hnorm, 0, 0.0)  # binEdges : intervalles
     Hnorm_cs = (
-        np.cumsum(Hnorm) * binEdges[1]
+            np.cumsum(Hnorm) * binEdges[1]
     )  # Somme cumulative de l'histogramme normalisé.
     F = interp1d(binEdges, Hnorm_cs)
     im_eq = np.reshape(np.abs((Imax - Imin + 1) * F(np.ravel(image))) - 1, image.shape)
@@ -139,7 +141,7 @@ def iProfilePieceWiseModel(z, I0, Imax, z0, zf, s, mu, k):
     iProfile[z1] = I0 * np.exp(-k * z[z1])
 
     # Tissue -> Focal plane area
-    iProfile[z2] = Imax * np.exp(-((z[z2] - zf) ** 2) / s**2)
+    iProfile[z2] = Imax * np.exp(-((z[z2] - zf) ** 2) / s ** 2)
 
     # Attenuation area
     iProfile[z3] = Imax * np.exp(-mu * (z[z3] - zf))
@@ -271,7 +273,7 @@ def T_r(p, x, y):
         Function evaluated at given positoin
 
     """
-    return p[0] * x**2 + p[1] * x * y + p[2] * y**2 + p[3] * x + p[4] * y + p[5]
+    return p[0] * x ** 2 + p[1] * x * y + p[2] * y ** 2 + p[3] * x + p[4] * y + p[5]
 
 
 # Defining objective function f_r
@@ -324,8 +326,8 @@ def f_r(x, data, z, pos, Imean):
         im2 = np.squeeze(ov2.mean(axis=2))
 
         # Evaluation T for overlap regions
-        T_im1 = T[pov1[0] : pov1[2], pov1[1] : pov1[3]]
-        T_im2 = T[pov2[0] : pov2[2], pov2[1] : pov2[3]]
+        T_im1 = T[pov1[0]: pov1[2], pov1[1]: pov1[3]]
+        T_im2 = T[pov2[0]: pov2[2], pov2[1]: pov2[3]]
 
         # Updating function evaluation
         f += np.sum(np.abs(im1 * T_im1 - im2 * T_im2))
@@ -402,7 +404,7 @@ def matchHistogramSequentially(data, preproc_data, abspos, z, overwrite=False):
     """
     firstVol = True
     for vol1, vol2, pos1, pos2 in data.singlePassNeighborSliceIterator(
-        (1, 1), z, method="dfs"
+            (1, 1), z, method="dfs"
     ):
         realPos1 = abspos[pos1[0] - 1, pos1[1] - 1, :]
         realPos2 = abspos[pos2[0] - 1, pos2[1] - 1, :]
@@ -493,19 +495,19 @@ def getSmoothIntensityTransition(vol, slicesStart):
         L = np.zeros((nx, ny, nz))
 
         # If z <= N/2
-        nz_1 = factor[:, :, 0 : nz / 2].shape[2]
+        nz_1 = factor[:, :, 0: nz / 2].shape[2]
         f1 = np.log((a_current + b_previous) / (2.0 * a_current + epsilon))
         f1 = np.tile(np.reshape(f1, (nx, ny, 1)), (1, 1, nz_1))
-        L1 = np.exp(-(2 * z[:, :, 0 : nz / 2] - nz) / (1.0 * nz) * f1)
+        L1 = np.exp(-(2 * z[:, :, 0: nz / 2] - nz) / (1.0 * nz) * f1)
 
         # If z > N/2
-        nz_2 = factor[:, :, nz / 2 : :].shape[2]
+        nz_2 = factor[:, :, nz / 2::].shape[2]
         f2 = np.log((a_next + b_current) / (2.0 * b_current + epsilon))
         f2 = np.tile(np.reshape(f2, (nx, ny, 1)), (1, 1, nz_2))
-        L2 = np.exp((2 * z[:, :, nz / 2 : :] - nz) / (1.0 * nz) * f2)
+        L2 = np.exp((2 * z[:, :, nz / 2::] - nz) / (1.0 * nz) * f2)
 
-        L[:, :, 0 : nz / 2] = L1
-        L[:, :, nz / 2 : :] = L2
+        L[:, :, 0: nz / 2] = L1
+        L[:, :, nz / 2::] = L2
 
         # Apply correction to this slice
         volume[:, :, z1:z2] = L * volume[:, :, z1:z2]
@@ -581,7 +583,7 @@ def getAttenuation_Vermeer2013(vol, dz=6.5e-6, mask=None, C=None):
         # Find bottom interface
         nx, ny, nz = mask.shape
         bottom_interface = (
-            nz - xyzcorr.getInterfaceDepthFromMask(mask[:, :, ::-1]) - 1
+                nz - xyzcorr.getInterfaceDepthFromMask(mask[:, :, ::-1]) - 1
         ).astype(int)
         xx, yy = np.meshgrid(list(range(nx)), list(range(ny)), indexing="ij")
         bottom_mu = mu[xx, yy, bottom_interface]
@@ -652,7 +654,7 @@ def get_extendedAttenuation_Vermeer2013(vol, mask=None, k=10, sigma=5,
 
     # Get the signal at the interface for each Aline
     interface_bottom = (
-        vol.shape[2] - xyzcorr.getInterfaceDepthFromMask(mask[:, :, ::-1]) - 1 - dz
+            vol.shape[2] - xyzcorr.getInterfaceDepthFromMask(mask[:, :, ::-1]) - 1 - dz
     )
     mask_bottom = xyzcorr.maskUnderInterface(vol, interface_bottom, returnMask=True)
     mask_bottom = (mask_bottom * mask).astype(bool)
@@ -720,7 +722,7 @@ def getAttenuation_Faber2004(vol, mask=None, dz=6.5e-6, N=4):
     n = 1.33  # Index of refraction
     w0 = 4.88e-6  # micron : Ligth beam width at the focal plane (need to validate)
     l0 = 1.030e-6  # micron : Ligth central wavelenth
-    zr = np.pi * alpha * n * w0**2.0 / l0  # Apparent Rayleigh length (micron)
+    zr = np.pi * alpha * n * w0 ** 2.0 / l0  # Apparent Rayleigh length (micron)
 
     # Defining the objective function for the minimization
     f = lambda x, y, z: np.sum(
@@ -862,9 +864,9 @@ def getAlineAttenuation(vol, k=1, mask=None):
 
     for z, ik in zip(zList, list(range(k))):
         # Selecting a subsample
-        this_vol = vol[:, :, z[0] : z[-1]]
+        this_vol = vol[:, :, z[0]: z[-1]]
         if mask is not None:
-            this_mask = mask[:, :, z[0] : z[-1]]
+            this_mask = mask[:, :, z[0]: z[-1]]
 
         # Transforming this volume into a list
         Alines = np.split(this_vol.flatten(), nx * ny)
@@ -874,8 +876,9 @@ def getAlineAttenuation(vol, k=1, mask=None):
                 Alines[ii] = A[M]
 
         # Process each Alines in parallel
-        nproc = multiprocessing.cpu_count()
-        p = multiprocessing.Pool(nproc)
+        nproc = get_available_cpus()
+        from linumpy._thread_config import worker_initializer
+        p = multiprocessing.Pool(nproc, initializer=worker_initializer)
         result = p.map(_AlineFit, Alines)
         p.close()
         p.join()
@@ -889,14 +892,14 @@ def getAlineAttenuation(vol, k=1, mask=None):
 
 
 def get_gradientAttenuation(
-    vol,
-    mask=None,
-    return_mask=False,
-    lowThresh=0.0,
-    fillHoles=False,
-    sz=3,
-    sxy=0,
-    res=1.0,
+        vol,
+        mask=None,
+        return_mask=False,
+        lowThresh=0.0,
+        fillHoles=False,
+        sz=3,
+        sxy=0,
+        res=1.0,
 ):
     vol_l = np.copy(vol)
     vol_l[vol > 0] = np.log(vol[vol > 0])
@@ -1006,10 +1009,10 @@ def findInterfaceFromGradient(vol, f=0.005, removeSmooth=False):
 
 
 def getHeterogeneousAttenuation(
-    vol, mask=None, fillHoles=False
+        vol, mask=None, fillHoles=False
 ):  # TODO: adapt multiproc to available proc given by mpi4py
     nx, ny, nz = vol.shape
-    nproc = multiprocessing.cpu_count()
+    nproc = get_available_cpus()
     if mask is None:  # Compute the mask
         mask = getInterfaceMask(vol)
 
@@ -1021,7 +1024,7 @@ def getHeterogeneousAttenuation(
     nAlines = len(Alines)
 
     # Process each Alines in parallel
-    p = multiprocessing.Pool(nproc)
+    p = multiprocessing.Pool(nproc, initializer=worker_initializer)
     result = p.map(_splitAlinesWorker, Alines_to_Split)
     p.close()
     p.join()
@@ -1045,7 +1048,7 @@ def getHeterogeneousAttenuation(
         z_portions.extend(foo[1])
         portion_idx.extend([idx] * len(foo[0]))
 
-    p = multiprocessing.Pool(nproc)
+    p = multiprocessing.Pool(nproc, initializer=worker_initializer)
     result = p.map(_AlineFit, aline_portions)
     p.close()
     p.join()
@@ -1202,7 +1205,7 @@ def confocalPSF(z, zf, zR, A=None):
 
 
 def get_SliceResolutionsFromPSF(
-    zf, zr, nz=120, spacing=(6.5, 6.5, 6.5), N=512, l=1.030
+        zf, zr, nz=120, spacing=(6.5, 6.5, 6.5), N=512, l=1.030
 ):
     res = np.zeros((nz,))
     z = np.linspace(0, nz * spacing[2], nz)
@@ -1214,7 +1217,7 @@ def get_SliceResolutionsFromPSF(
         zmax = wz[ii] * 4
         x = np.linspace(zmin, zmax, N)
         edge = x < 0
-        psf = np.exp(-(x**2.0) / wz[ii] ** 2.0)
+        psf = np.exp(-(x ** 2.0) / wz[ii] ** 2.0)
 
         edge = np.convolve(edge, psf, mode="same")
         edge /= edge.max()
@@ -1228,13 +1231,13 @@ def get_SliceResolutionsFromPSF(
 
 
 def estimatePSF(
-    agarose,
-    interface=None,
-    dz=6.5,
-    removeSaturation=False,
-    maskInterface=False,
-    zf=None,
-    fitAttn=False,
+        agarose,
+        interface=None,
+        dz=6.5,
+        removeSaturation=False,
+        maskInterface=False,
+        zf=None,
+        fitAttn=False,
 ):
     """Estimates the confocal PSF assuming a gaussian beam
 
@@ -1331,14 +1334,14 @@ def estimatePSF(
         # Detect outliers
         if fitAttn:
             I_err = (
-                iProfile
-                - confocalPSF(z, popt_1.x[0], popt_1.x[1], popt_1.x[2])
-                * np.exp(-2 * popt_1.x[3] * (z - z[0]))
-            ) ** 2.0
+                            iProfile
+                            - confocalPSF(z, popt_1.x[0], popt_1.x[1], popt_1.x[2])
+                            * np.exp(-2 * popt_1.x[3] * (z - z[0]))
+                    ) ** 2.0
         else:
             I_err = (
-                iProfile - confocalPSF(z, popt_1.x[0], popt_1.x[1], popt_1.x[2])
-            ) ** 2.0
+                            iProfile - confocalPSF(z, popt_1.x[0], popt_1.x[1], popt_1.x[2])
+                    ) ** 2.0
         err_med = np.median(I_err)
         err_MAD = np.median(np.abs(I_err - err_med))
         if err_MAD != 0:
@@ -1394,7 +1397,7 @@ def estimatePSF(
 
 
 def get3DPSF(
-    vol, interface, res=6.5, useAverageRayleigh=False, removeInterface=True, zf=None
+        vol, interface, res=6.5, useAverageRayleigh=False, removeInterface=True, zf=None
 ):
     """Compute a 3D PSF from a given uniform volume (e.g. agarose)
 
@@ -1458,11 +1461,11 @@ def get3DPSF(
     # Fit parabola on zf_map
     f = (
         lambda x, a, b, c, d, e, f: a * x[0] * x[1]
-        + b * x[0] ** 2
-        + c * x[1] ** 2
-        + d
-        + e * x[0]
-        + f * x[1]
+                                    + b * x[0] ** 2
+                                    + c * x[1] ** 2
+                                    + d
+                                    + e * x[0]
+                                    + f * x[1]
     )
     xx, yy = np.meshgrid(list(range(nx)), list(range(ny)), indexing="ij")
     xdata = (np.ravel(yy), np.ravel(xx))
@@ -1497,18 +1500,18 @@ def get3DPSF(
 
 def vignette_gauss(pos, x0, y0, sx, sy, a, b):
     return (
-        np.exp(
-            -((pos[0] - x0) ** 2) / (2.0 * sx**2.0)
-            - (pos[1] - y0) ** 2 / (2.0 * sy**2.0)
-        )
-        * a
-        + b
+            np.exp(
+                -((pos[0] - x0) ** 2) / (2.0 * sx ** 2.0)
+                - (pos[1] - y0) ** 2 / (2.0 * sy ** 2.0)
+            )
+            * a
+            + b
     )
 
 
 def vignette_gauss_lin(pos, x0, y0, s, a, b, c):
     gauss_surf = np.exp(
-        -((pos[0] - x0) ** 2) / (2.0 * s**2.0) - (pos[1] - y0) ** 2 / (2.0 * s**2.0)
+        -((pos[0] - x0) ** 2) / (2.0 * s ** 2.0) - (pos[1] - y0) ** 2 / (2.0 * s ** 2.0)
     )
     lin_surf = pos[0] * a + pos[1] * b + c
     return gauss_surf * lin_surf
@@ -1517,7 +1520,7 @@ def vignette_gauss_lin(pos, x0, y0, s, a, b, c):
 def vignette_quad(pos, a, b, c, d, e, f):
     x = pos[0]
     y = pos[1]
-    return a * x + b * y + c * x * y + d * x**2 + e * y**2 + f
+    return a * x + b * y + c * x * y + d * x ** 2 + e * y ** 2 + f
 
 
 def get_vignette(vol, returnParams=False, mask_z=None, method="gauss"):
@@ -1658,15 +1661,15 @@ def convert_to_8bit(vol):
 
 
 def fit_TissueConfocalModel(
-    iprofile,
-    z0,
-    zr_0=400.0,
-    res=6.5,
-    useBumpModel=False,
-    returnParameters=False,
-    return_fullModel=False,
-    plotProfiles=False,
-    fix_zr=False,
+        iprofile,
+        z0,
+        zr_0=400.0,
+        res=6.5,
+        useBumpModel=False,
+        returnParameters=False,
+        return_fullModel=False,
+        plotProfiles=False,
+        fix_zr=False,
 ):
     nz = len(iprofile)
     z = np.linspace(0, nz * res, nz)
