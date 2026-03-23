@@ -494,7 +494,8 @@ def collect_pairwise_registration_metrics(registration_error: float,
                                           output_path: Union[str, Path],
                                           fixed_path: Optional[str] = None,
                                           moving_path: Optional[str] = None,
-                                          params: Optional[Dict] = None) -> PipelineMetrics:
+                                          params: Optional[Dict] = None,
+                                          z_correlation: float = 0.0) -> PipelineMetrics:
     """
     Collect metrics for pairwise registration step.
 
@@ -516,6 +517,9 @@ def collect_pairwise_registration_metrics(registration_error: float,
         Paths to fixed and moving volumes.
     params : dict, optional
         Dictionary of parameters used.
+    z_correlation : float, optional
+        Normalized cross-correlation score from Z-matching (0–1). Higher values
+        indicate a reliable Z-match between the two slices.
 
     Returns
     -------
@@ -552,6 +556,26 @@ def collect_pairwise_registration_metrics(registration_error: float,
                        threshold_name='rotation_degrees')
     metrics.add_metric('z_drift', int(abs(best_z_index - expected_z_index)), unit='voxels',
                        description='Deviation from expected z-index')
+    metrics.add_metric('z_correlation', float(max(0.0, z_correlation)), unit='',
+                       description='Z-matching cross-correlation score (0–1; higher = more reliable)',
+                       threshold_name='correlation')
+
+    # Composite confidence score (0–1): combines Z-correlation, normalized translation
+    # and normalized rotation.  Used downstream by adaptive transform degradation
+    # in linum_stack_slices_motor.py to decide whether to apply the full transform,
+    # rotation-only, or skip entirely.
+    max_translation = float(params.get('max_translation_px', 50.0)) if params else 50.0
+    max_rotation = float(params.get('max_rotation_deg', 5.0)) if params else 5.0
+    norm_translation = min(translation_magnitude / max(max_translation, 1.0), 1.0)
+    norm_rotation = min(abs(rotation_deg) / max(max_rotation, 1.0), 1.0)
+    z_corr_score = float(max(0.0, z_correlation))
+    confidence = float(np.clip(
+        0.5 * z_corr_score + 0.3 * (1.0 - norm_translation) + 0.2 * (1.0 - norm_rotation),
+        0.0, 1.0
+    ))
+    metrics.add_metric('registration_confidence', confidence, unit='',
+                       description='Overall transform reliability score (0=unreliable, 1=reliable)',
+                       custom_thresholds={'warning': 0.4, 'error': 0.3, 'higher_is_better': True})
 
     metrics.save()
     metrics.log_issues()
