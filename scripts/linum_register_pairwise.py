@@ -203,6 +203,7 @@ def main():
         output_path=str(out_dir),
         fixed_path=args.in_fixed,
         moving_path=args.in_moving,
+        z_correlation=float(z_correlation),
         params={
             'slicing_interval_mm': args.slicing_interval_mm,
             'search_range_mm': args.search_range_mm,
