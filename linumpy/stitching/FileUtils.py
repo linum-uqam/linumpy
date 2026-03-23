@@ -17,7 +17,7 @@ import networkx
 import numpy as np
 
 from linumpy.stitching import topology
-from linumpy.utils import data_io
+from linumpy.io import data_io
 
 logger = logging.getLogger(__name__)
 

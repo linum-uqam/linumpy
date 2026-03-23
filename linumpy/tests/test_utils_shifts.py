@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Tests for linumpy/utils/shifts.py"""
+"""Tests for linumpy/shifts/utils.py"""
 import io
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from linumpy.utils.shifts import (
+from linumpy.shifts.utils import (
     build_cumulative_shifts,
     center_shifts,
     convert_shifts_to_pixels,

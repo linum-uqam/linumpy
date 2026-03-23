@@ -8,7 +8,7 @@ import random
 
 import SimpleITK as sitk
 from pathlib import Path
-from linumpy.utils.mosaic_grid import MosaicGrid
+from linumpy.stitching.mosaic_grid import MosaicGrid
 from basicpy import BaSiC
 import numpy as np
 
