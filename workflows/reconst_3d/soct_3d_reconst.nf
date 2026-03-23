@@ -516,6 +516,7 @@ process auto_assess_quality {
         --min_quality ${params.auto_assess_min_quality} \\
         --exclude_first ${params.auto_assess_exclude_first} \\
         --roi_size ${params.auto_assess_roi_size} \\
+        --processes ${params.processes} \\
         -f
     """
 }

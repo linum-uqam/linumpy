@@ -72,6 +72,10 @@ def _build_arg_parser():
                                help="Side length of center crop in XY (pixels) used for "
                                     "all quality metrics. 0 = full plane (slow for large "
                                     "single-resolution mosaics). Recommended: 1024.")
+    quality_group.add_argument("--processes", type=int, default=1,
+                               help="Number of parallel workers for slice assessment. "
+                                    "Each worker reads its own zarr planes concurrently. "
+                                    "Default: 1 (sequential). Set to params.processes.")
 
     # Calibration slice options
     calib_group = p.add_argument_group('Calibration Slice Handling')
@@ -260,39 +264,38 @@ def main():
             print(f"Detected calibration slices: {calibration_slices}")
 
     # Assess quality for each slice
-    print(f"\nAssessing slice quality (sample_depth={args.sample_depth})...")
+    print(f"\nAssessing slice quality (sample_depth={args.sample_depth}, "
+          f"roi_size={args.roi_size}, processes={args.processes})...")
     quality_results: Dict[int, Dict[str, Any]] = {}
 
-    for i, slice_id in enumerate(tqdm(slice_ids, desc="Assessing quality")):
+    def _assess_one(idx_and_id):
+        i, slice_id = idx_and_id
         vol = volumes.get(slice_id)
-
         if vol is None:
-            quality_results[slice_id] = {
+            return slice_id, {
                 'overall': 0.0, 'ssim_mean': 0.0, 'edge_score': 0.0,
                 'variance_score': 0.0, 'depth': 0, 'has_data': False,
                 'error': 'load_failed'
             }
-            continue
-
-        # Get neighbor volumes
         vol_before = volumes.get(slice_ids[i - 1]) if i > 0 else None
         vol_after = volumes.get(slice_ids[i + 1]) if i < len(slice_ids) - 1 else None
-
-        # Compute quality using consolidated module
         overall, metrics = assess_slice_quality(
             vol, vol_before, vol_after, args.sample_depth, xy_roi=args.roi_size
         )
-
-        # Add metadata
         metrics['is_calibration'] = slice_id in calibration_slices
         metrics['exclude_first'] = slice_id in slice_ids[:args.exclude_first]
         metrics['min_threshold'] = args.min_quality
+        return slice_id, metrics
 
-        quality_results[slice_id] = metrics
-
-        # Exclude if below quality threshold
-        if args.min_quality > 0 and overall < args.min_quality:
-            exclude_ids.add(slice_id)
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    tasks = list(enumerate(slice_ids))
+    with ThreadPoolExecutor(max_workers=args.processes) as executor:
+        futures = {executor.submit(_assess_one, t): t for t in tasks}
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Assessing quality"):
+            slice_id, metrics = future.result()
+            quality_results[slice_id] = metrics
+            if args.min_quality > 0 and metrics.get('overall', 0.0) < args.min_quality:
+                exclude_ids.add(slice_id)
 
     # Print quality report
     print("\n" + "=" * 70)
