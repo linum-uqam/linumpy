@@ -659,6 +659,8 @@ process stack_motor {
         options += " --max_rotation_deg ${params.max_rotation_deg}"
         if (params.skip_error_transforms) options += " --skip_error_transforms"
         if (params.skip_warning_transforms) options += " --skip_warning_transforms"
+        options += " --confidence_high ${params.transform_confidence_high}"
+        options += " --confidence_low ${params.transform_confidence_low}"
     }
 
     // Cumulative translation accumulation
