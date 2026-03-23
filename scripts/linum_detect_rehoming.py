@@ -50,7 +50,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from linumpy.utils.shifts import correct_tile_offset_shifts, filter_outlier_shifts
+from linumpy.shifts.utils import correct_tile_offset_shifts, filter_outlier_shifts
 from linumpy.utils.io import add_overwrite_arg, assert_output_exists
 from typing import Optional
 

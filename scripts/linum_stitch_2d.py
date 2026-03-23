@@ -13,7 +13,7 @@ from pathlib import Path
 import SimpleITK as sitk
 import numpy as np
 
-from linumpy.utils.mosaic_grid import MosaicGrid
+from linumpy.stitching.mosaic_grid import MosaicGrid
 
 
 def _build_arg_parser():

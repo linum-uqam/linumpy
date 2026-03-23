@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 from linumpy.io.zarr import read_omezarr, AnalysisOmeZarrWriter
 from linumpy.stitching.registration import apply_transform
-from linumpy.utils.mosaic_grid import getDiffusionBlendingWeights
+from linumpy.stitching.mosaic_grid import getDiffusionBlendingWeights
 from linumpy.utils.metrics import collect_stack_metrics
 from skimage.filters import threshold_otsu
 from scipy.ndimage import gaussian_filter

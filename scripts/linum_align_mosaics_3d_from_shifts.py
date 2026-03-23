@@ -24,7 +24,7 @@ import pandas as pd
 
 from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.utils.io import add_overwrite_arg, assert_output_exists
-from linumpy.utils.shifts import build_cumulative_shifts
+from linumpy.shifts.utils import build_cumulative_shifts
 from linumpy.utils_images import apply_xy_shift
 
 
