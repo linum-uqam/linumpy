@@ -132,6 +132,15 @@ def _build_arg_parser():
     p.add_argument('--output_z_matches', type=str, default=None,
                    help='Output CSV with Z-matching results')
 
+    p.add_argument('--confidence_high', type=float, default=0.6,
+                   help='Registration confidence above which the full transform is applied.\n'
+                        'Between confidence_low and confidence_high, rotation-only is forced\n'
+                        'regardless of --rotation_only. Based on registration_confidence in\n'
+                        'pairwise_registration_metrics.json. [%(default)s]')
+    p.add_argument('--confidence_low', type=float, default=0.3,
+                   help='Registration confidence below which the transform is skipped entirely.\n'
+                        'Prevents bad registrations from introducing XY drift. [%(default)s]')
+
     add_overwrite_arg(p)
     return p
 
@@ -193,22 +202,29 @@ def load_registration_transforms(transforms_dir, slice_ids,
             continue
 
         try:
-            # Check registration quality status before loading the transform
-            if skip_error_status or skip_warning_status:
-                metrics_files = list(transform_dir.glob("pairwise_registration_metrics.json"))
-                if metrics_files:
-                    with open(metrics_files[0]) as f:
-                        metrics = json.load(f)
-                    status = metrics.get("overall_status", "ok")
-                    should_skip = (status == "error" and skip_error_status) or \
-                                  (status == "warning" and skip_warning_status)
-                    if should_skip:
-                        logger.warning(
-                            f"Slice {slice_id}: skipping transform with "
-                            f"overall_status='{status}' (unreliable registration)"
-                        )
-                        transforms[slice_id] = None
-                        continue
+            # Read registration quality metrics (always, to extract confidence score)
+            confidence = 1.0
+            metrics_files = list(transform_dir.glob("pairwise_registration_metrics.json"))
+            if metrics_files:
+                with open(metrics_files[0]) as f:
+                    metrics_data = json.load(f)
+                status = metrics_data.get("overall_status", "ok")
+                try:
+                    confidence = float(
+                        metrics_data["metrics"]["registration_confidence"]["value"]
+                    )
+                except (KeyError, TypeError, ValueError):
+                    confidence = 1.0  # fallback for older JSONs without confidence score
+
+                should_skip = (status == "error" and skip_error_status) or \
+                              (status == "warning" and skip_warning_status)
+                if should_skip:
+                    logger.warning(
+                        f"Slice {slice_id}: skipping transform with "
+                        f"overall_status='{status}' (unreliable registration)"
+                    )
+                    transforms[slice_id] = None
+                    continue
 
             tfm = sitk.ReadTransform(str(tfm_files[0]))
 
@@ -226,8 +242,8 @@ def load_registration_transforms(transforms_dir, slice_ids,
                     moving_z = int(offsets[1])
                     logger.debug(f"Slice {slice_id}: fixed_z={fixed_z}, moving_z={moving_z}")
 
-            transforms[slice_id] = (tfm, fixed_z, moving_z)
-            logger.debug(f"Loaded transform for slice {slice_id}")
+            transforms[slice_id] = (tfm, fixed_z, moving_z, confidence)
+            logger.debug(f"Loaded transform for slice {slice_id} (confidence={confidence:.2f})")
 
         except Exception as e:
             logger.warning(f"Could not load transform for slice {slice_id}: {e}")
@@ -361,7 +377,7 @@ def main():
         pairwise_translations = {}
         for slice_id in available_ids[1:]:
             if slice_id in registration_transforms and registration_transforms[slice_id] is not None:
-                transform, fixed_z, moving_z = registration_transforms[slice_id]
+                transform, fixed_z, moving_z, _ = registration_transforms[slice_id]
                 params = list(transform.GetParameters())
                 tx = params[3] if len(params) > 3 else 0
                 ty = params[4] if len(params) > 4 else 0
@@ -452,7 +468,7 @@ def main():
             raw_angles = []
             for sid in angle_ids:
                 tfm_tuple = registration_transforms[sid]
-                tfm, _, _ = tfm_tuple
+                tfm, _, _, _ = tfm_tuple
                 params = list(tfm.GetParameters())
                 a = params[2] if len(params) > 2 else 0.0
                 # Clamp before smoothing (same cap as apply_2d_transform)
@@ -493,7 +509,7 @@ def main():
         fixed_z = None
         moving_z = None
         if slice_id in registration_transforms and registration_transforms[slice_id] is not None:
-            _, fixed_z, moving_z = registration_transforms[slice_id]
+            _, fixed_z, moving_z, _ = registration_transforms[slice_id]
 
         if args.use_expected_overlap:
             # Expected overlap from known slicing interval and volume depth
@@ -656,17 +672,28 @@ def main():
 
         # Apply registration transform (rotation/small translation refinement) if available
         if slice_id in registration_transforms and registration_transforms[slice_id] is not None:
-            transform, _, _ = registration_transforms[slice_id]
-            use_rotation_only = args.rotation_only or args.accumulate_translations
-            override_rot = smoothed_rotations.get(slice_id)  # None if no smoothing
-            vol = apply_transform_to_volume(vol, transform,
-                                           rotation_only=use_rotation_only,
-                                           max_rotation_deg=args.max_rotation_deg,
-                                           override_rotation=override_rot)
-            if use_rotation_only:
-                logger.debug(f"Applied rotation-only transform to slice {slice_id} (max_rot={args.max_rotation_deg}°)")
+            transform, _, _, confidence = registration_transforms[slice_id]
+            # Adaptive degradation: skip, force rotation-only, or apply full transform
+            # based on the per-registration confidence score.
+            if args.confidence_low is not None and confidence < args.confidence_low:
+                logger.warning(f"Slice {slice_id}: skipping transform "
+                               f"(confidence={confidence:.2f} < confidence_low={args.confidence_low:.2f})")
             else:
-                logger.debug(f"Applied registration transform to slice {slice_id}")
+                if args.confidence_high is not None and confidence < args.confidence_high:
+                    use_rotation_only = True
+                    logger.debug(f"Slice {slice_id}: forcing rotation-only "
+                                 f"(confidence={confidence:.2f} < confidence_high={args.confidence_high:.2f})")
+                else:
+                    use_rotation_only = args.rotation_only or args.accumulate_translations
+                override_rot = smoothed_rotations.get(slice_id)  # None if no smoothing
+                vol = apply_transform_to_volume(vol, transform,
+                                               rotation_only=use_rotation_only,
+                                               max_rotation_deg=args.max_rotation_deg,
+                                               override_rotation=override_rot)
+                if use_rotation_only:
+                    logger.debug(f"Applied rotation-only transform to slice {slice_id} (max_rot={args.max_rotation_deg}°)")
+                else:
+                    logger.debug(f"Applied registration transform to slice {slice_id}")
 
         # Apply XY shift (from motor positions)
         dx, dy = cumsum_px[slice_id]
