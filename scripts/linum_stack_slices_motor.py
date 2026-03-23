@@ -99,6 +99,11 @@ def _build_arg_parser():
                    help='Search range for Z-matching in mm [%(default)s]')
     p.add_argument('--use_expected_overlap', action='store_true',
                    help='Use expected overlap from slicing_interval instead of correlation')
+    p.add_argument('--z_overlap_min_corr', type=float, default=0.5,
+                   help='When using correlation-based Z-overlap (not --use_expected_overlap),\n'
+                        'fall back to expected overlap if the best correlation is below this\n'
+                        'threshold. Prevents failed tissue contact from causing wrong\n'
+                        'Z-positioning. 0 = always trust correlation result. [%(default)s]')
     p.add_argument('--moving_z_first_index', type=int, default=8,
                    help='Starting Z-index in moving volume to skip noisy data [%(default)s]')
 
@@ -568,6 +573,18 @@ def main():
                 prev_vol, vol,
                 args.slicing_interval_mm, args.search_range_mm, res_z_um
             )
+            # Fall back to expected overlap when correlation is too low to trust
+            if args.z_overlap_min_corr > 0 and corr < args.z_overlap_min_corr:
+                interval_voxels = int(args.slicing_interval_mm / res_z_mm)
+                crop_z = args.moving_z_first_index or 0
+                fallback_overlap = max(0, vol.shape[0] - crop_z - interval_voxels)
+                logger.warning(
+                    f"Slice {slice_id}: Z-overlap correlation {corr:.3f} < "
+                    f"z_overlap_min_corr={args.z_overlap_min_corr:.2f}, "
+                    f"falling back to expected overlap {fallback_overlap} (was: {overlap})"
+                )
+                overlap = fallback_overlap
+                corr = 0.0
             blend_overlap = overlap
             moving_z = args.moving_z_first_index  # Use default
 
