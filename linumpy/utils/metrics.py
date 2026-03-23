@@ -53,22 +53,42 @@ class PipelineMetrics:
 
     # Quality thresholds for common metrics (can be overridden)
     DEFAULT_THRESHOLDS = {
+        # Mean squared error of the registration transform (normalized, unitless)
         'registration_error': {'warning': 0.05, 'error': 0.15},
+        # Euclidean magnitude of the estimated translation vector (pixels)
         'translation_magnitude': {'warning': 30.0, 'error': 50.0},
+        # Rotation angle derived from the estimated transform (degrees)
         'rotation_degrees': {'warning': 1.0, 'error': 2.0},
+        # Normalized cross-correlation between registered image pairs (unitless, 0–1)
         'correlation': {'warning': 0.7, 'error': 0.5, 'higher_is_better': True},
+        # Fraction of the volume voxels classified as tissue
         'tissue_coverage': {'warning': 0.1, 'error': 0.05, 'higher_is_better': True},
+        # Fraction of the volume voxels covered by the binary mask
         'mask_coverage': {'warning': 0.05, 'error': 0.01, 'higher_is_better': True},
+        # Fraction of the volume voxels classified as agarose (embedding medium)
         'agarose_coverage': {'warning': 0.05, 'error': 0.01, 'higher_is_better': True},
+        # Fraction of the volume voxels that are empty (below background threshold)
         'empty_fraction': {'warning': 0.5, 'error': 0.8},
+        # Depth (in pixels) of the tissue–agarose interface from the top of the volume
         'interface_depth': {'warning': 50, 'error': 100},
+        # Quality score of the axial intensity profile fit (unitless, 0–1)
         'profile_quality': {'warning': 0.5, 'error': 0.3, 'higher_is_better': True},
+        # Root-mean-square residual of the least-squares transform fit (pixels)
         'rms_residual': {'warning': 5.0, 'error': 15.0},
+        # Standard deviation of per-slice Z offsets across the mosaic (pixels)
         'z_offset_std': {'warning': 10.0, 'error': 25.0},
+        # Peak-to-peak range of per-slice Z offsets across the mosaic (pixels)
         'z_offset_range': {'warning': 15.0, 'error': 30.0},
+        # Standard deviation of the per-slice background thresholds (normalized)
         'std_background': {'warning': 0.1, 'error': 0.25},
+        # Minimum mask coverage fraction across all slices
         'min_slice_coverage': {'warning': 0.02, 'error': 0.005, 'higher_is_better': True},
+        # Standard deviation of mask coverage fractions across slices
         'std_slice_coverage': {'warning': 0.15, 'error': 0.3},
+        # Minimum acceptable interface depth from the top of the volume (voxels)
+        'interface_min_depth_px': {'error': 5},
+        # Maximum acceptable interface depth as a fraction of the volume's Z size
+        'interface_max_depth_fraction': {'error': 0.5},
     }
 
     def __init__(self, step_name: str, output_dir: Optional[str] = None):
@@ -596,10 +616,12 @@ def collect_interface_crop_metrics(detected_interface: int,
                        description='End index for cropping')
 
     # Quality checks
-    if detected_interface < 5:
+    _min_depth = PipelineMetrics.DEFAULT_THRESHOLDS['interface_min_depth_px']['error']
+    _max_fraction = PipelineMetrics.DEFAULT_THRESHOLDS['interface_max_depth_fraction']['error']
+    if detected_interface < _min_depth:
         metrics.add_metric('interface_quality', 'warning',
                            description='Interface detected very close to start - may be incorrect')
-    elif detected_interface > input_shape[0] * 0.5:
+    elif detected_interface > input_shape[0] * _max_fraction:
         metrics.add_metric('interface_quality', 'warning',
                            description='Interface detected past halfway - check detection')
     else:
