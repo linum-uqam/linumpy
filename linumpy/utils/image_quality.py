@@ -120,22 +120,22 @@ def compute_ssim_3d(vol1: np.ndarray, vol2: np.ndarray,
     float
         Mean SSIM score (0 to 1, higher is better).
     """
-    if vol1.shape != vol2.shape:
-        min_z = min(vol1.shape[0], vol2.shape[0])
-        min_y = min(vol1.shape[1], vol2.shape[1])
-        min_x = min(vol1.shape[2], vol2.shape[2])
-        vol1 = vol1[:min_z, :min_y, :min_x]
-        vol2 = vol2[:min_z, :min_y, :min_x]
+    nz = min(vol1.shape[0], vol2.shape[0])
+    ny = min(vol1.shape[1], vol2.shape[1])
+    nx = min(vol1.shape[2], vol2.shape[2])
 
     # Sample z-planes if requested
-    if sample_depth > 0 and vol1.shape[0] > sample_depth:
-        indices = np.linspace(0, vol1.shape[0] - 1, sample_depth, dtype=int)
+    if sample_depth > 0 and nz > sample_depth:
+        indices = np.linspace(0, nz - 1, sample_depth, dtype=int)
     else:
-        indices = np.arange(vol1.shape[0])
+        indices = np.arange(nz)
 
     ssim_scores = []
     for z in indices:
-        score = compute_ssim_2d(vol1[z], vol2[z], win_size)
+        # Load one plane at a time — works for both numpy arrays and zarr arrays
+        p1 = np.asarray(vol1[z, :ny, :nx])
+        p2 = np.asarray(vol2[z, :ny, :nx])
+        score = compute_ssim_2d(p1, p2, win_size)
         ssim_scores.append(score)
 
     return float(np.mean(ssim_scores))
@@ -267,23 +267,30 @@ def assess_slice_quality(vol: np.ndarray,
     if weights is None:
         weights = {'ssim': 0.5, 'edge': 0.3, 'variance': 0.2}
 
+    nz = vol.shape[0] if vol.ndim == 3 else 1
+
+    # Load a strided subsample (≤ 8 planes) for cheap has-data and variance checks.
+    # This avoids materialising the full volume for zarr / dask arrays.
+    step = max(1, nz // 8)
+    vol_sample = np.asarray(vol[::step])
+
     metrics: Dict[str, Any] = {
         'ssim_before': 0.0,
         'ssim_after': 0.0,
         'ssim_mean': 0.0,
         'edge_score': 0.0,
         'variance_score': 0.0,
-        'depth': vol.shape[0] if vol.ndim == 3 else 1,
+        'depth': nz,
         'has_data': True,
     }
 
-    # Check if slice has meaningful data
-    if vol.max() == vol.min() or np.std(vol) < 1e-6:
+    # Check if slice has meaningful data using the cheap sample
+    if vol_sample.max() == vol_sample.min() or np.std(vol_sample) < 1e-6:
         metrics['has_data'] = False
         metrics['overall'] = 0.0
         return 0.0, metrics
 
-    # Compute SSIM with neighbors
+    # Compute SSIM with neighbors — compute_ssim_3d loads only sample_depth planes
     ssim_scores = []
     if vol_before is not None:
         metrics['ssim_before'] = compute_ssim_3d(vol, vol_before, sample_depth=sample_depth)
@@ -295,27 +302,38 @@ def assess_slice_quality(vol: np.ndarray,
     if ssim_scores:
         metrics['ssim_mean'] = float(np.mean(ssim_scores))
 
-    # Create reference from neighbors
+    # Build a single reference plane (middle z) for edge and variance scores.
+    # Materialises only 1–2 planes instead of the full 3D volumes.
+    mid_z = nz // 2
+    ny = vol.shape[1] if vol.ndim == 3 else vol.shape[0]
+    nx = vol.shape[2] if vol.ndim == 3 else vol.shape[1]
+    ref_plane: Optional[np.ndarray] = None
     if vol_before is not None and vol_after is not None:
-        min_z = min(vol.shape[0], vol_before.shape[0], vol_after.shape[0])
-        min_y = min(vol.shape[1], vol_before.shape[1], vol_after.shape[1])
-        min_x = min(vol.shape[2], vol_before.shape[2], vol_after.shape[2])
-        ref = (0.5 * vol_before[:min_z, :min_y, :min_x].astype(np.float32)
-               + 0.5 * vol_after[:min_z, :min_y, :min_x].astype(np.float32))
+        ny = min(ny, vol_before.shape[1], vol_after.shape[1])
+        nx = min(nx, vol_before.shape[2], vol_after.shape[2])
+        z_b = min(mid_z, vol_before.shape[0] - 1)
+        z_a = min(mid_z, vol_after.shape[0] - 1)
+        ref_plane = (0.5 * np.asarray(vol_before[z_b, :ny, :nx]).astype(np.float32)
+                     + 0.5 * np.asarray(vol_after[z_a, :ny, :nx]).astype(np.float32))
     elif vol_before is not None:
-        ref = vol_before.astype(np.float32)
+        ny = min(ny, vol_before.shape[1])
+        nx = min(nx, vol_before.shape[2])
+        z_b = min(mid_z, vol_before.shape[0] - 1)
+        ref_plane = np.asarray(vol_before[z_b, :ny, :nx]).astype(np.float32)
     elif vol_after is not None:
-        ref = vol_after.astype(np.float32)
-    else:
-        ref = None
+        ny = min(ny, vol_after.shape[1])
+        nx = min(nx, vol_after.shape[2])
+        z_a = min(mid_z, vol_after.shape[0] - 1)
+        ref_plane = np.asarray(vol_after[z_a, :ny, :nx]).astype(np.float32)
 
-    # Compute edge preservation score
-    if ref is not None:
-        metrics['edge_score'] = compute_edge_score(vol, ref)
+    # Compute edge preservation score using the single reference plane
+    if ref_plane is not None:
+        vol_plane = np.asarray(vol[mid_z, :ny, :nx])
+        metrics['edge_score'] = compute_edge_score(vol_plane, ref_plane)
 
-    # Compute variance consistency
-    if ref is not None:
-        metrics['variance_score'] = compute_variance_score(vol, ref)
+    # Compute variance consistency using the strided sample vs a matching reference sample
+    if ref_plane is not None:
+        metrics['variance_score'] = compute_variance_score(vol_sample, vol_sample * 0 + ref_plane.mean())
 
     # Compute overall score
     overall = (
