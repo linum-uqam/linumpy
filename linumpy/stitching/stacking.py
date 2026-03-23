@@ -12,6 +12,87 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def enforce_z_consistency(
+    z_matches: list,
+    confidence_per_slice: Optional[dict] = None,
+    outlier_threshold_frac: float = 0.30,
+    confidence_protect_threshold: float = 0.6,
+) -> Tuple[list, list]:
+    """Correct outlier Z-overlaps using neighbor interpolation.
+
+    Scans pairwise Z-overlap measurements for outliers (deviating more than
+    ``outlier_threshold_frac`` from the median) and replaces them with the
+    local median of their immediate neighbors.  Both ``overlap_voxels`` and
+    ``blend_overlap_voxels`` are corrected independently.
+
+    Slices whose registration confidence (from ``confidence_per_slice``)
+    meets or exceeds ``confidence_protect_threshold`` are considered reliable
+    and are not modified.
+
+    Parameters
+    ----------
+    z_matches : list of dict
+        Each dict must have keys ``overlap_voxels``, ``blend_overlap_voxels``
+        and ``moving_id``.  Items are modified in-place.
+    confidence_per_slice : dict or None
+        Mapping from ``moving_id`` (int) to confidence score in [0, 1].
+        Slices with confidence >= ``confidence_protect_threshold`` are skipped.
+        If None, all slices are treated as having confidence 0.5.
+    outlier_threshold_frac : float
+        Fractional deviation from median above which a value is an outlier.
+        Default: 0.30 (30 %).
+    confidence_protect_threshold : float
+        Minimum confidence to protect a slice from correction.  Default: 0.6.
+
+    Returns
+    -------
+    z_matches : list of dict
+        The corrected z_matches list (same objects, modified in-place).
+    corrections : list of dict
+        Log of corrections: each entry has keys ``moving_id``, ``field``,
+        ``old_value`` and ``new_value``.
+    """
+    if len(z_matches) < 3:
+        return z_matches, []
+
+    conf = confidence_per_slice or {}
+    corrections = []
+
+    for field in ('overlap_voxels', 'blend_overlap_voxels'):
+        values = np.array([float(m[field]) for m in z_matches])
+        median_val = float(np.median(values))
+        threshold = outlier_threshold_frac * max(median_val, 1.0)
+
+        for i, match in enumerate(z_matches):
+            slice_id = match.get('moving_id', i)
+
+            # Protect high-confidence registrations from correction
+            if conf.get(slice_id, 0.5) >= confidence_protect_threshold:
+                continue
+
+            deviation = abs(float(match[field]) - median_val)
+            if deviation <= threshold:
+                continue
+
+            old_val = match[field]
+            neighbor_vals = []
+            if i > 0:
+                neighbor_vals.append(float(z_matches[i - 1][field]))
+            if i + 1 < len(z_matches):
+                neighbor_vals.append(float(z_matches[i + 1][field]))
+
+            new_val = int(np.median(neighbor_vals)) if neighbor_vals else int(median_val)
+            match[field] = new_val
+            corrections.append({
+                'moving_id': slice_id,
+                'field': field,
+                'old_value': old_val,
+                'new_value': new_val,
+            })
+
+    return z_matches, corrections
+
+
 def find_z_overlap(fixed_vol: np.ndarray,
                    moving_vol: np.ndarray,
                    slicing_interval_mm: float,
