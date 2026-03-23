@@ -152,11 +152,12 @@ def interpolate_registration_based(vol_before: np.ndarray,
     fixed_2d = vol_after[reference_slice].astype(np.float32)
     moving_2d = vol_before[reference_slice].astype(np.float32)
 
-    for arr in [fixed_2d, moving_2d]:
-        mn, mx = arr.min(), arr.max()
-        if mx > mn:
-            idx = [fixed_2d, moving_2d].index(arr)
-            [fixed_2d, moving_2d][idx] = (arr - mn) / (mx - mn)
+    mn, mx = fixed_2d.min(), fixed_2d.max()
+    if mx > mn:
+        fixed_2d = (fixed_2d - mn) / (mx - mn)
+    mn, mx = moving_2d.min(), moving_2d.max()
+    if mx > mn:
+        moving_2d = (moving_2d - mn) / (mx - mn)
 
     transform_2d, _, error = register_2d_images_sitk(
         fixed_2d, moving_2d,
