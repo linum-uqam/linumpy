@@ -18,13 +18,10 @@ import linumpy._thread_config  # noqa: F401
 import argparse
 import numpy as np
 import SimpleITK as sitk
-from linumpy.stitching.registration import pairWisePhaseCorrelation
+from linumpy.stitching.registration import compute_motor_transform, estimate_mosaic_transform
 from linumpy.utils import mosaic_grid
 from linumpy.utils.metrics import collect_xy_transform_metrics
-from skimage.filters import threshold_otsu
-from skimage.exposure import match_histograms
 from pathlib import Path
-import random
 import zarr
 from linumpy.io.zarr import read_omezarr
 import logging
@@ -64,134 +61,6 @@ def _build_arg_parser():
                         "Recommended when motor positions are reliable.")
 
     return p
-
-
-def compute_motor_transform(tile_shape, overlap_fraction):
-    """
-    Compute the transform matrix for motor-based tile positions.
-
-    This creates a diagonal transform where tile index (i, j) maps to
-    pixel position based on the expected overlap.
-
-    Parameters
-    ----------
-    tile_shape : tuple or list
-        Tile shape as (height, width) in pixels
-    overlap_fraction : float
-        Expected overlap between tiles (0-1)
-
-    Returns
-    -------
-    np.ndarray
-        2x2 transform matrix
-    """
-    tile_size_y = tile_shape[0]  # rows (height)
-    tile_size_x = tile_shape[1]  # cols (width)
-
-    step_y = tile_size_y * (1.0 - overlap_fraction)
-    step_x = tile_size_x * (1.0 - overlap_fraction)
-
-    # Transform: pos = transform @ [i, j]
-    # Where i is the row index and j is the column index
-    transform = np.array([
-        [step_y, 0],
-        [0, step_x]
-    ])
-
-    return transform
-
-
-def estimate_registration_transform(mosaics, thresholds, max_empty_fraction, n_samples, seed=None):
-    """
-    Estimate transform using image-based registration (phase correlation).
-
-    Returns
-    -------
-    transform : np.ndarray
-        2x2 transform matrix
-    residuals : np.ndarray
-        Residuals from least squares fit
-    tile_count : int
-        Number of tile pairs used
-    """
-    rows = []
-    rows_px = []
-    cols = []
-    cols_px = []
-    tile_count = 0
-
-    # Loop over mosaics (random order)
-    if seed is not None:
-        random.seed = seed
-    mosaic_idx = list(range(len(mosaics)))
-    random.shuffle(mosaic_idx)
-
-    for m_id in mosaic_idx:
-        mosaic = mosaics[m_id]
-        thresh = thresholds[m_id]
-
-        # Loop over tiles
-        for i in range(mosaic.n_tiles_x):
-            for j in range(mosaic.n_tiles_y):
-                # Stop if max tile count is reached
-                if tile_count > n_samples:
-                    break
-
-                # Loop over neighborhood tiles
-                neighbors, tiles = mosaic.get_neighbors_around_tile(i, j)
-                for n, t in zip(neighbors, tiles):
-                    r = t[0] - i
-                    c = t[1] - j
-
-                    # Extract overlap
-                    o1, o2, p1, p2 = mosaic.get_neighbor_overlap_from_pos((i, j), t)
-
-                    # Check if one of the overlap is empty
-                    o1_empty = np.sum(o1 <= thresh) > max_empty_fraction * o1.size
-                    o2_empty = np.sum(o2 <= thresh) > max_empty_fraction * o2.size
-                    if o1_empty or o2_empty:
-                        continue
-
-                    # Match histogram
-                    o2 = match_histograms(o2, o1)
-
-                    # Perform pairwise registration
-                    dx, dy = pairWisePhaseCorrelation(o1, o2)
-
-                    # Compute the tile position
-                    if r == -1:
-                        r_px = p1[2] - mosaic.tile_size_x + dx
-                    else:
-                        r_px = p1[0] + dx
-                    if c == -1:
-                        c_px = p1[3] - mosaic.tile_size_y + dy
-                    else:
-                        c_px = p1[1] + dy
-
-                    # Updating the rows/cols and rows_px/cols_px
-                    rows.append(r)
-                    cols.append(c)
-                    rows_px.append(r_px)
-                    cols_px.append(c_px)
-
-                    # Count the number of tiles used
-                    tile_count += 1
-
-    # Estimate the transform matrix from this analysis
-    a = np.zeros((len(rows) * 2, 4))
-    b = np.zeros((len(rows) * 2, 1))
-    for i in range(len(rows)):
-        a[2 * i, :] = [rows[i], cols[i], 0, 0]
-        b[2 * i, 0] = rows_px[i]
-        a[2 * i + 1, :] = [0, 0, rows[i], cols[i]]
-        b[2 * i + 1, 0] = cols_px[i]
-
-    # Solve this
-    result = np.linalg.lstsq(a, b, rcond=None)
-    transform = result[0].reshape((2, 2))
-    residuals = result[1] if len(result[1]) > 0 else np.array([0.0])
-
-    return transform, residuals, tile_count
 
 
 def main():
@@ -244,7 +113,6 @@ def main():
 
         # Load all input images
         mosaics = []
-        thresholds = []
         for file in input_images:
             if file.rstrip('/').endswith(".ome.zarr"):
                 img, _ = read_omezarr(str(file), level=0)
@@ -257,12 +125,9 @@ def main():
             mosaic = mosaic_grid.MosaicGrid(image, tile_shape=tile_shape, overlap_fraction=args.initial_overlap)
             mosaics.append(mosaic)
 
-            # Compute an intensity threshold
-            thresholds.append(threshold_otsu(mosaic.image))
-
         # Estimate transform
-        transform, residuals, tile_count = estimate_registration_transform(
-            mosaics, thresholds, max_empty_fraction, args.n_samples, args.seed
+        transform, residuals, tile_count = estimate_mosaic_transform(
+            mosaics, max_empty_fraction, args.n_samples, args.seed
         )
 
         logger.info(f"Registration-based transform (from {tile_count} tile pairs):")
