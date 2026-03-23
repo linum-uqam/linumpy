@@ -29,8 +29,9 @@ from tqdm import tqdm
 
 from linumpy.io.zarr import read_omezarr, AnalysisOmeZarrWriter
 from linumpy.stitching.stacking import (
-    find_z_overlap, apply_2d_transform, apply_transform_to_volume,
-    apply_xy_shift, blend_overlap_z, refine_z_blend_overlap
+    find_z_overlap, enforce_z_consistency, apply_2d_transform,
+    apply_transform_to_volume, apply_xy_shift, blend_overlap_z,
+    refine_z_blend_overlap
 )
 from linumpy.utils.io import add_overwrite_arg, assert_output_exists
 from linumpy.utils.metrics import collect_stack_metrics
