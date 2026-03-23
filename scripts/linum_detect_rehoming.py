@@ -41,7 +41,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from linumpy.utils.shifts import filter_outlier_shifts
+from linumpy.shifts.utils import filter_outlier_shifts
 from linumpy.utils.io import add_overwrite_arg, assert_output_exists
 
 

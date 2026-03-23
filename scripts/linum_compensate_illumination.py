@@ -9,7 +9,7 @@ from pathlib import Path
 import SimpleITK as sitk
 import numpy as np
 
-from linumpy.utils.mosaic_grid import MosaicGrid
+from linumpy.stitching.mosaic_grid import MosaicGrid
 
 # TODO: Adapt the script to use multiple mosaic grids
 # TODO: Optimize performance for large tile numbers

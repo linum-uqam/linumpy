@@ -19,7 +19,7 @@ import argparse
 import numpy as np
 import SimpleITK as sitk
 from linumpy.stitching.registration import compute_motor_transform, estimate_mosaic_transform
-from linumpy.utils import mosaic_grid
+from linumpy.stitching import mosaic_grid
 from linumpy.utils.metrics import collect_xy_transform_metrics
 from pathlib import Path
 import zarr

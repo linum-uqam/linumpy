@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from linumpy.io.zarr import read_omezarr, OmeZarrWriter
-from linumpy.utils.mosaic_grid import addVolumeToMosaic
+from linumpy.stitching.mosaic_grid import addVolumeToMosaic
 
 
 def _build_arg_parser():
