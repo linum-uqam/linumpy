@@ -100,7 +100,8 @@ def compute_ssim_2d(img1: np.ndarray, img2: np.ndarray, win_size: int = 7) -> fl
 
 
 def compute_ssim_3d(vol1: np.ndarray, vol2: np.ndarray,
-                    win_size: int = 7, sample_depth: int = 0) -> float:
+                    win_size: int = 7, sample_depth: int = 0,
+                    xy_roi: int = 0) -> float:
     """
     Compute mean SSIM between two 3D volumes.
 
@@ -114,6 +115,10 @@ def compute_ssim_3d(vol1: np.ndarray, vol2: np.ndarray,
         Window size for SSIM computation.
     sample_depth : int
         Number of z-planes to sample. 0 = all planes.
+    xy_roi : int
+        Side length of center crop in XY (pixels). 0 = full plane.
+        Use a small value (e.g. 1024) on very large single-resolution
+        zarr arrays to avoid loading gigabytes per plane.
 
     Returns
     -------
@@ -124,6 +129,15 @@ def compute_ssim_3d(vol1: np.ndarray, vol2: np.ndarray,
     ny = min(vol1.shape[1], vol2.shape[1])
     nx = min(vol1.shape[2], vol2.shape[2])
 
+    # Compute center-crop bounds once (same for every plane)
+    if xy_roi > 0:
+        yc, xc = ny // 2, nx // 2
+        half = xy_roi // 2
+        ys, ye = max(0, yc - half), min(ny, yc + half)
+        xs, xe = max(0, xc - half), min(nx, xc + half)
+    else:
+        ys, ye, xs, xe = 0, ny, 0, nx
+
     # Sample z-planes if requested
     if sample_depth > 0 and nz > sample_depth:
         indices = np.linspace(0, nz - 1, sample_depth, dtype=int)
@@ -132,9 +146,9 @@ def compute_ssim_3d(vol1: np.ndarray, vol2: np.ndarray,
 
     ssim_scores = []
     for z in indices:
-        # Load one plane at a time — works for both numpy arrays and zarr arrays
-        p1 = np.asarray(vol1[z, :ny, :nx])
-        p2 = np.asarray(vol2[z, :ny, :nx])
+        # Load one plane (or crop) at a time — works for zarr and numpy
+        p1 = np.asarray(vol1[z, ys:ye, xs:xe])
+        p2 = np.asarray(vol2[z, ys:ye, xs:xe])
         score = compute_ssim_2d(p1, p2, win_size)
         ssim_scores.append(score)
 
@@ -235,7 +249,8 @@ def assess_slice_quality(vol: np.ndarray,
                          vol_before: Optional[np.ndarray],
                          vol_after: Optional[np.ndarray],
                          sample_depth: int = 5,
-                         weights: Optional[Dict[str, float]] = None) -> Tuple[float, Dict[str, Any]]:
+                         weights: Optional[Dict[str, float]] = None,
+                         xy_roi: int = 0) -> Tuple[float, Dict[str, Any]]:
     """
     Assess overall quality of a slice volume.
 
@@ -256,6 +271,10 @@ def assess_slice_quality(vol: np.ndarray,
         Number of z-planes to sample for SSIM. 0 = all.
     weights : dict, optional
         Custom weights for metrics. Keys: 'ssim', 'edge', 'variance'.
+    xy_roi : int
+        Side length of center crop in XY (pixels). 0 = full plane.
+        Use a small value (e.g. 1024) on very large single-resolution
+        zarr arrays to avoid loading gigabytes per plane.
 
     Returns
     -------
@@ -268,11 +287,23 @@ def assess_slice_quality(vol: np.ndarray,
         weights = {'ssim': 0.5, 'edge': 0.3, 'variance': 0.2}
 
     nz = vol.shape[0] if vol.ndim == 3 else 1
+    ny = vol.shape[1] if vol.ndim == 3 else vol.shape[0]
+    nx = vol.shape[2] if vol.ndim == 3 else vol.shape[1]
 
-    # Load a strided subsample (≤ 8 planes) for cheap has-data and variance checks.
-    # This avoids materialising the full volume for zarr / dask arrays.
+    # Compute center-crop bounds once — all plane reads below use this region.
+    # For large single-resolution zarr mosaic grids this is the primary
+    # performance control: a 1024×1024 crop loads ~2 MB instead of ~5 GB.
+    if xy_roi > 0:
+        yc, xc = ny // 2, nx // 2
+        half = xy_roi // 2
+        ys, ye = max(0, yc - half), min(ny, yc + half)
+        xs, xe = max(0, xc - half), min(nx, xc + half)
+    else:
+        ys, ye, xs, xe = 0, ny, 0, nx
+
+    # Load a strided subsample (≤ 8 planes) of the crop for has-data / variance checks.
     step = max(1, nz // 8)
-    vol_sample = np.asarray(vol[::step])
+    vol_sample = np.asarray(vol[::step, ys:ye, xs:xe])
 
     metrics: Dict[str, Any] = {
         'ssim_before': 0.0,
@@ -290,48 +321,47 @@ def assess_slice_quality(vol: np.ndarray,
         metrics['overall'] = 0.0
         return 0.0, metrics
 
-    # Compute SSIM with neighbors — compute_ssim_3d loads only sample_depth planes
+    # Compute SSIM with neighbors — each call loads only sample_depth cropped planes
     ssim_scores = []
     if vol_before is not None:
-        metrics['ssim_before'] = compute_ssim_3d(vol, vol_before, sample_depth=sample_depth)
+        metrics['ssim_before'] = compute_ssim_3d(vol, vol_before, sample_depth=sample_depth, xy_roi=xy_roi)
         ssim_scores.append(metrics['ssim_before'])
     if vol_after is not None:
-        metrics['ssim_after'] = compute_ssim_3d(vol, vol_after, sample_depth=sample_depth)
+        metrics['ssim_after'] = compute_ssim_3d(vol, vol_after, sample_depth=sample_depth, xy_roi=xy_roi)
         ssim_scores.append(metrics['ssim_after'])
 
     if ssim_scores:
         metrics['ssim_mean'] = float(np.mean(ssim_scores))
 
-    # Build a single reference plane (middle z) for edge and variance scores.
-    # Materialises only 1–2 planes instead of the full 3D volumes.
+    # Build a single reference plane (middle z, cropped) for edge and variance scores.
     mid_z = nz // 2
-    ny = vol.shape[1] if vol.ndim == 3 else vol.shape[0]
-    nx = vol.shape[2] if vol.ndim == 3 else vol.shape[1]
+    ny_n = min(ye, vol_before.shape[1] if vol_before is not None else ye,
+               vol_after.shape[1] if vol_after is not None else ye)
+    nx_n = min(xe, vol_before.shape[2] if vol_before is not None else xe,
+               vol_after.shape[2] if vol_after is not None else xe)
+    # Re-clip crop to neighbour extents
+    ye_n = min(ye, ny_n)
+    xe_n = min(xe, nx_n)
+
     ref_plane: Optional[np.ndarray] = None
     if vol_before is not None and vol_after is not None:
-        ny = min(ny, vol_before.shape[1], vol_after.shape[1])
-        nx = min(nx, vol_before.shape[2], vol_after.shape[2])
         z_b = min(mid_z, vol_before.shape[0] - 1)
         z_a = min(mid_z, vol_after.shape[0] - 1)
-        ref_plane = (0.5 * np.asarray(vol_before[z_b, :ny, :nx]).astype(np.float32)
-                     + 0.5 * np.asarray(vol_after[z_a, :ny, :nx]).astype(np.float32))
+        ref_plane = (0.5 * np.asarray(vol_before[z_b, ys:ye_n, xs:xe_n]).astype(np.float32)
+                     + 0.5 * np.asarray(vol_after[z_a, ys:ye_n, xs:xe_n]).astype(np.float32))
     elif vol_before is not None:
-        ny = min(ny, vol_before.shape[1])
-        nx = min(nx, vol_before.shape[2])
         z_b = min(mid_z, vol_before.shape[0] - 1)
-        ref_plane = np.asarray(vol_before[z_b, :ny, :nx]).astype(np.float32)
+        ref_plane = np.asarray(vol_before[z_b, ys:ye_n, xs:xe_n]).astype(np.float32)
     elif vol_after is not None:
-        ny = min(ny, vol_after.shape[1])
-        nx = min(nx, vol_after.shape[2])
         z_a = min(mid_z, vol_after.shape[0] - 1)
-        ref_plane = np.asarray(vol_after[z_a, :ny, :nx]).astype(np.float32)
+        ref_plane = np.asarray(vol_after[z_a, ys:ye_n, xs:xe_n]).astype(np.float32)
 
-    # Compute edge preservation score using the single reference plane
+    # Compute edge preservation score using the single cropped reference plane
     if ref_plane is not None:
-        vol_plane = np.asarray(vol[mid_z, :ny, :nx])
+        vol_plane = np.asarray(vol[mid_z, ys:ye_n, xs:xe_n])
         metrics['edge_score'] = compute_edge_score(vol_plane, ref_plane)
 
-    # Compute variance consistency using the strided sample vs a matching reference sample
+    # Compute variance consistency using the strided crop vs reference plane
     if ref_plane is not None:
         metrics['variance_score'] = compute_variance_score(vol_sample, vol_sample * 0 + ref_plane.mean())
 

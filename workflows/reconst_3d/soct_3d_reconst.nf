@@ -515,6 +515,7 @@ process auto_assess_quality {
     linum_assess_slice_quality.py inputs slice_config.csv \\
         --min_quality ${params.auto_assess_min_quality} \\
         --exclude_first ${params.auto_assess_exclude_first} \\
+        --roi_size ${params.auto_assess_roi_size} \\
         -f
     """
 }

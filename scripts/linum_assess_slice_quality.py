@@ -68,6 +68,10 @@ def _build_arg_parser():
     quality_group.add_argument("--pyramid_level", type=int, default=0,
                                help="Pyramid level to use for assessment (0=full res). "
                                     "Higher levels are faster but less accurate. Default: 0")
+    quality_group.add_argument("--roi_size", type=int, default=0,
+                               help="Side length of center crop in XY (pixels) used for "
+                                    "all quality metrics. 0 = full plane (slow for large "
+                                    "single-resolution mosaics). Recommended: 1024.")
 
     # Calibration slice options
     calib_group = p.add_argument_group('Calibration Slice Handling')
@@ -275,7 +279,9 @@ def main():
         vol_after = volumes.get(slice_ids[i + 1]) if i < len(slice_ids) - 1 else None
 
         # Compute quality using consolidated module
-        overall, metrics = assess_slice_quality(vol, vol_before, vol_after, args.sample_depth)
+        overall, metrics = assess_slice_quality(
+            vol, vol_before, vol_after, args.sample_depth, xy_roi=args.roi_size
+        )
 
         # Add metadata
         metrics['is_calibration'] = slice_id in calibration_slices
