@@ -257,8 +257,6 @@ def ITKRegistration(
 
     """
     # Equalize histogram
-    # vol1 = icorr.eqhist(vol1)
-    # vol2 = icorr.eqhist(vol2)
 
     # Make the itk images
     fixed_vol = sitk.GetImageFromArray(vol1)
@@ -293,12 +291,8 @@ def ITKRegistration(
     learningRate = 1.0
     minStep = 1
     nIterations = 500
-    # reg.SetOptimizerAsConjugateGradientLineSearch(learningRate, nIterations)
-    # reg.SetOptimizerAsGradientDescentLineSearch(learningRate, minStep)
     reg.SetOptimizerAsRegularStepGradientDescent(learningRate, minStep, nIterations)
-    # reg.SetOptimizerScalesFromPhysicalShift()
     reg.SetShrinkFactorsPerLevel(shrinkFactors=[1])
-    # reg.SetSmoothingSigmasPerLevel(smoothingSigmas=[3,2,1])
     reg.SmoothingSigmasAreSpecifiedInPhysicalUnitsOn()
 
     # Adding fixed and moving mask if defined
@@ -330,11 +324,6 @@ def ITKRegistration(
 
 
 def align_images_sitk(im1, im2):
-    # plt.subplot(121)
-    # plt.imshow(im1)
-    # plt.subplot(122)
-    # plt.imshow(im2)
-    # plt.show()
 
     # Parameters
     learning_rate = 4.0
@@ -345,36 +334,13 @@ def align_images_sitk(im1, im2):
     moving = sitk.GetImageFromArray(im2)
 
     R = sitk.ImageRegistrationMethod()
-    # R.SetMetricAsMeanSquares()
     R.SetMetricAsCorrelation()
-    # R.SetOptimizerAsGradientDescent(learning_rate, max_iteration)
     R.SetOptimizerAsRegularStepGradientDescent(learning_rate, min_step, max_iteration, relaxationFactor=0.5,
                                                gradientMagnitudeTolerance=1e-9)
     R.SetInitialTransform(sitk.TranslationTransform(fixed.GetDimension()))
-    # R.SetOptimizerScales([8,4,2,1])
     R.SetInterpolator(sitk.sitkLinear)
 
     outTx = R.Execute(fixed, moving)
-
-    # print("-------")
-    # print(outTx)
-    # print(f"Optimizer stop condition: {R.GetOptimizerStopConditionDescription()}")
-    # print(f" Iteration: {R.GetOptimizerIteration()}")
-    # print(f" Metric value: {R.GetMetricValue()}")
-
-    # Resampling
-    # resampler = sitk.ResampleImageFilter()
-    # resampler.SetReferenceImage(fixed)
-    # resampler.SetInterpolator(sitk.sitkLinear)
-    # resampler.SetDefaultPixelValue(1.0)
-    # resampler.SetTransform(outTx)
-    # out = resampler.Execute(moving)
-
-    # Create composite
-    # simg1 = sitk.Cast(sitk.RescaleIntensity(fixed), sitk.sitkUInt8)
-    # simg2 = sitk.Cast(sitk.RescaleIntensity(out), sitk.sitkUInt8)
-    # cimg = sitk.Compose(simg1, simg2, simg1 // 2.0 + simg2 // 2.0)
-    # plt.imshow(sitk.GetArrayFromImage(cimg)); plt.show()
 
     dx = -outTx.GetParameters()[1]
     dy = -outTx.GetParameters()[0]
@@ -699,7 +665,6 @@ def register_refinement(fixed: np.ndarray, moving: np.ndarray,
     metric : float
         Registration metric value.
     """
-    import SimpleITK as sitk
 
     fixed_std = np.std(fixed[fixed > 0]) if np.any(fixed > 0) else 0
     moving_std = np.std(moving[moving > 0]) if np.any(moving > 0) else 0
@@ -775,7 +740,6 @@ def create_transform(tx: float, ty: float, angle_deg: float, center):
     -------
     sitk.Euler3DTransform
     """
-    import SimpleITK as sitk
 
     transform = sitk.Euler3DTransform()
     transform.SetCenter([center[0], center[1], 0.0])
