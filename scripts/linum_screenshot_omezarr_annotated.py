@@ -42,6 +42,11 @@ def _build_arg_parser():
                         'When provided, panel titles use anatomical plane names\n'
                         '(Axial/Coronal/Sagittal) and axis labels use the actual\n'
                         'anatomical direction letters instead of X/Y/Z.')
+    p.add_argument('--voxel_size', type=float, nargs=3, metavar=('RES_Z', 'RES_Y', 'RES_X'),
+                   default=None,
+                   help='Override voxel size [res_z res_y res_x] in any unit (e.g. µm).\n'
+                        'Auto-read from OME-Zarr metadata when not provided.\n'
+                        'Used for correct physical aspect ratio in cross-section views.')
     return p
 
 
@@ -57,7 +62,7 @@ def main():
     # Resolve symlinks (common in Nextflow work directories)
     in_path = in_path.resolve()
 
-    image, _ = read_omezarr(str(in_path))
+    image, res = read_omezarr(str(in_path))
 
     # Determine number of input slices
     n_input_slices = args.n_slices if (args.n_slices is not None and args.n_slices > 0) else None
@@ -69,6 +74,9 @@ def main():
         if n_input_slices is None:
             n_input_slices = len(slice_ids)
 
+    # Resolve voxel size: CLI override takes priority, else use OME-Zarr metadata
+    voxel_size = args.voxel_size if args.voxel_size is not None else res
+
     save_annotated_views(image, args.out_figure,
                          n_input_slices=n_input_slices,
                          x_slice=args.x_slice,
@@ -78,7 +86,8 @@ def main():
                          show_lines=args.show_lines,
                          slice_ids=slice_ids,
                          zarr_path=str(in_path),
-                         orientation=args.orientation)
+                         orientation=args.orientation,
+                         voxel_size=voxel_size)
 
 
 if __name__ == '__main__':

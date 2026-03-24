@@ -243,7 +243,8 @@ def save_annotated_views(image, out_path: str,
                          show_lines: bool = False,
                          slice_ids: Optional[List[str]] = None,
                          zarr_path: str = None,
-                         orientation: str = None) -> None:
+                         orientation: str = None,
+                         voxel_size: list = None) -> None:
     """Save anatomically-labelled orthogonal views with Z-slice index annotations.
 
     Parameters
@@ -271,6 +272,11 @@ def save_annotated_views(image, out_path: str,
         When provided, panel titles and axis labels use anatomical names
         (Axial/Coronal/Sagittal) derived from this code instead of the
         generic ``'Coronal (ZY)'`` / ``'Sagittal (ZX)'`` defaults.
+    voxel_size : list or None
+        Voxel size as [z, y, x] in any consistent unit (e.g. millimetres from
+        ``read_omezarr``).  Used to set the correct physical aspect ratio so
+        that cross-sections look geometrically correct.  If None, aspect='equal'
+        (1 pixel = 1 pixel, which distorts anisotropic volumes).
     """
     import matplotlib
     matplotlib.use('Agg')
@@ -307,6 +313,18 @@ def save_annotated_views(image, out_path: str,
     image_zy = np.array(image[:, x_slice, :])
     image_zx = np.array(image[:, :, y_slice])
 
+    # Compute physical aspect ratios so cross-sections look geometrically correct.
+    # image shape is (Z, X, Y); voxel_size is [res_z, res_y, res_x] (mm).
+    # Panel 1 (ZY): rows=Z, cols=Y → aspect = res_z / res_y
+    # Panel 2 (ZX): rows=Z, cols=X → aspect = res_z / res_x
+    if voxel_size is not None and len(voxel_size) >= 3:
+        res_z, res_y, res_x = float(voxel_size[0]), float(voxel_size[1]), float(voxel_size[2])
+        aspect1 = res_z / res_y if res_y > 0 else 1.0
+        aspect2 = res_z / res_x if res_x > 0 else 1.0
+    else:
+        aspect1 = 'equal'
+        aspect2 = 'equal'
+
     allvals = np.concatenate([image_zy.flatten(), image_zx.flatten()])
     vmin = float(np.min(allvals))
     vmax = float(np.percentile(allvals, 99.9))
@@ -315,7 +333,7 @@ def save_annotated_views(image, out_path: str,
     for ax in [ax1, ax2]:
         ax.set_facecolor('black')
 
-    ax1.imshow(image_zy, cmap='magma', origin='lower', vmin=vmin, vmax=vmax, aspect='equal')
+    ax1.imshow(image_zy, cmap='magma', origin='lower', vmin=vmin, vmax=vmax, aspect=aspect1)
     ax1.set_title(title1, color='white', fontsize=12, pad=10)
     ax1.set_xlabel(xlabel1, color='white', fontsize=10)
     ax1.set_ylabel(ylabel1, color='white', fontsize=10)
@@ -326,7 +344,7 @@ def save_annotated_views(image, out_path: str,
                        font_size=font_size, label_every=label_every,
                        show_lines=show_lines, side='left', slice_ids=slice_ids)
 
-    ax2.imshow(image_zx, cmap='magma', origin='lower', vmin=vmin, vmax=vmax, aspect='equal')
+    ax2.imshow(image_zx, cmap='magma', origin='lower', vmin=vmin, vmax=vmax, aspect=aspect2)
     ax2.set_title(title2, color='white', fontsize=12, pad=10)
     ax2.set_xlabel(xlabel2, color='white', fontsize=10)
     ax2.set_ylabel(ylabel2, color='white', fontsize=10)
