@@ -496,8 +496,9 @@ process detect_rehoming_events {
     def diag_arg = params.rehoming_diagnostics ? "--diagnostics diagnostics" : ""
     def frac_arg = params.rehoming_return_fraction ? "--return_fraction ${params.rehoming_return_fraction}" : ""
     def tile_fov_arg = params.tile_fov_mm ? "--tile_fov_mm ${params.tile_fov_mm}" : ""
+    def max_shift_arg = params.rehoming_max_shift_mm ? "--max_shift_mm ${params.rehoming_max_shift_mm}" : ""
     """
-    linum_detect_rehoming.py ${shifts_csv} shifts_xy_clean.csv ${frac_arg} ${tile_fov_arg} ${diag_arg}
+    linum_detect_rehoming.py ${shifts_csv} shifts_xy_clean.csv ${frac_arg} ${max_shift_arg} ${tile_fov_arg} ${diag_arg}
     """
 }
 

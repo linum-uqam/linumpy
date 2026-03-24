@@ -540,8 +540,14 @@ def main():
             # boundary to blend at, while keeping z-spacing fixed at slicing_interval.
             # This handles cases where the actual tissue overlap is smaller than the
             # imaging depth implies (i.e. the cut removed more tissue than expected).
+            # Skip refinement for low-confidence slices — spurious correlation matches
+            # at degraded tissue boundaries cause Z-jumps.
             blend_overlap = overlap
-            if args.blend_z_refine_vox > 0 and overlap > 0:
+            slice_confidence = None
+            if slice_id in registration_transforms and registration_transforms[slice_id] is not None:
+                slice_confidence = registration_transforms[slice_id][3]
+            refine_ok = (slice_confidence is None or slice_confidence >= args.confidence_low)
+            if args.blend_z_refine_vox > 0 and overlap > 0 and refine_ok:
                 search_vox = args.blend_z_refine_vox
                 min_ov = max(1, overlap - search_vox)
                 max_ov = overlap  # cap at expected to preserve slicing_interval z-spacing
@@ -564,6 +570,9 @@ def main():
                         blend_overlap = ov
                 logger.debug(f"Slice {slice_id}: blend_z_refine: expected_overlap={overlap}, "
                              f"blend_overlap={blend_overlap} (corr={best_ref_corr:.3f})")
+            elif not refine_ok:
+                logger.info(f"Slice {slice_id}: skipping blend_z_refine (confidence "
+                            f"{slice_confidence:.3f} < {args.confidence_low})")
         elif fixed_z is not None:
             # We have registration-derived indices
             # fixed_z: Z-index in prev_vol where overlap starts

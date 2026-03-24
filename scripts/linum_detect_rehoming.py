@@ -69,6 +69,10 @@ def _build_arg_parser():
                         'reverses more than (1 - return_fraction) of the '
                         'displacement.  Lower values are more conservative '
                         '(correct fewer spikes).  [%(default)s]')
+    p.add_argument('--max_shift_mm', type=float, default=0.5,
+                   help='Steps with magnitude below this threshold are not\n'
+                        'checked for spike patterns.  Lower this value to\n'
+                        'catch smaller self-cancelling glitches.  [%(default)s]')
     p.add_argument('--tile_fov_mm', type=float, default=None,
                    help='Observed artifact step size in mm: the amount xmin_mm shifts\n'
                         'spuriously at mosaic grid-expansion transitions.\n'
@@ -251,6 +255,7 @@ def main():
     shifts_after = filter_outlier_shifts(
         shifts_intermediate,
         method="rehome",
+        max_shift_mm=args.max_shift_mm,
         return_fraction=args.return_fraction,
     )
 
