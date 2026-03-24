@@ -524,16 +524,18 @@ def main():
             _, fixed_z, moving_z, _ = registration_transforms[slice_id]
 
         if args.use_expected_overlap:
-            # Expected overlap from known slicing interval and volume depth
-            # overlap = trimmed_volume_depth - slicing_interval_in_voxels
-            # This ensures each slice contributes exactly slicing_interval new voxels
-            moving_z = moving_z if moving_z is not None else args.moving_z_first_index
+            # Expected overlap from known slicing interval and volume depth.
+            # ALWAYS use the physical default moving_z (moving_z_first_index),
+            # NOT the registration-derived value.  Registration-derived moving_z
+            # can vary between slices and cause inconsistent Z-spacing even when
+            # the user has explicitly requested physics-based expected overlap.
+            moving_z = args.moving_z_first_index
             interval_voxels = int(args.slicing_interval_mm / res_z_mm)
             overlap = vol.shape[0] - (moving_z or 0) - interval_voxels
             overlap = max(0, overlap)
             corr = 0.0
             logger.debug(f"Slice {slice_id}: expected overlap={overlap} voxels "
-                         f"(vol_depth={vol.shape[0]}, moving_z={moving_z}, interval={interval_voxels})")
+                         f"(vol_depth={vol.shape[0]}, moving_z={moving_z} [fixed], interval={interval_voxels})")
             # Optionally search below expected_overlap for the best-correlated tissue
             # boundary to blend at, while keeping z-spacing fixed at slicing_interval.
             # This handles cases where the actual tissue overlap is smaller than the

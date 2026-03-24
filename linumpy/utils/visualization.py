@@ -343,10 +343,15 @@ def save_annotated_views(image, out_path: str,
     else:
         slice_range_str = f"z00-z{n_input_slices-1:02d}"
 
+    orient_note = (
+        f"  ·  orientation: {orientation.strip(chr(39)).upper()} (acquisition space, pre-atlas-alignment)"
+        if orientation else ""
+    )
     fig.suptitle(
-        f'Z-Slice Index Reference: {n_input_slices} input slices ({slice_range_str})\n'
-        f'Volume: {n_z_voxels} Z × {n_rows} X × {n_cols} Y voxels',
-        color='white', fontsize=14, y=0.98
+        f'Z-Slice Alignment View — {n_input_slices} input slices ({slice_range_str}){orient_note}\n'
+        f'Volume: {n_z_voxels} Z × {n_rows} X × {n_cols} Y voxels'
+        f'  ·  NOTE: axes reflect raw acquisition geometry, NOT final neuroimaging orientation',
+        color='yellow', fontsize=11, y=0.98
     )
 
     plt.tight_layout(rect=(0, 0, 1, 0.95))
