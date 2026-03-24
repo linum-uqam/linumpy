@@ -483,12 +483,18 @@ def main():
                     a = float(np.clip(a, -max_rad, max_rad))
                 raw_angles.append(a)
             raw_angles = np.array(raw_angles)
-            w = args.smooth_window
-            kernel = np.ones(w) / w
-            smooth_angles = np.convolve(raw_angles, kernel, mode='same')
-            half_w = w // 2
-            smooth_angles[:half_w] = raw_angles[:half_w]
-            smooth_angles[-half_w:] = raw_angles[-half_w:]
+            # Clamp window to data length: np.convolve mode='same' returns
+            # max(M, N) elements, so a kernel larger than the data produces
+            # smooth_angles longer than raw_angles and the subtraction fails.
+            w = min(args.smooth_window, len(raw_angles))
+            if w < 2:
+                smooth_angles = raw_angles.copy()
+            else:
+                kernel = np.ones(w) / w
+                smooth_angles = np.convolve(raw_angles, kernel, mode='same')
+                half_w = w // 2
+                smooth_angles[:half_w] = raw_angles[:half_w]
+                smooth_angles[-half_w:] = raw_angles[-half_w:]
             max_rot_corr = float(np.max(np.abs(smooth_angles - raw_angles)))
             logger.info(f"Smoothed rotations with window={w} "
                         f"(max correction: {np.degrees(max_rot_corr):.3f}°)")
