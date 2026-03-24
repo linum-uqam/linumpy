@@ -192,9 +192,9 @@ def _panel_labels_from_orientation(orientation: str):
     Validates the code using :func:`linumpy.utils.orientation.parse_orientation_code`
     then computes panel names and axis labels from the source-dimension letters.
 
-    The volume has shape (Z=dim0, X=dim1, Y=dim2).
-    Panel 1 is ``image[:, x_slice, :]`` — shows (dim0, dim2), fixes dim1.
-    Panel 2 is ``image[:, :, y_slice]``  — shows (dim0, dim1), fixes dim2.
+    The volume has shape (Z=dim0, Y=dim1, X=dim2).
+    Panel 1 is ``image[:, x_slice, :]`` — shows (dim0, dim2)=(Z,X), fixes dim1 (Y).
+    Panel 2 is ``image[:, :, y_slice]``  — shows (dim0, dim1)=(Z,Y), fixes dim2 (X).
 
     Parameters
     ----------
@@ -223,10 +223,10 @@ def _panel_labels_from_orientation(orientation: str):
     a0, a1, a2 = code  # anatomical letter for source dim0, dim1, dim2
     g0, g1, g2 = _LETTER_GROUP[a0], _LETTER_GROUP[a1], _LETTER_GROUP[a2]
 
-    # Panel 1: shows (dim0=Z, dim2=Y), fixes dim1 at x_slice
-    p1_name = _GROUP_PLANE.get(frozenset({g0, g2}), 'ZY')
-    # Panel 2: shows (dim0=Z, dim1=X), fixes dim2 at y_slice
-    p2_name = _GROUP_PLANE.get(frozenset({g0, g1}), 'ZX')
+    # Panel 1: image[:, x_slice, :] → shows (dim0=Z, dim2=X), fixes dim1=Y at x_slice
+    p1_name = _GROUP_PLANE.get(frozenset({g0, g2}), 'ZX')
+    # Panel 2: image[:, :, y_slice] → shows (dim0=Z, dim1=Y), fixes dim2=X at y_slice
+    p2_name = _GROUP_PLANE.get(frozenset({g0, g1}), 'ZY')
 
     return (
         p1_name, a2, a0, a1,   # panel1: xlabel=dim2, ylabel=dim0, fixed=dim1
@@ -314,13 +314,13 @@ def save_annotated_views(image, out_path: str,
     image_zx = np.array(image[:, :, y_slice])
 
     # Compute physical aspect ratios so cross-sections look geometrically correct.
-    # image shape is (Z, X, Y); voxel_size is [res_z, res_y, res_x] (mm).
-    # Panel 1 (ZY): rows=Z, cols=Y → aspect = res_z / res_y
-    # Panel 2 (ZX): rows=Z, cols=X → aspect = res_z / res_x
+    # image shape is (Z, Y, X); voxel_size is [res_z, res_y, res_x] (mm, ZYX order).
+    # Panel 1: image[:, x_slice, :] → rows=Z, cols=X → aspect = res_z / res_x
+    # Panel 2: image[:, :, y_slice] → rows=Z, cols=Y → aspect = res_z / res_y
     if voxel_size is not None and len(voxel_size) >= 3:
         res_z, res_y, res_x = float(voxel_size[0]), float(voxel_size[1]), float(voxel_size[2])
-        aspect1 = res_z / res_y if res_y > 0 else 1.0
-        aspect2 = res_z / res_x if res_x > 0 else 1.0
+        aspect1 = res_z / res_x if res_x > 0 else 1.0
+        aspect2 = res_z / res_y if res_y > 0 else 1.0
     else:
         aspect1 = 'equal'
         aspect2 = 'equal'
