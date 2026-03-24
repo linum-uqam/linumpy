@@ -671,6 +671,7 @@ process stack_motor {
     options += " --search_range_mm ${params.registration_allowed_drifting_mm}"
     options += " --moving_z_first_index ${params.moving_slice_first_index}"
     if (params.use_expected_z_overlap) options += " --use_expected_overlap"
+    if (params.z_overlap_min_corr > 0) options += " --z_overlap_min_corr ${params.z_overlap_min_corr}"
     if (params.analyze_shifts) options += " --output_z_matches z_matches.csv"
 
     // Pairwise registration refinements
