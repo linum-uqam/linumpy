@@ -187,3 +187,5 @@ draft.py
 
 # Exculde subject data folders (symlinks)
 sub-*
+
+.python-version
