@@ -639,6 +639,27 @@ process register_pairwise {
     """
 }
 
+// Auto-exclude extended clusters of consecutive low-quality registrations.
+// Reads pairwise_registration_metrics.json from the registration output and
+// produces a CSV listing slice IDs whose transforms should be force-skipped
+// (motor-only positioning) during stacking.
+process auto_exclude_slices {
+    publishDir "$params.output/$task.process", mode: 'copy'
+
+    input:
+    path "transforms/*"
+
+    output:
+    path "auto_exclude.csv", emit: csv
+
+    script:
+    """
+    linum_auto_exclude_slices.py transforms auto_exclude.csv \
+        --consecutive_threshold ${params.auto_exclude_consecutive} \
+        --z_corr_threshold ${params.auto_exclude_z_corr}
+    """
+}
+
 // -----------------------------------------------------------------------------
 // Stacking Processes
 // -----------------------------------------------------------------------------
@@ -652,11 +673,13 @@ process stack_motor {
         saveAs: { fn -> fn.endsWith('.ome.zarr') ? null : fn }
 
     input:
-    tuple path("slices/*"), path(shifts_file), path("transforms/*"), val(subject_name), val(slice_ids_str)
+    tuple path("slices/*"), path(shifts_file), path("transforms/*"), path(auto_exclude_csv), val(subject_name), val(slice_ids_str)
 
     output:
     tuple path("${subject_name}.ome.zarr"), path("${subject_name}.ome.zarr.zip"), path("${subject_name}.png"), path("${subject_name}_annotated.png"), emit: volume
     path("*_metrics.json"), optional: true, emit: metrics
+    path("z_matches.csv"), optional: true, emit: z_matches
+    path("stacking_decisions.csv"), optional: true, emit: stacking_decisions
 
     script:
     def options = ""
@@ -665,6 +688,7 @@ process stack_motor {
     if (params.stack_blend_enabled) options += " --blend"
     if (params.blend_refinement_px > 0) options += " --blend_refinement_px ${params.blend_refinement_px}"
     if (params.stack_blend_z_refine_vox > 0) options += " --blend_z_refine_vox ${params.stack_blend_z_refine_vox}"
+    if (params.blend_z_refine_min_confidence > 0) options += " --blend_z_refine_min_confidence ${params.blend_z_refine_min_confidence}"
 
     // Z-matching
     options += " --slicing_interval_mm ${params.registration_slicing_interval_mm}"
@@ -673,6 +697,7 @@ process stack_motor {
     if (params.use_expected_z_overlap) options += " --use_expected_overlap"
     if (params.z_overlap_min_corr > 0) options += " --z_overlap_min_corr ${params.z_overlap_min_corr}"
     if (params.analyze_shifts) options += " --output_z_matches z_matches.csv"
+    options += " --output_stacking_decisions stacking_decisions.csv"
 
     // Pairwise registration refinements
     if (params.apply_pairwise_transforms) {
@@ -683,6 +708,11 @@ process stack_motor {
         if (params.skip_warning_transforms) options += " --skip_warning_transforms"
         options += " --confidence_high ${params.transform_confidence_high}"
         options += " --confidence_low ${params.transform_confidence_low}"
+    }
+
+    // Auto-exclude: force motor-only stacking for low-quality clusters
+    if (auto_exclude_csv.name != 'NO_AUTO_EXCLUDE') {
+        options += " --force_skip_slices ${auto_exclude_csv}"
     }
 
     // Cumulative translation accumulation
@@ -1259,17 +1289,29 @@ workflow {
         slices_collected = all_slices.flatten().collect()
         transforms_collected = register_pairwise.out.collect()
 
+        // Auto-exclude: detect clusters of consecutive low-quality registrations
+        if (params.auto_exclude_enabled) {
+            auto_exclude_slices(transforms_collected)
+            auto_exclude_csv = auto_exclude_slices.out.csv
+        } else {
+            auto_exclude_csv = Channel.value(file('NO_AUTO_EXCLUDE'))
+        }
+
         motor_stack_input = slices_collected
             .combine(shifts_xy)
             .combine(transforms_collected)
+            .combine(auto_exclude_csv)
             .map { items ->
                 def slices = []
                 def shifts = null
                 def transforms = []
+                def exclude_csv = null
 
                 items.each { item ->
                     def name = item.getName()
-                    if (name.endsWith('.csv')) {
+                    if (name == 'NO_AUTO_EXCLUDE' || name == 'auto_exclude.csv') {
+                        exclude_csv = item
+                    } else if (name.endsWith('.csv')) {
                         shifts = item
                     } else if (name.endsWith('.ome.zarr')) {
                         slices << item
@@ -1279,12 +1321,12 @@ workflow {
                 }
 
                 def slice_ids_str = extractSliceIdsString(slices)
-                tuple(slices, shifts, transforms, subject_name, slice_ids_str)
+                tuple(slices, shifts, transforms, exclude_csv, subject_name, slice_ids_str)
             }
 
         stack_motor(motor_stack_input)
         stack_output = stack_motor.out.volume
-        stack_metadata = motor_stack_input.map { slices, shifts, transforms, name, ids_str ->
+        stack_metadata = motor_stack_input.map { slices, shifts, transforms, exclude_csv, name, ids_str ->
             tuple(name, ids_str.split(',').size(), ids_str)
         }
 
