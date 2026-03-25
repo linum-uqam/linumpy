@@ -18,6 +18,7 @@ import argparse
 import csv
 import json
 import logging
+import os
 import re
 from pathlib import Path
 
@@ -53,7 +54,15 @@ def load_registration_metrics(transforms_dir: Path):
     metrics = []
     pattern = re.compile(r"slice_z(\d+)")
 
-    for metrics_file in sorted(transforms_dir.rglob("pairwise_registration_metrics.json")):
+    # os.walk with followlinks=True is used instead of Path.rglob() because
+    # Nextflow stages input directories as symlinks; rglob does not follow
+    # symlinks in Python 3.12+.
+    found_files = []
+    for root, _dirs, files in os.walk(str(transforms_dir), followlinks=True):
+        if "pairwise_registration_metrics.json" in files:
+            found_files.append(Path(root) / "pairwise_registration_metrics.json")
+
+    for metrics_file in sorted(found_files):
         m = pattern.search(metrics_file.parent.name)
         if not m:
             continue
