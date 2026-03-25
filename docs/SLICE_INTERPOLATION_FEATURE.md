@@ -1,0 +1,360 @@
+# Slice Interpolation Feature
+
+
+---
+
+## Overview
+
+The slice interpolation feature reconstructs missing or degraded slices in Serial OCT datasets using information from adjacent slices. This is particularly useful when a single physical slice was lost or damaged during acquisition but surrounding slices are intact.
+
+**Key Features**:
+- Pure interpolation from neighboring slices when slice is completely missing
+- **Quality-weighted blending** with degraded slices that have partial usable data
+- Automatic quality assessment to determine how much to trust degraded data
+
+**Important Limitation**: This method only works for **single missing slices**. When two or more consecutive slices are missing, there is insufficient information for accurate reconstruction.
+
+---
+
+## Background
+
+### The Problem
+
+In Serial Optical Coherence Tomography (SOCT), as described in Lefebvre et al. (2017)[^1], mouse brains are imaged through serial sectioning with a ~200 µm slice interval. Occasionally, a slice may be:
+
+- Damaged during cutting
+- Lost during handling
+- Unusable due to imaging artifacts
+
+When a single slice is missing, the gap can be filled using registration-based interpolation.
+
+### Scientific Basis
+
+The implemented method is based on **registration-based morphing interpolation**, which:
+
+1. Registers the slice before the gap to the slice after
+2. Computes a "half-transform" representing the midpoint
+3. Warps both adjacent slices toward the midpoint
+4. Blends the warped volumes
+
+This approach is inspired by:
+- **Video frame interpolation** techniques (Bao et al., CVPR 2019)
+- **Shape-based interpolation** in medical imaging (Lee et al., IEEE TMI 1991)
+- **Motion-compensated interpolation** for volumetric data
+
+---
+
+## Method Details
+
+### Registration-Based Morphing (Recommended)
+
+```
+Slice N-1 (before)    Slice N+1 (after)
+       \                   /
+        \                 /
+         ↓               ↓
+    [Find best overlap planes]
+    (NCC search at volume boundaries)
+              ↓
+    [Register best plane pair (2D affine)]
+              ↓
+    [Compute half-transform H]
+              ↓
+    ┌─────────┴─────────┐
+    ↓                   ↓
+[Warp N-1 by H]  [Warp N+1 by H⁻¹]
+    ↓                   ↓
+    └─────────┬─────────┘
+              ↓
+         [Blend 50/50]
+              ↓
+      Interpolated Slice N
+```
+
+#### Overlap Plane Selection
+
+In serial sectioning, the physically adjacent tissue is near the **bottom** of
+vol_before and the **top** of vol_after (the surface exposed after each cut).
+Because the exact cut depth can vary slightly, `find_best_overlap_planes` searches
+the last `overlap_search_window` z-planes of vol_before against the first
+`overlap_search_window` z-planes of vol_after using normalized cross-correlation
+on the central ROI. The pair with the highest correlation is selected for
+registration.
+
+The correlation score also acts as a **quality gate**: if no pair exceeds
+`min_overlap_correlation` (default 0.1), the volumes cannot be reliably aligned and
+the method falls back to a simple average rather than producing a bad warp.
+
+### Half-Transform Computation
+
+For an affine transform with center *c*, matrix *M*, and translation *t*:
+
+```
+T(x) = M(x - c) + c + t
+```
+
+The half-transform *H* satisfying *H(H(x)) = T(x)* is computed as:
+
+```python
+# Matrix square root via eigendecomposition
+eigenvalues, eigenvectors = np.linalg.eig(M)
+half_matrix = eigenvectors @ diag(sqrt(eigenvalues)) @ inv(eigenvectors)
+
+# Correct half-translation: (H_m + I) * h_t = t
+half_translation = np.linalg.solve(half_matrix + np.eye(dim), t)
+```
+
+Note: a naive `t / 2` is only correct for pure translations. The solve-based
+formula correctly accounts for the interaction between the matrix and translation
+components for any affine transform.
+
+### Alternative Methods
+
+| Method | Description | Use Case |
+|--------|-------------|----------|
+| `registration` | Registration-based morphing | **Recommended** - handles deformation |
+| `average` | Simple 50/50 pixel average | Fast baseline, no deformation handling |
+| `weighted` | Gaussian-smoothed average | Reduces discontinuities |
+
+### Blending Methods
+
+When combining the warped before and after volumes, two blending methods are available:
+
+| Blend Method | Description |
+|--------------|-------------|
+| `gaussian` | **Recommended.** Uses distance transform to create feathered edges. Interior pixels get more weight than edge pixels, eliminating visible double-edge artifacts. |
+| `linear` | Simple 50/50 blend. Fast but may show visible edges where the two warped volumes have different boundaries. |
+
+---
+
+## Degraded Slice Support
+
+When a slice exists but has quality issues (motion artifacts, partial data loss, etc.), it can still provide valuable structural information. The interpolation can blend the degraded data with the pure interpolation result.
+
+### Automatic Quality Assessment
+
+The quality of a degraded slice is automatically assessed using three metrics:
+
+| Metric | Weight | Description |
+|--------|--------|-------------|
+| **SSIM** | 50% | Structural Similarity with neighboring slices |
+| **Edge Preservation** | 30% | Correlation of edge maps with expected structure |
+| **Variance Ratio** | 20% | Consistency of signal variance |
+
+```
+Quality Score = 0.5 × SSIM + 0.3 × EdgeScore + 0.2 × VarianceScore
+```
+
+### Quality Thresholding
+
+- If `quality_score >= min_quality_threshold`: blend degraded with interpolated
+- If `quality_score < min_quality_threshold`: use pure interpolation (degraded is too damaged)
+
+Default threshold: **0.2** (very damaged slices are rejected)
+
+### Blending Formula
+
+```python
+final = quality_weight × degraded + (1 - quality_weight) × interpolated
+```
+
+Where `quality_weight` is either:
+- Automatically computed from quality assessment
+- Manually specified via `--degraded_weight`
+
+---
+
+## Usage
+
+### Enable in Pipeline
+
+```bash
+nextflow run soct_3d_reconst.nf \
+    --input /path/to/mosaics \
+    --interpolate_missing_slices true \
+    --interpolation_method registration
+```
+
+### Configuration Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `interpolate_missing_slices` | `true` | Enable interpolation |
+| `interpolation_method` | `'registration'` | Method: `registration`, `average`, `weighted` |
+| `interpolation_blend_method` | `'gaussian'` | Blend method: `gaussian` (feathered), `linear` (50/50) |
+| `interpolation_registration_metric` | `'MSE'` | Registration metric: `MSE`, `CC`, `MI` |
+| `interpolation_max_iterations` | `1000` | Max registration iterations |
+| `interpolation_overlap_search_window` | `5` | Z-planes to search at each boundary for best overlap pair |
+| `interpolation_min_overlap_correlation` | `0.1` | Min cross-correlation to proceed with registration; below this falls back to simple average |
+| `interpolation_use_degraded` | `true` | Use degraded slice data if available |
+| `interpolation_min_quality` | `0.2` | Minimum quality score to use degraded slice |
+
+### Standalone Script
+
+```bash
+# Basic usage (pure interpolation)
+linum_interpolate_missing_slice.py slice_z00.ome.zarr slice_z02.ome.zarr \
+    slice_z01_interpolated.ome.zarr
+
+# With options
+linum_interpolate_missing_slice.py slice_z00.ome.zarr slice_z02.ome.zarr \
+    slice_z01_interpolated.ome.zarr \
+    --method registration \
+    --registration_metric MSE \
+    --max_iterations 1000 \
+    --blend_method linear
+
+# With degraded slice (automatic quality assessment)
+linum_interpolate_missing_slice.py slice_z00.ome.zarr slice_z02.ome.zarr \
+    slice_z01_interpolated.ome.zarr \
+    --degraded_slice slice_z01_damaged.ome.zarr
+
+# With manual quality weight override
+linum_interpolate_missing_slice.py slice_z00.ome.zarr slice_z02.ome.zarr \
+    slice_z01_interpolated.ome.zarr \
+    --degraded_slice slice_z01_damaged.ome.zarr \
+    --degraded_weight 0.4
+
+# With custom quality threshold
+linum_interpolate_missing_slice.py slice_z00.ome.zarr slice_z02.ome.zarr \
+    slice_z01_interpolated.ome.zarr \
+    --degraded_slice slice_z01_damaged.ome.zarr \
+    --min_quality_threshold 0.3
+```
+
+---
+
+## Gap Detection
+
+The pipeline automatically detects gaps in the slice sequence:
+
+```groovy
+// Example: slices 00, 01, 03, 04 present
+// Detected: slice 02 missing (single gap - can interpolate)
+
+// Example: slices 00, 01, 04, 05 present
+// Detected: slices 02, 03 missing (multiple gap - CANNOT interpolate)
+```
+
+### Gap Detection Logic
+
+1. Extract numeric slice IDs from filenames
+2. Sort slice IDs
+3. Find gaps where `next_id - current_id == 2` (single gap)
+4. Warn if `next_id - current_id > 2` (multiple gap)
+
+---
+
+## Workflow Integration
+
+The interpolation happens after `bring_to_common_space` and before `register_pairwise`:
+
+```
+bring_to_common_space
+        ↓
+[detect_gaps]
+        ↓
+┌───────┴───────┐
+│  Single gap?  │
+└───────┬───────┘
+        ↓ yes
+interpolate_missing_slice
+        ↓
+[merge with existing slices]
+        ↓
+register_pairwise
+        ↓
+stack
+```
+
+---
+
+## Limitations
+
+### Only Single Gaps
+
+❌ **Cannot interpolate** when 2+ consecutive slices are missing:
+- Insufficient information to estimate intermediate content
+- Deformation between non-adjacent slices is too large
+
+### Structural Assumptions
+
+The method assumes:
+- Adjacent slices have similar content
+- Tissue deformation between slices is smooth
+- No major structural changes between slices
+
+### Quality Considerations
+
+- Interpolated slices are **estimates**, not measured data
+- Quality depends on registration accuracy
+- Fine structures may be blurred or misaligned
+- Consider marking interpolated slices in downstream analysis
+
+---
+
+## Output
+
+### Interpolated Slice Naming
+
+```
+slice_z{missing_id}_interpolated.ome.zarr
+```
+
+Example: If slice 02 is missing, output is `slice_z02_interpolated.ome.zarr`
+
+### Published Location
+
+```
+{output}/interpolate_missing_slice/
+└── slice_z02_interpolated.ome.zarr
+```
+
+---
+
+## Validation
+
+### Visual Inspection
+
+Compare interpolated slice with adjacent slices:
+
+```bash
+# View all three slices
+napari slice_z01.ome.zarr slice_z02_interpolated.ome.zarr slice_z03.ome.zarr
+```
+
+### Quantitative Metrics
+
+If ground truth is available (e.g., from a complete dataset):
+
+```python
+from skimage.metrics import structural_similarity as ssim
+from skimage.metrics import peak_signal_noise_ratio as psnr
+
+# Compare interpolated to ground truth
+ssim_score = ssim(interpolated, ground_truth)
+psnr_score = psnr(ground_truth, interpolated)
+```
+
+---
+
+## References
+
+[^1]: J. Lefebvre, A. Castonguay, P. Pouliot, M. Descoteaux, and F. Lesage, "Whole mouse brain imaging using optical coherence tomography: reconstruction, normalization, segmentation, and comparison with diffusion MRI," *Neurophotonics*, vol. 4, no. 4, p. 041501, July 2017, doi: 10.1117/1.NPh.4.4.041501.
+
+### Additional References
+
+- Lee, T. Y., & Wang, W. H. (2000). "Morphology-based three-dimensional interpolation." IEEE TMI, 19(7), 711-720.
+- Raya, S. P., & Udupa, J. K. (1990). "Shape-Based Interpolation of Multidimensional Objects." IEEE TMI, 9(1), 32-42.
+- Bao, W., et al. (2019). "Depth-Aware Video Frame Interpolation." CVPR.
+- Penney, G. P., et al. (2004). "A comparison of similarity measures for use in 2-D-3-D medical image registration." IEEE TMI.
+
+---
+
+## Files
+
+| File | Description |
+|------|-------------|
+| `scripts/linum_interpolate_missing_slice.py` | Standalone interpolation script |
+| `workflows/reconst_3d/soct_3d_reconst.nf` | Pipeline with interpolation process |
+| `workflows/reconst_3d/nextflow.config` | Configuration with interpolation params |
