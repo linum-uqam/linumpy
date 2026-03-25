@@ -53,13 +53,16 @@ Slice N-1 (before)    Slice N+1 (after)
        \                   /
         \                 /
          ↓               ↓
-    [Register N-1 to N+1]
+    [Find best overlap planes]
+    (NCC search at volume boundaries)
               ↓
-    [Compute half-transform T/2]
+    [Register best plane pair (2D affine)]
+              ↓
+    [Compute half-transform H]
               ↓
     ┌─────────┴─────────┐
     ↓                   ↓
-[Warp N-1 by T/2]  [Warp N+1 by T⁻¹/2]
+[Warp N-1 by H]  [Warp N+1 by H⁻¹]
     ↓                   ↓
     └─────────┬─────────┘
               ↓
@@ -68,21 +71,42 @@ Slice N-1 (before)    Slice N+1 (after)
       Interpolated Slice N
 ```
 
+#### Overlap Plane Selection
+
+In serial sectioning, the physically adjacent tissue is near the **bottom** of
+vol_before and the **top** of vol_after (the surface exposed after each cut).
+Because the exact cut depth can vary slightly, `find_best_overlap_planes` searches
+the last `overlap_search_window` z-planes of vol_before against the first
+`overlap_search_window` z-planes of vol_after using normalized cross-correlation
+on the central ROI. The pair with the highest correlation is selected for
+registration.
+
+The correlation score also acts as a **quality gate**: if no pair exceeds
+`min_overlap_correlation` (default 0.1), the volumes cannot be reliably aligned and
+the method falls back to a simple average rather than producing a bad warp.
+
 ### Half-Transform Computation
 
-For affine transforms, the "half-transform" is computed using matrix decomposition:
+For an affine transform with center *c*, matrix *M*, and translation *t*:
+
+```
+T(x) = M(x - c) + c + t
+```
+
+The half-transform *H* satisfying *H(H(x)) = T(x)* is computed as:
 
 ```python
 # Matrix square root via eigendecomposition
-eigenvalues, eigenvectors = np.linalg.eig(transform_matrix)
-sqrt_eigenvalues = np.sqrt(eigenvalues)
-half_matrix = eigenvectors @ diag(sqrt_eigenvalues) @ inv(eigenvectors)
+eigenvalues, eigenvectors = np.linalg.eig(M)
+half_matrix = eigenvectors @ diag(sqrt(eigenvalues)) @ inv(eigenvectors)
 
-# Half translation
-half_translation = translation / 2
+# Correct half-translation: (H_m + I) * h_t = t
+half_translation = np.linalg.solve(half_matrix + np.eye(dim), t)
 ```
 
-This ensures that applying the half-transform twice yields the full transform.
+Note: a naive `t / 2` is only correct for pure translations. The solve-based
+formula correctly accounts for the interaction between the matrix and translation
+components for any affine transform.
 
 ### Alternative Methods
 
@@ -155,11 +179,13 @@ nextflow run soct_3d_reconst.nf \
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `interpolate_missing_slices` | `false` | Enable interpolation |
+| `interpolate_missing_slices` | `true` | Enable interpolation |
 | `interpolation_method` | `'registration'` | Method: `registration`, `average`, `weighted` |
 | `interpolation_blend_method` | `'gaussian'` | Blend method: `gaussian` (feathered), `linear` (50/50) |
 | `interpolation_registration_metric` | `'MSE'` | Registration metric: `MSE`, `CC`, `MI` |
 | `interpolation_max_iterations` | `1000` | Max registration iterations |
+| `interpolation_overlap_search_window` | `5` | Z-planes to search at each boundary for best overlap pair |
+| `interpolation_min_overlap_correlation` | `0.1` | Min cross-correlation to proceed with registration; below this falls back to simple average |
 | `interpolation_use_degraded` | `true` | Use degraded slice data if available |
 | `interpolation_min_quality` | `0.2` | Minimum quality score to use degraded slice |
 
