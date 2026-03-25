@@ -575,8 +575,12 @@ def main():
             # at degraded tissue boundaries cause Z-jumps.
             blend_overlap = overlap
             slice_confidence = None
-            if slice_id in registration_transforms and registration_transforms[slice_id] is not None:
-                slice_confidence = registration_transforms[slice_id][3]
+            if slice_id in registration_transforms:
+                if registration_transforms[slice_id] is not None:
+                    slice_confidence = registration_transforms[slice_id][3]
+                else:
+                    # Transform was skipped (error/warning) — treat as zero confidence
+                    slice_confidence = 0.0
             refine_ok = (slice_confidence is None or slice_confidence >= args.blend_z_refine_min_confidence)
             if args.blend_z_refine_vox > 0 and overlap > 0 and refine_ok:
                 search_vox = args.blend_z_refine_vox
