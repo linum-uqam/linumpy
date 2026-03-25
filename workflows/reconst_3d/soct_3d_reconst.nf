@@ -559,6 +559,8 @@ process interpolate_missing_slice {
         --blend_method ${params.interpolation_blend_method} \
         --registration_metric ${params.interpolation_registration_metric} \
         --max_iterations ${params.interpolation_max_iterations} \
+        --overlap_search_window ${params.interpolation_overlap_search_window} \
+        --min_overlap_correlation ${params.interpolation_min_overlap_correlation} \
         ${preview_opt}
     """
 }
