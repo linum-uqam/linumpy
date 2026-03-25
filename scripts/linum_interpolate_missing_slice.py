@@ -99,8 +99,20 @@ def _build_arg_parser():
     p.add_argument("--max_iterations", type=int, default=1000,
                    help="Maximum iterations for registration [default: %(default)s]")
     p.add_argument("--reference_slice", type=int, default=None,
-                   help="Z-index in slice_before to use as registration reference.\n"
-                        "If not specified, uses the middle slice.")
+                   help="Z-index (in each volume, clamped to that volume's bounds)\n"
+                        "to use as the registration reference plane.\n"
+                        "If not specified, the best-correlated plane pair within\n"
+                        "--overlap_search_window planes from each boundary is used\n"
+                        "automatically (recommended).")
+    p.add_argument("--overlap_search_window", type=int, default=5,
+                   help="Number of z-planes to search at each volume boundary\n"
+                        "when selecting the registration reference pair automatically.\n"
+                        "Ignored when --reference_slice is set. [default: %(default)s]")
+    p.add_argument("--min_overlap_correlation", type=float, default=0.1,
+                   help="Minimum normalized cross-correlation required between the\n"
+                        "boundary planes to proceed with registration. Below this\n"
+                        "threshold the method falls back to a simple average.\n"
+                        "[default: %(default)s]")
     
     # Degraded slice options
     degraded_group = p.add_argument_group('Degraded Slice Options',
@@ -465,7 +477,9 @@ def main():
             metric=args.registration_metric,
             max_iterations=args.max_iterations,
             reference_slice=args.reference_slice,
-            blend_method=args.blend_method
+            blend_method=args.blend_method,
+            overlap_search_window=args.overlap_search_window,
+            min_overlap_correlation=args.min_overlap_correlation,
         )
     elif args.method == 'average':
         print("Performing simple average interpolation...")
