@@ -1055,12 +1055,15 @@ workflow {
   RECOMMENDATION: set skip_error_transforms=true
 """
     }
-    if (params.apply_pairwise_transforms && !params.skip_warning_transforms) {
+    if (params.apply_pairwise_transforms && !params.skip_warning_transforms
+        && !(params.apply_rotation_only && params.use_expected_z_overlap)) {
         log.warn """
 [CONFIG WARNING] skip_warning_transforms=false
   Transforms with overall_status='warning' (optimizer hit boundary) will be
   applied. Their Z-offsets are unreliable and can cause Z-positioning errors.
-  RECOMMENDATION: set skip_warning_transforms=true
+  This is safe only when apply_rotation_only=true AND use_expected_z_overlap=true
+  (rotation is the only output, Z-offsets are ignored).
+  If those two flags are not both true, set skip_warning_transforms=true.
 """
     }
     if (params.stacking_method == 'motor' && params.apply_pairwise_transforms && !params.apply_rotation_only) {
