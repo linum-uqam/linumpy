@@ -542,6 +542,9 @@ def apply_transform(moving_image, transform):
     transform: sitk.sitkTransform
         Transform to apply to `moving_image`.
     """
+    if not isinstance(moving_image, np.ndarray):
+        moving_image = np.asarray(moving_image)
+
     moving_image_sitk = sitk.GetImageFromArray(moving_image)
 
     resampler = sitk.ResampleImageFilter()
