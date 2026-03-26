@@ -706,6 +706,8 @@ process stack_motor {
         options += " --transforms_dir transforms"
         if (params.apply_rotation_only) options += " --rotation_only"
         options += " --max_rotation_deg ${params.max_rotation_deg}"
+        if (params.load_transform_min_zcorr > 0) options += " --load_min_zcorr ${params.load_transform_min_zcorr}"
+        if (params.load_transform_max_rotation > 0) options += " --load_max_rotation ${params.load_transform_max_rotation}"
         if (params.skip_error_transforms) options += " --skip_error_transforms"
         if (params.skip_warning_transforms) options += " --skip_warning_transforms"
         options += " --confidence_high ${params.transform_confidence_high}"
