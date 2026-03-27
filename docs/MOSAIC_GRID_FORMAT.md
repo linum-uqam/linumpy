@@ -53,7 +53,7 @@ For the final stacked 3D volume, specific analysis-friendly resolutions are used
 | 2 | 50 µm | Overview, atlas registration |
 | 3 | 100 µm | Quick visualization, large-scale |
 
-This is controlled by the `--pyramid_resolutions` parameter in `linum_stack_slices_3d.py` or the `pyramid_resolutions` parameter in the Nextflow workflow.
+This is controlled by the `--pyramid_resolutions` parameter in `linum_stack_slices_motor.py` or the `pyramid_resolutions` parameter in the Nextflow workflow.
 
 **Note:** Only resolutions ≥ the base processing resolution are included. For example, processing at 25 µm will create levels at 25, 50, and 100 µm.
 

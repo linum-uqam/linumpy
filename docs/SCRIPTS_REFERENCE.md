@@ -371,38 +371,16 @@ linum_stack_slices.py <slices_dir> <output> --xy_shifts <shifts.csv>
 
 ### linum_stack_slices_3d.py
 
-Stack 3D mosaics into final volume with analysis-optimized multi-resolution pyramid.
+> **Deprecated.** Use `linum_stack_slices_motor.py` with `--no_xy_shift` instead.
 
-```bash
-linum_stack_slices_3d.py <mosaics_dir> <transforms_dir> <output.ome.zarr> \
-    [--blend] [--overlap <n>] [--pyramid_resolutions 10 25 50 100]
-```
-
-**Options:**
-- `--blend`: Enable diffusion blending between slices
-- `--overlap`: Maximum overlap voxels for blending
-- `--pyramid_resolutions`: Target resolutions (µm) for pyramid levels (default: 10 25 50 100)
-- `--n_levels`: Number of traditional power-of-2 downsample levels (alternative to pyramid_resolutions)
-
-**Pyramid Resolution Modes:**
-
-1. **Custom resolutions (default)**: Specify exact analysis-friendly resolutions
-   ```bash
-   linum_stack_slices_3d.py mosaics/ transforms/ output.ome.zarr \
-       --pyramid_resolutions 10 25 50 100
-   ```
-
-2. **Traditional power-of-2**: Use `--n_levels` for 2x downsampling
-   ```bash
-   linum_stack_slices_3d.py mosaics/ transforms/ output.ome.zarr \
-       --n_levels 4
-   ```
-
-**Note:** Only resolutions ≥ the base resolution will be created. The base resolution is automatically determined from the input data.
+Stack 3D mosaics into final volume using pairwise registration transforms.
+This script is superseded by `linum_stack_slices_motor.py`, which provides
+confidence-based transform degradation, translation filtering/accumulation,
+rotation smoothing, auto-exclude, and richer diagnostics.
 
 ### linum_stack_slices_motor.py
 
-Stack slices into a 3D volume using motor positions for XY placement and correlation-based Z matching. This is the primary stacking script used by the `motor` stacking method in the pipeline.
+Stack slices into a 3D volume using motor positions for XY placement and correlation-based Z matching. This is the primary stacking script used by the pipeline.
 
 ```bash
 linum_stack_slices_motor.py <slices_dir> <shifts_file> <transforms_dir> <output.ome.zarr> \

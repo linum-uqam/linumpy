@@ -271,38 +271,30 @@ Computes small corrections (rotation, sub-pixel translation) between consecutive
 
 #### Stacking & Output
 
-Choose a stacking method with `stacking_method`:
-- **`motor`** (recommended): XY from motor positions (`shifts_xy.csv`), Z from correlation
-- **`registration`**: XY and Z both from pairwise registration
+Stacking assembles all common-space slices into a 3D volume using motor positions
+for XY placement, pairwise registration for rotation/translation refinement,
+and correlation or physics-based Z-matching.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `stacking_method` | `'motor'` | Stacking method: `motor` or `registration` |
 | `stack_blend_enabled` | `true` | Blend overlapping regions between slices |
 
-**Motor stacking (stacking_method = 'motor'):**
+**Stacking parameters:**
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `use_expected_z_overlap` | `true` | Use expected Z-overlap instead of correlation-based matching |
 | `apply_pairwise_transforms` | `true` | Apply pairwise registration transforms during stacking |
-| `apply_rotation_only` | `true` | Apply only the rotation component from registration (keeps XY from motor) |
+| `apply_rotation_only` | `false` | Apply only the rotation component from registration (keeps XY from motor) |
 | `max_rotation_deg` | `5.0` | Clamp rotation values larger than this before application |
 | `skip_error_transforms` | `true` | Skip transforms flagged as `error` status (prevents artifacts near interpolated slices) |
-| `skip_warning_transforms` | `false` | Skip transforms flagged as `warning` status |
-| `stack_accumulate_translations` | `false` | Accumulate pairwise translations as cumulative canvas offsets |
+| `skip_warning_transforms` | `true` | Skip transforms flagged as `warning` status |
+| `stack_accumulate_translations` | `true` | Accumulate pairwise translations as cumulative canvas offsets |
 | `stack_max_pairwise_translation` | `0` | Max pairwise translation (pixels) included in accumulation (0 = include all) |
 | `stitch_rehoming_enabled` | `false` | Apply one-time segment offset at re-homing event boundaries |
 | `stitch_rehoming_threshold_mm` | `0.7` | Motor shift magnitude that identifies a re-homing event (mm) |
 | `stitch_rehoming_use_motor` | `false` | Use motor delta instead of pairwise registration for re-homing corrections |
 | `stack_smooth_window` | `5` | Moving-average window (slices) for smoothing per-slice rotations (0 = disabled) |
-
-**Registration stacking (stacking_method = 'registration'):**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `stack_max_overlap` | `10` | Maximum blending overlap in voxels (-1 = unlimited) |
-| `stack_no_accumulate_transforms` | `true` | Apply each transform independently (recommended when slices are already XY-aligned) |
 
 **Output pyramid:**
 

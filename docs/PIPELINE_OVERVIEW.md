@@ -285,9 +285,10 @@ stack
 - Stacks all slices into final 3D volume
 - Creates multi-resolution pyramid with analysis-friendly resolutions (10, 25, 50, 100 µm)
 - Optional blending between slices
-- **Two stacking methods** (controlled by `stacking_method`):
-  - **`motor`** (default, recommended): XY positions from motor encoder data (`shifts_xy.csv`), Z from correlation matching between slices. Pairwise registration transforms are applied as rotation-only corrections on top.
-  - **`registration`**: Both XY and Z from pairwise image registration. More fully image-driven but accumulates registration errors.
+- XY positions from motor encoder data (`shifts_xy.csv`), Z from correlation matching
+- Pairwise registration transforms refine rotation and (optionally) translation
+- Confidence-based transform degradation: high-confidence pairs get full transforms, low-confidence get rotation-only, very low get skipped
+- Translation accumulation steers the viewing plane to reduce inter-slice drift
 
 #### 14. Z-Intensity Normalization (Optional)
 
@@ -344,9 +345,9 @@ The final 3D volume is stored as an OME-Zarr with multiple resolution levels opt
 | `registration_transform` | `'euler'` | Transform type: `euler` (XY + rotation) or `translation` |
 | `registration_max_translation` | `200.0` | Optimizer bound on translation (pixels) |
 | `registration_max_rotation` | `5.0` | Optimizer bound on rotation (degrees) |
-| `stacking_method` | `'motor'` | Stacking method: `motor` (recommended) or `registration` |
 | `stack_blend_enabled` | `true` | Enable blending between slices |
-| `apply_rotation_only` | `true` | Apply only rotation from pairwise registration during stacking |
+| `apply_rotation_only` | `false` | Apply only rotation from pairwise registration during stacking |
+| `stack_accumulate_translations` | `true` | Accumulate pairwise translations as cumulative canvas offsets |
 | `interpolation_blend_method` | `'gaussian'` | Blend method: `gaussian` (feathered) or `linear` |
 | `normalize_z_slices` | `false` | Enable post-stacking Z-intensity normalization |
 | `pyramid_resolutions` | `[10, 25, 50, 100]` | Pyramid resolution levels (µm) |
