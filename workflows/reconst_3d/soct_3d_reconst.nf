@@ -1291,7 +1291,6 @@ workflow {
         log.warn "  which is not part of the current pipeline. To analyze tile dilation,"
         log.warn "  run estimate_xy_transformation separately."
     }
-    }
 
     if (runMotorOnlyStitch) {
         stitch_motor_only(illum_fixed)
