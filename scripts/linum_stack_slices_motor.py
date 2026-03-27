@@ -571,6 +571,14 @@ def main():
                 logger.info(f"Smoothed accumulated translations with window={w} "
                             f"(max correction: {max_correction:.1f} px)")
 
+        # Center accumulated offsets around the middle slice to prevent
+        # asymmetric drift expanding the canvas in one direction.
+        middle_id = available_ids[len(available_ids) // 2]
+        center_dx, center_dy = cumsum_px[middle_id]
+        cumsum_px = {k: (dx - center_dx, dy - center_dy) for k, (dx, dy) in cumsum_px.items()}
+        logger.info(f"Centered accumulated translations around slice {middle_id} "
+                     f"(offset: dx={center_dx:.1f}, dy={center_dy:.1f})")
+
         # Recompute output XY shape to fit the shifted slices
         out_ny, out_nx, x0, y0 = compute_output_shape(slice_files, cumsum_px, first_vol.shape)
         cumsum_px = {k: (dx - x0, dy - y0) for k, (dx, dy) in cumsum_px.items()}
