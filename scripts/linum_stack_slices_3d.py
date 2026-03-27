@@ -49,6 +49,13 @@ def _build_arg_parser():
     p.add_argument('--no_accumulate_transforms', action='store_true',
                    help='Apply each transform independently instead of accumulating.\n'
                         'Use when slices are already in common space (XY aligned).')
+    p.add_argument('--max_pairwise_translation', type=float, default=0,
+                   help='Maximum allowed pairwise translation magnitude in pixels.\n'
+                        'Transforms whose translation exceeds this value have their\n'
+                        'translation zeroed out (rotation is preserved) before\n'
+                        'accumulation. 0 = keep all translations (default).\n'
+                        'Recommended: 50. Prevents registration failures (clamped\n'
+                        'translations) from compounding during accumulation.')
     p.add_argument('--pyramid_resolutions', type=float, nargs='+',
                    default=[10, 25, 50, 100],
                    help='Target resolutions for pyramid levels in microns.\n'
@@ -150,6 +157,23 @@ def main():
 
     first_mosaic, mosaics_sorted, transforms, offsets =\
         get_input(args.in_mosaics_dir, args.in_transforms_dir, parser)
+
+    # Filter large pairwise translations before accumulation if requested
+    if args.max_pairwise_translation > 0:
+        n_filtered = 0
+        for i, t in enumerate(transforms):
+            tx, ty = t.GetTranslation()
+            mag = np.sqrt(tx ** 2 + ty ** 2)
+            if mag > args.max_pairwise_translation:
+                filtered = sitk.Euler2DTransform()
+                filtered.SetCenter(t.GetCenter())
+                filtered.SetAngle(t.GetAngle())
+                filtered.SetTranslation([0.0, 0.0])
+                transforms[i] = filtered
+                n_filtered += 1
+        if n_filtered:
+            print(f"Filtered {n_filtered}/{len(transforms)} transforms with translation "
+                  f"> {args.max_pairwise_translation:.0f} px (translation zeroed, rotation kept)")
 
     vol, res = read_omezarr(first_mosaic)
     _, nr, nc = vol.shape

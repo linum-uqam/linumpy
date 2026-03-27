@@ -61,6 +61,12 @@ def _build_arg_parser():
                    help='For transitions flagged as unreliable (reliable=0 in the shifts CSV),\n'
                         'replace the metadata-derived shift with a 2-D phase cross-correlation\n'
                         'estimate computed from the stitched mosaics.  Requires scikit-image.')
+    p.add_argument('--refine_max_discrepancy_px', type=float, default=0,
+                   help='When --refine_unreliable is active, reject the image-based estimate and\n'
+                        'keep the original motor estimate if the two differ by more than this\n'
+                        'many pixels (L2 norm). 0 = accept all image-based estimates (default).\n'
+                        'Recommended: 50. Guards against phase-correlation failures on large-\n'
+                        'offset or low-overlap transitions where the image estimate is wrong.')
 
     add_overwrite_arg(p)
     return p
@@ -364,8 +370,21 @@ def main():
                     dx_mm, dy_mm, dx_px, dy_px = _estimate_shift_by_registration(
                         mosaic_files[fixed_id], mosaic_files[moving_id]
                     )
-                    print(f"  z{fixed_id:02d}→z{moving_id:02d}: metadata=({shifts_df.loc[idx, 'x_shift_mm']:.3f}, "
-                          f"{shifts_df.loc[idx, 'y_shift_mm']:.3f}) mm → "
+                    # Check discrepancy between image estimate and original motor estimate
+                    orig_dx_mm = shifts_df.loc[idx, 'x_shift_mm']
+                    orig_dy_mm = shifts_df.loc[idx, 'y_shift_mm']
+                    if args.refine_max_discrepancy_px > 0 and 'x_shift' in shifts_df.columns:
+                        orig_dx_px = float(shifts_df.loc[idx, 'x_shift'])
+                        orig_dy_px = float(shifts_df.loc[idx, 'y_shift'])
+                        discrepancy_px = np.sqrt((dx_px - orig_dx_px) ** 2 + (dy_px - orig_dy_px) ** 2)
+                        if discrepancy_px > args.refine_max_discrepancy_px:
+                            print(f"  z{fixed_id:02d}→z{moving_id:02d}: image estimate discarded "
+                                  f"(discrepancy={discrepancy_px:.1f} px > "
+                                  f"{args.refine_max_discrepancy_px:.0f} px threshold); "
+                                  f"keeping motor estimate ({orig_dx_mm:.3f}, {orig_dy_mm:.3f}) mm")
+                            continue
+                    print(f"  z{fixed_id:02d}→z{moving_id:02d}: metadata=({orig_dx_mm:.3f}, "
+                          f"{orig_dy_mm:.3f}) mm → "
                           f"registered=({dx_mm:.3f}, {dy_mm:.3f}) mm")
                     shifts_df.loc[idx, 'x_shift_mm'] = dx_mm
                     shifts_df.loc[idx, 'y_shift_mm'] = dy_mm

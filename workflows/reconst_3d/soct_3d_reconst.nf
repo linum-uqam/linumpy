@@ -538,10 +538,12 @@ process bring_to_common_space {
         "--excluded_slice_mode ${params.common_space_excluded_slice_mode} --excluded_slice_window ${params.common_space_excluded_slice_window}" : ""
 
     def refine_arg = params.common_space_refine_unreliable ? "--refine_unreliable" : ""
+    def discrepancy_arg = (params.common_space_refine_unreliable && params.common_space_refine_max_discrepancy_px > 0) ?
+        "--refine_max_discrepancy_px ${params.common_space_refine_max_discrepancy_px}" : ""
 
     """
     linum_align_mosaics_3d_from_shifts.py inputs shifts_xy.csv common_space \
-        ${slice_config_arg} ${excluded_args} ${refine_arg}
+        ${slice_config_arg} ${excluded_args} ${refine_arg} ${discrepancy_arg}
     mv common_space/* .
     """
 }
@@ -779,6 +781,7 @@ process stack {
         if (params.stack_max_overlap > 0) options += " --overlap ${params.stack_max_overlap}"
     }
     if (params.stack_no_accumulate_transforms) options += " --no_accumulate_transforms"
+    if (params.stack_max_pairwise_translation > 0) options += " --max_pairwise_translation ${params.stack_max_pairwise_translation}"
 
     if (params.pyramid_n_levels != null) {
         options += " --n_levels ${params.pyramid_n_levels}"
