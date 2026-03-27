@@ -1046,55 +1046,6 @@ workflow {
     log.info "Subject: ${subject_name}"
     log.info "GPU: ${params.use_gpu ? 'ENABLED' : 'DISABLED'}"
 
-    // =========================================================================
-    // CONFIGURATION VALIDATION
-    // Catch dangerous parameter combinations that are common causes of
-    // Z-alignment failures. Logs warnings but does not abort the pipeline.
-    // =========================================================================
-    if (params.apply_pairwise_transforms && !params.skip_error_transforms) {
-        log.warn """
-[CONFIG WARNING] skip_error_transforms=false
-  Transforms with overall_status='error' (failed registrations, e.g. against
-  interpolated slices) will be applied. These often introduce large spurious
-  rotations or translations.
-  RECOMMENDATION: set skip_error_transforms=true
-"""
-    }
-    if (params.apply_pairwise_transforms && !params.skip_warning_transforms
-        && !(params.apply_rotation_only && params.use_expected_z_overlap)) {
-        log.warn """
-[CONFIG WARNING] skip_warning_transforms=false
-  Transforms with overall_status='warning' (optimizer hit boundary) will be
-  applied. Their Z-offsets are unreliable and can cause Z-positioning errors.
-  This is safe only when apply_rotation_only=true AND use_expected_z_overlap=true
-  (rotation is the only output, Z-offsets are ignored).
-  If those two flags are not both true, set skip_warning_transforms=true.
-"""
-    }
-    if (params.stacking_method == 'motor' && params.apply_pairwise_transforms && !params.apply_rotation_only) {
-        log.warn """
-[CONFIG WARNING] apply_rotation_only=false with stacking_method='motor'
-  Registration XY translations will be added on top of motor positions.
-  When registration fails, this drifts slices from their correct XY positions.
-  RECOMMENDATION: set apply_rotation_only=true to keep XY from motor positions.
-"""
-    }
-    if (!params.interpolate_missing_slices) {
-        log.warn """
-[CONFIG WARNING] interpolate_missing_slices=false
-  Single-slice gaps (excluded slices, degraded sections) will create permanent
-  holes in the reconstruction. Consider enabling interpolation.
-  RECOMMENDATION: set interpolate_missing_slices=true
-"""
-    }
-    if (params.stack_accumulate_translations && (params.stack_max_pairwise_translation == null || params.stack_max_pairwise_translation <= 0)) {
-        log.warn """
-[CONFIG WARNING] stack_accumulate_translations=true without max_pairwise_translation limit
-  All pairwise translations will be accumulated, including failed registrations.
-  RECOMMENDATION: set stack_max_pairwise_translation to a safe cap (e.g. 50).
-"""
-    }
-
     def debugSlices = parseDebugSlices(params.debug_slices)
     if (debugSlices) {
         log.info "DEBUG MODE: Processing only slices ${debugSlices.sort().join(', ')}"
