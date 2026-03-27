@@ -726,6 +726,10 @@ process stack {
     // Cumulative translation accumulation
     if (params.stack_accumulate_translations) {
         options += " --accumulate_translations"
+        if (params.stack_confidence_weight_translations)
+            options += " --confidence_weight_translations"
+        if (params.stack_max_cumulative_drift_px > 0)
+            options += " --max_cumulative_drift_px ${params.stack_max_cumulative_drift_px}"
         // stack_max_pairwise_translation > 0 filters clamped translations; 0 = keep all.
         // Set to 0 when skip_error_transforms=false to preserve re-homing boundary corrections.
         if (params.stack_max_pairwise_translation > 0)
