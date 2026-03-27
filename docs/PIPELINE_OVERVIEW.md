@@ -348,6 +348,8 @@ The final 3D volume is stored as an OME-Zarr with multiple resolution levels opt
 | `stack_blend_enabled` | `true` | Enable blending between slices |
 | `apply_rotation_only` | `false` | Apply only rotation from pairwise registration during stacking |
 | `stack_accumulate_translations` | `true` | Accumulate pairwise translations as cumulative canvas offsets |
+| `stack_confidence_weight_translations` | `true` | Weight translations by confidence before accumulating |
+| `stack_max_cumulative_drift_px` | `0` | Max cumulative drift from motor baseline (0 = unlimited) |
 | `interpolation_blend_method` | `'gaussian'` | Blend method: `gaussian` (feathered) or `linear` |
 | `normalize_z_slices` | `false` | Enable post-stacking Z-intensity normalization |
 | `pyramid_resolutions` | `[10, 25, 50, 100]` | Pyramid resolution levels (µm) |

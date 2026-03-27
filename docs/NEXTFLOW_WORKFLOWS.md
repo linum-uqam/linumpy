@@ -290,11 +290,13 @@ and correlation or physics-based Z-matching.
 | `skip_error_transforms` | `true` | Skip transforms flagged as `error` status (prevents artifacts near interpolated slices) |
 | `skip_warning_transforms` | `true` | Skip transforms flagged as `warning` status |
 | `stack_accumulate_translations` | `true` | Accumulate pairwise translations as cumulative canvas offsets |
+| `stack_confidence_weight_translations` | `true` | Weight each pairwise translation by its confidence score before accumulating |
+| `stack_max_cumulative_drift_px` | `0` | Maximum cumulative translation drift from motor baseline (pixels). 0 = unlimited |
 | `stack_max_pairwise_translation` | `0` | Max pairwise translation (pixels) included in accumulation (0 = include all) |
 | `stitch_rehoming_enabled` | `false` | Apply one-time segment offset at re-homing event boundaries |
 | `stitch_rehoming_threshold_mm` | `0.7` | Motor shift magnitude that identifies a re-homing event (mm) |
 | `stitch_rehoming_use_motor` | `false` | Use motor delta instead of pairwise registration for re-homing corrections |
-| `stack_smooth_window` | `5` | Moving-average window (slices) for smoothing per-slice rotations (0 = disabled) |
+| `stack_smooth_window` | `5` | Moving-average window for smoothing accumulated translations and rotations (0 = disabled) |
 
 **Output pyramid:**
 
