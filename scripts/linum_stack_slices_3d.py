@@ -4,12 +4,19 @@
 Stack 3D mosaics on top of each other in a single 3D volume using pairwise
 registration transforms. Expects all 3D mosaics to be in the same space
 (same dimensions for last two axes).
+
+DEPRECATED: This script is superseded by linum_stack_slices_motor.py, which
+provides the same functionality plus confidence-based transform degradation,
+translation filtering/accumulation, rotation smoothing, auto-exclude, and
+richer diagnostics. Use linum_stack_slices_motor.py with --no_xy_shift for
+equivalent behavior on common-space slices.
 """
 # Configure thread limits before numpy/scipy imports
 import linumpy._thread_config  # noqa: F401
 
 import argparse
 import re
+import warnings
 from pathlib import Path
 import numpy as np
 from linumpy.io.zarr import read_omezarr, AnalysisOmeZarrWriter
@@ -152,6 +159,12 @@ def get_tissue_mask(vol):
 
 
 def main():
+    warnings.warn(
+        "linum_stack_slices_3d.py is deprecated. Use linum_stack_slices_motor.py "
+        "with --no_xy_shift instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     parser = _build_arg_parser()
     args = parser.parse_args()
 

@@ -668,10 +668,12 @@ process auto_exclude_slices {
 // Stacking Processes
 // -----------------------------------------------------------------------------
 
-// Motor-position-based stacking (shifts_xy.csv for XY + registration refinements).
+// Stacking: assembles common-space slices into a 3D volume using motor positions
+// for XY placement, pairwise registration for rotation/translation refinement,
+// and correlation or physics-based Z-matching.
 // publishDir mode is conditional: 'symlink' when a downstream step will produce
 // the final output (preserves work-dir files for -resume); 'move' when this is last.
-process stack_motor {
+process stack {
     publishDir "$params.output/$task.process",
         mode: (params.normalize_z_slices || params.align_to_ras_enabled) ? 'symlink' : 'move',
         saveAs: { fn -> fn.endsWith('.ome.zarr') ? null : fn }
@@ -757,54 +759,6 @@ process stack_motor {
     linum_screenshot_omezarr_annotated.py ${subject_name}.ome.zarr ${subject_name}_annotated.png \
         --slice_ids "${slice_ids_str}" \
         --label_every ${params.annotated_label_every} ${show_lines_flag} ${orientation_arg}
-    """
-}
-
-// Traditional pairwise-registration-based stacking
-process stack {
-    publishDir "$params.output/$task.process", mode: 'move', saveAs: { fn ->
-        fn.endsWith('.ome.zarr') ? null : fn
-    }
-
-    input:
-    tuple path("mosaics/*"), path("transforms/*"), val(subject_name), val(slice_ids_str)
-
-    output:
-    tuple path("${subject_name}.ome.zarr"), path("${subject_name}.ome.zarr.zip"), path("${subject_name}.png"), path("${subject_name}_annotated.png"), emit: volume
-    path("*_metrics.json"), optional: true, emit: metrics
-
-    script:
-    def options = ""
-
-    if (params.stack_blend_enabled) {
-        options += "--blend"
-        if (params.stack_max_overlap > 0) options += " --overlap ${params.stack_max_overlap}"
-    }
-    if (params.stack_no_accumulate_transforms) options += " --no_accumulate_transforms"
-    if (params.stack_max_pairwise_translation > 0) options += " --max_pairwise_translation ${params.stack_max_pairwise_translation}"
-
-    if (params.pyramid_n_levels != null) {
-        options += " --n_levels ${params.pyramid_n_levels}"
-    } else {
-        def base_res = params.resolution > 0 ? params.resolution : 10
-        def valid_resolutions = params.pyramid_resolutions.findAll { it >= base_res }.sort()
-        if (!valid_resolutions.contains(base_res)) valid_resolutions = [base_res] + valid_resolutions
-        def pyramid_res_str = valid_resolutions.collect { it.toString() }.join(' ')
-        options += " --pyramid_resolutions ${pyramid_res_str}"
-        options += params.pyramid_make_isotropic ? " --make_isotropic" : " --no_isotropic"
-    }
-
-    def show_lines_flag = params.annotated_show_lines ? '--show_lines' : ''
-    def orient = params.ras_input_orientation?.trim()?.replace("'", '') ?: ''
-    def orientation_arg = orient ? "--orientation ${orient}" : ''
-    """
-    linum_stack_slices_3d.py mosaics transforms ${subject_name}.ome.zarr ${options}
-    zip -r ${subject_name}.ome.zarr.zip ${subject_name}.ome.zarr
-    linum_screenshot_omezarr.py ${subject_name}.ome.zarr ${subject_name}.png
-    linum_screenshot_omezarr_annotated.py ${subject_name}.ome.zarr ${subject_name}_annotated.png \
-        --slice_ids "${slice_ids_str}" \
-        --label_every ${params.annotated_label_every} \
-        ${show_lines_flag} ${orientation_arg}
     """
 }
 
@@ -1114,18 +1068,9 @@ workflow {
     focal_fixed = params.fix_curvature_enabled ? fix_focal_curvature(resampled) : resampled
     illum_fixed = params.fix_illum_enabled ? fix_illumination(focal_fixed) : focal_fixed
 
-    // Stage 2: XY Stitching
-    // 'motor' path: image-registration-based blend refinement
-    // 'registration' path: AIP-based XY transform estimation
-    if (params.stacking_method == 'motor') {
-        stitch_3d_with_refinement(illum_fixed)
-        stitched_slices = stitch_3d_with_refinement.out
-    } else {
-        generate_aip(illum_fixed)
-        estimate_xy_transformation(generate_aip.out)
-        stitch_3d(illum_fixed.combine(estimate_xy_transformation.out.transform, by: 0))
-        stitched_slices = stitch_3d.out.stitched
-    }
+    // Stage 2: XY Stitching (image-registration-based blend refinement)
+    stitch_3d_with_refinement(illum_fixed)
+    stitched_slices = stitch_3d_with_refinement.out
 
     if (params.stitch_preview) {
         generate_stitch_preview(stitched_slices)
@@ -1244,71 +1189,50 @@ workflow {
     register_pairwise(pairs)
 
     // Stage 7: Stacking
-    if (params.stacking_method == 'motor') {
-        log.info "Using MOTOR-POSITION stacking with registration refinements"
+    log.info "Stacking slices with registration refinements"
 
-        slices_collected = all_slices.flatten().collect()
-        transforms_collected = register_pairwise.out.collect()
+    slices_collected = all_slices.flatten().collect()
+    transforms_collected = register_pairwise.out.collect()
 
-        // Auto-exclude: detect clusters of consecutive low-quality registrations
-        if (params.auto_exclude_enabled) {
-            auto_exclude_slices(transforms_collected)
-            auto_exclude_csv = auto_exclude_slices.out.csv
-        } else {
-            auto_exclude_csv = Channel.value(file('NO_AUTO_EXCLUDE'))
-        }
-
-        motor_stack_input = slices_collected
-            .combine(shifts_xy)
-            .combine(transforms_collected)
-            .combine(auto_exclude_csv)
-            .map { items ->
-                def slices = []
-                def shifts = null
-                def transforms = []
-                def exclude_csv = null
-
-                items.each { item ->
-                    def name = item.getName()
-                    if (name == 'NO_AUTO_EXCLUDE' || name == 'auto_exclude.csv') {
-                        exclude_csv = item
-                    } else if (name.endsWith('.csv')) {
-                        shifts = item
-                    } else if (name.endsWith('.ome.zarr')) {
-                        slices << item
-                    } else {
-                        transforms << item
-                    }
-                }
-
-                def slice_ids_str = extractSliceIdsString(slices)
-                tuple(slices, shifts, transforms, exclude_csv, subject_name, slice_ids_str)
-            }
-
-        stack_motor(motor_stack_input)
-        stack_output = stack_motor.out.volume
-        stack_metadata = motor_stack_input.map { slices, shifts, transforms, exclude_csv, name, ids_str ->
-            tuple(name, ids_str.split(',').size(), ids_str)
-        }
-
+    // Auto-exclude: detect clusters of consecutive low-quality registrations
+    if (params.auto_exclude_enabled) {
+        auto_exclude_slices(transforms_collected)
+        auto_exclude_csv = auto_exclude_slices.out.csv
     } else {
-        log.info "Using REGISTRATION stacking (pairwise transforms)"
+        auto_exclude_csv = Channel.value(file('NO_AUTO_EXCLUDE'))
+    }
 
-        stack_input = all_slices
-            .concat(register_pairwise.out.collect())
-            .toList()
-            .map { both_lists ->
-                def slices = both_lists[0]
-                def transforms = both_lists[1]
-                def slice_ids_str = extractSliceIdsString(slices)
-                tuple(slices, transforms, subject_name, slice_ids_str)
+    stack_input = slices_collected
+        .combine(shifts_xy)
+        .combine(transforms_collected)
+        .combine(auto_exclude_csv)
+        .map { items ->
+            def slices = []
+            def shifts = null
+            def transforms = []
+            def exclude_csv = null
+
+            items.each { item ->
+                def name = item.getName()
+                if (name == 'NO_AUTO_EXCLUDE' || name == 'auto_exclude.csv') {
+                    exclude_csv = item
+                } else if (name.endsWith('.csv')) {
+                    shifts = item
+                } else if (name.endsWith('.ome.zarr')) {
+                    slices << item
+                } else {
+                    transforms << item
+                }
             }
 
-        stack(stack_input)
-        stack_output = stack.out.volume
-        stack_metadata = stack_input.map { slices, transforms, name, ids_str ->
-            tuple(name, ids_str.split(',').size(), ids_str)
+            def slice_ids_str = extractSliceIdsString(slices)
+            tuple(slices, shifts, transforms, exclude_csv, subject_name, slice_ids_str)
         }
+
+    stack(stack_input)
+    stack_output = stack.out.volume
+    stack_metadata = stack_input.map { slices, shifts, transforms, exclude_csv, name, ids_str ->
+        tuple(name, ids_str.split(',').size(), ids_str)
     }
 
     // Stage 8: Z-Intensity Normalization (optional)
@@ -1359,24 +1283,10 @@ workflow {
     }
 
     if (runDilationDiagnostics) {
-        if (params.stacking_method == 'motor') {
-            // estimate_xy_transformation is not run in the motor path, so no XY transform to analyze
-            log.warn "Tile dilation analysis skipped: requires stacking_method='registration' (needs XY transform output)"
-        } else if (params.use_motor_positions_for_stitching) {
-            log.warn "Tile dilation analysis is not meaningful when use_motor_positions_for_stitching=true"
-            log.warn "  The transform IS motor positions, so no dilation will be detected."
-        } else {
-            log.info "Running tile dilation analysis..."
-            dilation_input_diag = illum_fixed.combine(estimate_xy_transformation.out.transform, by: 0)
-            analyze_tile_dilation(dilation_input_diag)
-
-            if (params.diagnostic_mode) {
-                dilation_json_files_diag = analyze_tile_dilation.out
-                    .map { slice_id, json, png, txt -> json }
-                    .collect()
-                aggregate_dilation_analysis(dilation_json_files_diag)
-            }
-        }
+        log.warn "Tile dilation analysis skipped: requires AIP-based XY transform estimation,"
+        log.warn "  which is not part of the current pipeline. To analyze tile dilation,"
+        log.warn "  run estimate_xy_transformation separately."
+    }
     }
 
     if (runMotorOnlyStitch) {
