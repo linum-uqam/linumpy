@@ -73,10 +73,19 @@ def _build_arg_parser():
                         'failures (hitting the optimizer boundary) and excluded from\n'
                         'accumulation. Set to registration_max_translation. 0 = disabled.\n'
                         '[%(default)s]')
+    p.add_argument('--confidence_weight_translations', action='store_true',
+                   help='Weight each pairwise translation by its confidence score before\n'
+                        'accumulating. High-confidence translations contribute fully;\n'
+                        'low-confidence ones are attenuated proportionally.')
+    p.add_argument('--max_cumulative_drift_px', type=float, default=0,
+                   help='Maximum allowed cumulative translation drift from motor baseline\n'
+                        '(pixels). If total accumulated drift exceeds this, it is clamped.\n'
+                        '0 = disabled (unlimited drift). [%(default)s]')
     p.add_argument('--smooth_window', type=int, default=0,
-                   help='Smooth cumulative translations with a moving average of this window\n'
-                        'size (in slices). Reduces XY jitter between consecutive slices,\n'
-                        'improving blend quality. 0 disables smoothing. [%(default)s]')
+                   help='Smooth accumulated translations with a moving average of this\n'
+                        'window size (in slices). Smooths only the pairwise-accumulated\n'
+                        'component, preserving motor baseline positions. 0 = disabled.\n'
+                        '[%(default)s]')
     p.add_argument('--skip_error_transforms', action='store_true',
                    help='Skip registration transforms flagged as overall_status="error"\n'
                         'in pairwise_registration_metrics.json.  Error-status registrations\n'
@@ -453,6 +462,9 @@ def main():
     # 1. The output canvas is sized to accommodate the cumulative shifts
     # 2. Transforms only apply rotation (no content lost at slice edges)
     if args.accumulate_translations and registration_transforms:
+        # Save motor baseline for targeted smoothing later
+        motor_baseline = {sid: cumsum_px[sid] for sid in cumsum_px}
+
         # First pass: extract all pairwise translations
         pairwise_translations = {}
         for slice_id in available_ids[1:]:
@@ -481,52 +493,83 @@ def main():
                         f"at boundary (>= {boundary:.1f} px)")
 
         # Second pass: accumulate filtered translations
+        # Optionally weight each translation by its confidence score
         cumulative_tx, cumulative_ty = 0.0, 0.0
         n_accumulated = 0
+        accumulated_offsets = {}  # Track per-slice cumulative offset for targeted smoothing
         for slice_id in available_ids[1:]:
             if slice_id in pairwise_translations:
                 tx, ty = pairwise_translations[slice_id]
+                # Confidence-weighted accumulation: attenuate low-confidence translations
+                if args.confidence_weight_translations:
+                    confidence = 1.0
+                    if slice_id in registration_transforms and registration_transforms[slice_id] is not None:
+                        confidence = registration_transforms[slice_id][3]
+                    tx *= confidence
+                    ty *= confidence
                 cumulative_tx += tx
                 cumulative_ty += ty
                 if tx != 0 or ty != 0:
                     n_accumulated += 1
                 logger.debug(f"Slice {slice_id}: pairwise tx={tx:.2f}, ty={ty:.2f} -> "
                              f"cumulative tx={cumulative_tx:.2f}, ty={cumulative_ty:.2f}")
-            # Every slice from this point gets the current cumulative correction
-            # Sign is negated: SimpleITK tx=+N shifts content LEFT (fetches from x+N),
-            # but cumsum_px dx=+N places content RIGHT. To achieve the same effect
-            # as the transform, we subtract.
+            # Cumulative drift cap: clamp total drift from motor baseline
+            capped_tx, capped_ty = cumulative_tx, cumulative_ty
+            if args.max_cumulative_drift_px > 0:
+                drift = np.sqrt(cumulative_tx**2 + cumulative_ty**2)
+                if drift > args.max_cumulative_drift_px:
+                    scale = args.max_cumulative_drift_px / drift
+                    capped_tx = cumulative_tx * scale
+                    capped_ty = cumulative_ty * scale
+                    logger.warning(f"Slice {slice_id}: clamping cumulative drift "
+                                   f"{drift:.1f} -> {args.max_cumulative_drift_px:.1f} px")
+            accumulated_offsets[slice_id] = (capped_tx, capped_ty)
+            # Apply to cumsum_px: sign is negated because SimpleITK tx=+N shifts
+            # content LEFT but cumsum_px dx=+N places content RIGHT
             prev_dx, prev_dy = cumsum_px[slice_id]
-            cumsum_px[slice_id] = (prev_dx - cumulative_tx, prev_dy - cumulative_ty)
+            cumsum_px[slice_id] = (prev_dx - capped_tx, prev_dy - capped_ty)
         logger.info(f"Accumulated translations for {n_accumulated} slices "
                      f"(final cumulative: tx={cumulative_tx:.2f}, ty={cumulative_ty:.2f})")
+        if args.confidence_weight_translations:
+            logger.info("Confidence-weighted accumulation enabled")
+        if args.max_cumulative_drift_px > 0:
+            final_drift = np.sqrt(capped_tx**2 + capped_ty**2)
+            logger.info(f"Cumulative drift cap: {args.max_cumulative_drift_px:.1f} px "
+                        f"(final drift: {final_drift:.1f} px)")
 
-        # Smooth cumulative translations to reduce per-slice XY jitter
+        # Targeted smoothing: smooth only the accumulated pairwise component,
+        # preserving motor baseline positions (which may contain legitimate jumps
+        # from rehoming events or stage resets).
         if args.smooth_window > 0:
-            ids_list = sorted(cumsum_px.keys())
-            x_vals = np.array([cumsum_px[sid][0] for sid in ids_list])
-            y_vals = np.array([cumsum_px[sid][1] for sid in ids_list])
+            ids_list = sorted(accumulated_offsets.keys())
+            acc_x = np.array([accumulated_offsets[sid][0] for sid in ids_list])
+            acc_y = np.array([accumulated_offsets[sid][1] for sid in ids_list])
 
-            w = args.smooth_window
-            kernel = np.ones(w) / w
-            x_smooth = np.convolve(x_vals, kernel, mode='same')
-            y_smooth = np.convolve(y_vals, kernel, mode='same')
+            w = min(args.smooth_window, len(acc_x))
+            if w >= 2:
+                kernel = np.ones(w) / w
+                acc_x_smooth = np.convolve(acc_x, kernel, mode='same')
+                acc_y_smooth = np.convolve(acc_y, kernel, mode='same')
 
-            # Keep original values at edges where the kernel doesn't fully overlap
-            half_w = w // 2
-            x_smooth[:half_w] = x_vals[:half_w]
-            x_smooth[-half_w:] = x_vals[-half_w:]
-            y_smooth[:half_w] = y_vals[:half_w]
-            y_smooth[-half_w:] = y_vals[-half_w:]
+                # Keep original values at edges where the kernel doesn't fully overlap
+                half_w = w // 2
+                acc_x_smooth[:half_w] = acc_x[:half_w]
+                acc_x_smooth[-half_w:] = acc_x[-half_w:]
+                acc_y_smooth[:half_w] = acc_y[:half_w]
+                acc_y_smooth[-half_w:] = acc_y[-half_w:]
 
-            max_correction = 0.0
-            for j, sid in enumerate(ids_list):
-                correction = np.sqrt((x_smooth[j] - x_vals[j])**2 + (y_smooth[j] - y_vals[j])**2)
-                max_correction = max(max_correction, correction)
-                cumsum_px[sid] = (float(x_smooth[j]), float(y_smooth[j]))
+                max_correction = 0.0
+                for j, sid in enumerate(ids_list):
+                    correction = np.sqrt((acc_x_smooth[j] - acc_x[j])**2 +
+                                         (acc_y_smooth[j] - acc_y[j])**2)
+                    max_correction = max(max_correction, correction)
+                    # Reconstruct cumsum_px = motor_baseline - smoothed_accumulated
+                    base_dx, base_dy = motor_baseline[sid]
+                    cumsum_px[sid] = (base_dx - float(acc_x_smooth[j]),
+                                     base_dy - float(acc_y_smooth[j]))
 
-            logger.info(f"Smoothed translations with window={w} "
-                        f"(max correction: {max_correction:.1f} px)")
+                logger.info(f"Smoothed accumulated translations with window={w} "
+                            f"(max correction: {max_correction:.1f} px)")
 
         # Recompute output XY shape to fit the shifted slices
         out_ny, out_nx, x0, y0 = compute_output_shape(slice_files, cumsum_px, first_vol.shape)
