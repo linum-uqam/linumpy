@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Axial beam profile correction. The script estimates the beam profile
 from agarose voxels and then applies the inverse profile to each a-line.
@@ -7,34 +6,32 @@ from agarose voxels and then applies the inverse profile to each a-line.
 
 import argparse
 
-import numpy as np
 import dask.array as da
+import matplotlib
+import numpy as np
 from skimage.filters import threshold_otsu
-from linumpy.io.zarr import save_omezarr, read_omezarr
+
+from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.preproc.xyzcorr import findTissueInterface, maskUnderInterface
 
-import matplotlib
-matplotlib.use('Agg')
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_zarr",
-                   help="Path to file (.ome.zarr) containing the 3D mosaic grid.")
-    p.add_argument("output_zarr",
-                   help="Corrected 3D mosaic grid file path (.ome.zarr).")
-    p.add_argument('--n_levels', type=int, default=5,
-                   help='Number of levels in pyramid representation.')
-    p.add_argument('--fit_gaussian', action='store_true',
-                   help='Fit a gaussian on the beam profile.')
-    p.add_argument('--output_plot',
-                   help='Optional output plot filename.')
-    p.add_argument('--percentile_max', type=float,
-                   help='Values above the ith percentile will be clipped *prior\n'
-                        'to profile estimation*. Original values will\n'
-                        'remain in output corrected volume (range [0-100]).')
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("input_zarr", help="Path to file (.ome.zarr) containing the 3D mosaic grid.")
+    p.add_argument("output_zarr", help="Corrected 3D mosaic grid file path (.ome.zarr).")
+    p.add_argument("--n_levels", type=int, default=5, help="Number of levels in pyramid representation.")
+    p.add_argument("--fit_gaussian", action="store_true", help="Fit a gaussian on the beam profile.")
+    p.add_argument("--output_plot", help="Optional output plot filename.")
+    p.add_argument(
+        "--percentile_max",
+        type=float,
+        help="Values above the ith percentile will be clipped *prior\n"
+        "to profile estimation*. Original values will\n"
+        "remain in output corrected volume (range [0-100]).",
+    )
     return p
 
 
@@ -84,18 +81,18 @@ def main():
                 break
         fwhm = (half_max_right - psf_mu) * 2.0
         sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))
-        psf = psf_max*np.exp(-((np.arange(len(profile)) - psf_mu) ** 2) / (2 * sigma ** 2))
+        psf = psf_max * np.exp(-((np.arange(len(profile)) - psf_mu) ** 2) / (2 * sigma**2))
 
     if args.output_plot is not None:
         fig, ax = plt.subplots(1, 3)
 
-        ax[0].imshow(agarose_mask, cmap='gray')
-        ax[0].set_title('Agarose mask')
+        ax[0].imshow(agarose_mask, cmap="gray")
+        ax[0].set_title("Agarose mask")
         ax[1].plot(np.arange(len(profile)), profile)
         ax[1].plot(np.repeat(background, len(profile)))
-        ax[1].set_title('Agarose profile')
+        ax[1].set_title("Agarose profile")
         ax[2].plot(np.arange(len(profile)), psf)
-        ax[2].set_title('Estimated PSF')
+        ax[2].set_title("Estimated PSF")
         fig.set_size_inches(12, 5)
         fig.savefig(args.output_plot)
 
@@ -109,8 +106,7 @@ def main():
 
     # save to ome-zarr
     dask_arr = da.from_array(vol_corr)
-    save_omezarr(dask_arr, args.output_zarr, voxel_size=res,
-                 chunks=vol.chunks, n_levels=args.n_levels)
+    save_omezarr(dask_arr, args.output_zarr, voxel_size=res, chunks=vol.chunks, n_levels=args.n_levels)
 
 
 if __name__ == "__main__":

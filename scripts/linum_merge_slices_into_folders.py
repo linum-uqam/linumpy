@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Move slices from a flat directory into subdirectories based on their names.
 """
+
 # Configure thread limits before numpy/scipy imports
 import linumpy._thread_config  # noqa: F401
 
@@ -16,8 +16,7 @@ from tqdm.auto import tqdm
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(
-        description=__doc__)
+    p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dir", help="Directory containing the slices.", required=True)
     return p
 
@@ -111,7 +110,7 @@ def remove_old_folders(old_folders: list) -> None:
     :return: None
     """
     confirm = input(f"Are you sure you want to remove {len(old_folders)} old folders? (y/n): ")
-    if confirm.lower() != 'y':
+    if confirm.lower() != "y":
         print("Aborting removal of old folders.")
         exit()
     else:

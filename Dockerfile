@@ -1,5 +1,7 @@
 FROM python:3.12
 
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
 WORKDIR /linumpy/
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -14,11 +16,8 @@ RUN apt-get update && apt-get install -y \
     zip \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip, setuptools and wheel
-RUN pip install --upgrade pip setuptools wheel build
-
-# Install with verbose output
+# Install with uv
 COPY linumpy ./linumpy
 COPY scripts ./scripts
-COPY pyproject.toml requirements.txt README.md setup.py ./
-RUN pip install --no-cache-dir -v -e .
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-dev

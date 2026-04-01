@@ -1,21 +1,17 @@
 #!/usr/bin/python3
-# -*- coding:utf-8 -*-
 
-import SimpleITK as sitk
 import numpy as np
 import scipy.ndimage
 import scipy.ndimage.morphology as morpho
+import SimpleITK as sitk
 from scipy.ndimage import gaussian_filter
-from skimage.morphology import disk, ball
-from skimage import metrics
+from skimage.morphology import ball, disk
 from tqdm import tqdm
-from scipy import optimize
-
 
 # TODO: Add an algorithm to estimate the affine transform parameters
 
 
-class MosaicGrid():
+class MosaicGrid:
     """This class is used to manage and process mosaic grid images. A mosaic grid is a 2D image containing all the tiles
     for a given mosaic, without any overlap. This class can be used for instance to apply processing to all tiles, to
     optimize the affine transform matrix describing the tile position, and to stitch the tiles together to obtain the
@@ -28,8 +24,7 @@ class MosaicGrid():
     """
 
     def __init__(self, image: np.ndarray, tile_shape: tuple = (512, 512), overlap_fraction: float = 0.2):
-        """Constructor method
-        """
+        """Constructor method"""
         self.tile_shape = tile_shape
         self.tile_size_x = self.tile_shape[0]
         self.tile_size_y = self.tile_shape[1]
@@ -38,7 +33,7 @@ class MosaicGrid():
         self.dtype = image.dtype
         self.imin = image.min()
         self.imax = image.max()
-        #self.image = (image - self.imin) / (self.imax - self.imin)
+        # self.image = (image - self.imin) / (self.imax - self.imin)
         self.image = image
 
         self.compute_mosaic_shape()
@@ -55,7 +50,7 @@ class MosaicGrid():
 
     def set_blending_method(self, method="none"):
         """To set the blending method. Available methodes are 'none' and 'average', 'diffusion'"""
-        available_methods = ['none', 'average', 'diffusion']
+        available_methods = ["none", "average", "diffusion"]
         method = str(method).lower()
         assert method in available_methods, f"Available blending methods are : {available_methods}"
         if method == "none":
@@ -186,7 +181,7 @@ class MosaicGrid():
         return pos
 
     def get_neighbor_tiles(self, n_id: int) -> tuple:
-        """ Extract the tiles for a given neighbor pair.
+        """Extract the tiles for a given neighbor pair.
 
         :param n_id: The neighbor pair id.
         :return: (2,) tuple containing each tile as a np.ndarray.
@@ -231,8 +226,8 @@ class MosaicGrid():
         mosaic1 = np.zeros((xf - x0, yf - y0, nz))
         mosaic2 = np.zeros((xf - x0, yf - y0, nz))
 
-        mosaic1[p1[0] - x0:p1[0] - x0 + nx, p1[1] - y0:p1[1] - y0 + ny, :] = t1 + 1
-        mosaic2[p2[0] - x0:p2[0] - x0 + nx, p2[1] - y0:p2[1] - y0 + ny, :] = t2 + 1
+        mosaic1[p1[0] - x0 : p1[0] - x0 + nx, p1[1] - y0 : p1[1] - y0 + ny, :] = t1 + 1
+        mosaic2[p2[0] - x0 : p2[0] - x0 + nx, p2[1] - y0 : p2[1] - y0 + ny, :] = t2 + 1
 
         # Find intersection
         mask = mosaic1 * mosaic2 >= 1
@@ -244,14 +239,12 @@ class MosaicGrid():
         o_xmax = x.max()
         o_ymax = y.max()
 
-        o_pos1 = (o_xmin - (p1[0] - x0), o_ymin - (p1[1] - y0),
-                  o_xmax - (p1[0] - x0), o_ymax - (p1[1] - y0))
-        o_pos2 = (o_xmin - (p2[0] - x0), o_ymin - (p2[1] - y0),
-                  o_xmax - (p2[0] - x0), o_ymax - (p2[1] - y0))
+        o_pos1 = (o_xmin - (p1[0] - x0), o_ymin - (p1[1] - y0), o_xmax - (p1[0] - x0), o_ymax - (p1[1] - y0))
+        o_pos2 = (o_xmin - (p2[0] - x0), o_ymin - (p2[1] - y0), o_xmax - (p2[0] - x0), o_ymax - (p2[1] - y0))
 
         # Getting overlap
-        overlap1 = t1[o_pos1[0]:o_pos1[2], o_pos1[1]:o_pos1[3], :]
-        overlap2 = t2[o_pos2[0]:o_pos2[2], o_pos2[1]:o_pos2[3], :]
+        overlap1 = t1[o_pos1[0] : o_pos1[2], o_pos1[1] : o_pos1[3], :]
+        overlap2 = t2[o_pos2[0] : o_pos2[2], o_pos2[1] : o_pos2[3], :]
 
         if ndim == 2:
             overlap1 = np.squeeze(overlap1)
@@ -260,17 +253,13 @@ class MosaicGrid():
         return (overlap1, overlap2, o_pos1, o_pos2)
 
     def get_neighbor_overlap(self, n_id):
-        """ Extract the tile overlaps for a given neighbor pair.
+        """Extract the tile overlaps for a given neighbor pair.
 
         :param n_id: The neighbor pair id.
         :return: (4,) tuple containing (overlap1, overlap2, overlap1_position, overlap2_position)
         """
         p1, p2 = self.neighbors_list[n_id]
         return self.get_neighbor_overlap_from_pos(p1, p2)
-
-
-
-
 
     def crop_tiles(self, xlim: tuple = (0, -1), ylim: tuple = (0, -1)):
         """Crop all tiles in the mosaic grid.
@@ -301,15 +290,14 @@ class MosaicGrid():
                 xf = x0 + nx
                 y0 = y * ny
                 yf = y0 + ny
-                image[x0:xf, y0:yf] = tile[xlim[0]:xlim[1], ylim[0]:ylim[1]]
+                image[x0:xf, y0:yf] = tile[xlim[0] : xlim[1], ylim[0] : ylim[1]]
 
         self.image = image
         self.tile_shape = (nx, ny)
         self.tile_size_x = nx
         self.tile_size_y = ny
 
-        self.set_affine(
-            overlap_fraction=self.overlap_fraction)  # FIXME : Overlap fraction need to be adjusted after cropping
+        self.set_affine(overlap_fraction=self.overlap_fraction)  # FIXME : Overlap fraction need to be adjusted after cropping
 
     def get_stitched_image(self, blending_method: str = "none") -> np.ndarray:
         """Performs a 2D reconstruction of the mosaic grid.
@@ -396,7 +384,15 @@ class MosaicGrid():
             error = error / float(n_samples)
         return error
 
-    def optimize_overlap(self, step: float = 0.01, omin: float = 0.1, omax: float = 0.5, display: bool = False, random_fraction=1.0, threshold=None):
+    def optimize_overlap(
+        self,
+        step: float = 0.01,
+        omin: float = 0.1,
+        omax: float = 0.5,
+        display: bool = False,
+        random_fraction=1.0,
+        threshold=None,
+    ):
         """Uses the similarity between every neighboring tiles to estimate the overlap fraction.
 
         :param step: Overlap fraction steps used for the search.
@@ -449,10 +445,11 @@ class MosaicGrid():
 
         if display:
             import matplotlib.pyplot as plt
+
             plt.plot(overlaps, cost)
             plt.axvline(optimal_overlap, color="r", linestyle="dashed", label=f"Optimal overlap: {optimal_overlap:.4f}")
             plt.xlabel("Overlap fraction")
-            plt.ylabel(f"Error")
+            plt.ylabel("Error")
             plt.legend()
             plt.show()
 
@@ -462,6 +459,7 @@ class MosaicGrid():
         :param initial_overlap: Initial overlap fraction (between 0 and 1), defaults to 0.2
         :type initial_overlap: float, optional
         """
+
         def loss(x):
             """Computing the normalized root mse over all the overlaps for a given transform"""
             self.affine = np.array(x).reshape((2, 2))
@@ -486,12 +484,13 @@ class MosaicGrid():
         x0 = self.affine.ravel()
         min_overlap = self.tile_size_x * 0.5
         max_overlap = self.tile_size_x
-        result = scipy.optimize.minimize(loss, x0, jac=loss_grad,
-                                         bounds=((min_overlap, max_overlap),
-                                                 (-64, 64),
-                                                 (-64, 64),
-                                                 (min_overlap, max_overlap)),
-                                         options={'maxiter': 30, 'disp': True})
+        result = scipy.optimize.minimize(
+            loss,
+            x0,
+            jac=loss_grad,
+            bounds=((min_overlap, max_overlap), (-64, 64), (-64, 64), (min_overlap, max_overlap)),
+            options={"maxiter": 30, "disp": True},
+        )
         if result.success:
             print("The optimization was a success!")
             print("The new affine matrix is:", result.x.reshape((2, 2)))
@@ -501,7 +500,7 @@ class MosaicGrid():
             self.set_affine(initial_overlap)
 
 
-def addVolumeToMosaic(volume, pos, mosaic, blendingMethod='diffusion', factor=3, width=1.0):
+def addVolumeToMosaic(volume, pos, mosaic, blendingMethod="diffusion", factor=3, width=1.0):
     """Add a single volume into a mosaic.
     Parameters
     ----------
@@ -541,16 +540,16 @@ def addVolumeToMosaic(volume, pos, mosaic, blendingMethod='diffusion', factor=3,
         wz = 0
 
     if mosaic.ndim == 3 and mosaic.shape[0] != 0:
-        mask = mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny].mean(axis=0) > 0
+        mask = mosaic[wz : wz + nz, wx : wx + nx, wy : wy + ny].mean(axis=0) > 0
     else:
-        mask = np.squeeze(mosaic[wx:wx + nx, wy:wy + ny]) > 0
+        mask = np.squeeze(mosaic[wx : wx + nx, wy : wy + ny]) > 0
 
     # Computing the blending weights
     if np.any(mask):
-        if blendingMethod == 'diffusion':
+        if blendingMethod == "diffusion":
             alpha = getDiffusionBlendingWeights(mask, factor=factor)
 
-        elif blendingMethod == 'average':
+        elif blendingMethod == "average":
             alpha = getAverageBlendingWeights(mask)
 
         else:  # Either none of unknown blending method
@@ -560,7 +559,7 @@ def addVolumeToMosaic(volume, pos, mosaic, blendingMethod='diffusion', factor=3,
         alpha = np.ones([nx, ny])
 
     # Adjusting the blending weights for the diffusion method
-    if 0 < width < 1 and blendingMethod == 'diffusion':
+    if 0 < width < 1 and blendingMethod == "diffusion":
         lowThresh = 0.5 * (1.0 - width)
         highThresh = 1.0 - lowThresh
         alpha = (alpha - lowThresh) / float(highThresh - lowThresh)
@@ -572,9 +571,11 @@ def addVolumeToMosaic(volume, pos, mosaic, blendingMethod='diffusion', factor=3,
 
     # Adding the volume to the mosaic using the blending weights computed above
     if mosaic.ndim == 3:
-        mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny] = volume * alpha + (1 - alpha) * mosaic[wz:wz + nz, wx:wx + nx, wy:wy + ny]
+        mosaic[wz : wz + nz, wx : wx + nx, wy : wy + ny] = (
+            volume * alpha + (1 - alpha) * mosaic[wz : wz + nz, wx : wx + nx, wy : wy + ny]
+        )
     else:
-        mosaic[wx:wx + nx, wy:wy + ny] = volume * alpha + (1 - alpha) * mosaic[wx:wx + nx, wy:wy + ny]
+        mosaic[wx : wx + nx, wy : wy + ny] = volume * alpha + (1 - alpha) * mosaic[wx : wx + nx, wy : wy + ny]
 
     return mosaic
 
@@ -592,9 +593,14 @@ def getAverageBlendingWeights(mask):
     return alpha
 
 
-def getDiffusionBlendingWeights(fixedMask: np.ndarray, movingMask: np.ndarray = None, factor: int = 8,
-                                nSteps: int = 5e2,
-                                convergence_threshold: float = 1e-4, k: int = 1) -> np.ndarray:
+def getDiffusionBlendingWeights(
+    fixedMask: np.ndarray,
+    movingMask: np.ndarray = None,
+    factor: int = 8,
+    nSteps: int = 5e2,
+    convergence_threshold: float = 1e-4,
+    k: int = 1,
+) -> np.ndarray:
     """Computes the diffusion blending (based on laplace equation) in 2D or 3D.
 
     :param fixedMask: Fixed volume mask to use as basis for the blending weights
@@ -613,10 +619,15 @@ def getDiffusionBlendingWeights(fixedMask: np.ndarray, movingMask: np.ndarray = 
             dI *= mask
             return dI / 4.0
         elif I.ndim == 3:
-            dI[1:-1, 1:-1, 1:-1] = I[0:-2, 1:-1, 1:-1] + I[2::, 1:-1, 1:-1] + \
-                                   I[1:-1, 0:-2, 1:-1] + I[1:-1, 2::, 1:-1] + \
-                                   I[1:-1, 1:-1, 0:-2] + I[1:-1, 1:-1, 2::] - \
-                                   6 * I[1:-1, 1:-1, 1:-1]
+            dI[1:-1, 1:-1, 1:-1] = (
+                I[0:-2, 1:-1, 1:-1]
+                + I[2::, 1:-1, 1:-1]
+                + I[1:-1, 0:-2, 1:-1]
+                + I[1:-1, 2::, 1:-1]
+                + I[1:-1, 1:-1, 0:-2]
+                + I[1:-1, 1:-1, 2::]
+                - 6 * I[1:-1, 1:-1, 1:-1]
+            )
             dI *= mask
             return dI / 6.0
 
@@ -627,8 +638,8 @@ def getDiffusionBlendingWeights(fixedMask: np.ndarray, movingMask: np.ndarray = 
     old_shape = fixedMask.shape
     if factor > 1:
         new_shape = list(np.round(np.array(old_shape) / float(factor)).astype(int))
-        small_fixedMask = resampleITK(fixedMask, new_shape, interpolator='NN')
-        small_movingMask = resampleITK(movingMask, new_shape, interpolator='NN')
+        small_fixedMask = resampleITK(fixedMask, new_shape, interpolator="NN")
+        small_movingMask = resampleITK(movingMask, new_shape, interpolator="NN")
     else:
         new_shape = old_shape
         small_fixedMask = fixedMask
@@ -650,7 +661,7 @@ def getDiffusionBlendingWeights(fixedMask: np.ndarray, movingMask: np.ndarray = 
 
     dilatedMask = morpho.binary_dilation(~np.logical_or(small_fixedMask, small_mask), structure=strel)
     bc = np.zeros(new_shape)
-    bc[boundary] = (~ dilatedMask[boundary]) * 1.0
+    bc[boundary] = (~dilatedMask[boundary]) * 1.0
     # del dilatedMask
 
     # Initialize alpha using gaussian smoothing
@@ -681,12 +692,12 @@ def getDiffusionBlendingWeights(fixedMask: np.ndarray, movingMask: np.ndarray = 
     alpha = 1.0 - alpha
 
     if factor > 1:
-        alpha = resampleITK(alpha, old_shape, interpolator='linear')
+        alpha = resampleITK(alpha, old_shape, interpolator="linear")
 
     return alpha
 
 
-def resampleITK(vol: np.ndarray, newshape: tuple, interpolator: str = 'linear') -> np.ndarray:
+def resampleITK(vol: np.ndarray, newshape: tuple, interpolator: str = "linear") -> np.ndarray:
     """Resamples a volume / image using ITK.
 
     :param vol: 2D/3D array to resample.
@@ -729,9 +740,9 @@ def resampleITK(vol: np.ndarray, newshape: tuple, interpolator: str = 'linear') 
         if nx / float(ox) > 1 or ny / float(oy) > 1 or nz / float(oz) > 1:  # Smoothing if downsampling
             vol = gaussian_filter(vol, sigma=[nx / float(2 * ox), ny / float(2 * oy), nz / float(2 * oz)])
 
-    if interpolator == 'NN':
+    if interpolator == "NN":
         resample.SetInterpolator(sitk.sitkNearestNeighbor)
-    elif interpolator == 'linear':
+    elif interpolator == "linear":
         resample.SetInterpolator(sitk.sitkLinear)
     else:
         resample.SetInterpolator(sitk.sitkLinear)

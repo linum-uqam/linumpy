@@ -1,5 +1,4 @@
 #! /usr/bin/env python
-# -*- coding: utf-8 -*-
 
 """Compute the tissue attenuation compensation bias field"""
 
@@ -10,22 +9,19 @@ import argparse
 
 import numpy as np
 from scipy.integrate import cumulative_trapezoid
+
 from linumpy.io.zarr import read_omezarr, save_omezarr
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
 
     # Mandatory parameters
-    p.add_argument("input",
-                   help="Input attenuation (OME-zarr).")
-    p.add_argument("output",
-                   help="Output bias field (OME-zarr).")
+    p.add_argument("input", help="Input attenuation (OME-zarr).")
+    p.add_argument("output", help="Output bias field (OME-zarr).")
 
     # Optional argument
-    p.add_argument("--isInCM", action="store_true",
-                   help="The provided attenuation map is in 1/cm")
+    p.add_argument("--isInCM", action="store_true", help="The provided attenuation map is in 1/cm")
 
     return p
 
@@ -47,15 +43,12 @@ def main():
 
     # Compute the attenuation bias field
     # by integrating over 0 -> z for each A-Lines
-    bias_field = cumulative_trapezoid(attn,
-                                      axis=2,
-                                      initial=0)
+    bias_field = cumulative_trapezoid(attn, axis=2, initial=0)
     bias_field = np.exp(-2 * bias_field)
 
     # Saving this bias field
     bias_field = np.moveaxis(bias_field, (0, 1, 2), (2, 1, 0))
-    save_omezarr(bias_field.astype(np.float32), args.output,
-              voxel_size=res, chunks=vol.chunks)
+    save_omezarr(bias_field.astype(np.float32), args.output, voxel_size=res, chunks=vol.chunks)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Read a shifts CSV produced by linum_compute_shifts_3d.py and detect/correct
 two classes of spurious inter-slice shifts.
@@ -40,6 +39,7 @@ Outputs
     - ``rehoming_report.json`` — lists every glitch spike that was corrected.
     - ``rehoming_plot.png``    — per-step magnitude chart with corrections marked.
 """
+
 # Configure thread limits before numpy/scipy imports
 import linumpy._thread_config  # noqa: F401
 
@@ -52,52 +52,64 @@ import pandas as pd
 
 from linumpy.shifts.utils import correct_tile_offset_shifts, filter_outlier_shifts
 from linumpy.utils.io import add_overwrite_arg, assert_output_exists
-from typing import Optional
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument('in_shifts',
-                   help='Shifts CSV file (e.g. shifts_xy.csv) produced by '
-                        'linum_compute_shifts_3d.py.')
-    p.add_argument('out_shifts',
-                   help='Output corrected shifts CSV file.')
-    p.add_argument('--return_fraction', type=float, default=0.4,
-                   help='Round-trip fraction threshold for spike detection.\n'
-                        'A step is treated as a glitch if the adjacent step '
-                        'reverses more than (1 - return_fraction) of the '
-                        'displacement.  Lower values are more conservative '
-                        '(correct fewer spikes).  [%(default)s]')
-    p.add_argument('--tile_fov_mm', type=float, default=None,
-                   help='Observed artifact step size in mm: the amount xmin_mm shifts\n'
-                        'spuriously at mosaic grid-expansion transitions.\n'
-                        'This value must be determined empirically from the\n'
-                        'shifts_xy.csv data — it is NOT simply tile_size_um × (1-overlap).\n'
-                        'To find it: look for a cluster of near-equal large steps in\n'
-                        'x_shift_mm (e.g. several rows all ≈ +0.875 mm).  The common\n'
-                        'value is the artifact step; its magnitude depends on the mosaic\n'
-                        'grid layout at the time of acquisition.\n'
-                        'When set, any step within tile_fov_tolerance of N × tile_fov_mm\n'
-                        '(N integer ≠ 0) is corrected by subtracting N × tile_fov_mm.\n'
-                        'If unsure, leave unset and inspect the --diagnostics plot.\n'
-                        '[%(default)s]')
-    p.add_argument('--tile_fov_tolerance', type=float, default=0.05,
-                   help='Fractional tolerance for tile-FOV multiple detection.\n'
-                        'Default 0.05 → a 5 %% margin around each integer multiple.'
-                        '  [%(default)s]')
-    p.add_argument('--diagnostics', metavar='DIR', default=None,
-                   help='If provided, write a JSON report and PNG plot of '
-                        'corrected spikes to this directory.')
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("in_shifts", help="Shifts CSV file (e.g. shifts_xy.csv) produced by linum_compute_shifts_3d.py.")
+    p.add_argument("out_shifts", help="Output corrected shifts CSV file.")
+    p.add_argument(
+        "--return_fraction",
+        type=float,
+        default=0.4,
+        help="Round-trip fraction threshold for spike detection.\n"
+        "A step is treated as a glitch if the adjacent step "
+        "reverses more than (1 - return_fraction) of the "
+        "displacement.  Lower values are more conservative "
+        "(correct fewer spikes).  [%(default)s]",
+    )
+    p.add_argument(
+        "--tile_fov_mm",
+        type=float,
+        default=None,
+        help="Observed artifact step size in mm: the amount xmin_mm shifts\n"
+        "spuriously at mosaic grid-expansion transitions.\n"
+        "This value must be determined empirically from the\n"
+        "shifts_xy.csv data — it is NOT simply tile_size_um × (1-overlap).\n"
+        "To find it: look for a cluster of near-equal large steps in\n"
+        "x_shift_mm (e.g. several rows all ≈ +0.875 mm).  The common\n"
+        "value is the artifact step; its magnitude depends on the mosaic\n"
+        "grid layout at the time of acquisition.\n"
+        "When set, any step within tile_fov_tolerance of N × tile_fov_mm\n"
+        "(N integer ≠ 0) is corrected by subtracting N × tile_fov_mm.\n"
+        "If unsure, leave unset and inspect the --diagnostics plot.\n"
+        "[%(default)s]",
+    )
+    p.add_argument(
+        "--tile_fov_tolerance",
+        type=float,
+        default=0.05,
+        help="Fractional tolerance for tile-FOV multiple detection.\n"
+        "Default 0.05 → a 5 %% margin around each integer multiple."
+        "  [%(default)s]",
+    )
+    p.add_argument(
+        "--diagnostics",
+        metavar="DIR",
+        default=None,
+        help="If provided, write a JSON report and PNG plot of corrected spikes to this directory.",
+    )
     add_overwrite_arg(p)
     return p
 
 
-def _save_diagnostics(diag_dir: Path,
-                      shifts_before: pd.DataFrame,
-                      shifts_after: pd.DataFrame,
-                      corrected_indices: list,
-                      tile_corrected_indices: Optional[list] = None) -> None:
+def _save_diagnostics(
+    diag_dir: Path,
+    shifts_before: pd.DataFrame,
+    shifts_after: pd.DataFrame,
+    corrected_indices: list,
+    tile_corrected_indices: list | None = None,
+) -> None:
     """Save a JSON report and PNG plot of corrected glitch spikes."""
     diag_dir.mkdir(parents=True, exist_ok=True)
 
@@ -109,29 +121,33 @@ def _save_diagnostics(diag_dir: Path,
     for idx in corrected_indices:
         row_before = shifts_before.loc[idx]
         row_after = shifts_after.loc[idx]
-        records.append({
-            "index": int(idx),
-            "fixed_id": int(row_before["fixed_id"]),
-            "moving_id": int(row_before["moving_id"]),
-            "correction_type": "spike",
-            "original_x_shift_mm": float(row_before["x_shift_mm"]),
-            "original_y_shift_mm": float(row_before["y_shift_mm"]),
-            "corrected_x_shift_mm": float(row_after["x_shift_mm"]),
-            "corrected_y_shift_mm": float(row_after["y_shift_mm"]),
-        })
+        records.append(
+            {
+                "index": int(idx),
+                "fixed_id": int(row_before["fixed_id"]),
+                "moving_id": int(row_before["moving_id"]),
+                "correction_type": "spike",
+                "original_x_shift_mm": float(row_before["x_shift_mm"]),
+                "original_y_shift_mm": float(row_before["y_shift_mm"]),
+                "corrected_x_shift_mm": float(row_after["x_shift_mm"]),
+                "corrected_y_shift_mm": float(row_after["y_shift_mm"]),
+            }
+        )
     for idx in tile_corrected_indices:
         row_before = shifts_before.loc[idx]
         row_after = shifts_after.loc[idx]
-        records.append({
-            "index": int(idx),
-            "fixed_id": int(row_before["fixed_id"]),
-            "moving_id": int(row_before["moving_id"]),
-            "correction_type": "tile_offset",
-            "original_x_shift_mm": float(row_before["x_shift_mm"]),
-            "original_y_shift_mm": float(row_before["y_shift_mm"]),
-            "corrected_x_shift_mm": float(row_after["x_shift_mm"]),
-            "corrected_y_shift_mm": float(row_after["y_shift_mm"]),
-        })
+        records.append(
+            {
+                "index": int(idx),
+                "fixed_id": int(row_before["fixed_id"]),
+                "moving_id": int(row_before["moving_id"]),
+                "correction_type": "tile_offset",
+                "original_x_shift_mm": float(row_before["x_shift_mm"]),
+                "original_y_shift_mm": float(row_before["y_shift_mm"]),
+                "corrected_x_shift_mm": float(row_after["x_shift_mm"]),
+                "corrected_y_shift_mm": float(row_after["y_shift_mm"]),
+            }
+        )
     records.sort(key=lambda r: r["index"])
     report = {
         "n_corrected": len(records),
@@ -146,63 +162,63 @@ def _save_diagnostics(diag_dir: Path,
     # ----- PNG plot ----------------------------------------------------------
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        step_mag_before = np.sqrt(
-            shifts_before["x_shift_mm"] ** 2 + shifts_before["y_shift_mm"] ** 2
-        )
-        step_mag_after = np.sqrt(
-            shifts_after["x_shift_mm"] ** 2 + shifts_after["y_shift_mm"] ** 2
-        )
+        step_mag_before = np.sqrt(shifts_before["x_shift_mm"] ** 2 + shifts_before["y_shift_mm"] ** 2)
+        step_mag_after = np.sqrt(shifts_after["x_shift_mm"] ** 2 + shifts_after["y_shift_mm"] ** 2)
         positions = np.arange(len(shifts_before))
 
         fig, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
 
         # X
-        axes[0].plot(positions, shifts_before["x_shift_mm"],
-                     color="steelblue", lw=1.2, label="original")
-        axes[0].plot(positions, shifts_after["x_shift_mm"],
-                     color="darkorange", lw=1.2, linestyle="--", label="corrected")
+        axes[0].plot(positions, shifts_before["x_shift_mm"], color="steelblue", lw=1.2, label="original")
+        axes[0].plot(positions, shifts_after["x_shift_mm"], color="darkorange", lw=1.2, linestyle="--", label="corrected")
         if corrected_indices:
             ci_pos = [shifts_before.index.get_loc(i) for i in corrected_indices]
-            axes[0].scatter(ci_pos,
-                            shifts_before.loc[corrected_indices, "x_shift_mm"],
-                            color="red", zorder=5, label="spike correction")
+            axes[0].scatter(
+                ci_pos, shifts_before.loc[corrected_indices, "x_shift_mm"], color="red", zorder=5, label="spike correction"
+            )
         if tile_corrected_indices:
             ti_pos = [shifts_before.index.get_loc(i) for i in tile_corrected_indices]
-            axes[0].scatter(ti_pos,
-                            shifts_before.loc[tile_corrected_indices, "x_shift_mm"],
-                            color="magenta", marker="^", zorder=5, label="tile-offset correction")
+            axes[0].scatter(
+                ti_pos,
+                shifts_before.loc[tile_corrected_indices, "x_shift_mm"],
+                color="magenta",
+                marker="^",
+                zorder=5,
+                label="tile-offset correction",
+            )
         axes[0].set_ylabel("x_shift_mm")
         axes[0].legend(fontsize=8)
         axes[0].grid(True, alpha=0.3)
 
         # Y
-        axes[1].plot(positions, shifts_before["y_shift_mm"],
-                     color="steelblue", lw=1.2, label="original")
-        axes[1].plot(positions, shifts_after["y_shift_mm"],
-                     color="darkorange", lw=1.2, linestyle="--", label="corrected")
+        axes[1].plot(positions, shifts_before["y_shift_mm"], color="steelblue", lw=1.2, label="original")
+        axes[1].plot(positions, shifts_after["y_shift_mm"], color="darkorange", lw=1.2, linestyle="--", label="corrected")
         if corrected_indices:
             ci_pos = [shifts_before.index.get_loc(i) for i in corrected_indices]
-            axes[1].scatter(ci_pos,
-                            shifts_before.loc[corrected_indices, "y_shift_mm"],
-                            color="red", zorder=5, label="spike correction")
+            axes[1].scatter(
+                ci_pos, shifts_before.loc[corrected_indices, "y_shift_mm"], color="red", zorder=5, label="spike correction"
+            )
         if tile_corrected_indices:
             ti_pos = [shifts_before.index.get_loc(i) for i in tile_corrected_indices]
-            axes[1].scatter(ti_pos,
-                            shifts_before.loc[tile_corrected_indices, "y_shift_mm"],
-                            color="magenta", marker="^", zorder=5, label="tile-offset correction")
+            axes[1].scatter(
+                ti_pos,
+                shifts_before.loc[tile_corrected_indices, "y_shift_mm"],
+                color="magenta",
+                marker="^",
+                zorder=5,
+                label="tile-offset correction",
+            )
         axes[1].set_ylabel("y_shift_mm")
         axes[1].set_xlabel("step index")
         axes[1].legend(fontsize=8)
         axes[1].grid(True, alpha=0.3)
 
         n_tile = len(tile_corrected_indices)
-        axes[0].set_title(
-            f"Rehoming correction — {len(corrected_indices)} spike(s), "
-            f"{n_tile} tile-offset(s) corrected"
-        )
+        axes[0].set_title(f"Rehoming correction — {len(corrected_indices)} spike(s), {n_tile} tile-offset(s) corrected")
         fig.tight_layout()
         plot_path = diag_dir / "rehoming_plot.png"
         fig.savefig(plot_path, dpi=150)
@@ -255,9 +271,8 @@ def main():
     )
 
     # Identify which rows were modified by the spike pass
-    diff_mask = (
-        (shifts_intermediate["x_shift_mm"] != shifts_after["x_shift_mm"])
-        | (shifts_intermediate["y_shift_mm"] != shifts_after["y_shift_mm"])
+    diff_mask = (shifts_intermediate["x_shift_mm"] != shifts_after["x_shift_mm"]) | (
+        shifts_intermediate["y_shift_mm"] != shifts_after["y_shift_mm"]
     )
     corrected_indices = list(shifts_intermediate.index[diff_mask])
     n_corrected = len(corrected_indices)

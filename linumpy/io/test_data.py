@@ -1,11 +1,12 @@
-# -*- coding:utf-8 -*-
+import os
+
+import dask.array as da
+import nibabel as nib
+import numpy as np
+from skimage.data import cells3d
+
 from linumpy import LINUMPY_HOME
 from linumpy.io.zarr import save_omezarr
-from skimage.data import cells3d
-import nibabel as nib
-import os
-import numpy as np
-import dask.array as da
 
 
 def get_data(name):
@@ -15,7 +16,7 @@ def get_data(name):
         "raw_tiles": _get_raw_tiles,
         "aip": _get_aip,
     }
-    if name not in data.keys():
+    if name not in data:
         raise ValueError(f"Unknown key for data: {name}")
     return data[name]()
 
@@ -47,9 +48,7 @@ def _get_mosaic_3d_omezarr():
         data = data[:5, :, :]
 
         dask_array = da.from_array(data)
-        save_omezarr(
-            dask_array, filename, chunks=(5, 32, 32), n_levels=5, overwrite=False
-        )
+        save_omezarr(dask_array, filename, chunks=(5, 32, 32), n_levels=5, overwrite=False)
     return filename
 
 
@@ -72,20 +71,18 @@ def _get_aip():
     return filename
 
 
-def _get_scan_info(
-    nx, ny, top_z, bottom_z, width_mm, height_mm, x_pos_mm, y_pos_mm, z_pos_mm
-):
+def _get_scan_info(nx, ny, top_z, bottom_z, width_mm, height_mm, x_pos_mm, y_pos_mm, z_pos_mm):
     focus_z = int((top_z + bottom_z) / 2)
     scan_info = "Scan info\n"
     scan_info += f"nx: {nx}\n"
     scan_info += f"ny: {ny}\n"
-    scan_info += f"n_repeat: 1\n"
+    scan_info += "n_repeat: 1\n"
     scan_info += f"width: {width_mm}\n"
     scan_info += f"height: {height_mm}\n"
-    scan_info += f"n_extra: 0\n"
-    scan_info += f"line_rate: 80\n"
-    scan_info += f"exposure: 23\n"
-    scan_info += f"alinerepeat: 1\n"
+    scan_info += "n_extra: 0\n"
+    scan_info += "line_rate: 80\n"
+    scan_info += "exposure: 23\n"
+    scan_info += "alinerepeat: 1\n"
     scan_info += f"top_z: {top_z}\n"
     scan_info += f"bottom_z: {bottom_z}\n"
     scan_info += f"focus_z: {focus_z}\n"
@@ -111,9 +108,7 @@ def _get_raw_tiles():
                     tile_xyz = data[zmin:zmax, ymin:ymax, xmin:xmax]
                     tile_xyz = tile_xyz[:, ::-1, ::-1]
                     tile_xyz[:, 0, 0] = 2.0 * np.max(tile_xyz)
-                    tile_xyz.astype(np.float32).reshape(-1, order="F").tofile(
-                        os.path.join(tile_folder, "image_00000.bin")
-                    )
+                    tile_xyz.astype(np.float32).reshape(-1, order="F").tofile(os.path.join(tile_folder, "image_00000.bin"))
                     nx = width = xmax - xmin
                     ny = height = ymax - ymin
                     top_z = zmin

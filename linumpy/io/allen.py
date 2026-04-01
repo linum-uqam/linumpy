@@ -1,13 +1,11 @@
-# -*- coding: utf-8 -*-
-
 """
 Methods to download data from the Allen Institute
 """
 
 from pathlib import Path
 
-import SimpleITK as sitk
 import requests
+import SimpleITK as sitk
 from tqdm import tqdm
 
 AVAILABLE_RESOLUTIONS = [10, 25, 50, 100]

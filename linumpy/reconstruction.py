@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-""""Quick reconstruction and processing methods for the S-OCT data."""
+""" "Quick reconstruction and processing methods for the S-OCT data."""
+
 import os.path
 import re
 from pathlib import Path
@@ -9,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from imageio import imwrite
 from matplotlib.patches import Rectangle
-from scipy.ndimage import median_filter, binary_fill_holes
+from scipy.ndimage import binary_fill_holes, median_filter
 from skimage.color import label2rgb
 from skimage.filters import threshold_otsu
 from skimage.measure import label
@@ -31,10 +32,9 @@ def getLargestCC(segmentation: np.ndarray) -> np.ndarray:
         The largest connected component.
     """
     labels = label(segmentation)
-    assert (labels.max() != 0)  # assume at least 1 CC
+    assert labels.max() != 0  # assume at least 1 CC
     largestCC = labels == np.argmax(np.bincount(labels.flat)[1:]) + 1
     return largestCC
-
 
 
 DEFAULT_TILE_FILE_PATTERN = r"tile_x(?P<x>\d+)_y(?P<y>\d+)_z(?P<z>\d+)"
@@ -48,15 +48,14 @@ def get_tiles_ids(directory, z: int = None):
     if z is not None:
         tiles_to_process = f"*z{z:02d}"
     else:
-        tiles_to_process = f"tile_*"
+        tiles_to_process = "tile_*"
     tiles = list(input_directory.rglob(tiles_to_process))
-    tiles = [t for t in tiles if t.name.startswith('tile_') and not os.path.isfile(t)]
+    tiles = [t for t in tiles if t.name.startswith("tile_") and not os.path.isfile(t)]
     tile_ids = get_tiles_ids_from_list(tiles)
     return tiles, tile_ids
 
 
-def get_tiles_ids_from_list(tiles_list,
-                            file_pattern=DEFAULT_TILE_FILE_PATTERN):
+def get_tiles_ids_from_list(tiles_list, file_pattern=DEFAULT_TILE_FILE_PATTERN):
     tiles_list.sort()
 
     # Get the tile positions
@@ -71,7 +70,6 @@ def get_tiles_ids_from_list(tiles_list,
         tile_ids.append((mx, my, mz))
 
     return tile_ids
-
 
 
 def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_positions: bool = False):
@@ -154,9 +152,20 @@ def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_
     return info
 
 
-def quick_stitch(directory, z: int, overlap_fraction: float = 0.2, n_rot: int = 3, zmin: int = 0, zmax: int = -1,
-                 use_log: bool = False, use_stage_positions: bool = False, flip_ud: bool = True, flip_lr: bool = False,
-                 galvo_shift: int = None, galvo_shift_first_tile=(0, 0)):
+def quick_stitch(
+    directory,
+    z: int,
+    overlap_fraction: float = 0.2,
+    n_rot: int = 3,
+    zmin: int = 0,
+    zmax: int = -1,
+    use_log: bool = False,
+    use_stage_positions: bool = False,
+    flip_ud: bool = True,
+    flip_lr: bool = False,
+    galvo_shift: int = None,
+    galvo_shift_first_tile=(0, 0),
+):
     # TODO: accelerate the stitching by preprocessing the tiles in parallel
     input_directory = Path(directory)
 
@@ -215,9 +224,7 @@ def quick_stitch(directory, z: int, overlap_fraction: float = 0.2, n_rot: int = 
         my = int(match.group("y"))
 
         apply_shift = True
-        if mx < galvo_shift_first_tile[0]:
-            apply_shift = False
-        elif mx == galvo_shift_first_tile[0] and my < galvo_shift_first_tile[1]:
+        if mx < galvo_shift_first_tile[0] or (mx == galvo_shift_first_tile[0] and my < galvo_shift_first_tile[1]):
             apply_shift = False
 
         # Load the fringes
@@ -256,8 +263,17 @@ def quick_stitch(directory, z: int, overlap_fraction: float = 0.2, n_rot: int = 
     return mosaic
 
 
-def detect_mosaic(directory: str, z: int, img: np.ndarray=None,  margin: float = 0.5, display: bool = False, image_file: str = None,
-                  roi_file: str = None, keep_largest_island: bool = False, stitching_settings:dict = None):
+def detect_mosaic(
+    directory: str,
+    z: int,
+    img: np.ndarray = None,
+    margin: float = 0.5,
+    display: bool = False,
+    image_file: str = None,
+    roi_file: str = None,
+    keep_largest_island: bool = False,
+    stitching_settings: dict = None,
+):
     """Detect the tissue in the mosaic and compute the limits of the tissue.
     Parameters
     ----------
@@ -346,19 +362,27 @@ def detect_mosaic(directory: str, z: int, img: np.ndarray=None,  margin: float =
     # Display the result
     if display or roi_file is not None:
         fig, ax = plt.subplots()
-        ax.imshow(label2rgb(mask, img, bg_label=0, colors=['blue']),
-                  extent=(ymin, ymax, xmax, xmin))  # Y axes are inverted
+        ax.imshow(label2rgb(mask, img, bg_label=0, colors=["blue"]), extent=(ymin, ymax, xmax, xmin))  # Y axes are inverted
 
-        rect = Rectangle((roi_y_min, roi_x_min),
-                         width=(roi_y_max - roi_y_min),
-                         height=(roi_x_max - roi_x_min),
-                         fill=None, edgecolor="red", linestyle="dashed", label="ROI")
+        rect = Rectangle(
+            (roi_y_min, roi_x_min),
+            width=(roi_y_max - roi_y_min),
+            height=(roi_x_max - roi_x_min),
+            fill=None,
+            edgecolor="red",
+            linestyle="dashed",
+            label="ROI",
+        )
         ax.add_patch(rect)
 
-        rect_margin = Rectangle((roi_y_min_margin, roi_x_min_margin),
-                                width=(roi_y_max_margin - roi_y_min_margin),
-                                height=(roi_x_max_margin - roi_x_min_margin),
-                                fill=None, edgecolor="red", label="ROI + margin")
+        rect_margin = Rectangle(
+            (roi_y_min_margin, roi_x_min_margin),
+            width=(roi_y_max_margin - roi_y_min_margin),
+            height=(roi_x_max_margin - roi_x_min_margin),
+            fill=None,
+            edgecolor="red",
+            label="ROI + margin",
+        )
         ax.add_patch(rect_margin)
 
         ax.set_ylabel("x axis (mm)")

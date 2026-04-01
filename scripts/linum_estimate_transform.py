@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 Estimate the affine transform used to compute tile positions in a 2D mosaic grid.
@@ -15,50 +14,70 @@ The output transform is a 2x2 matrix that maps tile indices (i, j) to pixel posi
 # Configure thread limits before numpy/scipy imports
 import linumpy._thread_config  # noqa: F401
 
-import argparse
-import numpy as np
-import SimpleITK as sitk
-from linumpy.stitching.registration import compute_motor_transform, estimate_mosaic_transform
-from linumpy.stitching import mosaic_grid
-from linumpy.utils.metrics import collect_xy_transform_metrics
-from pathlib import Path
-import zarr
-from linumpy.io.zarr import read_omezarr
-import logging
-
 # Configure all libraries (especially SimpleITK) to respect thread limits
 from linumpy._thread_config import configure_all_libraries
+
+import argparse
+import logging
+from pathlib import Path
+
+import numpy as np
+import SimpleITK as sitk
+import zarr
+
+from linumpy.io.zarr import read_omezarr
+from linumpy.stitching import mosaic_grid
+from linumpy.stitching.registration import compute_motor_transform, estimate_mosaic_transform
+from linumpy.utils.metrics import collect_xy_transform_metrics
+
 configure_all_libraries()
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_images", nargs="+",
-                   help="Full path to a 2D mosaic grid image.")
-    p.add_argument("output_transform",
-                   help="Output affine transform filename (must be a npy)")
-    p.add_argument("--initial_overlap", type=float, default=0.2,
-                   help="Initial/expected overlap fraction between 0 and 1. (default=%(default)s)")
-    p.add_argument("-t", "--tile_shape", nargs="+", type=int, default=400,
-                   help="Tile shape in pixel. You can provide both the row and col shape if different. Additional "
-                        "shapes will be ignored. Note that this will be ignored if a zarr is provided. The zarr chunks will be used instead. (default=%(default)s)")
-    p.add_argument("--maximum_empty_fraction", type=float, default=0.9,
-                   help="Maximum empty pixel fraction within an overlap to tolerate (default=%(default)s)")
-    p.add_argument("--n_samples", type=int, default=512,
-                   help="Maximum number of tile pairs to use for the optimization. (default=%(default)s)")
-    p.add_argument("--seed", type=int,
-                   help="Seed value for the random number generator")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("input_images", nargs="+", help="Full path to a 2D mosaic grid image.")
+    p.add_argument("output_transform", help="Output affine transform filename (must be a npy)")
+    p.add_argument(
+        "--initial_overlap",
+        type=float,
+        default=0.2,
+        help="Initial/expected overlap fraction between 0 and 1. (default=%(default)s)",
+    )
+    p.add_argument(
+        "-t",
+        "--tile_shape",
+        nargs="+",
+        type=int,
+        default=400,
+        help="Tile shape in pixel. You can provide both the row and col shape if different. Additional "
+        "shapes will be ignored. Note that this will be ignored if a zarr is provided. The zarr chunks will be used instead. (default=%(default)s)",
+    )
+    p.add_argument(
+        "--maximum_empty_fraction",
+        type=float,
+        default=0.9,
+        help="Maximum empty pixel fraction within an overlap to tolerate (default=%(default)s)",
+    )
+    p.add_argument(
+        "--n_samples",
+        type=int,
+        default=512,
+        help="Maximum number of tile pairs to use for the optimization. (default=%(default)s)",
+    )
+    p.add_argument("--seed", type=int, help="Seed value for the random number generator")
 
     # Motor position mode
-    p.add_argument("--use_motor_positions", action="store_true",
-                   help="Use motor positions (expected tile spacing) instead of image registration.\n"
-                        "This creates a transform based purely on the overlap fraction,\n"
-                        "corresponding to the precise motor/stage positions from acquisition.\n"
-                        "Recommended when motor positions are reliable.")
+    p.add_argument(
+        "--use_motor_positions",
+        action="store_true",
+        help="Use motor positions (expected tile spacing) instead of image registration.\n"
+        "This creates a transform based purely on the overlap fraction,\n"
+        "corresponding to the precise motor/stage positions from acquisition.\n"
+        "Recommended when motor positions are reliable.",
+    )
 
     return p
 
@@ -84,10 +103,10 @@ def main():
     elif len(tile_shape) > 2:
         tile_shape = tile_shape[0:2]
 
-    if input_images[0].rstrip('/').endswith('.ome.zarr'):
+    if input_images[0].rstrip("/").endswith(".ome.zarr"):
         img, _ = read_omezarr(input_images[0], level=0)
         tile_shape = list(img.chunks[-2:])  # Get last 2 dimensions (Y, X)
-    elif input_images[0].rstrip('/').endswith(".zarr"):
+    elif input_images[0].rstrip("/").endswith(".zarr"):
         img = zarr.open(input_images[0], mode="r")
         tile_shape = list(img.chunks[-2:])
 
@@ -96,14 +115,14 @@ def main():
 
     if args.use_motor_positions:
         # Motor-position mode: compute transform from expected overlap
-        logger.info(f"Using motor positions with {args.initial_overlap*100:.1f}% overlap")
+        logger.info(f"Using motor positions with {args.initial_overlap * 100:.1f}% overlap")
         logger.info(f"Tile shape: {tile_shape}")
 
         transform = compute_motor_transform(tile_shape, args.initial_overlap)
         residuals = np.array([0.0])
         tile_count = 0
 
-        logger.info(f"Motor-based transform:")
+        logger.info("Motor-based transform:")
         logger.info(f"  Step Y: {transform[0, 0]:.1f} px")
         logger.info(f"  Step X: {transform[1, 1]:.1f} px")
 
@@ -114,10 +133,10 @@ def main():
         # Load all input images
         mosaics = []
         for file in input_images:
-            if file.rstrip('/').endswith(".ome.zarr"):
+            if file.rstrip("/").endswith(".ome.zarr"):
                 img, _ = read_omezarr(str(file), level=0)
                 image = img[:]
-            elif file.rstrip('/').endswith(".zarr"):
+            elif file.rstrip("/").endswith(".zarr"):
                 img = zarr.open(str(file), mode="r")
                 image = img[:]
             else:
@@ -126,9 +145,7 @@ def main():
             mosaics.append(mosaic)
 
         # Estimate transform
-        transform, residuals, tile_count = estimate_mosaic_transform(
-            mosaics, max_empty_fraction, args.n_samples, args.seed
-        )
+        transform, residuals, tile_count = estimate_mosaic_transform(mosaics, max_empty_fraction, args.n_samples, args.seed)
 
         logger.info(f"Registration-based transform (from {tile_count} tile pairs):")
         logger.info(f"  Step Y: {transform[0, 0]:.1f} px (expected: {tile_shape[0] * (1 - args.initial_overlap):.1f})")
@@ -173,10 +190,7 @@ def main():
         residuals=residuals,
         output_path=output_transform,
         input_paths=input_images,
-        params={
-            'initial_overlap': args.initial_overlap,
-            'use_motor_positions': args.use_motor_positions
-        },
+        params={"initial_overlap": args.initial_overlap, "use_motor_positions": args.use_motor_positions},
         n_tiles_x=n_tiles_x,
         n_tiles_y=n_tiles_y,
     )

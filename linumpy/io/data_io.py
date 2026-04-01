@@ -1,6 +1,5 @@
 #! /usr/bin/env python
-# -*- coding: utf-8 -*-
-""" This modules contains all methods related to I/O for the slicer data.
+"""This modules contains all methods related to I/O for the slicer data.
 
 .. moduleauthor:: Joël Lefebvre <joel.lefebvre@polymtl.ca>
 
@@ -13,7 +12,6 @@ import re
 import nibabel as nib
 import numpy as np
 from PIL import Image
-from pathlib import Path
 
 
 def listSlicesInDir(directory, extension=".nii", returnIndices=False):
@@ -38,7 +36,7 @@ def listSlicesInDir(directory, extension=".nii", returnIndices=False):
 def getSliceListIndices(slice_list):
     zList = list()
     for this_file in slice_list:
-        filename_rx = re.compile(".*z(\d+).*")
+        filename_rx = re.compile(r".*z(\d+).*")
         tmp = filename_rx.match(this_file)
         if tmp is not None:
             zList.append(int(tmp.groups()[0]))
@@ -76,15 +74,7 @@ def load_volume(
 
     filename = os.path.join(
         directory,
-        prefix
-        + "_"
-        + "x%02.0f" % (pos[0])
-        + "_"
-        + "y%02.0f" % (pos[1])
-        + "_"
-        + "z%02.0f" % (pos[2])
-        + suffix
-        + extension,
+        prefix + "_" + "x%02.0f" % (pos[0]) + "_" + "y%02.0f" % (pos[1]) + "_" + "z%02.0f" % (pos[2]) + suffix + extension,
     )
     return load_volumeByFilename(filename, vol_shape, precision)
 
@@ -117,7 +107,9 @@ def load_slice(directory, z, prototype="slice_z%d", extension=".nii"):
         return -1
 
 
-def load_volumeByFilename(filename: str, volshape: tuple=(512, 512, 120), precision: str="float32", convert2Bool: bool=True) -> np.ndarray:
+def load_volumeByFilename(
+    filename: str, volshape: tuple = (512, 512, 120), precision: str = "float32", convert2Bool: bool = True
+) -> np.ndarray:
     """Load a volume based on its filename.
 
     Parameters
@@ -162,9 +154,7 @@ def load_volumeByFilename(filename: str, volshape: tuple=(512, 512, 120), precis
 
     elif extension in [".bin"]:
         dt = precision  # big endian 32-bit floating-point number
-        read_order = (
-            "C"  # Matlab fwrite save the data in a column order (i.e. Fortran Order)
-        )
+        read_order = "C"  # Matlab fwrite save the data in a column order (i.e. Fortran Order)
         volume = np.fromfile(filename, dtype=dt)
         volume = np.reshape(volume, volshape, order=read_order)
         volume = np.swapaxes(volume, 0, 1)  # Matlab inverts the X and Y axis
@@ -177,9 +167,7 @@ def load_volumeByFilename(filename: str, volshape: tuple=(512, 512, 120), precis
     return volume
 
 
-def save_nifti(
-    fname, volume, pixDim=(1, 1, 1), pixelFormat=None, intent=1007, expand_dim=True
-):
+def save_nifti(fname, volume, pixDim=(1, 1, 1), pixelFormat=None, intent=1007, expand_dim=True):
     """Save volume as a nifti format. The origin is assumed to be at the center of the volume.
 
     Parameters
@@ -216,9 +204,7 @@ def save_nifti(
     afft[3, 1] = -np.round(ny / 2) * pixDim[1]  # y origin
     afft[3, 2] = -np.round(nz / 2) * pixDim[2]  # z origin
 
-    if volume.dtype is np.dtype(bool):
-        volume = 255 * volume.astype(np.uint8)
-    elif len(np.unique(np.ravel(volume))) == 2:
+    if volume.dtype is np.dtype(bool) or len(np.unique(np.ravel(volume))) == 2:
         volume = 255 * volume.astype(np.uint8)
 
     # Create the nibabel img object and adjust header.
@@ -226,9 +212,7 @@ def save_nifti(
         pixelFormat = volume.dtype
 
     if volume.ndim > 3 and expand_dim:
-        img = nib.Nifti1Image(
-            np.expand_dims(volume.astype(pixelFormat), 3), afft
-        )  # A nifti image
+        img = nib.Nifti1Image(np.expand_dims(volume.astype(pixelFormat), 3), afft)  # A nifti image
     else:
         img = nib.Nifti1Image(volume.astype(pixelFormat), afft)  # A nifti image
     header = img.header

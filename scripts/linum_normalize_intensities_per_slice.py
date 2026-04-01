@@ -1,30 +1,28 @@
 #!/usr/bin/env python3
-#-*- coding:utf-8 -*-
 """
 Normalize intensities of ome.zarr volume along z axis. Intensities for
 each z are rescaled between the minimum value inside agarose and the value
 defined by the `percentile_max` argument.
 """
+
 import argparse
-from linumpy.io.zarr import read_omezarr, save_omezarr
-from skimage.filters import threshold_otsu
-from scipy.ndimage import gaussian_filter
 
 import dask.array as da
 import numpy as np
+from scipy.ndimage import gaussian_filter
+from skimage.filters import threshold_otsu
+
+from linumpy.io.zarr import read_omezarr, save_omezarr
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(description='__doc__',
-                                formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument('in_image',
-                   help='Input image.')
-    p.add_argument('out_image',
-                   help='Output image.')
-    p.add_argument('--percentile_max', type=float, default=99.9,
-                   help='Values above the ith percentile will be clipped. [%(default)s]')
-    p.add_argument('--sigma', type=float, default=1.0,
-                   help='Smoothing sigma for estimating the agarose mask. [%(default)s]')
+    p = argparse.ArgumentParser(description="__doc__", formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("in_image", help="Input image.")
+    p.add_argument("out_image", help="Output image.")
+    p.add_argument(
+        "--percentile_max", type=float, default=99.9, help="Values above the ith percentile will be clipped. [%(default)s]"
+    )
+    p.add_argument("--sigma", type=float, default=1.0, help="Smoothing sigma for estimating the agarose mask. [%(default)s]")
     return p
 
 
@@ -73,5 +71,5 @@ def main():
     save_omezarr(da.from_array(vol), args.out_image, res, n_levels=3)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

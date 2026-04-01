@@ -1,2 +1,1 @@
-# -*- coding: utf-8 -*-
-from .utils import *  # noqa: F401, F403
+from .utils import *  # noqa: F403

@@ -7,9 +7,10 @@ files, as well as utility functions for preprocessing and tile extraction.
 """
 
 import gc
-from pathlib import Path
 import zipfile
+from pathlib import Path
 from xml.dom.minidom import parse
+
 import numpy as np
 
 
@@ -50,7 +51,7 @@ class ThorOCT:
         path (str): Path to the compressed data file.
         compressed_data (zipfile.ZipFile): ZipFile object containing the data.
         config (PreprocessingConfig): Configuration for preprocessing.
-            
+
     Attributes:
         first_polarization (np.ndarray): Data for the first polarization.
         second_polarization (np.ndarray): Data for the second polarization.
@@ -73,9 +74,7 @@ class ThorOCT:
 
         """
         self.path = path
-        self.compressed_data = compressed_data or (
-            zipfile.ZipFile(path) if path else None
-        )
+        self.compressed_data = compressed_data or (zipfile.ZipFile(path) if path else None)
         self.first_polarization = None
         self.second_polarization = None
         self.size_x = None
@@ -211,9 +210,7 @@ class ThorOCT:
             stacked_tile = np.concatenate(
                 data[i : i + self.ascan_averaging_value],
                 axis=0,  # Stack along the z-axis
-            )[
-                ::-1
-            ]  # Reverse the stacking order so the last tile appears on top
+            )[::-1]  # Reverse the stacking order so the last tile appears on top
             stacked_data.append(stacked_tile)
 
         # Combine all stacked tiles into a single array
@@ -228,9 +225,7 @@ class ThorOCT:
         self.size_y = stacked_data.shape[1]
         return stacked_data
 
-    def _crop_z(
-        self, data: np.ndarray, index1: int = 320, index2: int = 750
-    ) -> np.ndarray:
+    def _crop_z(self, data: np.ndarray, index1: int = 320, index2: int = 750) -> np.ndarray:
         """
         Crops the 3D volume along the Z-axis and keeps the data between the specified indices.
 
@@ -247,9 +242,7 @@ class ThorOCT:
         """
         # Ensure valid indices
         if index1 < 0 or index2 > data.shape[2] or index1 >= index2:
-            raise ValueError(
-                f"Invalid indices: index1={index1}, index2={index2}, data shape={data.shape}"
-            )
+            raise ValueError(f"Invalid indices: index1={index1}, index2={index2}, data shape={data.shape}")
 
         # Perform the crop
         cropped_data = data[:, :, index1:index2]
@@ -268,9 +261,7 @@ class ThorOCT:
             np.ndarray: Raw complex data array.
         """
         with self.compressed_data.open(file) as f:
-            raw_data = np.frombuffer(f.read(), dtype=np.complex64).reshape(
-                (self.size_x, self.size_y, self.size_z), order="C"
-            )
+            raw_data = np.frombuffer(f.read(), dtype=np.complex64).reshape((self.size_x, self.size_y, self.size_z), order="C")
         return raw_data
 
     def _preprocess_data(
@@ -328,7 +319,7 @@ class ThorOCT:
         raw_positions = []
 
         if scan_file_path:
-            with open(file=scan_file_path, mode="r", encoding="utf-8") as file:
+            with open(file=scan_file_path, encoding="utf-8") as file:
                 lines = file.readlines()
 
                 # Find the start of the positions section
@@ -355,9 +346,7 @@ class ThorOCT:
 
         # Remap y: sort unique y values in descending order
         unique_y = np.unique([pos[1] for pos in raw_positions])
-        sorted_y_desc = np.sort(unique_y)[
-            ::-1
-        ]  # Flip order to preserve top-down layout
+        sorted_y_desc = np.sort(unique_y)[::-1]  # Flip order to preserve top-down layout
         y_map = {val: idx for idx, val in enumerate(sorted_y_desc)}
 
         # Create a new list of tuples with remapped x and y, z remains unchanged
@@ -385,9 +374,7 @@ class ThorOCT:
         tiles_path = Path(tiles_directory)
 
         if not tiles_path.is_dir():
-            raise ValueError(
-                f"Provided path '{tiles_directory}' is not a valid directory."
-            )
+            raise ValueError(f"Provided path '{tiles_directory}' is not a valid directory.")
 
         # Initialize variables to store the results
         scan_file = None
@@ -409,13 +396,9 @@ class ThorOCT:
             raise ValueError("Warning: No .oct files found in the directory.")
 
         for i, oct_file in enumerate(oct_files):
-            angle_index = (
-                i % number_of_angles
-            )  # Determine the angle based on file index
+            angle_index = i % number_of_angles  # Determine the angle based on file index
             grouped_files[angle_index].append(oct_file)
-        print(
-            f"File Count for Angle index = {angle_index + 1}: {len(grouped_files[angle_index])}"
-        )
+        print(f"File Count for Angle index = {angle_index + 1}: {len(grouped_files[angle_index])}")
         print("Processing the following Files:")
         for file in grouped_files[0]:
             print(f"  - {file}")

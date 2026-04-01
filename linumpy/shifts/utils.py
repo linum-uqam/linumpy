@@ -1,17 +1,15 @@
-# -*- coding: utf-8 -*-
 """
 XY shift utilities for serial-section alignment.
 
 Consolidated from linum_stack_motor_only.py, linum_stack_slices_motor.py,
 and linum_align_mosaics_3d_from_shifts.py.
 """
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
 
-def load_shifts_csv(shifts_path) -> Tuple[Dict, List]:
+def load_shifts_csv(shifts_path) -> tuple[dict, list]:
     """Load shifts CSV and build cumulative shift lookup.
 
     The shifts file contains pairwise shifts: fixed_id -> moving_id in mm.
@@ -31,13 +29,13 @@ def load_shifts_csv(shifts_path) -> Tuple[Dict, List]:
     """
     df = pd.read_csv(shifts_path)
 
-    all_ids = sorted(set(df['fixed_id'].tolist() + df['moving_id'].tolist()))
+    all_ids = sorted(set(df["fixed_id"].tolist() + df["moving_id"].tolist()))
 
     shift_lookup = {}
     for _, row in df.iterrows():
-        fixed_id = int(row['fixed_id'])
-        moving_id = int(row['moving_id'])
-        shift_lookup[(fixed_id, moving_id)] = (row['x_shift_mm'], row['y_shift_mm'])
+        fixed_id = int(row["fixed_id"])
+        moving_id = int(row["moving_id"])
+        shift_lookup[(fixed_id, moving_id)] = (row["x_shift_mm"], row["y_shift_mm"])
 
     cumsum = {all_ids[0]: (0.0, 0.0)}
     for i in range(len(all_ids) - 1):
@@ -55,7 +53,7 @@ def load_shifts_csv(shifts_path) -> Tuple[Dict, List]:
     return cumsum, all_ids
 
 
-def detect_shift_units(resolution) -> Tuple[float, float]:
+def detect_shift_units(resolution) -> tuple[float, float]:
     """Detect whether resolution is in mm or µm and return (res_x_um, res_y_um).
 
     OME-Zarr resolution can be reported in either mm (OME-NGFF standard)
@@ -86,7 +84,7 @@ def detect_shift_units(resolution) -> Tuple[float, float]:
     return res_x_um, res_y_um
 
 
-def convert_shifts_to_pixels(cumsum_mm: Dict, resolution_um: float) -> Dict:
+def convert_shifts_to_pixels(cumsum_mm: dict, resolution_um: float) -> dict:
     """Convert mm cumulative shifts to pixel shifts.
 
     Parameters
@@ -102,13 +100,10 @@ def convert_shifts_to_pixels(cumsum_mm: Dict, resolution_um: float) -> Dict:
         Mapping from slice_id to (dx_px, dy_px).
     """
     mm_to_px = 1000.0 / resolution_um
-    return {
-        slice_id: (dx_mm * mm_to_px, dy_mm * mm_to_px)
-        for slice_id, (dx_mm, dy_mm) in cumsum_mm.items()
-    }
+    return {slice_id: (dx_mm * mm_to_px, dy_mm * mm_to_px) for slice_id, (dx_mm, dy_mm) in cumsum_mm.items()}
 
 
-def center_shifts(cumsum_px: Dict, slice_ids: List) -> Dict:
+def center_shifts(cumsum_px: dict, slice_ids: list) -> dict:
     """Center shifts around the middle slice.
 
     Subtracts the middle slice's cumulative shift from all slices,
@@ -133,17 +128,16 @@ def center_shifts(cumsum_px: Dict, slice_ids: List) -> Dict:
     middle_id = slice_ids[middle_idx]
     center_dx, center_dy = cumsum_px.get(middle_id, (0, 0))
 
-    return {
-        slice_id: (dx - center_dx, dy - center_dy)
-        for slice_id, (dx, dy) in cumsum_px.items()
-    }
+    return {slice_id: (dx - center_dx, dy - center_dy) for slice_id, (dx, dy) in cumsum_px.items()}
 
 
-def filter_outlier_shifts(shifts_df: pd.DataFrame,
-                          max_shift_mm: float = 0.5,
-                          method: str = 'rehome',
-                          iqr_multiplier: float = 1.5,
-                          return_fraction: float = 0.4) -> pd.DataFrame:
+def filter_outlier_shifts(
+    shifts_df: pd.DataFrame,
+    max_shift_mm: float = 0.5,
+    method: str = "rehome",
+    iqr_multiplier: float = 1.5,
+    return_fraction: float = 0.4,
+) -> pd.DataFrame:
     """Detect and filter outlier shifts that cause excessive drift.
 
     Parameters
@@ -179,9 +173,9 @@ def filter_outlier_shifts(shifts_df: pd.DataFrame,
         Filtered DataFrame with outlier shifts corrected.
     """
     df = shifts_df.copy()
-    shift_mag = np.sqrt(df['x_shift_mm']**2 + df['y_shift_mm']**2)
+    shift_mag = np.sqrt(df["x_shift_mm"] ** 2 + df["y_shift_mm"] ** 2)
 
-    if method == 'iqr':
+    if method == "iqr":
         q1 = shift_mag.quantile(0.25)
         q3 = shift_mag.quantile(0.75)
         iqr = q3 - q1
@@ -195,32 +189,32 @@ def filter_outlier_shifts(shifts_df: pd.DataFrame,
     if n_outliers == 0:
         return df
 
-    if method == 'clamp':
+    if method == "clamp":
         for idx in df[outlier_mask].index:
             scale = max_shift_mm / shift_mag[idx]
-            df.loc[idx, 'x_shift_mm'] *= scale
-            df.loc[idx, 'y_shift_mm'] *= scale
-            if 'x_shift' in df.columns:
-                df.loc[idx, 'x_shift'] *= scale
-                df.loc[idx, 'y_shift'] *= scale
+            df.loc[idx, "x_shift_mm"] *= scale
+            df.loc[idx, "y_shift_mm"] *= scale
+            if "x_shift" in df.columns:
+                df.loc[idx, "x_shift"] *= scale
+                df.loc[idx, "y_shift"] *= scale
 
-    elif method == 'median':
+    elif method == "median":
         non_outlier = df[~outlier_mask]
-        median_x = non_outlier['x_shift_mm'].median()
-        median_y = non_outlier['y_shift_mm'].median()
+        median_x = non_outlier["x_shift_mm"].median()
+        median_y = non_outlier["y_shift_mm"].median()
         for idx in df[outlier_mask].index:
-            df.loc[idx, 'x_shift_mm'] = median_x
-            df.loc[idx, 'y_shift_mm'] = median_y
+            df.loc[idx, "x_shift_mm"] = median_x
+            df.loc[idx, "y_shift_mm"] = median_y
 
-    elif method == 'zero':
+    elif method == "zero":
         for idx in df[outlier_mask].index:
-            df.loc[idx, 'x_shift_mm'] = 0.0
-            df.loc[idx, 'y_shift_mm'] = 0.0
-            if 'x_shift' in df.columns:
-                df.loc[idx, 'x_shift'] = 0.0
-                df.loc[idx, 'y_shift'] = 0.0
+            df.loc[idx, "x_shift_mm"] = 0.0
+            df.loc[idx, "y_shift_mm"] = 0.0
+            if "x_shift" in df.columns:
+                df.loc[idx, "x_shift"] = 0.0
+                df.loc[idx, "y_shift"] = 0.0
 
-    elif method in ['local', 'iqr']:
+    elif method in ["local", "iqr"]:
         for idx in df[outlier_mask].index:
             pos = df.index.get_loc(idx)
             neighbor_vals_x, neighbor_vals_y = [], []
@@ -229,18 +223,18 @@ def filter_outlier_shifts(shifts_df: pd.DataFrame,
                 if 0 <= neighbor_pos < len(df):
                     neighbor_idx = df.index[neighbor_pos]
                     if not outlier_mask[neighbor_idx]:
-                        neighbor_vals_x.append(df.loc[neighbor_idx, 'x_shift_mm'])
-                        neighbor_vals_y.append(df.loc[neighbor_idx, 'y_shift_mm'])
+                        neighbor_vals_x.append(df.loc[neighbor_idx, "x_shift_mm"])
+                        neighbor_vals_y.append(df.loc[neighbor_idx, "y_shift_mm"])
 
             if neighbor_vals_x:
-                df.loc[idx, 'x_shift_mm'] = np.median(neighbor_vals_x)
-                df.loc[idx, 'y_shift_mm'] = np.median(neighbor_vals_y)
+                df.loc[idx, "x_shift_mm"] = np.median(neighbor_vals_x)
+                df.loc[idx, "y_shift_mm"] = np.median(neighbor_vals_y)
             else:
                 non_outlier = df[~outlier_mask]
-                df.loc[idx, 'x_shift_mm'] = non_outlier['x_shift_mm'].median()
-                df.loc[idx, 'y_shift_mm'] = non_outlier['y_shift_mm'].median()
+                df.loc[idx, "x_shift_mm"] = non_outlier["x_shift_mm"].median()
+                df.loc[idx, "y_shift_mm"] = non_outlier["y_shift_mm"].median()
 
-    elif method == 'rehome':
+    elif method == "rehome":
         # Only correct steps that are large AND self-cancelling with a neighbour.
         # A step that stays (re-homing event) has a large neighbour sum; a step
         # that returns (encoder glitch) has a near-zero neighbour sum.
@@ -249,8 +243,8 @@ def filter_outlier_shifts(shifts_df: pd.DataFrame,
                 nb_pos = pos + offset
                 if 0 <= nb_pos < len(df):
                     nb_idx = df.index[nb_pos]
-                    nb_x = df.loc[nb_idx, 'x_shift_mm']
-                    nb_y = df.loc[nb_idx, 'y_shift_mm']
+                    nb_x = df.loc[nb_idx, "x_shift_mm"]
+                    nb_y = df.loc[nb_idx, "y_shift_mm"]
                     roundtrip = np.sqrt((step_x + nb_x) ** 2 + (step_y + nb_y) ** 2)
                     if roundtrip < return_fraction * step_mag:
                         return True
@@ -258,8 +252,8 @@ def filter_outlier_shifts(shifts_df: pd.DataFrame,
 
         for idx in df[outlier_mask].index:
             pos = df.index.get_loc(idx)
-            step_x = df.loc[idx, 'x_shift_mm']
-            step_y = df.loc[idx, 'y_shift_mm']
+            step_x = df.loc[idx, "x_shift_mm"]
+            step_y = df.loc[idx, "y_shift_mm"]
             step_mag = shift_mag[idx]
 
             if not _is_spike(pos, step_x, step_y, step_mag):
@@ -273,39 +267,39 @@ def filter_outlier_shifts(shifts_df: pd.DataFrame,
                 if 0 <= neighbor_pos < len(df):
                     neighbor_idx = df.index[neighbor_pos]
                     if not outlier_mask[neighbor_idx]:
-                        neighbor_vals_x.append(df.loc[neighbor_idx, 'x_shift_mm'])
-                        neighbor_vals_y.append(df.loc[neighbor_idx, 'y_shift_mm'])
+                        neighbor_vals_x.append(df.loc[neighbor_idx, "x_shift_mm"])
+                        neighbor_vals_y.append(df.loc[neighbor_idx, "y_shift_mm"])
 
             if not neighbor_vals_x:
                 non_outlier = df[~outlier_mask]
-                neighbor_vals_x = [non_outlier['x_shift_mm'].median()]
-                neighbor_vals_y = [non_outlier['y_shift_mm'].median()]
+                neighbor_vals_x = [non_outlier["x_shift_mm"].median()]
+                neighbor_vals_y = [non_outlier["y_shift_mm"].median()]
 
-            df.loc[idx, 'x_shift_mm'] = float(np.median(neighbor_vals_x))
-            df.loc[idx, 'y_shift_mm'] = float(np.median(neighbor_vals_y))
-            if 'x_shift' in df.columns:
+            df.loc[idx, "x_shift_mm"] = float(np.median(neighbor_vals_x))
+            df.loc[idx, "y_shift_mm"] = float(np.median(neighbor_vals_y))
+            if "x_shift" in df.columns:
                 nb_px_x, nb_px_y = [], []
                 for offset in [-2, -1, 1, 2]:
                     nb_pos = pos + offset
                     if 0 <= nb_pos < len(df):
                         nb_idx = df.index[nb_pos]
                         if not outlier_mask[nb_idx]:
-                            nb_px_x.append(df.loc[nb_idx, 'x_shift'])
-                            nb_px_y.append(df.loc[nb_idx, 'y_shift'])
+                            nb_px_x.append(df.loc[nb_idx, "x_shift"])
+                            nb_px_y.append(df.loc[nb_idx, "y_shift"])
                 if nb_px_x:
-                    df.loc[idx, 'x_shift'] = float(np.median(nb_px_x))
-                    df.loc[idx, 'y_shift'] = float(np.median(nb_px_y))
+                    df.loc[idx, "x_shift"] = float(np.median(nb_px_x))
+                    df.loc[idx, "y_shift"] = float(np.median(nb_px_y))
 
     return df
 
 
 def correct_tile_offset_shifts(
-        shifts_df: pd.DataFrame,
-        tile_fov_x_mm: float,
-        tile_fov_y_mm: float = None,
-        tolerance: float = 0.05,
-        min_step_mm: float = 0.0,
-) -> Tuple[pd.DataFrame, List[int]]:
+    shifts_df: pd.DataFrame,
+    tile_fov_x_mm: float,
+    tile_fov_y_mm: float = None,
+    tolerance: float = 0.05,
+    min_step_mm: float = 0.0,
+) -> tuple[pd.DataFrame, list[int]]:
     """Correct pairwise shifts that are spurious integer multiples of an artifact step.
 
     The XY shifts file records ``xmin_mm[fixed] - xmin_mm[moving]``, where
@@ -367,9 +361,9 @@ def correct_tile_offset_shifts(
     corrected_indices = []
 
     for idx in df.index:
-        dx = df.loc[idx, 'x_shift_mm']
-        dy = df.loc[idx, 'y_shift_mm']
-        mag = float(np.sqrt(dx ** 2 + dy ** 2))
+        dx = df.loc[idx, "x_shift_mm"]
+        dy = df.loc[idx, "y_shift_mm"]
+        mag = float(np.sqrt(dx**2 + dy**2))
 
         if mag < min_step_mm:
             continue
@@ -381,20 +375,20 @@ def correct_tile_offset_shifts(
             nx = int(round(dx / tile_fov_x_mm))
             if nx != 0 and abs(dx - nx * tile_fov_x_mm) / tile_fov_x_mm < tolerance:
                 offset_x_mm = nx * tile_fov_x_mm
-                if 'x_shift' in df.columns and abs(dx) > 1e-9:
-                    df.loc[idx, 'x_shift'] -= offset_x_mm * (df.loc[idx, 'x_shift'] / dx)
-                df.loc[idx, 'x_shift_mm'] -= offset_x_mm
+                if "x_shift" in df.columns and abs(dx) > 1e-9:
+                    df.loc[idx, "x_shift"] -= offset_x_mm * (df.loc[idx, "x_shift"] / dx)
+                df.loc[idx, "x_shift_mm"] -= offset_x_mm
                 modified = True
 
         # Check Y component
         if tile_fov_y_mm > 0:
-            dy_cur = df.loc[idx, 'y_shift_mm']  # may differ from dy if X was corrected
+            dy_cur = df.loc[idx, "y_shift_mm"]  # may differ from dy if X was corrected
             ny = int(round(dy_cur / tile_fov_y_mm))
             if ny != 0 and abs(dy_cur - ny * tile_fov_y_mm) / tile_fov_y_mm < tolerance:
                 offset_y_mm = ny * tile_fov_y_mm
-                if 'y_shift' in df.columns and abs(dy) > 1e-9:
-                    df.loc[idx, 'y_shift'] -= offset_y_mm * (df.loc[idx, 'y_shift'] / dy)
-                df.loc[idx, 'y_shift_mm'] -= offset_y_mm
+                if "y_shift" in df.columns and abs(dy) > 1e-9:
+                    df.loc[idx, "y_shift"] -= offset_y_mm * (df.loc[idx, "y_shift"] / dy)
+                df.loc[idx, "y_shift_mm"] -= offset_y_mm
                 modified = True
 
         if modified:
@@ -403,12 +397,14 @@ def correct_tile_offset_shifts(
     return df, corrected_indices
 
 
-def filter_step_outliers(shifts_df: pd.DataFrame,
-                         max_step_mm: float = 0.0,
-                         window: int = 2,
-                         method: str = 'local_median',
-                         mad_threshold: float = 3.0,
-                         return_fraction: float = 0.4) -> pd.DataFrame:
+def filter_step_outliers(
+    shifts_df: pd.DataFrame,
+    max_step_mm: float = 0.0,
+    window: int = 2,
+    method: str = "local_median",
+    mad_threshold: float = 3.0,
+    return_fraction: float = 0.4,
+) -> pd.DataFrame:
     """Fix per-step spikes in shifts, independent of global outlier detection.
 
     Parameters
@@ -435,15 +431,14 @@ def filter_step_outliers(shifts_df: pd.DataFrame,
         Filtered DataFrame.
     """
     df = shifts_df.copy()
-    shift_mag = np.sqrt(df['x_shift_mm']**2 + df['y_shift_mm']**2)
+    shift_mag = np.sqrt(df["x_shift_mm"] ** 2 + df["y_shift_mm"] ** 2)
 
-    if method == 'local_mad':
+    if method == "local_mad":
         outlier_mask = pd.Series(False, index=df.index)
         for i in range(len(df)):
             lo = max(0, i - window)
             hi = min(len(df), i + window + 1)
-            neighbour_mags = np.concatenate([shift_mag.iloc[lo:i].values,
-                                             shift_mag.iloc[i + 1:hi].values])
+            neighbour_mags = np.concatenate([shift_mag.iloc[lo:i].values, shift_mag.iloc[i + 1 : hi].values])
             if len(neighbour_mags) == 0:
                 continue
             local_med = float(np.median(neighbour_mags))
@@ -465,9 +460,9 @@ def filter_step_outliers(shifts_df: pd.DataFrame,
     for idx in df[outlier_mask].index:
         row = df.loc[idx]
         pos = df.index.get_loc(idx)
-        step_x = df.loc[idx, 'x_shift_mm']
-        step_y = df.loc[idx, 'y_shift_mm']
-        step_mag = shift_mag.iloc[pos] if hasattr(shift_mag, 'iloc') else float(np.sqrt(step_x**2 + step_y**2))
+        step_x = df.loc[idx, "x_shift_mm"]
+        step_y = df.loc[idx, "y_shift_mm"]
+        step_mag = shift_mag.iloc[pos] if hasattr(shift_mag, "iloc") else float(np.sqrt(step_x**2 + step_y**2))
 
         # Re-homing guard: skip correction if the step is NOT self-cancelling.
         # A re-homing event has a large neighbour sum (position stays); a glitch
@@ -478,8 +473,8 @@ def filter_step_outliers(shifts_df: pd.DataFrame,
                 nb_pos = pos + offset
                 if 0 <= nb_pos < len(df):
                     nb_idx = df.index[nb_pos]
-                    nb_x = df.loc[nb_idx, 'x_shift_mm']
-                    nb_y = df.loc[nb_idx, 'y_shift_mm']
+                    nb_x = df.loc[nb_idx, "x_shift_mm"]
+                    nb_y = df.loc[nb_idx, "y_shift_mm"]
                     roundtrip = np.sqrt((step_x + nb_x) ** 2 + (step_y + nb_y) ** 2)
                     if roundtrip < return_fraction * step_mag:
                         is_spike = True
@@ -487,13 +482,13 @@ def filter_step_outliers(shifts_df: pd.DataFrame,
             if not is_spike:
                 continue  # Re-homing event — leave unchanged
 
-        if method == 'clamp':
+        if method == "clamp":
             scale = max_step_mm / shift_mag[idx]
-            df.loc[idx, 'x_shift_mm'] *= scale
-            df.loc[idx, 'y_shift_mm'] *= scale
-            if 'x_shift' in df.columns:
-                df.loc[idx, 'x_shift'] *= scale
-                df.loc[idx, 'y_shift'] *= scale
+            df.loc[idx, "x_shift_mm"] *= scale
+            df.loc[idx, "y_shift_mm"] *= scale
+            if "x_shift" in df.columns:
+                df.loc[idx, "x_shift"] *= scale
+                df.loc[idx, "y_shift"] *= scale
         else:
             pos = df.index.get_loc(idx)
             neighbor_vals_x, neighbor_vals_y = [], []
@@ -503,31 +498,30 @@ def filter_step_outliers(shifts_df: pd.DataFrame,
                 neighbor_pos = pos + offset
                 if 0 <= neighbor_pos < len(df):
                     neighbor_idx = df.index[neighbor_pos]
-                    neighbor_vals_x.append(df.loc[neighbor_idx, 'x_shift_mm'])
-                    neighbor_vals_y.append(df.loc[neighbor_idx, 'y_shift_mm'])
+                    neighbor_vals_x.append(df.loc[neighbor_idx, "x_shift_mm"])
+                    neighbor_vals_y.append(df.loc[neighbor_idx, "y_shift_mm"])
             if neighbor_vals_x:
-                df.loc[idx, 'x_shift_mm'] = float(np.median(neighbor_vals_x))
-                df.loc[idx, 'y_shift_mm'] = float(np.median(neighbor_vals_y))
-                if 'x_shift' in df.columns:
-                    neighbor_px_x = [df.loc[df.index[df.index.get_loc(idx) + o], 'x_shift']
-                                     for o in range(-window, window + 1)
-                                     if o != 0 and 0 <= df.index.get_loc(idx) + o < len(df)
-                                     and 'x_shift' in df.columns]
-                    neighbor_px_y = [df.loc[df.index[df.index.get_loc(idx) + o], 'y_shift']
-                                     for o in range(-window, window + 1)
-                                     if o != 0 and 0 <= df.index.get_loc(idx) + o < len(df)
-                                     and 'x_shift' in df.columns]
+                df.loc[idx, "x_shift_mm"] = float(np.median(neighbor_vals_x))
+                df.loc[idx, "y_shift_mm"] = float(np.median(neighbor_vals_y))
+                if "x_shift" in df.columns:
+                    neighbor_px_x = [
+                        df.loc[df.index[df.index.get_loc(idx) + o], "x_shift"]
+                        for o in range(-window, window + 1)
+                        if o != 0 and 0 <= df.index.get_loc(idx) + o < len(df) and "x_shift" in df.columns
+                    ]
+                    neighbor_px_y = [
+                        df.loc[df.index[df.index.get_loc(idx) + o], "y_shift"]
+                        for o in range(-window, window + 1)
+                        if o != 0 and 0 <= df.index.get_loc(idx) + o < len(df) and "x_shift" in df.columns
+                    ]
                     if neighbor_px_x:
-                        df.loc[idx, 'x_shift'] = float(np.median(neighbor_px_x))
-                        df.loc[idx, 'y_shift'] = float(np.median(neighbor_px_y))
+                        df.loc[idx, "x_shift"] = float(np.median(neighbor_px_x))
+                        df.loc[idx, "y_shift"] = float(np.median(neighbor_px_y))
 
     return df
 
 
-def build_cumulative_shifts(shifts_df: pd.DataFrame,
-                            selected_slice_ids: List,
-                            resolution,
-                            center_drift: bool = True) -> Dict:
+def build_cumulative_shifts(shifts_df: pd.DataFrame, selected_slice_ids: list, resolution, center_drift: bool = True) -> dict:
     """Build cumulative pixel shifts for selected slices.
 
     Handles skipped slices by accumulating intermediate steps.
@@ -551,14 +545,14 @@ def build_cumulative_shifts(shifts_df: pd.DataFrame,
     """
     shift_lookup = {}
     for _, row in shifts_df.iterrows():
-        fixed_id = int(row['fixed_id'])
-        moving_id = int(row['moving_id'])
-        shift_lookup[(fixed_id, moving_id)] = (row['x_shift_mm'], row['y_shift_mm'])
+        fixed_id = int(row["fixed_id"])
+        moving_id = int(row["moving_id"])
+        shift_lookup[(fixed_id, moving_id)] = (row["x_shift_mm"], row["y_shift_mm"])
 
     all_slice_ids = set()
     for _, row in shifts_df.iterrows():
-        all_slice_ids.add(int(row['fixed_id']))
-        all_slice_ids.add(int(row['moving_id']))
+        all_slice_ids.add(int(row["fixed_id"]))
+        all_slice_ids.add(int(row["moving_id"]))
     all_slice_ids = sorted(all_slice_ids)
 
     cumsum_all = {all_slice_ids[0]: (0.0, 0.0)}
