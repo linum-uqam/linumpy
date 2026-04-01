@@ -7,11 +7,7 @@ from various processing steps in the 3D reconstruction pipeline.
 
 Usage:
     # Use step-specific collectors (recommended)
-    from linumpy.metrics import collect_mask_metrics, collect_pairwise_registration_metrics
-
-    # In your script:
-    mask = create_mask(vol, ...)
-    collect_mask_metrics(mask, vol, output_path, params={'sigma': 5.0})
+    from linumpy.metrics import collect_pairwise_registration_metrics
 """
 
 import json
@@ -29,7 +25,6 @@ class MetricsEncoder(json.JSONEncoder):
     """Custom JSON encoder to handle numpy types."""
 
     def default(self, o: Any) -> Any:
-        """Serialize numpy and Path types to JSON-compatible values."""
         if isinstance(o, np.integer):
             return int(o)
         elif isinstance(o, np.floating):
@@ -236,7 +231,7 @@ class PipelineMetrics:
         else:
             filepath = Path(filename)
 
-        with filepath.open("w") as f:
+        with Path(filepath).open("w") as f:
             json.dump(self.to_dict(), f, indent=2, cls=MetricsEncoder)
 
         return filepath
@@ -244,9 +239,9 @@ class PipelineMetrics:
     def log_issues(self) -> None:
         """Log any warnings or errors to the logger."""
         for w in self.warnings:
-            logger.warning("Metric warning: %s", w)
+            logger.warning(f"Metric warning: {w}")
         for e in self.errors:
-            logger.error("Metric error: %s", e)
+            logger.error(f"Metric error: {e}")
 
 
 # =============================================================================
@@ -254,83 +249,12 @@ class PipelineMetrics:
 # =============================================================================
 
 
-def collect_mask_metrics(
-    mask: np.ndarray,
-    input_vol: np.ndarray,
-    output_path: Path,
-    input_path: str | None = None,
-    params: dict | None = None,
-) -> PipelineMetrics:
-    """
-    Collect metrics for mask creation step.
-
-    Parameters
-    ----------
-    mask : np.ndarray
-        The created binary mask.
-    input_vol : np.ndarray
-        The input volume.
-    output_path : str or Path
-        Path to the output mask file.
-    input_path : str, optional
-        Path to the input image.
-    params : dict, optional
-        Dictionary of parameters used (sigma, selem_radius, min_size, etc.)
-
-    Returns
-    -------
-    PipelineMetrics
-        Metrics object (already saved).
-    """
-    output_path = Path(output_path)
-    metrics = PipelineMetrics("create_masks", str(output_path.parent))
-
-    # Info
-    if input_path:
-        metrics.add_info("input_image", str(input_path), "Input image path")
-    metrics.add_info("output_mask", str(output_path), "Output mask path")
-    metrics.add_info("volume_shape", list(input_vol.shape), "Volume shape")
-
-    if params:
-        for key, val in params.items():
-            metrics.add_info(key, val, f"Parameter: {key}")
-
-    # Mask coverage metrics
-    mask_coverage = float(np.sum(mask > 0)) / mask.size
-    metrics.add_metric(
-        "mask_coverage", mask_coverage, description="Fraction of volume covered by mask", threshold_name="mask_coverage"
-    )
-
-    # Per-slice coverage
-    if mask.ndim == 3:
-        per_slice_coverage = np.mean(mask > 0, axis=(1, 2))
-        metrics.add_metric(
-            "mean_slice_coverage", float(np.mean(per_slice_coverage)), description="Mean mask coverage per slice"
-        )
-        metrics.add_metric(
-            "min_slice_coverage",
-            float(np.min(per_slice_coverage)),
-            description="Minimum mask coverage across slices",
-            threshold_name="min_slice_coverage",
-        )
-        metrics.add_metric(
-            "std_slice_coverage",
-            float(np.std(per_slice_coverage)),
-            description="Std dev of mask coverage across slices",
-            threshold_name="std_slice_coverage",
-        )
-
-    metrics.save(f"{output_path.stem}_metrics.json")
-    metrics.log_issues()
-    return metrics
-
-
 def collect_normalization_metrics(
     vol_normalized: np.ndarray,
     agarose_mask: np.ndarray,
     otsu_threshold: float,
     background_thresholds: np.ndarray,
-    output_path: Path,
+    output_path: str | Path,
     input_path: str | None = None,
     params: dict | None = None,
 ) -> PipelineMetrics:
@@ -402,7 +326,7 @@ def collect_xy_transform_metrics(
     tile_pairs_used: int,
     tile_shape: tuple[int, int],
     residuals: np.ndarray,
-    output_path: Path,
+    output_path: str | Path,
     input_paths: list[str] | None = None,
     params: dict | None = None,
     n_tiles_x: int | None = None,
@@ -524,10 +448,11 @@ def collect_pairwise_registration_metrics(
     rotation_deg: float,
     best_z_index: int,
     expected_z_index: int,
-    output_path: Path,
+    output_path: str | Path,
     fixed_path: str | None = None,
     moving_path: str | None = None,
     params: dict | None = None,
+    z_correlation: float = 0.0,
 ) -> PipelineMetrics:
     """
     Collect metrics for pairwise registration step.
@@ -550,6 +475,9 @@ def collect_pairwise_registration_metrics(
         Paths to fixed and moving volumes.
     params : dict, optional
         Dictionary of parameters used.
+    z_correlation : float, optional
+        Normalized cross-correlation score from Z-matching (0–1). Higher values
+        indicate a reliable Z-match between the two slices.
 
     Returns
     -------
@@ -592,6 +520,31 @@ def collect_pairwise_registration_metrics(
     metrics.add_metric(
         "z_drift", int(abs(best_z_index - expected_z_index)), unit="voxels", description="Deviation from expected z-index"
     )
+    metrics.add_metric(
+        "z_correlation",
+        float(max(0.0, z_correlation)),
+        unit="",
+        description="Z-matching cross-correlation score (0–1; higher = more reliable)",
+        threshold_name="correlation",
+    )
+
+    # Composite confidence score (0–1): combines Z-correlation, normalized translation
+    # and normalized rotation.  Used downstream by adaptive transform degradation
+    # in linum_stack_slices_motor.py to decide whether to apply the full transform,
+    # rotation-only, or skip entirely.
+    max_translation = float(params.get("max_translation_px", 50.0)) if params else 50.0
+    max_rotation = float(params.get("max_rotation_deg", 5.0)) if params else 5.0
+    norm_translation = min(translation_magnitude / max(max_translation, 1.0), 1.0)
+    norm_rotation = min(abs(rotation_deg) / max(max_rotation, 1.0), 1.0)
+    z_corr_score = float(max(0.0, z_correlation))
+    confidence = float(np.clip(0.5 * z_corr_score + 0.3 * (1.0 - norm_translation) + 0.2 * (1.0 - norm_rotation), 0.0, 1.0))
+    metrics.add_metric(
+        "registration_confidence",
+        confidence,
+        unit="",
+        description="Overall transform reliability score (0=unreliable, 1=reliable)",
+        custom_thresholds={"warning": 0.4, "error": 0.3, "higher_is_better": True},
+    )
 
     metrics.save()
     metrics.log_issues()
@@ -606,7 +559,7 @@ def collect_interface_crop_metrics(
     input_shape: tuple[int, ...],
     output_shape: tuple[int, ...],
     resolution_um: float,
-    output_path: Path,
+    output_path: str | Path,
     input_path: str | None = None,
     padding_needed: bool = False,
 ) -> PipelineMetrics:
@@ -682,7 +635,7 @@ def collect_interface_crop_metrics(
 def collect_psf_compensation_metrics(
     psf: np.ndarray,
     agarose_coverage: float,
-    output_path: Path,
+    output_path: str | Path,
     input_path: str | None = None,
     fit_gaussian: bool = False,
 ) -> PipelineMetrics:
@@ -751,7 +704,7 @@ def collect_stack_metrics(
     z_offsets: np.ndarray,
     num_slices: int,
     resolution: list[float],
-    output_path: Path,
+    output_path: str | Path,
     blend_enabled: bool = False,
     normalize_enabled: bool = False,
 ) -> PipelineMetrics:
@@ -822,7 +775,7 @@ def collect_stitch_3d_metrics(
     output_shape: tuple[int, ...],
     num_tiles: int,
     resolution: list[float],
-    output_path: Path,
+    output_path: str | Path,
     input_path: str | None = None,
     blending_method: str = "diffusion",
 ) -> PipelineMetrics:
@@ -881,7 +834,7 @@ def collect_stitch_3d_metrics(
 # =============================================================================
 
 
-def load_metrics(filepath: Path) -> dict:
+def load_metrics(filepath: str | Path) -> dict:
     """
     Load metrics from a JSON file.
 
@@ -899,7 +852,7 @@ def load_metrics(filepath: Path) -> dict:
         return json.load(f)
 
 
-def aggregate_metrics(metrics_dir: Path, pattern: str = "*_metrics.json") -> dict[str, list[dict]]:
+def aggregate_metrics(metrics_dir: str | Path, pattern: str = "*_metrics.json") -> dict[str, list[dict]]:
     """
     Aggregate all metrics files from a directory.
 
@@ -927,7 +880,7 @@ def aggregate_metrics(metrics_dir: Path, pattern: str = "*_metrics.json") -> dic
             metrics["source_file"] = str(metrics_file)
             aggregated[step_name].append(metrics)
         except Exception as e:
-            logger.warning("Could not load %s: %s", metrics_file, e)
+            logger.warning(f"Could not load {metrics_file}: {e}")
 
     return aggregated
 

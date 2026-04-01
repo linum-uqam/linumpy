@@ -23,7 +23,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--resolution",
         type=float,
         default=-1,
-        help="Output isotropic resolution in micron per pixel. (Use -1 to keep the original resolution). (default=%(default)s)",
+        help="Output isotropic resolution in micron per pixel. "
+        "(Use -1 to keep the original resolution). (default=%(default)s)",
     )
     p.add_argument(
         "-e", "--extension", default=".tiff", choices=[".tiff", ".zarr"], help="Output extension (default=%(default)s)"

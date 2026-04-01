@@ -1,25 +1,29 @@
 #!/usr/bin/env python3
 
-"""Convert 3D OCT tiles to a 3D mosaic grid."""
+"""Convert 3D OCT tiles to a 3D mosaic grid"""
+
+# Configure thread limits before numpy/scipy imports
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import multiprocessing
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
 from skimage.transform import resize
 from tqdm.auto import tqdm
 
-from linumpy.cli.args import add_processes_arg, parse_processes_arg
+from linumpy.mosaic import discovery as reconstruction
 from linumpy.io.thorlabs import PreprocessingConfig, ThorOCT
 from linumpy.io.zarr import OmeZarrWriter
 from linumpy.microscope.oct import OCT
-from linumpy.mosaic import discovery as reconstruction
+from linumpy.cli.args import add_processes_arg, parse_processes_arg
 
 
-def _build_arg_parser() -> argparse.ArgumentParser:
+def _build_arg_parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("output_zarr", type=Path, help="Full path to the output zarr file")
+    p.add_argument("output_zarr", help="Full path to the output zarr file")
     p.add_argument(
         "--data_type",
         type=str,
@@ -29,14 +33,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     input_g = p.add_argument_group("input")
     input_mutex_g = input_g.add_mutually_exclusive_group(required=True)
-    input_mutex_g.add_argument(
-        "--from_root_directory", type=Path,
-        help="Full path to a directory containing the tiles to process."
-    )
-    input_mutex_g.add_argument(
-        "--from_tiles_list", type=Path, nargs="+",
-        help="List of tiles to assemble (argument --slice is ignored)."
-    )
+    input_mutex_g.add_argument("--from_root_directory", help="Full path to a directory containing the tiles to process.")
+    input_mutex_g.add_argument("--from_tiles_list", nargs="+", help="List of tiles to assemble (argument --slice is ignored).")
     options_g = p.add_argument_group("other options")
     options_g.add_argument(
         "-r", "--resolution", type=float, default=10.0, help="Output isotropic resolution in micron per pixel. [%(default)s]"
@@ -46,7 +44,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     options_g.add_argument("-z", "--slice", type=int, help="Slice to process.")
     options_g.add_argument("--keep_galvo_return", action="store_true", help="Keep the galvo return signal [%(default)s]")
-    options_g.add_argument("--n_levels", type=int, default=5, help="Number of levels in pyramid representation.")
     options_g.add_argument(
         "--zarr_root", help="Path to parent directory under which the zarr temporary directory will be created [/tmp/]."
     )
@@ -55,6 +52,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     options_g.add_argument(
         "--fix_camera_shift", default=False, action=argparse.BooleanOptionalAction, help="Fix the camera shift. [%(default)s]"
+    )
+    options_g.add_argument(
+        "--preprocess",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Apply preprocessing (rotate/flip) for legacy data. [%(default)s]",
+    )
+    options_g.add_argument(
+        "--galvo_threshold", type=float, default=0.6, help="Galvo detection confidence threshold. [%(default)s]"
     )
     options_g.add_argument(
         "--sharding_factor",
@@ -77,15 +83,62 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def preprocess_volume(vol: np.ndarray) -> np.ndarray:
-    """Preprocess the volume by rotating and flipping it."""
+def preprocess_volume(vol: np.ndarray, apply: bool = True) -> np.ndarray:
+    """Preprocess the volume by rotating and flipping it (for legacy data)."""
+    if not apply:
+        return vol
     vol = np.rot90(vol, k=3, axes=(1, 2))
     vol = np.flip(vol, axis=1)
     return vol
 
 
-def process_tile(proc_params: dict) -> None:
-    """Process a tile and add it to the mosaic."""
+def load_single_tile(params: dict) -> tuple:
+    """Load a single tile from disk. Used for parallel I/O.
+
+    Returns
+    -------
+    tuple
+        (params, volume) where volume is the loaded numpy array
+    """
+    f = params["file"]
+    crop = params["crop"]
+    galvo_shift = params["galvo_shift"]
+    fix_camera_shift = params["fix_camera_shift"]
+    preprocess = params["preprocess"]
+    data_type = params["data_type"]
+    psoct_config = params["psoct_config"]
+
+    if data_type == "OCT":
+        oct = OCT(f)
+        # Load without automatic galvo detection - we apply consistent shift for all tiles
+        vol = oct.load_image(crop=crop, fix_galvo_shift=False, fix_camera_shift=fix_camera_shift)
+        # Apply galvo shift if detected for this slice
+        if galvo_shift is not None and galvo_shift > 0:
+            from linumpy.geometry.interface import fix_galvo_shift as apply_galvo_fix
+
+            vol = apply_galvo_fix(vol, shift=galvo_shift)
+        vol = preprocess_volume(vol, apply=preprocess)
+    elif data_type == "PSOCT":
+        oct = ThorOCT(f, config=psoct_config)
+        if psoct_config.erase_polarization_2:
+            oct.load()
+            vol = oct.first_polarization
+        else:
+            oct.load()
+            vol = oct.second_polarization
+        vol = ThorOCT.orient_volume_psoct(vol)
+    else:
+        raise ValueError(f"Unknown data type: {data_type}")
+
+    return (params, vol)
+
+
+def process_tile(proc_params: dict):
+    """Process a tile and add it to the mosaic.
+
+    Uses ThreadPoolExecutor for parallel I/O when loading multiple tiles
+    in a shard, then processes each with CPU-based resize.
+    """
     mosaic = proc_params["mosaic"]
     shard_shape = proc_params["shard_shape"]
     tiles_params = proc_params["params"]
@@ -94,35 +147,24 @@ def process_tile(proc_params: dict) -> None:
     mx_min = min([p["tile_pos"][0] for p in tiles_params])
     my_min = min([p["tile_pos"][1] for p in tiles_params])
 
-    vol: np.ndarray = np.empty(0)
-    tile_size: list = []
+    # Parallel I/O: Load all tiles in this shard concurrently
+    # This significantly speeds up I/O-bound tile loading
+    n_tiles = len(tiles_params)
+    if n_tiles > 1:
+        # Use ThreadPoolExecutor for parallel disk I/O
+        with ThreadPoolExecutor(max_workers=min(4, n_tiles)) as executor:
+            loaded_tiles = list(executor.map(load_single_tile, tiles_params))
+    else:
+        # Single tile, no need for threading overhead
+        loaded_tiles = [load_single_tile(tiles_params[0])]
 
-    for params in tiles_params:
-        f = params["file"]
+    # Process loaded tiles with CPU resize
+    vol = None  # Track last volume for shape info
+    tile_size = None
+    for params, vol in loaded_tiles:
         mx, my = params["tile_pos"]
-        crop = params["crop"]
-        fix_galvo_shift = params["fix_galvo_shift"]
-        fix_camera_shift = params["fix_camera_shift"]
         tile_size = params["tile_size"]
-        data_type = params["data_type"]
-        psoct_config = params["psoct_config"]
 
-        # Load the tile
-        if data_type == "OCT":
-            oct = OCT(f)
-            vol = oct.load_image(crop=crop, fix_galvo_shift=fix_galvo_shift, fix_camera_shift=fix_camera_shift)
-            vol = preprocess_volume(vol)
-        elif data_type == "PSOCT":
-            oct = ThorOCT(f, config=psoct_config)
-            if psoct_config.erase_polarization_2:
-                oct.load()
-                assert oct.first_polarization is not None
-                vol = oct.first_polarization
-            else:
-                oct.load()
-                assert oct.second_polarization is not None
-                vol = oct.second_polarization
-            vol = ThorOCT.orient_volume_psoct(vol)
         # Rescale the volume
         if np.iscomplexobj(vol):
             vol = resize(vol.real, tile_size, anti_aliasing=True, order=1, preserve_range=True) + 1j * resize(
@@ -150,8 +192,7 @@ def process_tile(proc_params: dict) -> None:
     ]
 
 
-def main() -> None:
-    """Run the 3D mosaic grid creation script."""
+def main():
     # Parse arguments
     parser = _build_arg_parser()
     args = parser.parse_args()
@@ -161,6 +202,8 @@ def main() -> None:
     crop = not args.keep_galvo_return
     fix_galvo_shift = args.fix_galvo_shift
     fix_camera_shift = args.fix_camera_shift
+    preprocess = args.preprocess
+    galvo_threshold = args.galvo_threshold
 
     data_type = args.data_type
     angle_index = args.angle_index
@@ -173,9 +216,6 @@ def main() -> None:
     psoct_config.return_complex = args.return_complex
 
     # Analyze the tiles
-    tiles_directory = args.from_root_directory
-    tiles: list = []
-    tiles_pos: list = []
     if data_type == "OCT":
         if args.from_root_directory:
             z = args.slice
@@ -191,26 +231,38 @@ def main() -> None:
         tiles = tiles[angle_index]
 
     # Prepare the mosaic_grid
-    vol: np.ndarray = np.empty(0)
-    resolution: list = []
     if data_type == "OCT":
         oct = OCT(tiles[0], args.axial_resolution)
         vol = oct.load_image(crop=crop)
-        vol = preprocess_volume(vol)
+        vol = preprocess_volume(vol, apply=preprocess)
         resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
+        n_extra = oct.info.get("n_extra", 0)
     elif data_type == "PSOCT":
         oct = ThorOCT(tiles[0], config=psoct_config)
         if psoct_config.erase_polarization_2:
             oct.load()
-            assert oct.first_polarization is not None
             vol = oct.first_polarization
         else:
             oct.load()
-            assert oct.second_polarization is not None
             vol = oct.second_polarization
         vol = ThorOCT.orient_volume_psoct(vol)
         resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
+        n_extra = 0  # PSOCT doesn't have galvo return
     print(f"Resolution: z = {resolution[0]} , x = {resolution[1]} , y = {resolution[2]} ")
+
+    # Detect galvo shift by sampling multiple tiles
+    # galvo_shift: 0 = no fix, >0 = shift amount to apply
+    galvo_shift = 0
+    if fix_galvo_shift and data_type == "OCT" and n_extra > 0:
+        from linumpy.geometry.interface import detect_galvo_for_slice
+
+        galvo_shift, confidence = detect_galvo_for_slice(
+            tiles, n_extra, threshold=galvo_threshold, axial_resolution=args.axial_resolution
+        )
+        if galvo_shift > 0:
+            print(f"Galvo shift detected: shift={galvo_shift}, confidence={confidence:.3f} - will apply fix")
+        else:
+            print(f"Galvo shift not significant: confidence={confidence:.3f} - skipping fix")
 
     # tiles position in the mosaic grid
     pos_xy = np.asarray(tiles_pos)[:, :2]
@@ -235,9 +287,9 @@ def main() -> None:
     # Create the zarr writer
     writer = OmeZarrWriter(
         args.output_zarr,
-        shape=tuple(mosaic_shape),
+        shape=mosaic_shape,
         dtype=np.complex64 if args.return_complex else np.float32,
-        chunk_shape=tuple(tile_size),
+        chunk_shape=tile_size,
         shards=shards,
         overwrite=True,
     )
@@ -259,8 +311,9 @@ def main() -> None:
                 "file": tiles[i],
                 "tile_pos": pos_xy[i],
                 "crop": crop,
-                "fix_galvo_shift": fix_galvo_shift,
+                "galvo_shift": galvo_shift,  # 0 = no fix, >0 = shift amount
                 "fix_camera_shift": fix_camera_shift,
+                "preprocess": preprocess,
                 "tile_size": tile_size,
                 "data_type": data_type,
                 "psoct_config": psoct_config,
@@ -272,7 +325,9 @@ def main() -> None:
         params_grid[i, j] for i in range(nb_shards_xy[0]) for j in range(nb_shards_xy[1]) if params_grid[i, j] is not None
     ]
     if n_cpus > 1:  # process in parallel
-        with multiprocessing.Pool(n_cpus) as pool:
+        from linumpy.config.threads import worker_initializer
+
+        with multiprocessing.Pool(n_cpus, initializer=worker_initializer) as pool:
             results = tqdm(pool.imap(process_tile, params), total=len(params))
             tuple(results)
     else:  # Process the tiles sequentially
@@ -280,7 +335,7 @@ def main() -> None:
             process_tile(p)
 
     # Convert to ome-zarr
-    writer.finalize(output_resolution, args.n_levels)
+    writer.finalize(output_resolution, 0)
 
 
 if __name__ == "__main__":

@@ -1,38 +1,39 @@
 #! /usr/bin/env python
 
-"""Compute the tissue apparent attenuation coefficient map and compensate its effect in the OCT data."""
+"""Computes the tissue apparent attenuation coefficient map
+and then use the average attenuation to compensate its effect in
+the OCT reflectivity data.
+"""
 
 # Configure thread limits before numpy/scipy imports
+# TODO: Keep the OCT pixel format (which is float32 ?)
 import linumpy.config.threads  # noqa: F401
 
-# TODO: Keep the OCT pixel format (which is float32 ?)
 import argparse
-from pathlib import Path
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-from linumpy.intensity.attenuation import get_extended_attenuation_vermeer2013
 from linumpy.io.zarr import read_omezarr, save_omezarr
+from linumpy.intensity.attenuation import get_extended_attenuation_vermeer2013
 
 
-def _build_arg_parser() -> argparse.ArgumentParser:
+def _build_arg_parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
 
     # Mandatory parameters
-    p.add_argument("input", type=Path, help="A single slice to process (ome-zarr).")
-    p.add_argument("output", type=Path, help="Output attenuation map (ome-zarr).")
+    p.add_argument("input", help="A single slice to process (ome-zarr).")
+    p.add_argument("output", help="Output attenuation map (ome-zarr).")
 
     # Optional argument
-    p.add_argument("-m", "--mask", type=Path, default=None, help="Optional tissue mask (.ome.zarr)")
+    p.add_argument("-m", "--mask", default=None, help="Optional tissue mask (.ome.zarr)")
     p.add_argument("--s_xy", default=0.0, type=float, help="Lateral smoothing sigma (default=%(default)s)")
     p.add_argument("--s_z", default=5.0, type=float, help="Axial smoothing sigma (default=%(default)s)")
 
     return p
 
 
-def main() -> None:
-    """Run the attenuation computation script."""
+def main():
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -42,7 +43,7 @@ def main() -> None:
 
     # TODO: Change behaviour of attenuation estimation method
     # to avoid having to swap the axes
-    vol = np.moveaxis(np.asarray(zarr_vol), (0, 1, 2), (2, 1, 0))
+    vol = np.moveaxis(zarr_vol, (0, 1, 2), (2, 1, 0))
 
     # resolution is expected to be in microns
     res_axial_microns = res[0] * 1000
@@ -50,7 +51,7 @@ def main() -> None:
     mask = None
     if args.mask is not None:
         mask_zarr, _ = read_omezarr(args.mask, level=0)
-        mask = np.moveaxis(np.asarray(mask_zarr), (0, 1, 2), (2, 1, 0)).astype(bool)
+        mask = np.moveaxis(mask_zarr, (0, 1, 2), (2, 1, 0)).astype(bool)
 
     # Preprocessing
     vol = gaussian_filter(vol, sigma=(args.s_xy, args.s_xy, args.s_z))

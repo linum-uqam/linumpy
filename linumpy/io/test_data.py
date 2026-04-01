@@ -1,7 +1,4 @@
-"""Utilities for loading test data."""
-
 from pathlib import Path
-from typing import Any
 
 import dask.array as da
 import nibabel as nib
@@ -12,8 +9,7 @@ from linumpy import LINUMPY_HOME
 from linumpy.io.zarr import save_omezarr
 
 
-def get_data(name: str) -> Any:
-    """Return test data for the given key name."""
+def get_data(name):
     data = {
         "mosaic_3d_omezarr": _get_mosaic_3d_omezarr,
         "mosaic_3d_nifti": _get_mosaic_3d_nifti,
@@ -25,11 +21,11 @@ def get_data(name: str) -> Any:
     return data[name]()
 
 
-def _create_linumpy_home_if_not_exists() -> None:
-    Path(LINUMPY_HOME).mkdir(parents=True, exist_ok=True)
+def _create_linumpy_home_if_not_exists():
+    Path(LINUMPY_HOME).mkdir(exist_ok=True)
 
 
-def _get_mosaic_3d_nifti() -> Path:
+def _get_mosaic_3d_nifti():
     _create_linumpy_home_if_not_exists()
     filename = Path(LINUMPY_HOME) / "mosaic_3d.nii.gz"
     if not filename.exists():
@@ -42,7 +38,7 @@ def _get_mosaic_3d_nifti() -> Path:
     return filename
 
 
-def _get_mosaic_3d_omezarr() -> Path:
+def _get_mosaic_3d_omezarr():
     _create_linumpy_home_if_not_exists()
     filename = Path(LINUMPY_HOME) / "mosaic_3d.ome.zarr"
     if not filename.exists():
@@ -55,7 +51,7 @@ def _get_mosaic_3d_omezarr() -> Path:
     return filename
 
 
-def _get_aip() -> Path:
+def _get_aip():
     _create_linumpy_home_if_not_exists()
     filename = Path(LINUMPY_HOME) / "aip.ome.zarr"
     if not filename.exists():
@@ -74,17 +70,7 @@ def _get_aip() -> Path:
     return filename
 
 
-def _get_scan_info(
-    nx: int,
-    ny: int,
-    top_z: int,
-    bottom_z: int,
-    width_mm: float,
-    height_mm: float,
-    x_pos_mm: float,
-    y_pos_mm: float,
-    z_pos_mm: float,
-) -> str:
+def _get_scan_info(nx, ny, top_z, bottom_z, width_mm, height_mm, x_pos_mm, y_pos_mm, z_pos_mm):
     focus_z = int((top_z + bottom_z) / 2)
     scan_info = "Scan info\n"
     scan_info += f"nx: {nx}\n"
@@ -105,13 +91,13 @@ def _get_scan_info(
     return scan_info
 
 
-def _get_raw_tiles() -> Path:
+def _get_raw_tiles():
     _create_linumpy_home_if_not_exists()
     folder = Path(LINUMPY_HOME) / "raw_tiles"
     bounds_xy = [(0, 140), ((256 - 140), 256)]
     bounds_z = [(0, 35), ((60 - 35), 60)]
     if not folder.exists():
-        folder.mkdir(parents=True)
+        folder.mkdir()
         data = np.mean(cells3d(), axis=1)  # (order z, y, x)
         for zi, (zmin, zmax) in enumerate(bounds_z):
             for yi, (ymin, ymax) in enumerate(bounds_xy):
@@ -140,6 +126,5 @@ def _get_raw_tiles() -> Path:
                         stage_y_pos,
                         stage_z_pos,
                     )
-                    with (tile_folder / "info.txt").open("w") as f:
-                        f.writelines(info)
+                    (tile_folder / "info.txt").write_text(info)
     return folder

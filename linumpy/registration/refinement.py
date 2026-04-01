@@ -4,7 +4,7 @@ import numpy as np
 import SimpleITK as sitk
 
 
-def find_best_z(fixed_vol: np.ndarray, moving_slice: np.ndarray, expected_z: int, search_range: int, mask: np.ndarray | None = None) -> tuple[int, float]:
+def find_best_z(fixed_vol: np.ndarray, moving_slice: np.ndarray, expected_z: int, search_range: int) -> tuple[int, float]:
     """Find the Z-index in fixed_vol that best matches moving_slice.
 
     Uses normalized cross-correlation in the center region.
@@ -19,8 +19,6 @@ def find_best_z(fixed_vol: np.ndarray, moving_slice: np.ndarray, expected_z: int
         Expected Z-index in fixed_vol for the match.
     search_range : int
         Search +/-search_range around expected_z.
-    mask : np.ndarray or None
-        Optional 2D tissue mask applied to correlation.
 
     Returns
     -------
@@ -48,9 +46,6 @@ def find_best_z(fixed_vol: np.ndarray, moving_slice: np.ndarray, expected_z: int
         pmax = float(np.percentile(moving_roi[valid_mov], 95))
         moving_roi = np.clip((moving_roi - pmin) / max(pmax - pmin, 1e-8), 0, 1)
 
-    if mask is not None:
-        moving_roi = moving_roi * mask[roi].astype(np.float32)
-
     moving_norm = (moving_roi - moving_roi.mean()) / (moving_roi.std() + 1e-8)
 
     best_z = expected_z
@@ -64,9 +59,6 @@ def find_best_z(fixed_vol: np.ndarray, moving_slice: np.ndarray, expected_z: int
             pmin = float(np.percentile(fixed_roi[valid_fix], 5))
             pmax = float(np.percentile(fixed_roi[valid_fix], 95))
             fixed_roi = np.clip((fixed_roi - pmin) / max(pmax - pmin, 1e-8), 0, 1)
-
-        if mask is not None:
-            fixed_roi = fixed_roi * mask[roi].astype(np.float32)
 
         fixed_norm = (fixed_roi - fixed_roi.mean()) / (fixed_roi.std() + 1e-8)
         corr = float(np.mean(fixed_norm * moving_norm))

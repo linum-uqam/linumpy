@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Uses the BaSiC algorithm to estimate the illumination inhomogeneities in a mosaic grid."""
+"""Uses the BaSiC algorithm to estimate the illumination inhomogeneities in a mosaic grid"""
 
 # Configure thread limits before numpy/scipy imports
 import linumpy.config.threads  # noqa: F401
@@ -19,14 +19,15 @@ from linumpy.mosaic.grid import MosaicGrid
 log_epsilon = 1e-8
 
 
-def _build_arg_parser() -> argparse.ArgumentParser:
+def _build_arg_parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_images", type=Path, nargs="+", help="Full path to a 2D mosaic grid image.")
-    p.add_argument("output_flatfield", type=Path, help="Flatfield filename (must be a .nii or .nii.gz file).")
+    p.add_argument("input_images", nargs="+", help="Full path to a 2D mosaic grid image.")
+    p.add_argument("output_flatfield", help="Flatfield filename (must be a .nii or .nii.gz file).")
     p.add_argument(
-        "--output_darkfield", type=Path, default=None,
-        help="Optional darkfield filename (if none is given, the darkfield won't be estimated)."
-        " (must be a .nii or .nii.gz file).",
+        "--output_darkfield",
+        default=None,
+        help="Optional darkfield filename (if none is given, the darkfield won't be estimated). "
+        "(must be a .nii or .nii.gz file).",
     )
     p.add_argument(
         "-t",
@@ -46,8 +47,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main() -> None:
-    """Run the illumination estimation script."""
+def main():
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -75,7 +75,7 @@ def main() -> None:
             log_imax = image.max()
             image = (image - log_imin) / (log_imax - log_imin)
 
-        mosaic = MosaicGrid(image, tile_shape=tuple(tile_shape))
+        mosaic = MosaicGrid(image, tile_shape=tile_shape)
 
         # Convert the image into a stack of ndarrays of shape N_Images x Height x Width
         these_tiles, _ = mosaic.get_tiles()

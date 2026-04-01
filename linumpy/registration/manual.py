@@ -1,5 +1,3 @@
-"""Manual registration GUI for mosaic slices."""
-
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.widgets import RadioButtons, RangeSlider, Slider
@@ -12,8 +10,7 @@ NO_REF_LABEL = "No reference slice"
 
 class ManualImageCorrection:
     """
-    Manual image correction using a graphical user interface. Corrections.
-
+    Manual image correction using a graphical user interface. Corrections
     include independent translation and rotation of each z-slice as well
     as image intensities rescaling per z-slice.
 
@@ -34,14 +31,7 @@ class ManualImageCorrection:
         Intensities for rescaling each slice. One (vmin, vmax) per slice.
     """
 
-    def __init__(
-        self,
-        data: np.ndarray,
-        resolution: tuple,
-        downsample_factor: int,
-        transforms: np.ndarray | None = None,
-        custom_ranges: np.ndarray | None = None,
-    ) -> None:
+    def __init__(self, data, resolution, downsample_factor, transforms=None, custom_ranges=None):
         # We will work on a dataset rescaled between [0, 1]
         data = data - data.min()
         data = data / data.max()
@@ -57,17 +47,19 @@ class ManualImageCorrection:
 
         # Transforms array contains translation and rotation
         # for each slice in the order (ty, tx, theta)
-        self.transforms: np.ndarray = transforms if transforms is not None else np.zeros((len(z), 3))
+        if transforms is None:
+            self.transforms: np.ndarray = np.zeros((len(z), 3))
+        else:
+            self.transforms = transforms
         if self.transforms.shape != (len(z), 3):
             raise ValueError(f"Invalid shape for transforms file: expected ({len(z)}, 3), got {self.transforms.shape}.")
 
         # Base intensity normalization will rescale each slice
         # between its min and max values to the range [0, 1]
-        self.custom_ranges: np.ndarray = (
-            custom_ranges
-            if custom_ranges is not None
-            else np.array([np.min(data, axis=(1, 2)), np.max(data, axis=(1, 2))]).T
-        )
+        if custom_ranges is None:
+            self.custom_ranges: np.ndarray = np.array([np.min(data, axis=(1, 2)), np.max(data, axis=(1, 2))]).T
+        else:
+            self.custom_ranges = custom_ranges
         if self.custom_ranges.shape != (len(z), 2):
             raise ValueError(f"Invalid shape for custom ranges file: expected ({len(z)}, 3), got {self.custom_ranges.shape}.")
 
@@ -162,7 +154,7 @@ class ManualImageCorrection:
         self.radio_buttons.on_clicked(self.on_change_ref_z)
         self.scalebar.on_changed(self.on_change_scaling)
 
-    def start(self) -> bool:
+    def start(self):
         """
         Start GUI.
 
@@ -174,16 +166,14 @@ class ManualImageCorrection:
         plt.show(block=True)
         return True
 
-    def on_change_scaling(self, scaling_range: tuple) -> None:
-        """Handle a scaling range change event."""
+    def on_change_scaling(self, scaling_range):
         self.custom_ranges[self.current_z] = scaling_range
         self.axim_a.set(data=self.get_view_a())
         self.axim_b.set(data=self.get_view_b())
         self.axim_c.set(data=self.get_view_c())
         self.fig.canvas.draw_idle()
 
-    def on_change_z(self, val: float) -> None:
-        """Handle a z-slice change event."""
+    def on_change_z(self, val):
         self.current_z = int(val)
         self.s_offset_a.set_val(self.transforms[self.current_z, 0])
         self.s_offset_b.set_val(self.transforms[self.current_z, 1])
@@ -192,50 +182,43 @@ class ManualImageCorrection:
         self.axim_c.set(data=self.get_view_c())
         self.fig.canvas.draw_idle()
 
-    def on_change_y(self, val: float) -> None:
-        """Handle a y-slice change event."""
+    def on_change_y(self, val):
         self.current_y = int(val)
         self.axim_b.set(data=self.get_view_b())
         self.fig.canvas.draw_idle()
 
-    def on_change_x(self, val: float) -> None:
-        """Handle an x-slice change event."""
+    def on_change_x(self, val):
         self.current_x = int(val)
         self.axim_a.set(data=self.get_view_a())
         self.fig.canvas.draw_idle()
 
-    def on_change_offset_a(self, val: float) -> None:
-        """Handle a change in the offset along axis A."""
+    def on_change_offset_a(self, val):
         self.transforms[self.current_z, 0] = val
         self.axim_a.set(data=self.get_view_a())
         self.axim_b.set(data=self.get_view_b())
         self.axim_c.set(data=self.get_view_c())
         self.fig.canvas.draw_idle()
 
-    def on_change_offset_b(self, val: float) -> None:
-        """Handle a change in the offset along axis B."""
+    def on_change_offset_b(self, val):
         self.transforms[self.current_z, 1] = val
         self.axim_a.set(data=self.get_view_a())
         self.axim_b.set(data=self.get_view_b())
         self.axim_c.set(data=self.get_view_c())
         self.fig.canvas.draw_idle()
 
-    def on_change_theta(self, val: float) -> None:
-        """Handle a rotation angle change event."""
+    def on_change_theta(self, val):
         self.transforms[self.current_z, 2] = val
         self.axim_a.set(data=self.get_view_a())
         self.axim_b.set(data=self.get_view_b())
         self.axim_c.set(data=self.get_view_c())
         self.fig.canvas.draw_idle()
 
-    def on_change_ref_z(self, label: str | None) -> None:
-        """Handle a change in the reference z-slice mode."""
+    def on_change_ref_z(self, label):
         self.ref_z_mode = label
         self.axim_c.set(data=self.get_view_c())
         self.fig.canvas.draw_idle()
 
-    def transform_coordinates(self, coordinates: np.ndarray, z: int | None = None) -> np.ndarray:
-        """Apply the stored affine transforms to a set of coordinates."""
+    def transform_coordinates(self, coordinates, z=None):
         # will consider either all z or a single one
         if z is None:
             ty = self.transforms[:, 0]
@@ -250,8 +233,7 @@ class ManualImageCorrection:
 
         return coordinates
 
-    def apply_scaling(self, data: np.ndarray, z: int | None = None) -> np.ndarray:
-        """Apply intensity clipping and scaling to data for display."""
+    def apply_scaling(self, data, z=None):
         if z is not None:
             clip_min = self.custom_ranges[z, 0]
             clip_max = self.custom_ranges[z, 1]
@@ -264,32 +246,28 @@ class ManualImageCorrection:
         # at this point the data is between [0, 1]
         return data
 
-    def draw_cursor(self, data: np.ndarray) -> np.ndarray:
-        """Draw a cursor marker on the z-slice boundary of the data."""
+    def draw_cursor(self, data):
         # keeping in mind that axis=0 is the z axis
         cursor_len = int(0.02 * data.shape[-1])
         data[self.current_z, :cursor_len] = 1.0
         data[self.current_z, -cursor_len:] = 1.0
         return data
 
-    def get_view_a(self) -> np.ndarray:
-        """Return the transformed view along axis A."""
+    def get_view_a(self):
         view_coords = self.grid_coordinates[:, :, self.current_x, :]
         transformed_coords = self.transform_coordinates(view_coords)
         data = self.apply_scaling(self.image_interpolator(transformed_coords))
         data = self.draw_cursor(data)
         return data
 
-    def get_view_b(self) -> np.ndarray:
-        """Return the transformed view along axis B."""
+    def get_view_b(self):
         view_coords = self.grid_coordinates[:, self.current_y, :, :]
         transformed_coords = self.transform_coordinates(view_coords)
         data = self.apply_scaling(self.image_interpolator(transformed_coords))
         data = self.draw_cursor(data)
         return data.T
 
-    def get_view_c(self) -> np.ndarray:
-        """Return the transformed RGB view at the current z-slice."""
+    def get_view_c(self):
         # subsample coordinates for better interactivity
         view_coords = self.grid_coordinates[self.current_z, :: self.downsample, :: self.downsample, :]
         transformed_coords = self.transform_coordinates(view_coords, self.current_z)
@@ -307,7 +285,7 @@ class ManualImageCorrection:
                 data_rgb[..., 0] = data_ref
         return np.clip(data_rgb, 0.0, 1.0)
 
-    def save_results(self, filename: str) -> None:
+    def save_results(self, filename):
         """
         Save resulting corrections to npz file.
 
@@ -319,16 +297,11 @@ class ManualImageCorrection:
         np.savez_compressed(filename, custom_ranges=self.custom_ranges, transforms=self.transforms)
 
 
-def apply_transform(
-    ty: float | np.ndarray,
-    tx: float | np.ndarray,
-    theta: float | np.ndarray,
-    coordinates: np.ndarray,
-) -> np.ndarray:
-    """Apply transformation to coordinates.
-
-    Coordinates are expected to be of shape ``(nz, ny, nx, 3)``,
-    with each coordinate given in the order ``(z, y, x)``.
+def apply_transform(ty, tx, theta, coordinates):
+    """
+    Apply transformation to coordinates. Coordinates are expected to be
+    of shape (nz, ny, nx, 3), with each coordinate given in the order
+    (z, y, x).
 
     Parameters
     ----------
@@ -336,12 +309,9 @@ def apply_transform(
         Translation along y axis.
     tx: float or ndarray of shape (nz,)
         Translation along x axis.
-    theta : float or ndarray of shape (nz,)
+    theta: float or ndarray of shape (nz,)
         Rotation around z axis in radians. The center of rotation
         is the center of the image.
-    coordinates : ndarray of shape (nz, ny, nx, 3)
-        Input coordinates to transform, with each coordinate in (z, y, x) order.
-
     Returns
     -------
     coordinates: ndarray (nz, ny, nx, 3)
@@ -363,10 +333,9 @@ def apply_transform(
     return coordinates
 
 
-def apply_scaling(data: np.ndarray, vmin: float | np.ndarray, vmax: float | np.ndarray) -> np.ndarray:
+def apply_scaling(data, vmin, vmax):
     """
-    Rescale image intensities from (vmin, vmax) to (0.0, 1.0). Values.
-
+    Rescale image intensities from (vmin, vmax) to (0.0, 1.0). Values
     outside the range (vmin, vmax) are clipped.
 
     Rescaling can be performed with a single range for the whole image
@@ -391,17 +360,16 @@ def apply_scaling(data: np.ndarray, vmin: float | np.ndarray, vmax: float | np.n
     data -= vmin
     clip_range = vmax - vmin
     if isinstance(clip_range, np.ndarray):
-        mask = np.reshape(clip_range > 0, (-1,))
-        data[mask] /= clip_range[mask]  # ty: ignore[invalid-argument-type]  # clip_range dtype is Unknown after subtraction; safe at runtime
+        mask = (clip_range > 0).reshape((-1,))
+        data[mask] /= clip_range[mask]
     elif clip_range > 0.0:
         data /= clip_range
     return data
 
 
-def transform_and_rescale_slice(slice: np.ndarray, ty: float, tx: float, theta: float, vmin: float, vmax: float) -> np.ndarray:
+def transform_and_rescale_slice(slice, ty, tx, theta, vmin, vmax):
     """
-    Transform and rescale 2D slice. Transform consists of a translation.
-
+    Transform and rescale 2D slice. Transform consists of a translation
     (ty, tx) and a rotation theta. Rescaling clips intensities to (vmin, vmax)
     and rescales the resulting values to the range (0, 1).
 

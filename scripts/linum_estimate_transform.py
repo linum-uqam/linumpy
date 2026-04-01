@@ -26,9 +26,9 @@ import SimpleITK as sitk
 import zarr
 
 from linumpy.io.zarr import read_omezarr
-from linumpy.metrics import collect_xy_transform_metrics
 from linumpy.mosaic import grid as mosaic_grid
 from linumpy.registration.transforms import compute_motor_transform, estimate_mosaic_transform
+from linumpy.metrics import collect_xy_transform_metrics
 
 configure_all_libraries()
 
@@ -36,10 +36,10 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def _build_arg_parser() -> argparse.ArgumentParser:
+def _build_arg_parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_images", type=Path, nargs="+", help="Full path to a 2D mosaic grid image.")
-    p.add_argument("output_transform", type=Path, help="Output affine transform filename (must be a npy)")
+    p.add_argument("input_images", nargs="+", help="Full path to a 2D mosaic grid image.")
+    p.add_argument("output_transform", help="Output affine transform filename (must be a npy)")
     p.add_argument(
         "--initial_overlap",
         type=float,
@@ -53,8 +53,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=400,
         help="Tile shape in pixel. You can provide both the row and col shape if different. Additional "
-        "shapes will be ignored. Note that this will be ignored if a zarr is provided. The zarr chunks will be used instead."
-        " (default=%(default)s)",
+        "shapes will be ignored. Note that this will be ignored if a zarr is provided. "
+        "The zarr chunks will be used instead. (default=%(default)s)",
     )
     p.add_argument(
         "--maximum_empty_fraction",
@@ -83,8 +83,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main() -> None:
-    """Run the mosaic transform estimation script."""
+def main():
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -105,67 +104,53 @@ def main() -> None:
     elif len(tile_shape) > 2:
         tile_shape = tile_shape[0:2]
 
-    img: zarr.Array | None = None
     if input_images[0].rstrip("/").endswith(".ome.zarr"):
         img, _ = read_omezarr(input_images[0], level=0)
         tile_shape = list(img.chunks[-2:])  # Get last 2 dimensions (Y, X)
     elif input_images[0].rstrip("/").endswith(".zarr"):
-        _zarr = zarr.open(input_images[0], mode="r")
-        assert isinstance(_zarr, zarr.Array)
-        img = _zarr
+        img = zarr.open(input_images[0], mode="r")
         tile_shape = list(img.chunks[-2:])
 
     # Check the output filename extensions
     assert output_transform.name.endswith(".npy"), "output_transform must be a .npy file"
 
-    mosaics: list = []
     if args.use_motor_positions:
         # Motor-position mode: compute transform from expected overlap
-        logger.info("Using motor positions with %.1f%% overlap", args.initial_overlap * 100)
-        logger.info("Tile shape: %s", tile_shape)
+        logger.info(f"Using motor positions with {args.initial_overlap * 100:.1f}% overlap")
+        logger.info(f"Tile shape: {tile_shape}")
 
         transform = compute_motor_transform(tile_shape, args.initial_overlap)
         residuals = np.array([0.0])
         tile_count = 0
 
         logger.info("Motor-based transform:")
-        logger.info("  Step Y: %.1f px", transform[0, 0])
-        logger.info("  Step X: %.1f px", transform[1, 1])
+        logger.info(f"  Step Y: {transform[0, 0]:.1f} px")
+        logger.info(f"  Step X: {transform[1, 1]:.1f} px")
 
     else:
         # Registration mode: use phase correlation
         logger.info("Using image-based registration (phase correlation)")
 
         # Load all input images
+        mosaics = []
         for file in input_images:
             if file.rstrip("/").endswith(".ome.zarr"):
-                img, _ = read_omezarr(file, level=0)
+                img, _ = read_omezarr(str(file), level=0)
                 image = img[:]
             elif file.rstrip("/").endswith(".zarr"):
-                _zarr2 = zarr.open(str(file), mode="r")
-                assert isinstance(_zarr2, zarr.Array)
-                image = _zarr2[:]
+                img = zarr.open(str(file), mode="r")
+                image = img[:]
             else:
                 image = sitk.GetArrayFromImage(sitk.ReadImage(str(file)))
-            mosaic = mosaic_grid.MosaicGrid(
-                np.asarray(image), tile_shape=tuple(tile_shape), overlap_fraction=args.initial_overlap
-            )
+            mosaic = mosaic_grid.MosaicGrid(image, tile_shape=tile_shape, overlap_fraction=args.initial_overlap)
             mosaics.append(mosaic)
 
         # Estimate transform
         transform, residuals, tile_count = estimate_mosaic_transform(mosaics, max_empty_fraction, args.n_samples, args.seed)
 
-        logger.info("Registration-based transform (from %d tile pairs):", tile_count)
-        logger.info(
-            "  Step Y: %.1f px (expected: %.1f)",
-            transform[0, 0],
-            tile_shape[0] * (1 - args.initial_overlap),
-        )
-        logger.info(
-            "  Step X: %.1f px (expected: %.1f)",
-            transform[1, 1],
-            tile_shape[1] * (1 - args.initial_overlap),
-        )
+        logger.info(f"Registration-based transform (from {tile_count} tile pairs):")
+        logger.info(f"  Step Y: {transform[0, 0]:.1f} px (expected: {tile_shape[0] * (1 - args.initial_overlap):.1f})")
+        logger.info(f"  Step X: {transform[1, 1]:.1f} px (expected: {tile_shape[1] * (1 - args.initial_overlap):.1f})")
 
         # Compare with expected motor positions
         expected_step_y = tile_shape[0] * (1 - args.initial_overlap)
@@ -174,22 +159,25 @@ def main() -> None:
         diff_x = (transform[1, 1] - expected_step_x) / expected_step_x * 100
 
         if abs(diff_y) > 1 or abs(diff_x) > 1:
-            logger.warning("Registration differs from motor positions by Y=%.1f%%, X=%.1f%%", diff_y, diff_x)
+            logger.warning(f"Registration differs from motor positions by Y={diff_y:.1f}%, X={diff_x:.1f}%")
             logger.warning("Consider using --use_motor_positions if motor positions are reliable")
 
     # Save the transform
     output_transform.parent.mkdir(exist_ok=True, parents=True)
     np.save(str(output_transform), transform)
-    logger.info("Transform saved to %s", output_transform)
+    logger.info(f"Transform saved to {output_transform}")
 
     # Determine grid dimensions for accumulated error computation
     n_tiles_x = None
     n_tiles_y = None
     if args.use_motor_positions:
         # img may be defined if input was a zarr
-        if img is not None:
+        try:
+            # img.shape[-2] = rows, img.shape[-1] = cols
             n_tiles_y = img.shape[-2] // tile_shape[0]
             n_tiles_x = img.shape[-1] // tile_shape[1]
+        except NameError:
+            pass  # non-zarr input; tile counts unknown
     else:
         if mosaics:
             n_tiles_x = mosaics[0].n_tiles_x

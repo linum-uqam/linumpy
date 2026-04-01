@@ -45,6 +45,11 @@ def resample_itk(vol: np.ndarray, newshape: Sequence[int] | int, interpolator: s
         vol = np.squeeze(vol, axis=(2,))
         newshape = newshape[0:2]
 
+    # Use a small positive default value instead of zero to avoid black dots
+    nonzero_vals = vol[vol > 0]
+    default_val = float(np.percentile(nonzero_vals, 1)) if len(nonzero_vals) > 0 else 0.0
+    resample.SetDefaultPixelValue(default_val)
+
     if vol.ndim == 2:
         nx, ny = vol.shape
         ox, oy = newshape
@@ -121,6 +126,11 @@ def shrink(vol: np.ndarray, spacing: tuple[float, float, float] = (1.0, 1.0, 1.0
     resample.SetInterpolator(sitk.sitkLinear)
     resample.SetOutputSpacing([rz, ry, rx])
     resample.SetSize(output_size)
+
+    # Use a small positive default value instead of zero to avoid black dots
+    nonzero_vals = vol[vol > 0]
+    default_val = float(np.percentile(nonzero_vals, 1)) if len(nonzero_vals) > 0 else 0.0
+    resample.SetDefaultPixelValue(default_val)
 
     # Resampling
     return sitk.GetArrayFromImage(resample.Execute(img))

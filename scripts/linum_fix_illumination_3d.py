@@ -1,14 +1,36 @@
 #!/usr/bin/env python3
 
 """
-Detect and fix the lateral illumination inhomogeneities for each.
-
+Detect and fix the lateral illumination inhomogeneities for each
 3D tiles of a mosaic grid.
+
+This is the CPU version. For GPU acceleration, use linum_fix_illumination_3d_gpu.py
 """
 
-from os import environ
+# Configure thread limits before numpy/scipy imports
+import linumpy.config.threads  # noqa: F401
 
-environ["OMP_NUM_THREADS"] = "1"
+import os
+
+# When using multiprocessing with pqdm, we need to limit threads per worker
+# to prevent thread oversubscription. The number of threads per worker should be
+# calculated based on total CPUs and number of parallel processes.
+# This is set dynamically in main() after parsing arguments.
+# For now, we preserve any existing OMP_NUM_THREADS setting from Nextflow,
+# or default to 1 for safety when multiprocessing.
+if "OMP_NUM_THREADS" not in os.environ:
+    os.environ["OMP_NUM_THREADS"] = "1"
+
+# Configure JAX/XLA thread limits for BaSiCPy
+# Must be set BEFORE importing jax/basicpy
+if "XLA_FLAGS" not in os.environ:
+    omp_threads = os.environ.get("OMP_NUM_THREADS", "1")
+    os.environ["XLA_FLAGS"] = f"--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads={omp_threads}"
+if "OMP_NUM_THREADS" not in os.environ:
+    os.environ["OMP_NUM_THREADS"] = "1"
+
+# Force CPU mode for JAX
+os.environ["JAX_PLATFORMS"] = "cpu"
 
 import argparse
 import tempfile
@@ -22,16 +44,16 @@ from basicpy import BaSiC
 from pqdm.processes import pqdm
 from tqdm.auto import tqdm
 
-from linumpy.cli.args import add_processes_arg, parse_processes_arg
 from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
+from linumpy.cli.args import add_processes_arg, parse_processes_arg
 
 # TODO: add option to export the flatfields and darkfields
 
 
-def _build_arg_parser() -> argparse.ArgumentParser:
+def _build_arg_parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_zarr", type=Path, help="Full path to the input zarr file")
-    p.add_argument("output_zarr", type=Path, help="Full path to the output zarr file")
+    p.add_argument("input_zarr", help="Full path to the input zarr file")
+    p.add_argument("output_zarr", help="Full path to the output zarr file")
     p.add_argument("--max_iterations", type=int, default=500, help="Maximum number of iterations for BaSiC. [%(default)s]")
     p.add_argument(
         "--percentile_max",
@@ -42,8 +64,18 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def process_tile(params: dict) -> tuple[int, Path]:
-    """Process a tile and add it to the output mosaic."""
+def process_tile(params: dict):
+    """Process a tile and add it to the output mosaic.
+
+    Note: This function runs in a subprocess when using pqdm multiprocessing.
+    Thread limits are configured via environment variables which are inherited.
+    """
+    # Ensure thread limits are applied in this worker process
+    # (environment variables are inherited but threadpoolctl needs to be reapplied)
+    from linumpy.config.threads import apply_threadpool_limits
+
+    apply_threadpool_limits()
+
     file = params["slice_file"]
     z = params["z"]
     tile_shape = params["tile_shape"]
@@ -124,8 +156,7 @@ def process_tile(params: dict) -> tuple[int, Path]:
     return z, file_output
 
 
-def main() -> None:
-    """Run the 3D illumination correction script."""
+def main():
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -139,7 +170,7 @@ def main() -> None:
     vol, resolution = read_omezarr(input_zarr, level=0)
     p_upper = None
     if args.percentile_max is not None:
-        p_upper = float(da.percentile(da.from_zarr(vol).ravel(), args.percentile_max).compute()[0])
+        p_upper = np.percentile(vol[:], args.percentile_max)
     n_slices = vol.shape[0]
 
     tmp_dir = tempfile.TemporaryDirectory(suffix="_linum_fix_illumination_3d_slices", dir=output_zarr.parent)

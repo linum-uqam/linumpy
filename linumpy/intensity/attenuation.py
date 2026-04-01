@@ -17,6 +17,8 @@ from scipy.ndimage import (
 from scipy.optimize import minimize
 from skimage.filters import threshold_li
 
+from linumpy.cli.args import get_available_cpus
+from linumpy.config.threads import worker_initializer
 from linumpy.geometry.crop import mask_under_interface
 from linumpy.geometry.interface import find_tissue_interface, get_interface_depth_from_mask
 from linumpy.intensity.normalize import eqhist, normalize
@@ -374,8 +376,8 @@ def get_aline_attenuation(vol: np.ndarray, k: int = 1, mask: np.ndarray | None =
                 a_lines[ii] = A[M]
 
         # Process each Alines in parallel
-        nproc = multiprocessing.cpu_count()
-        p = multiprocessing.Pool(nproc)
+        nproc = get_available_cpus()
+        p = multiprocessing.Pool(nproc, initializer=worker_initializer)
         result = p.map(_aline_fit, a_lines)
         p.close()
         p.join()
@@ -511,7 +513,7 @@ def find_interface_from_gradient(vol: np.ndarray, f: float = 0.005, remove_smoot
 def get_heterogeneous_attenuation(vol: np.ndarray, mask: np.ndarray | None = None, fill_holes: bool = False) -> np.ndarray:  # TODO: adapt multiproc to available proc given by mpi4py
     """Compute heterogeneous attenuation coefficients for each A-line segment."""
     nx, ny, nz = vol.shape
-    nproc = multiprocessing.cpu_count()
+    nproc = get_available_cpus()
     if mask is None:  # Compute the mask
         mask = get_interface_mask(vol)
 
@@ -523,7 +525,7 @@ def get_heterogeneous_attenuation(vol: np.ndarray, mask: np.ndarray | None = Non
     n_alines = len(a_lines)
 
     # Process each Alines in parallel
-    p = multiprocessing.Pool(nproc)
+    p = multiprocessing.Pool(nproc, initializer=worker_initializer)
     result = p.map(_split_alines_worker, a_lines_to_split)
     p.close()
     p.join()
@@ -545,7 +547,7 @@ def get_heterogeneous_attenuation(vol: np.ndarray, mask: np.ndarray | None = Non
         z_portions.extend(foo[1])
         portion_idx.extend([idx] * len(foo[0]))
 
-    p = multiprocessing.Pool(nproc)
+    p = multiprocessing.Pool(nproc, initializer=worker_initializer)
     result = p.map(_aline_fit, aline_portions)
     p.close()
     p.join()
