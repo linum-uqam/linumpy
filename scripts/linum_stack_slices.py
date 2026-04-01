@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """Stack 2D mosaics into a single volume."""
 
@@ -19,23 +18,25 @@ from tqdm.auto import tqdm
 
 from linumpy.utils_images import apply_xy_shift
 
-
 # TODO: add option to give a folder
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_images", nargs="+",
-                   help="Full path to a 2D mosaic grid image (nifti files). Expects this format: '.*z(\d+)_.*' to extract the slice number.")
-    p.add_argument("output_volume",
-                   help="Assembled volume filename (must be a .zarr)")
-    p.add_argument("--xy_shifts", required=False, default=None,
-                   help="CSV file containing the xy shifts for each slice")
-    p.add_argument("--resolution_xy", type=float, default=1.0,
-                   help="Lateral (xy) resolution in micron. (default=%(default)s)")
-    p.add_argument("--resolution_z", type=float, default=1.0,
-                   help="Axial (z) resolution in micron, corresponding to the z distance between images in the stack. (default=%(default)s)")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument(
+        "input_images",
+        nargs="+",
+        help=r"Full path to a 2D mosaic grid image (nifti files). Expects this format: '.*z(\d+)_.*' to extract the slice number.",
+    )
+    p.add_argument("output_volume", help="Assembled volume filename (must be a .zarr)")
+    p.add_argument("--xy_shifts", required=False, default=None, help="CSV file containing the xy shifts for each slice")
+    p.add_argument("--resolution_xy", type=float, default=1.0, help="Lateral (xy) resolution in micron. (default=%(default)s)")
+    p.add_argument(
+        "--resolution_z",
+        type=float,
+        default=1.0,
+        help="Axial (z) resolution in micron, corresponding to the z distance between images in the stack. (default=%(default)s)",
+    )
     return p
 
 
@@ -97,15 +98,16 @@ def main():
     y0 = min(ymin)
     x1 = max(xmax)
     y1 = max(ymax)
-    nx = int((x1 - x0))
-    ny = int((y1 - y0))
+    nx = int(x1 - x0)
+    ny = int(y1 - y0)
     volume_shape = (n_slices, ny, nx)
 
     # Create the zarr persistent array
     process_sync_file = str(zarr_file).replace(".zarr", ".sync")
     synchronizer = zarr.ProcessSynchronizer(process_sync_file)
-    mosaic = zarr.open(zarr_file, mode="w", shape=volume_shape, dtype=np.float32, chunks=(1, 256, 256),
-                       synchronizer=synchronizer)
+    mosaic = zarr.open(
+        zarr_file, mode="w", shape=volume_shape, dtype=np.float32, chunks=(1, 256, 256), synchronizer=synchronizer
+    )
 
     # Loop over the slices
     for i in tqdm(range(len(files)), unit="slice", desc="Stacking slices"):
@@ -132,6 +134,7 @@ def main():
 
     # Removing the synchronizer file
     shutil.rmtree(process_sync_file)
+
 
 if __name__ == "__main__":
     main()

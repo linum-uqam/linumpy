@@ -1,11 +1,9 @@
 import warnings
 from pathlib import Path
-from typing import Union
 
 import numpy as np
 
 from linumpy.preproc import xyzcorr
-
 
 # TODO: consider the 'n_repeat' parameter when loading the data
 # TODO: reorder the dimension, position, etc to be n_depths, n_alines and n_bscans
@@ -14,7 +12,7 @@ from linumpy.preproc import xyzcorr
 class OCT:
     """
     Spectral-domain OCT class to reconstruct the data.
-    
+
     Parameters
     ==========
     directory: string
@@ -22,6 +20,7 @@ class OCT:
     axial_res: float, optional
         Axial resolution of the data in microns.
     """
+
     def __init__(self, directory: str, axial_res=3.5):
         self.directory = Path(directory)
         self.info_filename = self.directory / "info.txt"
@@ -32,13 +31,13 @@ class OCT:
         self.read_scan_info(self.info_filename)
 
     def read_scan_info(self, filename: str):
-        """ Read the scan information file
+        """Read the scan information file
         Parameters
         ----------
         filename
             Path to the scan_file written by the OCT (.txt)
         """
-        with open(filename, "r") as f:
+        with open(filename) as f:
             foo = f.read()
 
         # Process the file input
@@ -48,16 +47,12 @@ class OCT:
             if len(hello) == 1:
                 continue
             key, val = hello
-            if val.isnumeric():
-                val = int(val)
-            elif val.strip("-").isnumeric():
+            if val.isnumeric() or val.strip("-").isnumeric():
                 val = int(val)
             self.info[key] = val
 
-    def load_image(self, crop: bool = True,
-                   fix_galvo_shift: Union[bool, int] = True,
-                   fix_camera_shift: bool = False) -> np.ndarray:
-        """ Load an image dataset
+    def load_image(self, crop: bool = True, fix_galvo_shift: bool | int = True, fix_camera_shift: bool = False) -> np.ndarray:
+        """Load an image dataset
         Parameters
         ----------
         crop
@@ -75,9 +70,9 @@ class OCT:
         """
         # Create numpy array
         # n_avg = self.info['n_repeat']  # TODO: use the number of averages when loading the data
-        n_alines = self.info['nx']
-        n_bscans = self.info['ny']
-        n_extra = self.info['n_extra']
+        n_alines = self.info["nx"]
+        n_bscans = self.info["ny"]
+        n_extra = self.info["n_extra"]
         n_alines_per_bscan = n_alines + n_extra
         n_z = self.info["bottom_z"] - self.info["top_z"] + 1
 
@@ -89,7 +84,7 @@ class OCT:
             with open(file, "rb") as f:
                 foo = np.fromfile(f, dtype=np.float32)
             n_frames = int(len(foo) / (n_alines_per_bscan * n_z))
-            foo = np.reshape(foo, (n_z, n_alines_per_bscan, n_frames), order='F')
+            foo = np.reshape(foo, (n_z, n_alines_per_bscan, n_frames), order="F")
             if vol is None:
                 vol = foo
             else:
@@ -124,7 +119,7 @@ class OCT:
     @property
     def position_available(self) -> bool:
         """True if the position is available in the info.txt file"""
-        return 'stage_x_pos_mm' in self.info
+        return "stage_x_pos_mm" in self.info
 
     @property
     def dimension(self) -> tuple[float, float, float]:
@@ -132,7 +127,7 @@ class OCT:
         try:
             nz = self.shape[2]
             rz = self.resolution[2]
-            return self.info['width'] / 1000.0, self.info['height'] / 1000.0, nz * rz
+            return self.info["width"] / 1000.0, self.info["height"] / 1000.0, nz * rz
         except KeyError:
             return 1, 1, 1
 
@@ -140,9 +135,9 @@ class OCT:
     def position(self) -> tuple[float, float, float]:
         """OCT physical position in mm from the info.txt file. Will be (0, 0, 0) if not found"""
         try:
-            x = float(self.info['stage_x_pos_mm'])
-            y = float(self.info['stage_y_pos_mm'])
-            z = float(self.info['stage_z_pos_mm'])
+            x = float(self.info["stage_x_pos_mm"])
+            y = float(self.info["stage_y_pos_mm"])
+            z = float(self.info["stage_z_pos_mm"])
             return x, y, z
         except KeyError:
             return 0, 0, 0
@@ -154,8 +149,8 @@ class OCT:
         Will be (1, 1, 1) if not found.
         """
         try:
-            rx = self.info['width'] / self.info['nx'] / 1000.0
-            ry = self.info['height'] / self.info['ny'] / 1000.0
+            rx = self.info["width"] / self.info["nx"] / 1000.0
+            ry = self.info["height"] / self.info["ny"] / 1000.0
             rz = self.rz / 1000.0  # TODO: add this info to the info.txt file
             return rx, ry, rz
         except KeyError:
@@ -164,10 +159,10 @@ class OCT:
     @property
     def shape(self) -> tuple[float, float, float]:
         """OCT shape in pixel from the info.txt file. Returns (nx, ny, nz)"""
-        nx = self.info['nx']
-        ny = self.info['ny']
-        if 'bottom_z' in self.info and 'top_z' in self.info:
-            nz = self.info['bottom_z'] - self.info['top_z'] + 1
+        nx = self.info["nx"]
+        ny = self.info["ny"]
+        if "bottom_z" in self.info and "top_z" in self.info:
+            nz = self.info["bottom_z"] - self.info["top_z"] + 1
         else:
             nz = self.n_samples // 2
         return nx, ny, nz

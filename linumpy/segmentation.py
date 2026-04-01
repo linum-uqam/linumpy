@@ -1,12 +1,11 @@
 #! /usr/bin/env python
-# -*- coding: utf-8 -*-
 
-import SimpleITK as sitk
 import numpy as np
+import SimpleITK as sitk
 from scipy.ndimage import binary_erosion, binary_fill_holes
 
 
-def segmentOCT3D(vol: np.ndarray, k:int=5, useLog:bool=True, thresholdMethod:str="otsu") -> np.ndarray:
+def segmentOCT3D(vol: np.ndarray, k: int = 5, useLog: bool = True, thresholdMethod: str = "otsu") -> np.ndarray:
     """To segment an S-OCT brain in 3D using thresholding and morphological watershed
     Parameters
     ----------
@@ -79,7 +78,7 @@ def fillHoles_2Dand3D(mask: np.ndarray) -> np.ndarray:
     return mask
 
 
-def removeBottom(mask: np.ndarray, k:int=10, axis:int=2, inverse:bool=False, fillHoles:bool=False) -> np.ndarray:
+def removeBottom(mask: np.ndarray, k: int = 10, axis: int = 2, inverse: bool = False, fillHoles: bool = False) -> np.ndarray:
     """Remove the bottom side of the mask.
     Parameters
     ----------

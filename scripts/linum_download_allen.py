@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 Download the Allen mouse brain template, and setting the correct RAS+ direction and spacing.
@@ -14,12 +13,16 @@ from linumpy.io import allen
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("output",
-                   help="Output nifti filename")
-    p.add_argument("-r", "--resolution", default=100, type=int, choices=allen.AVAILABLE_RESOLUTIONS,
-                   help="Template resolution in micron. Default=%(default)s")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("output", help="Output nifti filename")
+    p.add_argument(
+        "-r",
+        "--resolution",
+        default=100,
+        type=int,
+        choices=allen.AVAILABLE_RESOLUTIONS,
+        help="Template resolution in micron. Default=%(default)s",
+    )
 
     return p
 

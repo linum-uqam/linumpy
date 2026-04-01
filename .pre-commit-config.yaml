@@ -1,0 +1,19 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.8
+    hooks:
+      - id: ruff-format
+      - id: ruff
+        args: [--fix]
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty (type check)
+        entry: bash -c 'uv run ty check || true'
+        language: system
+        types: [python]
+        files: ^linumpy/
+        pass_filenames: false
+        # Non-blocking (advisory) until the existing error baseline is resolved.
+        # Switch entry to just "uv run ty check" once errors reach zero.
+        verbose: true

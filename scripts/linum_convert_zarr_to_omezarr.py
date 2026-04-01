@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """Convert a zarr file to an ome-zarr file"""
 
@@ -7,27 +6,27 @@
 import linumpy._thread_config  # noqa: F401
 
 import argparse
-
-import zarr
-
-from linumpy.io.zarr import save_omezarr
 from pathlib import Path
 
 import dask.array as da
+import zarr
+
+from linumpy.io.zarr import save_omezarr
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input",
-                   help="Full path to a zarr file (.zarr)")
-    p.add_argument("output",
-                   help="Full path to the output ome-zarr file (.ome-zarr)")
-    p.add_argument("-r", "--resolution", nargs="+", type=float, default=[1.0],
-                   help="Resolution of the image in microns."
-                        " (default=%(default)s)")
-    p.add_argument('--n_levels', type=int, default=5,
-                   help='Number of levels in pyramidal decomposition. [%(default)s]')
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("input", help="Full path to a zarr file (.zarr)")
+    p.add_argument("output", help="Full path to the output ome-zarr file (.ome-zarr)")
+    p.add_argument(
+        "-r",
+        "--resolution",
+        nargs="+",
+        type=float,
+        default=[1.0],
+        help="Resolution of the image in microns. (default=%(default)s)",
+    )
+    p.add_argument("--n_levels", type=int, default=5, help="Number of levels in pyramidal decomposition. [%(default)s]")
 
     return p
 
@@ -53,8 +52,7 @@ def main():
 
     foo = zarr.open(input_file, mode="r")
     out_dask = da.from_zarr(foo)
-    save_omezarr(out_dask, output_file, voxel_size=scales,
-              overwrite=True, n_levels=args.n_levels)
+    save_omezarr(out_dask, output_file, voxel_size=scales, overwrite=True, n_levels=args.n_levels)
 
 
 if __name__ == "__main__":

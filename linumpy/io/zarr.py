@@ -1,3 +1,6 @@
+# Configure dask thread pool based on environment variables
+from linumpy._thread_config import configure_dask
+
 import os
 import shutil
 import tempfile
@@ -10,13 +13,10 @@ import zarr
 from ome_zarr.dask_utils import resize as da_resize
 from ome_zarr.format import CurrentFormat
 from ome_zarr.io import parse_url
-from ome_zarr.reader import Reader, Multiscales
+from ome_zarr.reader import Multiscales, Reader
 from ome_zarr.scale import Scaler
 from ome_zarr.writer import write_image, write_multiscales_metadata
 from skimage.transform import resize
-
-# Configure dask thread pool based on environment variables
-from linumpy._thread_config import configure_dask
 
 configure_dask()
 
@@ -105,8 +105,7 @@ class CustomScaler(Scaler):
         pyramid = [base]
         max_axes_resize = min(len(base.shape), 3)
         level = self.max_layer
-        while level > 0 and np.all(np.asarray(pyramid[-1].shape[:-max_axes_resize])
-                                   >= self.downscale):
+        while level > 0 and np.all(np.asarray(pyramid[-1].shape[:-max_axes_resize]) >= self.downscale):
             pyramid.append(self.resize_image(pyramid[-1]))
             level -= 1
         return pyramid
@@ -136,15 +135,12 @@ def create_transformation_dict(nlevels, voxel_size, ndims=3):
 
     def _get_scale(i):
         scale = np.zeros(ndims)
-        scale[:-len(voxel_size) - 1:-1] = np.asarray(voxel_size)[::-1] * 2.0 ** i
+        scale[: -len(voxel_size) - 1 : -1] = np.asarray(voxel_size)[::-1] * 2.0**i
         return scale.tolist()
 
     coord_transforms = []
     for i in range(nlevels):
-        transform_dict = [{
-            "type": "scale",
-            "scale": _get_scale(i)
-        }]
+        transform_dict = [{"type": "scale", "scale": _get_scale(i)}]
         coord_transforms.append(transform_dict)
     return coord_transforms
 
@@ -165,7 +161,7 @@ def generate_axes_dict(ndims=3, unit="millimeter"):
         {"name": "c", "type": "channel"},
         {"name": "z", "type": "space", "unit": unit},
         {"name": "y", "type": "space", "unit": unit},
-        {"name": "x", "type": "space", "unit": unit}
+        {"name": "x", "type": "space", "unit": unit},
     ]
     offset = len(axes) - ndims
     return axes[offset:]
@@ -180,16 +176,12 @@ def create_directory(store_path, overwrite=False):
         if overwrite:
             directory.unlink()  # Remove the symlink only; target is NOT deleted
         else:
-            raise FileExistsError('Path {} already exists as a symlink. '
-                                  'Set overwrite=True to overwrite.'
-                                  .format(directory.as_posix()))
+            raise FileExistsError(f"Path {directory.as_posix()} already exists as a symlink. Set overwrite=True to overwrite.")
     elif directory.exists():
         if overwrite:
             shutil.rmtree(directory)
         else:
-            raise FileExistsError('Directory {} already exists. '
-                                  'Set overwrite=True to overwrite.'
-                                  .format(directory.as_posix()))
+            raise FileExistsError(f"Directory {directory.as_posix()} already exists. Set overwrite=True to overwrite.")
     directory.mkdir(parents=True)
     return directory
 
@@ -214,13 +206,13 @@ def validate_n_levels(n_levels, shape, downscale_factor=2):
 
     adjusted_n_levels = min(*logn(shape, downscale_factor).astype(int), n_levels)
     if n_levels > adjusted_n_levels:
-        print(f'WARNING: Requested n_levels {n_levels} too high for image dimensions: {shape}.\n'
-              f'Setting to {adjusted_n_levels}.')
+        print(
+            f"WARNING: Requested n_levels {n_levels} too high for image dimensions: {shape}.\nSetting to {adjusted_n_levels}."
+        )
     return int(adjusted_n_levels)
 
 
-def save_omezarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3),
-                 chunks=(128, 128, 128), n_levels=5, overwrite=True):
+def save_omezarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3), chunks=(128, 128, 128), n_levels=5, overwrite=True):
     """
     Save numpy array to disk in zarr format following OME-NGFF file specifications.
     Expected ordering for axes in `data` and `scales` is `(c, z, y, x)`. Does not
@@ -245,16 +237,10 @@ def save_omezarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3),
     n_levels = validate_n_levels(n_levels, data.shape)
 
     # pyramidal decomposition (ome_zarr.scale.Scaler) keywords
-    pyramid_kw = {"max_layer": int(n_levels),
-                  "method": "linear",
-                  "downscale": 2}
+    pyramid_kw = {"max_layer": int(n_levels), "method": "linear", "downscale": 2}
 
     ome_zarr_version = version("ome-zarr")
-    metadata = {
-        "method": "ome_zarr.scale.Scaler",
-        "version": ome_zarr_version,
-        "args": pyramid_kw
-    }
+    metadata = {"method": "ome_zarr.scale.Scaler", "version": ome_zarr_version, "args": pyramid_kw}
 
     # # axes and coordinate transformations
     ndims = len(data.shape)
@@ -263,14 +249,19 @@ def save_omezarr(data, store_path, voxel_size=(1e-3, 1e-3, 1e-3),
 
     # create directory for zarr storage
     create_directory(store_path, overwrite)
-    store = parse_url(store_path, mode='w').store
+    store = parse_url(store_path, mode="w").store
     zarr_group = zarr.group(store=store)
 
-    write_image(data, zarr_group, axes=axes,
-                scaler=CustomScaler(**pyramid_kw),
-                storage_options=dict(chunks=chunks),
-                coordinate_transformations=coordinate_transformations,
-                compute=True, metadata=metadata)
+    write_image(
+        data,
+        zarr_group,
+        axes=axes,
+        scaler=CustomScaler(**pyramid_kw),
+        storage_options=dict(chunks=chunks),
+        coordinate_transformations=coordinate_transformations,
+        compute=True,
+        metadata=metadata,
+    )
 
     # return zarr group containing saved data
     return zarr_group
@@ -307,13 +298,13 @@ def read_omezarr(zarr_path, level=0):
     for spec in image_node.specs:
         if isinstance(spec, Multiscales):
             multiscale = spec
-    vol = zarr.open_array(Path(zarr_path) / multiscale.datasets[level], mode='r')
+    vol = zarr.open_array(Path(zarr_path) / multiscale.datasets[level], mode="r")
 
     coordTransforms = image_node.metadata["coordinateTransformations"][level]
     scale = [1] * len(vol.shape)
     for tr in coordTransforms:
-        if tr['type'] == 'scale':
-            scale = tr['scale']
+        if tr["type"] == "scale":
+            scale = tr["scale"]
             break
 
     return vol, scale
@@ -327,10 +318,17 @@ class OmeZarrWriter:
     axes: list
     zarray: zarr.Array
 
-    def __init__(self, store_path: str | Path, shape: tuple,
-                 chunk_shape: tuple, shards: tuple = None,
-                 dtype: np.dtype = np.float32, overwrite: bool = True,
-                 downscale_factor: int = 2, unit: str = 'millimeter'):
+    def __init__(
+        self,
+        store_path: str | Path,
+        shape: tuple,
+        chunk_shape: tuple,
+        shards: tuple = None,
+        dtype: np.dtype = np.float32,
+        overwrite: bool = True,
+        downscale_factor: int = 2,
+        unit: str = "millimeter",
+    ):
         """
         Class for writing ome-zarr files to disk in a pyramidal format.
 
@@ -412,9 +410,7 @@ class OmeZarrWriter:
             dims[-2] = dims[-2] // self.downscale_factor
             if len(dims) > 2:
                 dims[-3] = dask_image.shape[-3] // self.downscale_factor
-            output = da_resize(
-                dask_image, tuple(dims), preserve_range=True, anti_aliasing=False
-            )
+            output = da_resize(dask_image, tuple(dims), preserve_range=True, anti_aliasing=False)
 
             options = {}
             if self.fmt.zarr_format == 2:
@@ -423,10 +419,7 @@ class OmeZarrWriter:
                 options["chunk_key_encoding"] = self.fmt.chunk_key_encoding
                 options["dimension_names"] = [axis["name"] for axis in self.axes]
             # write to disk
-            da.to_zarr(
-                arr=output, url=img_path, component=path,
-                zarr_format=self.fmt.zarr_format, **options
-            )
+            da.to_zarr(arr=output, url=img_path, component=path, zarr_format=self.fmt.zarr_format, **options)
 
     def __setitem__(self, index, data):
         self.zarray[index] = data
@@ -445,7 +438,7 @@ class OmeZarrWriter:
     def finalize(self, res, n_levels=5):
         """
         Finalize the OME-Zarr with traditional power-of-2 pyramid levels.
-        
+
         Parameters
         ----------
         res : list of float
@@ -461,16 +454,10 @@ class OmeZarrWriter:
         for p, t in zip(paths, transformations):
             datasets.append({"path": p, "coordinateTransformations": t})
 
-        pyramid_kw = {"max_layer": n_levels,
-                      "method": "linear",
-                      "downscale": self.downscale_factor}
+        pyramid_kw = {"max_layer": n_levels, "method": "linear", "downscale": self.downscale_factor}
 
         ome_zarr_version = version("ome-zarr")
-        metadata = {
-            "method": "ome_zarr.scale.Scaler",
-            "version": ome_zarr_version,
-            "args": pyramid_kw
-        }
+        metadata = {"method": "ome_zarr.scale.Scaler", "version": ome_zarr_version, "args": pyramid_kw}
 
         write_multiscales_metadata(self.root, datasets, axes=self.axes, metadata=metadata)
 
@@ -478,18 +465,18 @@ class OmeZarrWriter:
 class AnalysisOmeZarrWriter(OmeZarrWriter):
     """
     OmeZarrWriter subclass that supports custom analysis-friendly resolution pyramids.
-    
+
     This class extends OmeZarrWriter to create pyramid levels at specific target
     resolutions (e.g., 10, 25, 50, 100 µm) instead of traditional power-of-2
     downsampling. This is useful for creating output volumes optimized for
     downstream analysis at specific scales.
-    
+
     Example
     -------
     >>> writer = AnalysisOmeZarrWriter("output.ome.zarr", shape, chunks, dtype=np.float32)
     >>> writer[:] = data  # Write data at full resolution
     >>> writer.finalize(base_res, [10, 25, 50, 100])
-    
+
     Notes
     -----
     - Use `finalize()` for traditional power-of-2 pyramids (inherited from OmeZarrWriter)
@@ -516,9 +503,7 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
         path_to_array = os.path.join(image_path, source_path)
         dask_image = da.from_zarr(path_to_array)
 
-        output = da_resize(
-            dask_image, tuple(target_shape), preserve_range=True, anti_aliasing=True
-        )
+        output = da_resize(dask_image, tuple(target_shape), preserve_range=True, anti_aliasing=True)
 
         options = {}
         if self.fmt.zarr_format == 2:
@@ -527,16 +512,12 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
             options["chunk_key_encoding"] = self.fmt.chunk_key_encoding
             options["dimension_names"] = [axis["name"] for axis in self.axes]
 
-        da.to_zarr(
-            arr=output, url=img_path, component=target_path,
-            zarr_format=self.fmt.zarr_format, **options
-        )
+        da.to_zarr(arr=output, url=img_path, component=target_path, zarr_format=self.fmt.zarr_format, **options)
 
-    def finalize(self, res, target_resolutions_um=(10, 25, 50, 100), n_levels=None,
-                 make_isotropic=True):
+    def finalize(self, res, target_resolutions_um=(10, 25, 50, 100), n_levels=None, make_isotropic=True):
         """
         Finalize the OME-Zarr with pyramid levels.
-        
+
         Parameters
         ----------
         res : list of float
@@ -554,23 +535,23 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
             to achieve the target resolution.
             If False, preserves the original aspect ratio by scaling all dimensions
             uniformly based on the finest (smallest) base resolution.
-            
+
         Notes
         -----
         By default, creates pyramid levels at specific analysis-friendly
         resolutions (e.g., 10, 25, 50, 100 µm). If n_levels is provided,
         falls back to traditional power-of-2 downsampling for backward
         compatibility.
-        
+
         Examples
         --------
         For anisotropic data with base resolution [1.5, 10, 10] µm targeting 25 µm:
-        
+
         With make_isotropic=True (default):
             - Scale factors: [16.67, 2.5, 2.5] (per-dimension)
             - Output: isotropic 25 µm voxels
             - Shape aspect ratio changes
-            
+
         With make_isotropic=False:
             - Scale factor: 16.67 (uniform, based on finest dimension 1.5 µm)
             - Output: anisotropic [25, 167, 167] µm voxels
@@ -597,11 +578,11 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
         is_anisotropic = max(base_res_um) / min_base_res_um > 1.1  # 10% threshold
         if is_anisotropic:
             if make_isotropic:
-                print(f"Creating ISOTROPIC pyramid from anisotropic data")
+                print("Creating ISOTROPIC pyramid from anisotropic data")
                 print(f"  Base resolution: {base_res_um} µm (anisotropic)")
                 print(f"  Output: isotropic voxels at {valid_targets} µm")
             else:
-                print(f"Creating pyramid PRESERVING ASPECT RATIO")
+                print("Creating pyramid PRESERVING ASPECT RATIO")
                 print(f"  Base resolution: {base_res_um} µm (anisotropic)")
                 print(f"  Scaling uniformly based on finest dimension ({min_base_res_um} µm)")
         else:
@@ -671,10 +652,7 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
         metadata = {
             "method": "custom_resolution_pyramid",
             "version": ome_zarr_version,
-            "args": {
-                "target_resolutions_um": valid_targets,
-                "make_isotropic": make_isotropic
-            }
+            "args": {"target_resolutions_um": valid_targets, "make_isotropic": make_isotropic},
         }
 
         write_multiscales_metadata(self.root, datasets, axes=self.axes, metadata=metadata)

@@ -1,14 +1,14 @@
-import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider, RadioButtons, RangeSlider
+import numpy as np
+from matplotlib.widgets import RadioButtons, RangeSlider, Slider
 from scipy.interpolate import RegularGridInterpolator
 
-PREV_REF_LABEL = 'Previous slice as reference'
-NEXT_REF_LABEL = 'Next slice as reference'
-NO_REF_LABEL = 'No reference slice'
+PREV_REF_LABEL = "Previous slice as reference"
+NEXT_REF_LABEL = "Next slice as reference"
+NO_REF_LABEL = "No reference slice"
 
 
-class ManualImageCorrection():
+class ManualImageCorrection:
     """
     Manual image correction using a graphical user interface. Corrections
     include independent translation and rotation of each z-slice as well
@@ -30,8 +30,8 @@ class ManualImageCorrection():
     custom_ranges: ndarray (nz, 2), optional
         Intensities for rescaling each slice. One (vmin, vmax) per slice.
     """
-    def __init__(self, data, resolution, downsample_factor,
-                 transforms=None, custom_ranges=None):
+
+    def __init__(self, data, resolution, downsample_factor, transforms=None, custom_ranges=None):
         # We will work on a dataset rescaled between [0, 1]
         data = data - data.min()
         data = data / data.max()
@@ -42,10 +42,8 @@ class ManualImageCorrection():
 
         y = np.arange(data.shape[1])
         x = np.arange(data.shape[2])
-        self.image_interpolator = RegularGridInterpolator((z, y, x), data,
-                                                          bounds_error=False,
-                                                          fill_value=0)
-        self.grid_coordinates = np.stack(np.meshgrid(z, y, x, indexing='ij'), axis=-1)
+        self.image_interpolator = RegularGridInterpolator((z, y, x), data, bounds_error=False, fill_value=0)
+        self.grid_coordinates = np.stack(np.meshgrid(z, y, x, indexing="ij"), axis=-1)
 
         # Transforms array contains translation and rotation
         # for each slice in the order (ty, tx, theta)
@@ -53,18 +51,15 @@ class ManualImageCorrection():
         if transforms is None:
             self.transforms = np.zeros((len(z), 3))
         if self.transforms.shape != (len(z), 3):
-            raise ValueError("Invalid shape for transforms file: "
-                             f"expected ({len(z)}, 3), got {self.transforms.shape}.")
+            raise ValueError(f"Invalid shape for transforms file: expected ({len(z)}, 3), got {self.transforms.shape}.")
 
         # Base intensity normalization will rescale each slice
         # between its min and max values to the range [0, 1]
         self.custom_ranges = custom_ranges
         if custom_ranges is None:
-            self.custom_ranges = np.array([np.min(data, axis=(1, 2)),
-                                           np.max(data, axis=(1, 2))]).T
+            self.custom_ranges = np.array([np.min(data, axis=(1, 2)), np.max(data, axis=(1, 2))]).T
         if self.custom_ranges.shape != (len(z), 2):
-            raise ValueError("Invalid shape for custom ranges file: "
-                             f"expected ({len(z)}, 3), got {self.custom_ranges.shape}.")
+            raise ValueError(f"Invalid shape for custom ranges file: expected ({len(z)}, 3), got {self.custom_ranges.shape}.")
 
         self.ref_z_mode = NO_REF_LABEL
         self.current_x = len(x) // 2
@@ -76,17 +71,17 @@ class ManualImageCorrection():
 
         # intensities will always be displayed between (0, 1)
         aspect_a = resolution[0] / resolution[2]
-        self.axim_a = axs[0].imshow(self.get_view_a(), aspect=aspect_a,
-                                    vmin=0.0, vmax=1.0,
-                                    interpolation='nearest', cmap='magma')
+        self.axim_a = axs[0].imshow(
+            self.get_view_a(), aspect=aspect_a, vmin=0.0, vmax=1.0, interpolation="nearest", cmap="magma"
+        )
         aspect_b = resolution[0] / resolution[1]
-        self.axim_b = axs[1].imshow(self.get_view_b(), aspect=1.0/aspect_b,
-                                    vmin=0.0, vmax=1.0,
-                                    interpolation='nearest', cmap='magma')
+        self.axim_b = axs[1].imshow(
+            self.get_view_b(), aspect=1.0 / aspect_b, vmin=0.0, vmax=1.0, interpolation="nearest", cmap="magma"
+        )
         aspect_c = resolution[1] / resolution[2]
-        self.axim_c = axs[2].imshow(self.get_view_c(), aspect=aspect_c,
-                                    vmin=0.0, vmax=1.0,
-                                    interpolation='nearest', cmap='magma')
+        self.axim_c = axs[2].imshow(
+            self.get_view_c(), aspect=aspect_c, vmin=0.0, vmax=1.0, interpolation="nearest", cmap="magma"
+        )
         axs[0].set_axis_off()
         axs[1].set_axis_off()
         axs[2].set_axis_off()
@@ -100,32 +95,51 @@ class ManualImageCorrection():
         ax_current_x = self.fig.add_axes([0.15, 0.05, 0.75, 0.03])
         ax_scalebar = self.fig.add_axes([0.91, 0.40, 0.01, 0.55])
 
-        self.scalebar = RangeSlider(ax_scalebar, "Scalebar",
-                                    valmin=0.0, valmax=1.0,
-                                    valinit=(self.custom_ranges[self.current_z, 0],
-                                             self.custom_ranges[self.current_z, 1]),
-                                    orientation='vertical')
+        self.scalebar = RangeSlider(
+            ax_scalebar,
+            "Scalebar",
+            valmin=0.0,
+            valmax=1.0,
+            valinit=(self.custom_ranges[self.current_z, 0], self.custom_ranges[self.current_z, 1]),
+            orientation="vertical",
+        )
 
-        self.s_offset_a = Slider(ax_offset_a, "Offset left image",
-                                 valmin=-data.shape[2]/2,
-                                 valmax=data.shape[2]/2,
-                                 valinit=self.transforms[self.current_z, 0])
-        self.s_offset_b = Slider(ax_offset_b, "Offset right image",
-                                 valmin=-data.shape[1]/2,
-                                 valmax=data.shape[1]/2,
-                                 valinit=self.transforms[self.current_z, 1])
-        self.s_current_z = Slider(ax_current_z, "Current slice z",
-                                  valmin=0, valmax=data.shape[0],
-                                  valinit=0, valstep=np.arange(data.shape[0]))
-        self.s_current_y = Slider(ax_current_y, "Current slice y",
-                                  valmin=0, valmax=data.shape[1],
-                                  valinit=self.current_y, valstep=np.arange(data.shape[1]))
-        self.s_current_x = Slider(ax_current_x, "Current slice x",
-                                  valmin=0, valmax=data.shape[2],
-                                  valinit=self.current_x, valstep=np.arange(data.shape[2]))
-        self.s_theta = Slider(ax_theta, 'Rotation',
-                              valmin=-np.pi/6.0, valmax=np.pi/6.0,
-                              valinit=self.transforms[self.current_z, 2])
+        self.s_offset_a = Slider(
+            ax_offset_a,
+            "Offset left image",
+            valmin=-data.shape[2] / 2,
+            valmax=data.shape[2] / 2,
+            valinit=self.transforms[self.current_z, 0],
+        )
+        self.s_offset_b = Slider(
+            ax_offset_b,
+            "Offset right image",
+            valmin=-data.shape[1] / 2,
+            valmax=data.shape[1] / 2,
+            valinit=self.transforms[self.current_z, 1],
+        )
+        self.s_current_z = Slider(
+            ax_current_z, "Current slice z", valmin=0, valmax=data.shape[0], valinit=0, valstep=np.arange(data.shape[0])
+        )
+        self.s_current_y = Slider(
+            ax_current_y,
+            "Current slice y",
+            valmin=0,
+            valmax=data.shape[1],
+            valinit=self.current_y,
+            valstep=np.arange(data.shape[1]),
+        )
+        self.s_current_x = Slider(
+            ax_current_x,
+            "Current slice x",
+            valmin=0,
+            valmax=data.shape[2],
+            valinit=self.current_x,
+            valstep=np.arange(data.shape[2]),
+        )
+        self.s_theta = Slider(
+            ax_theta, "Rotation", valmin=-np.pi / 6.0, valmax=np.pi / 6.0, valinit=self.transforms[self.current_z, 2]
+        )
         self.radio_buttons = RadioButtons(ax_ref_z, [NO_REF_LABEL, PREV_REF_LABEL, NEXT_REF_LABEL], 0)
 
         # register callbacks
@@ -229,14 +243,13 @@ class ManualImageCorrection():
 
         # at this point the data is between [0, 1]
         return data
-    
+
     def draw_cursor(self, data):
         # keeping in mind that axis=0 is the z axis
         cursor_len = int(0.02 * data.shape[-1])
         data[self.current_z, :cursor_len] = 1.0
         data[self.current_z, -cursor_len:] = 1.0
         return data
-
 
     def get_view_a(self):
         view_coords = self.grid_coordinates[:, :, self.current_x, :]
@@ -254,10 +267,9 @@ class ManualImageCorrection():
 
     def get_view_c(self):
         # subsample coordinates for better interactivity
-        view_coords = self.grid_coordinates[self.current_z, ::self.downsample, ::self.downsample, :]
+        view_coords = self.grid_coordinates[self.current_z, :: self.downsample, :: self.downsample, :]
         transformed_coords = self.transform_coordinates(view_coords, self.current_z)
-        data_view = self.apply_scaling(self.image_interpolator(transformed_coords),
-                                       self.current_z)
+        data_view = self.apply_scaling(self.image_interpolator(transformed_coords), self.current_z)
 
         data_rgb = np.zeros(data_view.shape + (3,))
         data_rgb[..., :] = data_view[..., None]
@@ -265,10 +277,9 @@ class ManualImageCorrection():
         if self.ref_z_mode != NO_REF_LABEL:
             ref_z = self.current_z - 1 if self.ref_z_mode == PREV_REF_LABEL else self.current_z + 1
             if ref_z >= 0 and ref_z <= self.max_z:
-                ref_coords = self.grid_coordinates[ref_z, ::self.downsample, ::self.downsample, :]
+                ref_coords = self.grid_coordinates[ref_z, :: self.downsample, :: self.downsample, :]
                 transformed_ref_coords = self.transform_coordinates(ref_coords, ref_z)
-                data_ref = self.apply_scaling(self.image_interpolator(transformed_ref_coords),
-                                              self.current_z)
+                data_ref = self.apply_scaling(self.image_interpolator(transformed_ref_coords), self.current_z)
                 data_rgb[..., 0] = data_ref
         return np.clip(data_rgb, 0.0, 1.0)
 
@@ -281,9 +292,7 @@ class ManualImageCorrection():
         filename: string or Path
             Output filename.
         """
-        np.savez_compressed(filename,
-                            custom_ranges=self.custom_ranges,
-                            transforms=self.transforms)
+        np.savez_compressed(filename, custom_ranges=self.custom_ranges, transforms=self.transforms)
 
 
 def apply_transform(ty, tx, theta, coordinates):
@@ -310,10 +319,8 @@ def apply_transform(ty, tx, theta, coordinates):
     center_y = np.max(coordinates[:, :, 1]) / 2.0
     center_x = np.max(coordinates[:, :, 2]) / 2.0
     coordinates = coordinates - np.reshape([0, center_y, center_x], (1, 1, 3))
-    rotated_y = np.atleast_2d(np.cos(theta)).T*coordinates[..., 1]\
-        - np.atleast_2d(np.sin(theta)).T*coordinates[..., 2]
-    rotated_x = np.atleast_2d(np.sin(theta)).T*coordinates[..., 1]\
-        + np.atleast_2d(np.cos(theta)).T*coordinates[..., 2]
+    rotated_y = np.atleast_2d(np.cos(theta)).T * coordinates[..., 1] - np.atleast_2d(np.sin(theta)).T * coordinates[..., 2]
+    rotated_x = np.atleast_2d(np.sin(theta)).T * coordinates[..., 1] + np.atleast_2d(np.cos(theta)).T * coordinates[..., 2]
     coordinates[:, :, 1] = rotated_y + center_y
     coordinates[:, :, 2] = rotated_x + center_x
 
@@ -387,7 +394,7 @@ def transform_and_rescale_slice(slice, ty, tx, theta, vmin, vmax):
     y = np.arange(slice.shape[0])
     x = np.arange(slice.shape[1])
     image_interpolator = RegularGridInterpolator((y, x), slice, bounds_error=False, fill_value=0)
-    grid_coordinates = np.stack(np.meshgrid(0, y, x, indexing='ij'), axis=-1)
+    grid_coordinates = np.stack(np.meshgrid(0, y, x, indexing="ij"), axis=-1)
 
     # transform coordinates
     transformed_coordinates = apply_transform(ty, tx, theta, grid_coordinates[0])

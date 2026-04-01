@@ -1,31 +1,30 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Clip .ome.zarr volume intensities between lower and upper percentile.
 """
+
 # Configure thread limits before numpy/scipy imports
 import linumpy._thread_config  # noqa: F401
 
 import argparse
+
+import dask.array as da
 import numpy as np
 
 from linumpy.io.zarr import read_omezarr, save_omezarr
-import dask.array as da
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument('in_volume',
-                   help='Input volume .ome.zarr.')
-    p.add_argument('out_volume',
-                   help='Output volume .ome.zarr.')
-    p.add_argument('--percentile_lower', default=0, type=float,
-                   help='Percentile below which values will be clipped [%(default)s].')
-    p.add_argument('--percentile_upper', default=99.9, type=float,
-                   help='Percentile above which values will be clipped [%(default)s].')
-    p.add_argument('--rescale', action='store_true',
-                   help='Rescale volume intensities after clipping.')
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("in_volume", help="Input volume .ome.zarr.")
+    p.add_argument("out_volume", help="Output volume .ome.zarr.")
+    p.add_argument(
+        "--percentile_lower", default=0, type=float, help="Percentile below which values will be clipped [%(default)s]."
+    )
+    p.add_argument(
+        "--percentile_upper", default=99.9, type=float, help="Percentile above which values will be clipped [%(default)s]."
+    )
+    p.add_argument("--rescale", action="store_true", help="Rescale volume intensities after clipping.")
     return p
 
 
@@ -46,5 +45,5 @@ def main():
     save_omezarr(darr, args.out_volume, res, vol.chunks)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

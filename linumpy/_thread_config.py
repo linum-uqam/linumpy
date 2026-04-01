@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Thread configuration module for linumpy.
 
@@ -49,12 +48,12 @@ def get_max_threads():
 
     try:
         # Check for explicit max CPUs limit
-        max_cpus = os.environ.get('LINUMPY_MAX_CPUS')
+        max_cpus = os.environ.get("LINUMPY_MAX_CPUS")
         if max_cpus is not None:
             return max(1, min(int(max_cpus), total_cpus))
 
         # Check for reserved CPUs
-        reserved = os.environ.get('LINUMPY_RESERVED_CPUS')
+        reserved = os.environ.get("LINUMPY_RESERVED_CPUS")
         if reserved is not None:
             return max(1, total_cpus - int(reserved))
     except ValueError:
@@ -79,42 +78,44 @@ def configure_thread_limits():
     max_threads = get_max_threads()
 
     # If OMP_NUM_THREADS is already set, use that value instead
-    if 'OMP_NUM_THREADS' in os.environ:
+    if "OMP_NUM_THREADS" in os.environ:
         try:
-            max_threads = int(os.environ['OMP_NUM_THREADS'])
+            max_threads = int(os.environ["OMP_NUM_THREADS"])
         except ValueError:
             pass
 
     # Set environment variables for all common threading libraries
     # Set ALL of them unconditionally to ensure consistency
     thread_vars = [
-        'OMP_NUM_THREADS',  # OpenMP (used by numpy, scipy, etc.)
-        'MKL_NUM_THREADS',  # Intel MKL
-        'OPENBLAS_NUM_THREADS',  # OpenBLAS
-        'VECLIB_MAXIMUM_THREADS',  # macOS Accelerate
-        'NUMEXPR_NUM_THREADS',  # NumExpr
-        'NUMBA_NUM_THREADS',  # Numba
-        'GOTO_NUM_THREADS',  # GotoBLAS
-        'BLIS_NUM_THREADS',  # BLIS
-        'ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS',  # SimpleITK/ITK
-        'XLA_FLAGS',  # JAX/XLA thread pool (set below with special format)
+        "OMP_NUM_THREADS",  # OpenMP (used by numpy, scipy, etc.)
+        "MKL_NUM_THREADS",  # Intel MKL
+        "OPENBLAS_NUM_THREADS",  # OpenBLAS
+        "VECLIB_MAXIMUM_THREADS",  # macOS Accelerate
+        "NUMEXPR_NUM_THREADS",  # NumExpr
+        "NUMBA_NUM_THREADS",  # Numba
+        "GOTO_NUM_THREADS",  # GotoBLAS
+        "BLIS_NUM_THREADS",  # BLIS
+        "ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS",  # SimpleITK/ITK
+        "XLA_FLAGS",  # JAX/XLA thread pool (set below with special format)
     ]
 
     for var in thread_vars:
-        if var == 'XLA_FLAGS':
+        if var == "XLA_FLAGS":
             # XLA flags use a special format
             # This limits JAX's XLA thread pool (used by BaSiCPy)
-            xla_flags = os.environ.get('XLA_FLAGS', '')
-            if f'--xla_cpu_multi_thread_eigen=false' not in xla_flags:
+            xla_flags = os.environ.get("XLA_FLAGS", "")
+            if "--xla_cpu_multi_thread_eigen=false" not in xla_flags:
                 # Disable multi-threading in XLA's Eigen backend for better control
-                new_flags = f'{xla_flags} --xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads={max_threads}'.strip()
-                os.environ['XLA_FLAGS'] = new_flags
+                new_flags = (
+                    f"{xla_flags} --xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads={max_threads}".strip()
+                )
+                os.environ["XLA_FLAGS"] = new_flags
         else:
             os.environ[var] = str(max_threads)
 
     # Also set dask configuration via environment variable
     # This limits dask's thread pool before dask is imported
-    os.environ['DASK_NUM_WORKERS'] = str(max_threads)
+    os.environ["DASK_NUM_WORKERS"] = str(max_threads)
 
     return max_threads
 
@@ -126,10 +127,11 @@ def configure_dask():
     """
     try:
         import dask
-        max_threads = int(os.environ.get('OMP_NUM_THREADS', multiprocessing.cpu_count()))
+
+        max_threads = int(os.environ.get("OMP_NUM_THREADS", multiprocessing.cpu_count()))
         dask.config.set(num_workers=max_threads)
-        dask.config.set(scheduler='threads')  # Use thread scheduler, not process
-        dask.config.set({'array.slicing.split_large_chunks': False})
+        dask.config.set(scheduler="threads")  # Use thread scheduler, not process
+        dask.config.set({"array.slicing.split_large_chunks": False})
     except ImportError:
         pass
 
@@ -145,7 +147,8 @@ def configure_sitk():
     """
     try:
         import SimpleITK as sitk
-        max_threads = int(os.environ.get('OMP_NUM_THREADS', multiprocessing.cpu_count()))
+
+        max_threads = int(os.environ.get("OMP_NUM_THREADS", multiprocessing.cpu_count()))
         sitk.ProcessObject.SetGlobalDefaultNumberOfThreads(max_threads)
     except ImportError:
         pass
@@ -165,7 +168,7 @@ def apply_threadpool_limits():
         from threadpoolctl import threadpool_limits
 
         # Get the configured thread limit
-        max_threads = int(os.environ.get('OMP_NUM_THREADS', multiprocessing.cpu_count()))
+        max_threads = int(os.environ.get("OMP_NUM_THREADS", multiprocessing.cpu_count()))
 
         # Apply limits globally - this returns a context manager but also applies immediately
         limiter = threadpool_limits(limits=max_threads)
@@ -192,20 +195,21 @@ def configure_all_libraries():
     """
     global _thread_config_applied
 
-    max_threads = int(os.environ.get('OMP_NUM_THREADS', multiprocessing.cpu_count()))
+    max_threads = int(os.environ.get("OMP_NUM_THREADS", multiprocessing.cpu_count()))
 
     # Configure SimpleITK if imported (CRITICAL - major source of CPU spikes)
-    if 'SimpleITK' in sys.modules:
+    if "SimpleITK" in sys.modules:
         configure_sitk()
 
     # Configure dask if imported
-    if 'dask' in sys.modules:
+    if "dask" in sys.modules:
         configure_dask()
 
     # Configure numba if imported
-    if 'numba' in sys.modules:
+    if "numba" in sys.modules:
         try:
             from numba import set_num_threads
+
             set_num_threads(max_threads)
         except (ImportError, Exception):
             pass
@@ -226,31 +230,32 @@ def get_thread_info():
         dict: Thread configuration information
     """
     info = {
-        'total_cpus': multiprocessing.cpu_count(),
-        'configured_threads': int(os.environ.get('OMP_NUM_THREADS', multiprocessing.cpu_count())),
-        'env_vars': {},
-        'libraries': {},
+        "total_cpus": multiprocessing.cpu_count(),
+        "configured_threads": int(os.environ.get("OMP_NUM_THREADS", multiprocessing.cpu_count())),
+        "env_vars": {},
+        "libraries": {},
     }
 
     # Check environment variables
-    for var in ['OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
-                'LINUMPY_MAX_CPUS', 'LINUMPY_RESERVED_CPUS']:
-        info['env_vars'][var] = os.environ.get(var, 'NOT SET')
+    for var in ["OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "LINUMPY_MAX_CPUS", "LINUMPY_RESERVED_CPUS"]:
+        info["env_vars"][var] = os.environ.get(var, "NOT SET")
 
     # Check SimpleITK
-    if 'SimpleITK' in sys.modules:
+    if "SimpleITK" in sys.modules:
         try:
             import SimpleITK as sitk
-            info['libraries']['SimpleITK'] = sitk.ProcessObject.GetGlobalDefaultNumberOfThreads()
+
+            info["libraries"]["SimpleITK"] = sitk.ProcessObject.GetGlobalDefaultNumberOfThreads()
         except Exception:
-            info['libraries']['SimpleITK'] = 'ERROR'
+            info["libraries"]["SimpleITK"] = "ERROR"
 
     # Check threadpoolctl
     try:
         from threadpoolctl import threadpool_info
-        info['libraries']['threadpoolctl'] = threadpool_info()
+
+        info["libraries"]["threadpoolctl"] = threadpool_info()
     except ImportError:
-        info['libraries']['threadpoolctl'] = 'NOT INSTALLED'
+        info["libraries"]["threadpoolctl"] = "NOT INSTALLED"
 
     return info
 
@@ -261,10 +266,10 @@ def print_thread_info():
     print(f"CPU cores: {info['total_cpus']}")
     print(f"Configured threads: {info['configured_threads']}")
     print("Environment variables:")
-    for var, val in info['env_vars'].items():
+    for var, val in info["env_vars"].items():
         print(f"  {var}: {val}")
     print("Library configurations:")
-    for lib, val in info['libraries'].items():
+    for lib, val in info["libraries"].items():
         print(f"  {lib}: {val}")
 
 

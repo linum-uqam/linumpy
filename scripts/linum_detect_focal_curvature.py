@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """Detect and fix the focal curvature in a 3D mosaic grid"""
 
@@ -8,35 +7,34 @@ import linumpy._thread_config  # noqa: F401
 
 import argparse
 
-import numpy as np
 import dask.array as da
+import numpy as np
+import zarr
 from basicpy import BaSiC
 
-from linumpy.io.zarr import save_omezarr, read_omezarr, create_tempstore
+from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
 from linumpy.preproc.xyzcorr import findTissueInterface
-import zarr
-
 
 # TODO: Replace by interpolation using deformation field
 # TODO: optimize for full resolution data
 # TODO: parallelize the correction
 
+
 def _build_arg_parser():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_zarr",
-                   help="Path to file (.ome.zarr) "
-                        "containing the 3D mosaic grid.")
-    p.add_argument("output_zarr",
-                   help="Corrected 3D mosaic grid file path (.ome.zarr).")
-    p.add_argument('--n_levels', type=int, default=5,
-                   help='Number of levels in pyramid representation.')
-    p.add_argument("--sigma_xy", type=float, default=3.0,
-                   help="Gaussian smoothing sigma in X and Y before interface detection [%(default)s]")
-    p.add_argument("--sigma_z", type=float, default=2.0,
-                   help="Gaussian smoothing sigma in Z before interface detection [%(default)s]")
-    p.add_argument("--use_log", action="store_true",
-                   help="Apply log transform before gradient detection")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("input_zarr", help="Path to file (.ome.zarr) containing the 3D mosaic grid.")
+    p.add_argument("output_zarr", help="Corrected 3D mosaic grid file path (.ome.zarr).")
+    p.add_argument("--n_levels", type=int, default=5, help="Number of levels in pyramid representation.")
+    p.add_argument(
+        "--sigma_xy",
+        type=float,
+        default=3.0,
+        help="Gaussian smoothing sigma in X and Y before interface detection [%(default)s]",
+    )
+    p.add_argument(
+        "--sigma_z", type=float, default=2.0, help="Gaussian smoothing sigma in Z before interface detection [%(default)s]"
+    )
+    p.add_argument("--use_log", action="store_true", help="Apply log transform before gradient detection")
     return p
 
 
@@ -54,8 +52,7 @@ def main():
     dtype = vol.dtype
     data = np.moveaxis(vol, 0, -1)
     # Estimate the water-tissue interface
-    z0 = findTissueInterface(np.abs(data), s_xy=args.sigma_xy,
-                             s_z=args.sigma_z, useLog=args.use_log)
+    z0 = findTissueInterface(np.abs(data), s_xy=args.sigma_xy, s_z=args.sigma_z, useLog=args.use_log)
 
     # Extract the tile shape from the filename
     tile_shape = vol.chunks
@@ -86,8 +83,7 @@ def main():
     corr = ((flatfield - 1) * z0.mean()).astype(int)
 
     temp_store = create_tempstore()
-    vol_corr = zarr.open(temp_store, mode="w", shape=vol.shape,
-                         dtype=dtype, chunks=tile_shape)
+    vol_corr = zarr.open(temp_store, mode="w", shape=vol.shape, dtype=dtype, chunks=tile_shape)
 
     for i in range(nx):
         for j in range(ny):
@@ -106,10 +102,7 @@ def main():
 
     # save to ome-zarr
     dask_arr = da.from_zarr(vol_corr)
-    save_omezarr(dask_arr, output_zarr,
-                 voxel_size=res,
-                 chunks=tile_shape,
-                 n_levels=args.n_levels)
+    save_omezarr(dask_arr, output_zarr, voxel_size=res, chunks=tile_shape, n_levels=args.n_levels)
 
 
 if __name__ == "__main__":
