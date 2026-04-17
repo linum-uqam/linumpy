@@ -43,13 +43,17 @@ def _build_arg_parser():
 
 
 def load_shifts(shifts_path):
-    """Load shifts CSV file."""
+    """Load shifts CSV file.
+
+    Rows are sorted by ``moving_id`` so that every ``cumsum`` downstream
+    reflects slice order rather than CSV row order.
+    """
     df = pd.read_csv(shifts_path)
     required_cols = ["fixed_id", "moving_id", "x_shift_mm", "y_shift_mm"]
     for col in required_cols:
         if col not in df.columns:
             raise ValueError(f"Missing required column: {col}")
-    return df
+    return df.sort_values("moving_id").reset_index(drop=True)
 
 
 def detect_outliers(df, iqr_multiplier=1.5):

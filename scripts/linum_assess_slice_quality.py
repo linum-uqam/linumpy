@@ -10,6 +10,9 @@ reconstruction. It uses multiple metrics to identify problematic slices:
 3. **Variance Consistency**: Checks for unusual signal variance (data loss/corruption)
 4. **First Slice Detection**: Automatically identifies calibration slices (thicker/different)
 
+GPU acceleration is used when available (--use_gpu, default on) for SSIM and
+edge-detection computations. Falls back to CPU automatically if no GPU is detected.
+
 The output can be:
 - A new slice_config.csv with quality scores and recommendations
 - An update to an existing slice_config.csv with quality assessments
@@ -27,13 +30,15 @@ Example usage:
 
     # Update existing config with quality info
     linum_assess_slice_quality.py /path/to/mosaics slice_config.csv --update_existing
+
+    # Force CPU fallback
+    linum_assess_slice_quality.py /path/to/mosaics slice_config.csv --no-use_gpu
 """
 
 # Configure thread limits before numpy/scipy imports
 import linumpy._thread_config  # noqa: F401
 
 import argparse
-import csv
 import re
 from pathlib import Path
 from typing import Any
@@ -41,6 +46,12 @@ from typing import Any
 import numpy as np
 from tqdm.auto import tqdm
 
+from linumpy.gpu import GPU_AVAILABLE
+from linumpy.gpu.image_quality import (
+    assess_slice_quality_gpu,
+    clear_gpu_memory,
+)
+from linumpy.io import slice_config as slice_config_io
 from linumpy.io.zarr import read_omezarr
 from linumpy.utils.image_quality import (
     assess_slice_quality,
@@ -54,7 +65,15 @@ def _build_arg_parser():
     p.add_argument("input", help="Input directory containing mosaic grids (*.ome.zarr)")
     p.add_argument("output_file", help="Output slice configuration CSV file")
 
-    # Quality assessment options
+    gpu_group = p.add_argument_group("GPU Options")
+    gpu_group.add_argument(
+        "--use_gpu",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Use GPU acceleration if available. [%(default)s]",
+    )
+    gpu_group.add_argument("--gpu_id", type=int, default=0, help="GPU device ID to use. [%(default)s]")
+
     quality_group = p.add_argument_group("Quality Assessment")
     quality_group.add_argument(
         "--min_quality",
@@ -86,12 +105,11 @@ def _build_arg_parser():
         "--processes",
         type=int,
         default=1,
-        help="Number of parallel workers for slice assessment. "
-        "Each worker reads its own zarr planes concurrently. "
+        help="Number of parallel workers for slice assessment (CPU mode only).\n"
+        "Each worker reads its own zarr planes concurrently.\n"
         "Default: 1 (sequential). Set to params.processes.",
     )
 
-    # Calibration slice options
     calib_group = p.add_argument_group("Calibration Slice Handling")
     calib_group.add_argument(
         "--exclude_first",
@@ -111,14 +129,12 @@ def _build_arg_parser():
         help="Slices with thickness ratio > this are flagged as calibration. Default: 1.5",
     )
 
-    # Update/merge options
     update_group = p.add_argument_group("Update Existing Config")
     update_group.add_argument(
         "--update_existing", action="store_true", help="Update an existing slice_config.csv with quality info"
     )
     update_group.add_argument("--existing_config", type=str, default=None, help="Path to existing slice config to update")
 
-    # Output options
     output_group = p.add_argument_group("Output Options")
     output_group.add_argument("--report_only", action="store_true", help="Only print report, don't write config file")
     output_group.add_argument("-v", "--verbose", action="store_true", help="Print detailed quality metrics per slice")
@@ -143,14 +159,9 @@ def get_mosaic_files(directory: Path) -> dict[int, Path]:
 
 
 def read_existing_config(config_path: Path) -> dict[int, dict[str, Any]]:
-    """Read an existing slice configuration file."""
-    config = {}
-    with Path(config_path).open() as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            slice_id = int(row["slice_id"])
-            config[slice_id] = dict(row)
-    return config
+    """Read an existing slice configuration file keyed by integer ``slice_id``."""
+    rows = slice_config_io.read(config_path)
+    return {int(sid): dict(row) for sid, row in rows.items()}
 
 
 def write_slice_config_with_quality(
@@ -160,68 +171,50 @@ def write_slice_config_with_quality(
     exclude_ids: list[int],
     existing_config: dict[int, dict[str, Any]] | None = None,
 ):
-    """Write the slice configuration file with quality metrics."""
-    with Path(output_file).open("w", newline="") as f:
-        writer = csv.writer(f)
+    """Write ``slice_config.csv`` with the decision columns set from the quality
+    assessment. Raw per-metric scores (ssim_mean / edge_score / variance_score /
+    depth) intentionally stay out of the CSV — they live in the pipeline report
+    and per-stage diagnostics JSON, not in the per-slice decision trace.
+    """
+    out_rows: list[dict[str, object]] = []
+    for slice_id in slice_ids:
+        quality = quality_results.get(slice_id, {})
+        use = "true"
+        reason = ""
+        if slice_id in exclude_ids:
+            use = "false"
+            if quality.get("is_calibration", False):
+                reason = "calibration_slice"
+            elif quality.get("overall", 1.0) < quality.get("min_threshold", 0):
+                reason = "low_quality"
+            elif quality.get("exclude_first", False):
+                reason = "first_slice_excluded"
+            else:
+                reason = "manually_excluded"
 
-        header = ["slice_id", "use", "quality_score", "ssim_mean", "edge_score", "variance_score", "depth", "exclude_reason"]
+        existing = existing_config.get(slice_id, {}) if existing_config else {}
+        if existing.get("use", "true").lower() in ["false", "0", "no"]:
+            use = "false"
+            if not reason:
+                reason = existing.get("exclude_reason") or existing.get("notes") or "previously_excluded"
 
-        # Add galvo columns if present in existing config
-        has_galvo = False
-        if existing_config:
-            sample = next(iter(existing_config.values()), {})
-            if "galvo_confidence" in sample:
-                has_galvo = True
-                header.insert(3, "galvo_confidence")
-                header.insert(4, "galvo_fix")
+        row: dict[str, object] = {
+            "slice_id": f"{slice_id:02d}",
+            "use": use,
+            "quality_score": f"{float(quality.get('overall', 0.0)):.3f}",
+            "exclude_reason": reason,
+        }
+        if existing.get("galvo_confidence", ""):
+            row["galvo_confidence"] = existing["galvo_confidence"]
+        if existing.get("galvo_fix", ""):
+            row["galvo_fix"] = existing["galvo_fix"]
+        for carry in ("notes",):
+            val = existing.get(carry)
+            if val:
+                row[carry] = val
+        out_rows.append(row)
 
-        writer.writerow(header)
-
-        for slice_id in slice_ids:
-            quality = quality_results.get(slice_id, {})
-
-            use = "true"
-            reason = ""
-
-            if slice_id in exclude_ids:
-                use = "false"
-                if quality.get("is_calibration", False):
-                    reason = "calibration_slice"
-                elif quality.get("overall", 1.0) < quality.get("min_threshold", 0):
-                    reason = "low_quality"
-                elif quality.get("exclude_first", False):
-                    reason = "first_slice_excluded"
-                else:
-                    reason = "manually_excluded"
-
-            # Preserve existing use status if updating
-            if existing_config and slice_id in existing_config:
-                existing = existing_config[slice_id]
-                if existing.get("use", "true").lower() in ["false", "0", "no"]:
-                    use = "false"
-                    if not reason:
-                        reason = existing.get("notes", existing.get("exclude_reason", "previously_excluded"))
-
-            row = [
-                f"{slice_id:02d}",
-                use,
-                f"{quality.get('overall', 0.0):.3f}",
-                f"{quality.get('ssim_mean', 0.0):.3f}",
-                f"{quality.get('edge_score', 0.0):.3f}",
-                f"{quality.get('variance_score', 0.0):.3f}",
-                str(quality.get("depth", 0)),
-                reason,
-            ]
-
-            # Add galvo columns if present
-            if has_galvo:
-                existing = existing_config.get(slice_id, {}) if existing_config else {}
-                galvo_conf = existing.get("galvo_confidence", "0.000")
-                galvo_fix = existing.get("galvo_fix", "false")
-                row.insert(3, galvo_conf)
-                row.insert(4, galvo_fix)
-
-            writer.writerow(row)
+    slice_config_io.write(output_file, out_rows)
 
 
 def main():
@@ -237,7 +230,18 @@ def main():
     if not input_path.is_dir():
         p.error(f"Input directory not found: {input_path}")
 
-    # Find mosaic files
+    use_gpu = args.use_gpu and GPU_AVAILABLE
+    if args.use_gpu and not GPU_AVAILABLE:
+        print("Warning: GPU requested but not available. Using CPU.")
+    elif use_gpu:
+        try:
+            import cupy as cp
+
+            cp.cuda.Device(args.gpu_id).use()
+            print(f"Using GPU device {args.gpu_id}")
+        except Exception as e:
+            print(f"Warning: Could not select GPU {args.gpu_id}: {e}. Using default.")
+
     print(f"Scanning for mosaic grids in: {input_path}")
     mosaic_files = get_mosaic_files(input_path)
 
@@ -247,7 +251,6 @@ def main():
     slice_ids = sorted(mosaic_files.keys())
     print(f"Found {len(slice_ids)} slices: {[f'{s:02d}' for s in slice_ids]}")
 
-    # Load existing config if updating
     existing_config = None
     if args.update_existing:
         config_to_load = args.existing_config if args.existing_config else output_file
@@ -255,16 +258,13 @@ def main():
             existing_config = read_existing_config(Path(config_to_load))
             print(f"Loaded existing config with {len(existing_config)} entries")
 
-    # Identify slices to exclude
     exclude_ids = set()
 
-    # Exclude first N slices
     if args.exclude_first > 0:
         first_slices = slice_ids[: args.exclude_first]
         exclude_ids.update(first_slices)
         print(f"Excluding first {args.exclude_first} slice(s) as calibration: {first_slices}")
 
-    # Load volumes
     print(f"\nLoading slices (pyramid_level={args.pyramid_level})...")
     volumes: dict[int, np.ndarray] = {}
     for slice_id in tqdm(slice_ids, desc="Loading slices"):
@@ -275,7 +275,6 @@ def main():
             print(f"  Warning: Could not load slice {slice_id:02d}: {e}")
             volumes[slice_id] = None
 
-    # Detect calibration slices if requested
     calibration_slices = []
     if args.detect_calibration:
         print(f"Detecting calibration slices (thickness ratio > {args.calibration_thickness_ratio})...")
@@ -285,48 +284,68 @@ def main():
             exclude_ids.update(calibration_slices)
             print(f"Detected calibration slices: {calibration_slices}")
 
-    # Assess quality for each slice
-    print(
-        f"\nAssessing slice quality (sample_depth={args.sample_depth}, "
-        f"roi_size={args.roi_size}, processes={args.processes})..."
-    )
+    print(f"\nAssessing slice quality (GPU={'enabled' if use_gpu else 'disabled'}, sample_depth={args.sample_depth})...")
     quality_results: dict[int, dict[str, Any]] = {}
 
-    def _assess_one(idx_and_id):
-        i, slice_id = idx_and_id
-        vol = volumes.get(slice_id)
-        if vol is None:
-            return slice_id, {
-                "overall": 0.0,
-                "ssim_mean": 0.0,
-                "edge_score": 0.0,
-                "variance_score": 0.0,
-                "depth": 0,
-                "has_data": False,
-                "error": "load_failed",
-            }
-        vol_before = volumes.get(slice_ids[i - 1]) if i > 0 else None
-        vol_after = volumes.get(slice_ids[i + 1]) if i < len(slice_ids) - 1 else None
-        _overall, metrics = assess_slice_quality(vol, vol_before, vol_after, args.sample_depth, xy_roi=args.roi_size)
-        metrics["is_calibration"] = slice_id in calibration_slices
-        metrics["exclude_first"] = slice_id in slice_ids[: args.exclude_first]
-        metrics["min_threshold"] = args.min_quality
-        return slice_id, metrics
-
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    tasks = list(enumerate(slice_ids))
-    with ThreadPoolExecutor(max_workers=args.processes) as executor:
-        futures = {executor.submit(_assess_one, t): t for t in tasks}
-        for future in tqdm(as_completed(futures), total=len(futures), desc="Assessing quality"):
-            slice_id, metrics = future.result()
+    if use_gpu:
+        for i, slice_id in enumerate(tqdm(slice_ids, desc="Assessing quality")):
+            vol = volumes.get(slice_id)
+            if vol is None:
+                quality_results[slice_id] = {
+                    "overall": 0.0,
+                    "ssim_mean": 0.0,
+                    "edge_score": 0.0,
+                    "variance_score": 0.0,
+                    "depth": 0,
+                    "has_data": False,
+                    "error": "load_failed",
+                }
+                continue
+            vol_before = volumes.get(slice_ids[i - 1]) if i > 0 else None
+            vol_after = volumes.get(slice_ids[i + 1]) if i < len(slice_ids) - 1 else None
+            overall, metrics = assess_slice_quality_gpu(vol, vol_before, vol_after, args.sample_depth)
+            metrics["is_calibration"] = slice_id in calibration_slices
+            metrics["exclude_first"] = slice_id in slice_ids[: args.exclude_first]
+            metrics["min_threshold"] = args.min_quality
             quality_results[slice_id] = metrics
-            if args.min_quality > 0 and metrics.get("overall", 0.0) < args.min_quality:
+            if args.min_quality > 0 and overall < args.min_quality:
                 exclude_ids.add(slice_id)
+        clear_gpu_memory()
+    else:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    # Print quality report
+        def _assess_one(idx_and_id):
+            i, slice_id = idx_and_id
+            vol = volumes.get(slice_id)
+            if vol is None:
+                return slice_id, {
+                    "overall": 0.0,
+                    "ssim_mean": 0.0,
+                    "edge_score": 0.0,
+                    "variance_score": 0.0,
+                    "depth": 0,
+                    "has_data": False,
+                    "error": "load_failed",
+                }
+            vol_before = volumes.get(slice_ids[i - 1]) if i > 0 else None
+            vol_after = volumes.get(slice_ids[i + 1]) if i < len(slice_ids) - 1 else None
+            _overall, metrics = assess_slice_quality(vol, vol_before, vol_after, args.sample_depth, xy_roi=args.roi_size)
+            metrics["is_calibration"] = slice_id in calibration_slices
+            metrics["exclude_first"] = slice_id in slice_ids[: args.exclude_first]
+            metrics["min_threshold"] = args.min_quality
+            return slice_id, metrics
+
+        tasks = list(enumerate(slice_ids))
+        with ThreadPoolExecutor(max_workers=args.processes) as executor:
+            futures = {executor.submit(_assess_one, t): t for t in tasks}
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Assessing quality"):
+                slice_id, metrics = future.result()
+                quality_results[slice_id] = metrics
+                if args.min_quality > 0 and metrics.get("overall", 0.0) < args.min_quality:
+                    exclude_ids.add(slice_id)
+
     print("\n" + "=" * 70)
-    print("SLICE QUALITY REPORT")
+    print(f"SLICE QUALITY REPORT{' (GPU-accelerated)' if use_gpu else ' (CPU)'}")
     print("=" * 70)
     print(f"{'Slice':<8} {'Quality':<10} {'SSIM':<10} {'Edge':<10} {'Var':<10} {'Depth':<8} {'Status':<15}")
     print("-" * 70)
@@ -347,7 +366,6 @@ def main():
             status.append("OK")
 
         status_str = ",".join(status)
-
         print(
             f"{slice_id:02d}      {q.get('overall', 0):.3f}      "
             f"{q.get('ssim_mean', 0):.3f}      {q.get('edge_score', 0):.3f}      "
@@ -364,12 +382,10 @@ def main():
         if low_quality:
             print(f"Low quality slices (< {args.min_quality}): {low_quality}")
 
-    # Write config file
     if not args.report_only:
         write_slice_config_with_quality(output_file, slice_ids, quality_results, list(exclude_ids), existing_config)
         print(f"\nSlice configuration written to: {output_file}")
 
-    # Return exit code based on whether any slices were excluded
     if exclude_ids:
         print(f"\nExcluded slice IDs: {sorted(exclude_ids)}")
 

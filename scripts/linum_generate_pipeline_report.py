@@ -13,6 +13,7 @@ import linumpy._thread_config  # noqa: F401
 import argparse
 import base64
 import io as _io
+import json
 import re
 import zipfile
 from collections import defaultdict
@@ -454,6 +455,138 @@ def compute_cross_slice_trends(aggregated: dict[str, list[dict]]) -> dict:
 # =============================================================================
 
 
+def discover_interpolation_data(input_dir: Path) -> dict | None:
+    """
+    Discover slice-interpolation outputs.
+
+    Reads per-slice diagnostic JSONs written by ``linum_interpolate_missing_slice.py``
+    (``slice_z*_interpolated_diagnostics.json``) and the preview PNGs.
+    ``slice_config_final.csv`` (produced by ``finalise_interpolation``) is
+    read via :mod:`linumpy.io.slice_config` to enrich the rows with the
+    per-slice trace fields (``interpolated``, ``interpolation_method_used``,
+    ``interpolation_fallback_reason``, ``use``, ``auto_excluded``, ...).
+
+    Returns
+    -------
+    dict or None
+        ``None`` when no interpolation happened. Otherwise a dict with keys
+        ``rows`` (list of per-slice dicts), ``images`` (list of preview
+        PNG paths), ``slice_config_final`` (path or None) and
+        ``summary`` (aggregated stats).
+    """
+    from linumpy.io import slice_config as slice_config_io
+
+    interp_dir = input_dir / "interpolate_missing_slice"
+    if not interp_dir.is_dir():
+        return None
+
+    diag_files = sorted(interp_dir.glob("slice_z*_interpolated_diagnostics.json"))
+    if not diag_files:
+        return None
+
+    rows: list[dict] = []
+    for path in diag_files:
+        try:
+            with path.open() as fh:
+                data = json.load(fh)
+        except Exception:
+            continue
+        rows.append(
+            {
+                "slice_id": str(data.get("slice_id") or "").strip(),
+                "method": str(data.get("method") or "unknown"),
+                "method_used": (
+                    ""
+                    if data.get("interpolation_failed") is True
+                    else str(data.get("method_used") or data.get("method") or "unknown")
+                ),
+                "fallback_reason": str(data.get("fallback_reason") or ""),
+                "interpolation_failed": bool(data.get("interpolation_failed", False)),
+                "pre_reg_ncc": data.get("pre_reg_ncc"),
+                "post_reg_ncc": data.get("post_reg_ncc"),
+                "ncc_improvement": data.get("ncc_improvement"),
+                "affine_determinant": data.get("affine_determinant"),
+                "output_path": str(data.get("output_path") or ""),
+                "diagnostics_path": str(path),
+            }
+        )
+
+    if not rows:
+        return None
+
+    # Enrich from slice_config_final.csv when available (single source of truth).
+    slice_config_final = input_dir / "slice_config_final.csv"
+    if slice_config_final.exists():
+        try:
+            sc_rows = slice_config_io.read(slice_config_final)
+            for r in rows:
+                sid = slice_config_io.normalize_slice_id(r["slice_id"])
+                sc_row = sc_rows.get(sid)
+                if sc_row is not None:
+                    r["slice_config_use"] = sc_row.get("use", "")
+                    r["slice_config_interpolated"] = sc_row.get("interpolated", "")
+                    r["slice_config_interpolation_failed"] = sc_row.get("interpolation_failed", "")
+                    r["slice_config_auto_excluded"] = sc_row.get("auto_excluded", "")
+                    r["slice_config_notes"] = sc_row.get("notes", "")
+        except Exception:
+            slice_config_final = None
+
+    images: list[Path] = sorted(interp_dir.glob("slice_z*_interpolated_preview.png"))
+
+    method_counts: dict[str, int] = {}
+    method_used_counts: dict[str, int] = {}
+    fallback_counts: dict[str, int] = {}
+    pre_nccs: list[float] = []
+    post_nccs: list[float] = []
+    improvements: list[float] = []
+
+    def _to_float(value) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    for r in rows:
+        method = (r.get("method") or "unknown").strip() or "unknown"
+        method_used = (r.get("method_used") or method).strip() or method
+        fallback = (r.get("fallback_reason") or "").strip()
+        method_counts[method] = method_counts.get(method, 0) + 1
+        method_used_counts[method_used] = method_used_counts.get(method_used, 0) + 1
+        if fallback:
+            fallback_counts[fallback] = fallback_counts.get(fallback, 0) + 1
+        pre = _to_float(r.get("pre_reg_ncc"))
+        post = _to_float(r.get("post_reg_ncc"))
+        imp = _to_float(r.get("ncc_improvement"))
+        if pre is not None:
+            pre_nccs.append(pre)
+        if post is not None:
+            post_nccs.append(post)
+        if imp is not None:
+            improvements.append(imp)
+
+    n_failed = sum(1 for r in rows if r.get("interpolation_failed"))
+
+    summary = {
+        "count": len(rows),
+        "n_succeeded": len(rows) - n_failed,
+        "n_failed": n_failed,
+        "method_counts": method_counts,
+        "method_used_counts": method_used_counts,
+        "fallback_counts": fallback_counts,
+        "n_with_fallback": sum(fallback_counts.values()),
+        "pre_reg_ncc_mean": float(np.mean(pre_nccs)) if pre_nccs else None,
+        "post_reg_ncc_mean": float(np.mean(post_nccs)) if post_nccs else None,
+        "ncc_improvement_mean": float(np.mean(improvements)) if improvements else None,
+    }
+
+    return {
+        "rows": rows,
+        "images": images,
+        "slice_config_final": slice_config_final if (slice_config_final and slice_config_final.exists()) else None,
+        "summary": summary,
+    }
+
+
 def discover_diagnostic_data(input_dir: Path) -> dict[str, dict]:
     """
     Discover diagnostic outputs in the pipeline output directory.
@@ -729,6 +862,211 @@ def _render_grouped_issues_html(grouped: list[dict], color_class: str, label: st
     return html
 
 
+def _render_interpolation_section_html(
+    interpolation: dict,
+    image_mode: str = "link",
+    max_thumb_width: int = 380,
+) -> str:
+    """Render the slice-interpolation section of the HTML report."""
+    summary = interpolation.get("summary", {})
+    rows = interpolation.get("rows", [])
+    images = interpolation.get("images", [])
+    slice_config_final = interpolation.get("slice_config_final")
+
+    count = summary.get("count", 0)
+    n_failed = summary.get("n_failed", 0)
+    n_succeeded = summary.get("n_succeeded", count - n_failed)
+    method_counts = summary.get("method_counts", {})
+    method_used_counts = summary.get("method_used_counts", {})
+    fallback_counts = summary.get("fallback_counts", {})
+    pre_mean = summary.get("pre_reg_ncc_mean")
+    post_mean = summary.get("post_reg_ncc_mean")
+    imp_mean = summary.get("ncc_improvement_mean")
+
+    status = "ok"
+    if n_failed > 0 and count > 0:
+        status = "warning" if n_failed < count else "error"
+
+    html = '\n    <div class="diag-section">\n'
+    html += "        <h2>Slice Interpolation</h2>\n"
+    html += (
+        '        <p style="color:#555;font-size:0.9em;">'
+        "Missing slices reconstructed from their neighbours via <code>zmorph</code>. "
+        "Successful interpolations stamp <code>interpolated=true</code> and are flagged "
+        "<code>reliable=0</code> in downstream pairwise registration. When quality gates "
+        "fail the slice is <strong>hard-skipped</strong> (<code>interpolation_failed=true</code>) "
+        "and the slot stays a genuine gap in the stacked volume \u2014 no blended volume is "
+        "written. See <code>docs/SLICE_INTERPOLATION_FEATURE.md</code>.</p>\n"
+    )
+
+    html += '        <div class="stats-grid">\n'
+    html += f'            <div class="stat-box"><div class="stat-value">{count}</div>'
+    html += '<div class="stat-label">Gaps Detected</div></div>\n'
+    ok_color = get_status_color("ok")
+    html += (
+        f'            <div class="stat-box"><div class="stat-value" style="color:{ok_color};">'
+        f'{n_succeeded}</div><div class="stat-label">Successfully Interpolated</div></div>\n'
+    )
+    html += (
+        f'            <div class="stat-box"><div class="stat-value" style="color:{get_status_color(status)};">'
+        f'{n_failed}</div><div class="stat-label">Hard-Skipped (Gap)</div></div>\n'
+    )
+    if pre_mean is not None:
+        html += f'            <div class="stat-box"><div class="stat-value">{pre_mean:.3f}</div>'
+        html += '<div class="stat-label">Mean Pre-Reg NCC</div></div>\n'
+    if post_mean is not None:
+        html += f'            <div class="stat-box"><div class="stat-value">{post_mean:.3f}</div>'
+        html += '<div class="stat-label">Mean Post-Reg NCC</div></div>\n'
+    if imp_mean is not None:
+        html += f'            <div class="stat-box"><div class="stat-value">{imp_mean:+.3f}</div>'
+        html += '<div class="stat-label">Mean NCC Improvement</div></div>\n'
+    html += "        </div>\n"
+
+    # Method breakdown
+    html += '        <div style="margin-top:12px;">\n'
+    html += '            <div class="section-label">Methods</div>\n'
+    html += '            <table class="diag-kv-table">\n'
+    html += "                <tr><td><strong>Method requested</strong></td><td>"
+    html += ", ".join(f"{k}: {v}" for k, v in sorted(method_counts.items())) or "(none)"
+    html += "</td></tr>\n"
+    html += "                <tr><td><strong>Method actually used</strong></td><td>"
+    html += ", ".join(f"{k}: {v}" for k, v in sorted(method_used_counts.items())) or "(none)"
+    html += "</td></tr>\n"
+    if fallback_counts:
+        html += "                <tr><td><strong>Hard-skip reasons</strong></td><td>"
+        html += ", ".join(f"{k}: {v}" for k, v in sorted(fallback_counts.items()))
+        html += "</td></tr>\n"
+    if slice_config_final is not None:
+        html += "                <tr><td><strong>Per-slice trace file</strong></td>"
+        html += f"<td>{slice_config_final.name}</td></tr>\n"
+    html += "            </table>\n"
+    html += "        </div>\n"
+
+    # Per-slice table (cap to 50 rows; more than that is rare)
+    if rows:
+        html += '        <details class="params-details" open>\n'
+        html += '            <summary class="params-summary">'
+        html += f"Per-slice interpolation diagnostics ({len(rows)} slice(s))</summary>\n"
+        html += '            <table class="metrics-table" style="font-size:0.85em;">\n'
+        html += (
+            "                <tr>"
+            "<th>Slice</th><th>Status</th><th>Method Used</th>"
+            "<th>Reason</th><th>Pre NCC</th><th>Post NCC</th>"
+            "<th>ΔNCC</th><th>|det|</th>"
+            "</tr>\n"
+        )
+        for r in rows[:50]:
+            sid = r.get("slice_id", "") or "?"
+            failed = bool(r.get("interpolation_failed"))
+            status_label = "SKIPPED" if failed else "OK"
+            method_used = r.get("method_used", "") or ("—" if failed else "")
+            fb = r.get("fallback_reason", "") or ""
+            pre = r.get("pre_reg_ncc", "")
+            post = r.get("post_reg_ncc", "")
+            imp = r.get("ncc_improvement", "")
+            det = r.get("affine_determinant", "")
+
+            pre_fmt = f"{float(pre):.3f}" if pre not in ("", None) else "-"
+            post_fmt = f"{float(post):.3f}" if post not in ("", None) else "-"
+            imp_fmt = f"{float(imp):+.3f}" if imp not in ("", None) else "-"
+            det_fmt = f"{float(det):.3f}" if det not in ("", None) else "-"
+
+            if failed:
+                row_style = ' style="background:#ffe5e5;"'
+            elif fb:
+                row_style = ' style="background:#fff8e1;"'
+            else:
+                row_style = ""
+            html += (
+                f"                <tr{row_style}>"
+                f"<td>{sid}</td><td>{status_label}</td><td>{method_used}</td>"
+                f"<td>{fb}</td><td>{pre_fmt}</td><td>{post_fmt}</td>"
+                f"<td>{imp_fmt}</td><td>{det_fmt}</td>"
+                "</tr>\n"
+            )
+        if len(rows) > 50:
+            html += (
+                f'                <tr><td colspan="8" style="color:#888;">(showing first 50 of {len(rows)} rows)</td></tr>\n'
+            )
+        html += "            </table>\n"
+        html += "        </details>\n"
+
+    # Preview image gallery (shown in zip/link mode only; embed mode skips images)
+    if images:
+        gallery = render_image_gallery_html(
+            images,
+            mode=image_mode,
+            category="diag_interpolate_missing_slice",
+            label="Interpolation Previews",
+            max_width=max_thumb_width,
+        )
+        html += gallery
+
+    html += "    </div>\n"
+    return html
+
+
+def _render_interpolation_section_text(interpolation: dict) -> str:
+    """Render the slice-interpolation section of the text report."""
+    summary = interpolation.get("summary", {})
+    rows = interpolation.get("rows", [])
+    count = summary.get("count", 0)
+    n_failed = summary.get("n_failed", 0)
+    n_succeeded = summary.get("n_succeeded", count - n_failed)
+    pre_mean = summary.get("pre_reg_ncc_mean")
+    post_mean = summary.get("post_reg_ncc_mean")
+    imp_mean = summary.get("ncc_improvement_mean")
+
+    lines = []
+    lines.append("")
+    lines.append(f"{get_status_emoji('info')} SLICE INTERPOLATION")
+    lines.append("-" * 70)
+    lines.append(f"  Gaps detected          : {count}")
+    lines.append(f"  Successfully interp'd  : {n_succeeded}")
+    lines.append(f"  Hard-skipped (gap)     : {n_failed}")
+    if pre_mean is not None:
+        lines.append(f"  Mean pre-reg NCC       : {pre_mean:.3f}")
+    if post_mean is not None:
+        lines.append(f"  Mean post-reg NCC      : {post_mean:.3f}")
+    if imp_mean is not None:
+        lines.append(f"  Mean NCC improvement   : {imp_mean:+.3f}")
+
+    method_used_counts = summary.get("method_used_counts", {})
+    if method_used_counts:
+        mu_parts = ", ".join(f"{k}: {v}" for k, v in sorted(method_used_counts.items()))
+        lines.append(f"  Methods used           : {mu_parts}")
+    fallback_counts = summary.get("fallback_counts", {})
+    if fallback_counts:
+        fb_parts = ", ".join(f"{k}: {v}" for k, v in sorted(fallback_counts.items()))
+        lines.append(f"  Hard-skip reasons      : {fb_parts}")
+
+    if rows:
+        lines.append("")
+        lines.append(f"  {'Slice':<6} {'Status':<8} {'Used':<14} {'Reason':<28} {'PreNCC':>7} {'PostNCC':>7}")
+        lines.append("  " + "-" * 80)
+        for r in rows[:50]:
+            sid = (r.get("slice_id", "") or "?")[:6]
+            failed = bool(r.get("interpolation_failed"))
+            status = "SKIP" if failed else "OK"
+            method_used = (r.get("method_used", "") or ("—" if failed else ""))[:14]
+            fb = (r.get("fallback_reason", "") or "")[:28]
+            pre = r.get("pre_reg_ncc", "")
+            post = r.get("post_reg_ncc", "")
+            try:
+                pre_fmt = f"{float(pre):.3f}" if pre not in ("", None) else "-"
+            except (TypeError, ValueError):
+                pre_fmt = "-"
+            try:
+                post_fmt = f"{float(post):.3f}" if post not in ("", None) else "-"
+            except (TypeError, ValueError):
+                post_fmt = "-"
+            lines.append(f"  {sid:<6} {status:<8} {method_used:<14} {fb:<28} {pre_fmt:>7} {post_fmt:>7}")
+        if len(rows) > 50:
+            lines.append(f"  ... ({len(rows) - 50} more row(s) not shown)")
+
+    return "\n".join(lines)
+
+
 def generate_html_report(
     aggregated: dict[str, list[dict]],
     title: str,
@@ -739,6 +1077,7 @@ def generate_html_report(
     max_thumb_width: int = 380,
     trends: dict | None = None,
     diagnostics: dict | None = None,
+    interpolation: dict | None = None,
 ) -> str:
     """Generate an HTML report from aggregated metrics."""
     aggregated = sort_steps(aggregated)
@@ -1391,6 +1730,10 @@ def generate_html_report(
 
         html += "    </div>\n"
 
+    # Slice interpolation section (only if interpolation happened)
+    if interpolation:
+        html += _render_interpolation_section_html(interpolation, image_mode=image_mode, max_thumb_width=max_thumb_width)
+
     # Diagnostics section (only if diagnostic data was found)
     if diagnostics:
         html += '\n    <div class="diag-section">\n'
@@ -1453,7 +1796,12 @@ def generate_html_report(
     return html
 
 
-def generate_text_report(aggregated: dict[str, list[dict]], title: str, verbose: bool = False) -> str:
+def generate_text_report(
+    aggregated: dict[str, list[dict]],
+    title: str,
+    verbose: bool = False,
+    interpolation: dict | None = None,
+) -> str:
     """Generate a plain text report from aggregated metrics."""
     aggregated = sort_steps(aggregated)
 
@@ -1545,6 +1893,9 @@ def generate_text_report(aggregated: dict[str, list[dict]], title: str, verbose:
                         unit = data.get("unit", "") or ""
                         lines.append(f"       {name}: {format_value(value)}{(' ' + unit) if unit else ''}")
 
+    if interpolation:
+        lines.append(_render_interpolation_section_text(interpolation))
+
     lines.append("")
     lines.append("=" * 70)
     lines.append("End of Report".center(70))
@@ -1613,6 +1964,14 @@ def main():
         n_trend_groups = len(trends)
         print(f"Computed {n_trend_groups} cross-slice trend group(s)")
 
+    # Discover slice-interpolation outputs
+    interpolation = discover_interpolation_data(input_dir)
+    if interpolation:
+        s = interpolation["summary"]
+        print(f"Found interpolation output(s): {s['count']} slice(s), {s['n_with_fallback']} with fallback")
+        if output_format == "zip" and not args.no_images and interpolation.get("images"):
+            images["diag_interpolate_missing_slice"] = list(interpolation["images"])
+
     # Discover diagnostic outputs
     diagnostics = discover_diagnostic_data(input_dir)
     if diagnostics:
@@ -1638,6 +1997,7 @@ def main():
             max_thumb_width=args.max_thumb_width,
             trends=trends if trends else None,
             diagnostics=diagnostics if diagnostics else None,
+            interpolation=interpolation,
         )
         if output_format == "zip":
             if output_file.suffix.lower() != ".zip":
@@ -1647,7 +2007,7 @@ def main():
             with Path(output_file).open("w") as f:
                 f.write(report)
     else:
-        report = generate_text_report(aggregated, args.title, args.verbose)
+        report = generate_text_report(aggregated, args.title, args.verbose, interpolation=interpolation)
         with Path(output_file).open("w") as f:
             f.write(report)
 
