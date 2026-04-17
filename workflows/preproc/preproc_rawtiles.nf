@@ -23,10 +23,9 @@ process create_mosaic_grid {
     options += " "
     options += params.preprocess? "--preprocess":"--no-preprocess"
     // Select GPU or CPU script based on use_gpu parameter
-    String script_name = params.use_gpu ? "linum_create_mosaic_grid_3d_gpu.py" : "linum_create_mosaic_grid_3d.py"
-    String gpu_opts = params.use_gpu ? "--use_gpu --galvo_threshold ${params.galvo_confidence_threshold}" : ""
+    String gpu_opts = params.use_gpu ? "--use_gpu --galvo_threshold ${params.galvo_confidence_threshold}" : "--no-use_gpu"
     """
-    ${script_name} mosaic_grid_3d_z${slice_id}.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution} --sharding_factor ${params.sharding_factor} ${options} ${gpu_opts}
+    linum_create_mosaic_grid_3d.py mosaic_grid_3d_z${slice_id}.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution} --sharding_factor ${params.sharding_factor} ${options} ${gpu_opts}
     """
 }
 
@@ -38,10 +37,9 @@ process generate_aip {
     output:
         tuple val(slice_id), path("aip_z${slice_id}.png")
     script:
-    String script_name = params.use_gpu ? "linum_aip_gpu.py" : "linum_aip_png.py"
-    String gpu_opts = params.use_gpu ? "--use_gpu" : ""
+    String gpu_opts = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
     """
-    ${script_name} ${mosaic_grid} aip_z${slice_id}.png ${gpu_opts}
+    linum_aip_png.py ${mosaic_grid} aip_z${slice_id}.png ${gpu_opts}
     """
 }
 

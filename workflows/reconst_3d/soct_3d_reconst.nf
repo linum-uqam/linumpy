@@ -6,7 +6,276 @@ nextflow.enable.dsl = 2
  *
  * Input:  Directory containing mosaic_grid*.ome.zarr files + shifts_xy.csv
  * Output: 3D OME-Zarr volume with multi-resolution pyramid
+ *
+ * Channel patterns and authoring conventions: docs/NEXTFLOW_WORKFLOWS.md
  */
+
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
+
+// Annotated-screenshot CLI flags shared by `stack` and `normalize_z_intensity`.
+def annotatedScreenshotArgs(String sliceIdsStr) {
+    def show_lines = params.annotated_show_lines ? '--show_lines' : ''
+    def orient = params.ras_input_orientation?.trim()?.replace("'", '') ?: ''
+    def orientation = orient ? "--orientation ${orient}" : ''
+    return "--slice_ids \"${sliceIdsStr}\" --label_every ${params.annotated_label_every} ${show_lines} ${orientation} --crop_to_tissue"
+}
+
+// True when the named per-stage diagnostic flag (or `diagnostic_mode`) is set.
+def diagEnabled(String flag) { params.diagnostic_mode || params[flag] }
+
+// Resolve subject_name from inputDir when not explicitly set:
+//   1. `params.subject_name` if provided
+//   2. `sub-XX` token anywhere in the path
+//   3. parent of common input dirnames (`mosaic-grids`, `mosaics`, ...)
+//   4. leaf directory name
+def resolveSubjectName(String inputDir) {
+    if (params.subject_name) return params.subject_name
+    def subMatch = inputDir.split('/').find { part -> part ==~ /sub-\w+/ }
+    if (subMatch) return subMatch
+    def inputFile = file(inputDir)
+    def dirName = inputFile.getName()
+    if (dirName in ['mosaic-grids', 'mosaics', 'mosaic_grids', 'input', 'data']) {
+        return inputFile.getParent()?.getName() ?: dirName
+    }
+    return dirName
+}
+
+// ---------------------------------------------------------------------------
+// `stack` option builders. Split by concern so each `if` group lives next to
+// the related parameters rather than as one 65-line imperative blob.
+// ---------------------------------------------------------------------------
+
+def stackBlendingArgs() {
+    def opts = ""
+    if (params.stack_blend_enabled) opts += " --blend"
+    if (params.blend_refinement_px > 0) opts += " --blend_refinement_px ${params.blend_refinement_px}"
+    if (params.stack_blend_z_refine_vox > 0) opts += " --blend_z_refine_vox ${params.stack_blend_z_refine_vox}"
+    if (params.blend_z_refine_min_confidence > 0) opts += " --blend_z_refine_min_confidence ${params.blend_z_refine_min_confidence}"
+    return opts
+}
+
+def stackZMatchingArgs() {
+    def opts = ""
+    opts += " --slicing_interval_mm ${params.registration_slicing_interval_mm}"
+    opts += " --search_range_mm ${params.registration_allowed_drifting_mm}"
+    opts += " --moving_z_first_index ${params.moving_slice_first_index}"
+    if (params.use_expected_z_overlap) opts += " --use_expected_overlap"
+    if (params.z_overlap_min_corr > 0) opts += " --z_overlap_min_corr ${params.z_overlap_min_corr}"
+    if (params.analyze_shifts) opts += " --output_z_matches z_matches.csv"
+    opts += " --output_stacking_decisions stacking_decisions.csv"
+    return opts
+}
+
+def stackPairwiseTransformArgs() {
+    if (!params.apply_pairwise_transforms) return ""
+    def opts = " --transforms_dir transforms"
+    if (params.apply_rotation_only) opts += " --rotation_only"
+    opts += " --max_rotation_deg ${params.max_rotation_deg}"
+    if (params.load_transform_min_zcorr > 0) opts += " --load_min_zcorr ${params.load_transform_min_zcorr}"
+    if (params.load_transform_max_rotation > 0) opts += " --load_max_rotation ${params.load_transform_max_rotation}"
+    if (params.skip_error_transforms) opts += " --skip_error_transforms"
+    if (params.skip_warning_transforms) opts += " --skip_warning_transforms"
+    opts += " --confidence_high ${params.transform_confidence_high}"
+    opts += " --confidence_low ${params.transform_confidence_low}"
+    return opts
+}
+
+// Drives per-slice use/auto_excluded → motor-only fallback in stack.
+def stackSliceConfigArg(slice_config) {
+    return slice_config.name != 'NO_SLICE_CONFIG' ? " --slice_config ${slice_config}" : ""
+}
+
+// Skipped when refine_manual_transforms baked manual corrections into the
+// transforms directory; passing them again would double-apply.
+def stackManualOverrideArg() {
+    return (params.manual_transforms_dir && !params.refine_manual_transforms)
+        ? " --manual_transforms_dir ${params.manual_transforms_dir}"
+        : ""
+}
+
+def stackCumulativeArgs() {
+    if (!params.stack_accumulate_translations) return ""
+    def opts = " --accumulate_translations"
+    if (params.stack_confidence_weight_translations) opts += " --confidence_weight_translations"
+    if (params.stack_max_cumulative_drift_px > 0) opts += " --max_cumulative_drift_px ${params.stack_max_cumulative_drift_px}"
+    // > 0 filters clamped translations; 0 = keep all (preserves re-homing boundary corrections).
+    if (params.stack_max_pairwise_translation > 0) opts += " --max_pairwise_translation ${params.stack_max_pairwise_translation}"
+    return opts
+}
+
+def stackSmoothingArgs() {
+    def opts = ""
+    if (params.stack_smooth_window > 0) opts += " --smooth_window ${params.stack_smooth_window}"
+    if (params.stack_translation_smooth_sigma > 0) opts += " --translation_smooth_sigma ${params.stack_translation_smooth_sigma}"
+    if (params.stack_translation_min_zcorr > 0) opts += " --translation_min_zcorr ${params.stack_translation_min_zcorr}"
+    return opts
+}
+
+// Build pyramid-related CLI arguments from `params.pyramid_*` settings.
+// `nLevelsFlag` names the downstream flag (`--n_levels` for most scripts,
+// `--n-levels` for `linum_align_to_ras.py`).
+def pyramidArgs(nLevelsFlag = '--n_levels') {
+    def opts = ""
+    if (params.pyramid_n_levels != null) {
+        opts += " ${nLevelsFlag} ${params.pyramid_n_levels}"
+    } else {
+        def base_res = params.resolution > 0 ? params.resolution : 10
+        def valid = params.pyramid_resolutions.findAll { r -> r >= base_res }.sort()
+        if (!valid.contains(base_res)) valid = [base_res] + valid
+        opts += " --pyramid_resolutions " + valid.collect { r -> r.toString() }.join(' ')
+        opts += params.pyramid_make_isotropic ? " --make_isotropic" : " --no_isotropic"
+    }
+    return opts
+}
+
+// Extract z## slice ID string from a filename; returns "unknown" if not found.
+def extractSliceId(filename) {
+    def name = filename instanceof Path ? filename.getName() : filename.toString()
+    def matcher = name =~ /z(\d+)/
+    return matcher ? matcher[0][1] : "unknown"
+}
+
+// Extract slice ID as integer; returns -1 if not found.
+def extractSliceIdInt(filename) {
+    def id = extractSliceId(filename)
+    return id == "unknown" ? -1 : id.toInteger()
+}
+
+// Return tuple(slice_id, file) for a given file path.
+def toSliceTuple(file_path) {
+    tuple(extractSliceId(file_path), file_path)
+}
+
+// Return sorted, comma-separated slice IDs from a list of files (e.g. "01,02,03,05").
+def extractSliceIdsString(fileList) {
+    fileList
+        .collect { f -> extractSliceId(f) }
+        .findAll { s -> s != "unknown" }
+        .sort { s -> s.toInteger() }
+        .join(',')
+}
+
+// Remove duplicate and trailing slashes from a path string.
+def normalizePath(path) {
+    return path.replaceAll('/+', '/').replaceAll('/$', '')
+}
+
+// Join path components safely.
+def joinPath(base, filename) {
+    return "${normalizePath(base)}/${filename}"
+}
+
+// Parse a slice_config.csv and return a map with the sets of slice IDs
+// marked for use vs. excluded: `[use: Set<String>, excluded: Set<String>]`.
+// Boolean parsing is kept in lockstep with `linumpy.io.slice_config._parse_bool`
+// (true / 1 / yes / y / t, case-insensitive). Edit there when the canonical
+// schema changes — Nextflow can't depend on Python at workflow-init time.
+def parseSliceConfig(configPath) {
+    def slicesToUse = [] as Set
+    def slicesExcluded = [] as Set
+    def file = new File(configPath)
+
+    if (!file.exists()) error("Slice config file not found: ${configPath}")
+
+    def truthy = ['true', '1', 'yes', 'y', 't'] as Set
+    file.withReader { reader ->
+        reader.readLine() // Skip header
+        reader.eachLine { line ->
+            def parts = line.split(',')
+            if (parts.size() >= 2) {
+                def sliceId = parts[0].trim()
+                def use = parts[1].trim().toLowerCase()
+                if (truthy.contains(use)) slicesToUse.add(sliceId)
+                else slicesExcluded.add(sliceId)
+            }
+        }
+    }
+
+    return [use: slicesToUse, excluded: slicesExcluded]
+}
+
+// Detect single-slice gaps in a sorted slice list.
+// Returns a list of [missingId, beforeId, afterId] tuples.
+def detectSingleGaps(sliceList) {
+    def gaps = []
+    def sliceIds = sliceList
+        .collect { f -> extractSliceIdInt(f) }
+        .findAll { n -> n >= 0 }
+        .sort()
+
+    sliceIds.eachWithIndex { current, i ->
+        if (i >= sliceIds.size() - 1) {
+            return
+        }
+        def next = sliceIds[i + 1]
+        def gap = next - current
+
+        if (gap == 2) {
+            def missingId = String.format("%02d", current + 1)
+            def beforeId = String.format("%02d", current)
+            def afterId = String.format("%02d", next)
+            gaps.add([missingId, beforeId, afterId])
+            log.info "Gap detected: slice ${missingId} (between ${beforeId} and ${afterId})"
+        } else if (gap > 2) {
+            log.warn "Multiple missing slices between ${current} and ${next} - cannot interpolate"
+        }
+    }
+    return gaps
+}
+
+// Partition a flat list of staged files into (slices, transforms): .ome.zarr
+// items go to slices, everything else (excluding *.json metrics) to
+// transforms. Used by export_manual_align / refine_manual_transforms inputs.
+def partitionSlicesAndTransforms(items) {
+    def slices = items.findAll { f -> f.getName().endsWith('.ome.zarr') }
+    def transforms = items.findAll { f -> def n = f.getName(); !n.endsWith('.ome.zarr') && !n.endsWith('.json') }
+    return tuple(slices, transforms)
+}
+
+// Parse debug_slices parameter; supports "25,26", "25-29", or "25,27-29".
+// Returns a set of zero-padded slice IDs, or null if not specified.
+def parseDebugSlices(debugSlicesStr) {
+    if (!debugSlicesStr || debugSlicesStr.trim().isEmpty()) return null
+
+    def sliceIds = [] as Set
+    debugSlicesStr.split(',').each { part ->
+        part = part.trim()
+        if (part.contains('-')) {
+            def rangeParts = part.split('-')
+            if (rangeParts.size() == 2) {
+                def start = rangeParts[0].trim().toInteger()
+                def end = rangeParts[1].trim().toInteger()
+                (start..end).each { n -> sliceIds.add(String.format("%02d", n)) }
+            }
+        } else {
+            sliceIds.add(String.format("%02d", part.toInteger()))
+        }
+    }
+    return sliceIds
+}
+
+// =============================================================================
+// SUB-WORKFLOW INCLUDES
+// =============================================================================
+
+// Diagnostic processes (analyze_rotation_drift, stitch_motor_only, stitch_refined,
+// compare_stitching, stack_motor_only, analyze_acquisition_rotation) live in
+// ./diagnostics.nf and are gated below by `params.diagnostic_mode` and
+// per-stage flags.
+include {
+    analyze_rotation_drift;
+    stitch_motor_only;
+    stitch_refined;
+    compare_stitching;
+    stack_motor_only;
+    analyze_acquisition_rotation;
+} from './diagnostics.nf'
+
+// =============================================================================
+// PROCESSES
+// =============================================================================
 
 // -----------------------------------------------------------------------------
 // Utility Processes
@@ -50,210 +319,6 @@ process analyze_shifts {
     """
 }
 
-// -----------------------------------------------------------------------------
-// Diagnostic Processes
-// -----------------------------------------------------------------------------
-
-process analyze_rotation_drift {
-    publishDir "${params.output}/diagnostics/rotation_analysis", mode: 'copy'
-
-    input:
-    path(reg_dirs)
-
-    output:
-    path "rotation_analysis/*"
-
-    script:
-    """
-    mkdir -p register_pairwise
-    for d in *; do
-        if [ -d "\$d" ] && [[ "\$d" == slice_z* ]]; then
-            ln -s "\$(pwd)/\$d" "register_pairwise/\$d"
-        fi
-    done
-
-    linum_analyze_registration_transforms.py register_pairwise rotation_analysis \
-        --resolution ${params.resolution} \
-        --rotation_threshold ${params.diagnostic_rotation_threshold}
-    """
-}
-
-process analyze_tile_dilation {
-    publishDir "${params.output}/diagnostics/dilation_analysis/${slice_id}", mode: 'copy'
-
-    input:
-    tuple val(slice_id), path(mosaic_grid), path(transform_xy)
-
-    output:
-    tuple val(slice_id), path("dilation_analysis_${slice_id}.json"), path("dilation_analysis_${slice_id}.png"), path("dilation_analysis_${slice_id}.txt")
-
-    script:
-    """
-    linum_analyze_tile_dilation.py ${mosaic_grid} ${transform_xy} dilation_analysis \
-        --resolution ${params.resolution} \
-        --overlap_fraction ${params.motor_only_overlap} \
-        --slice_id ${slice_id}
-
-    mv dilation_analysis/dilation_analysis.json dilation_analysis_${slice_id}.json
-    mv dilation_analysis/dilation_analysis.png dilation_analysis_${slice_id}.png
-    mv dilation_analysis/dilation_analysis.txt dilation_analysis_${slice_id}.txt
-    """
-}
-
-process aggregate_dilation_analysis {
-    publishDir "${params.output}/diagnostics/aggregated_dilation", mode: 'copy'
-
-    input:
-    path(json_files)
-
-    output:
-    path "aggregated_dilation_analysis.json", emit: json
-    path "per_slice_correction_factors.csv", emit: csv
-    path "aggregated_dilation_report.txt", emit: report
-    path "aggregated_dilation_analysis.png", emit: plot
-
-    script:
-    """
-    mkdir -p dilation_input
-    for f in *.json; do
-        if [ -f "\$f" ]; then
-            slice_id=\$(grep -o '"slice_id"[[:space:]]*:[[:space:]]*"[^"]*"' "\$f" | head -1 | sed 's/.*"\\([^"]*\\)".*/\\1/')
-            if [ -z "\$slice_id" ]; then
-                slice_id=\$(grep -o '"slice_id"[[:space:]]*:[[:space:]]*[0-9]*' "\$f" | head -1 | sed 's/.*[[:space:]]\\([0-9]*\\)/\\1/')
-            fi
-            if [ -n "\$slice_id" ]; then
-                mkdir -p "dilation_input/\${slice_id}/dilation_analysis"
-                ln -s "\$(pwd)/\$f" "dilation_input/\${slice_id}/dilation_analysis/dilation_analysis.json"
-            fi
-        fi
-    done
-
-    linum_aggregate_dilation_analysis.py dilation_input . \
-        --pattern "*/dilation_analysis/dilation_analysis.json"
-    """
-}
-
-process stitch_motor_only {
-    publishDir "${params.output}/diagnostics/motor_only_stitch", mode: 'copy'
-
-    input:
-    tuple val(slice_id), path(mosaic_grid)
-
-    output:
-    path "slice_z${slice_id}_motor_only.ome.zarr"
-
-    script:
-    def blending = params.motor_only_stitch_blending ?: 'diffusion'
-    """
-    linum_stitch_motor_only.py ${mosaic_grid} "slice_z${slice_id}_motor_only.ome.zarr" \
-        --overlap_fraction ${params.motor_only_overlap} \
-        --blending_method ${blending}
-    """
-}
-
-process stitch_refined {
-    publishDir "${params.output}/diagnostics/refined_stitch", mode: 'copy'
-
-    input:
-    tuple val(slice_id), path(mosaic_grid)
-
-    output:
-    path "slice_z${slice_id}_refined.ome.zarr"
-    path "slice_z${slice_id}_refinements.json", optional: true
-
-    script:
-    def refinement_out = params.save_refinement_data ? "--output_refinements slice_z${slice_id}_refinements.json" : ""
-    """
-    linum_stitch_3d_refined.py ${mosaic_grid} "slice_z${slice_id}_refined.ome.zarr" \
-        --overlap_fraction ${params.stitch_overlap_fraction} \
-        --blending_method diffusion \
-        --refinement_mode blend_shift \
-        --max_refinement_px ${params.max_blend_refinement_px} \
-        ${refinement_out} -f
-    """
-}
-
-process compare_stitching {
-    publishDir "${params.output}/diagnostics/stitch_comparison", mode: 'copy'
-
-    input:
-    tuple val(slice_id), path(motor_stitch), path(refined_stitch)
-
-    output:
-    path "slice_z${slice_id}_comparison/*"
-
-    script:
-    """
-    linum_compare_stitching.py ${motor_stitch} ${refined_stitch} \
-        "slice_z${slice_id}_comparison" \
-        --label1 "Motor-only" --label2 "Refined" \
-        --tile_step ${params.comparison_tile_step}
-    """
-}
-
-process stack_motor_only {
-    publishDir "${params.output}/diagnostics/motor_only_stack", mode: 'copy'
-
-    input:
-    path("slices/*")
-    path(shifts_file)
-
-    output:
-    path "motor_only_stack.ome.zarr"
-    path "motor_only_stack_preview.png", optional: true
-
-    script:
-    def blending_arg = params.motor_only_stack_blending ?: 'none'
-    def preview_arg = "--preview motor_only_stack_preview.png"
-    """
-    linum_stack_motor_only.py slices ${shifts_file} motor_only_stack.ome.zarr \
-        --blending ${blending_arg} \
-        ${preview_arg}
-    """
-}
-
-process run_full_diagnostics {
-    publishDir "${params.output}/diagnostics", mode: 'copy'
-
-    input:
-    path(pipeline_output)
-
-    output:
-    path "full_diagnostics/*"
-
-    script:
-    """
-    linum_diagnose_reconstruction.py ${pipeline_output} full_diagnostics \
-        --resolution ${params.resolution} \
-        --rotation_threshold ${params.diagnostic_rotation_threshold}
-    """
-}
-
-process analyze_acquisition_rotation {
-    publishDir "${params.output}/diagnostics/acquisition_rotation", mode: 'copy'
-
-    input:
-    path(shifts_file)
-    path(reg_dirs)
-
-    output:
-    path "acquisition_rotation_analysis/*"
-
-    script:
-    """
-    mkdir -p register_pairwise
-    for d in *; do
-        if [ -d "\$d" ] && [[ "\$d" == slice_z* ]]; then
-            ln -s "\$(pwd)/\$d" "register_pairwise/\$d"
-        fi
-    done
-
-    linum_analyze_acquisition_rotation.py ${shifts_file} acquisition_rotation_analysis \
-        --registration_dir register_pairwise \
-        --resolution ${params.resolution}
-    """
-}
-
 process generate_report {
     publishDir "$params.output", mode: 'copy'
 
@@ -288,10 +353,9 @@ process resample_mosaic_grid {
     tuple val(slice_id), path("mosaic_grid_z${slice_id}_resampled.ome.zarr")
 
     script:
-    def script_name = params.use_gpu ? "linum_resample_mosaic_grid_gpu.py" : "linum_resample_mosaic_grid.py"
-    def gpu_flag = params.use_gpu ? "--use_gpu" : ""
+    def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
     """
-    ${script_name} ${mosaic_grid} "mosaic_grid_z${slice_id}_resampled.ome.zarr" \
+    linum_resample_mosaic_grid.py ${mosaic_grid} "mosaic_grid_z${slice_id}_resampled.ome.zarr" \
         -r ${params.resolution} ${gpu_flag} -v
     """
 }
@@ -319,11 +383,11 @@ process fix_illumination {
     tuple val(slice_id), path("mosaic_grid_z${slice_id}_illum_fix.ome.zarr")
 
     script:
-    def script_name = params.use_gpu ? "linum_fix_illumination_3d_gpu.py" : "linum_fix_illumination_3d.py"
+    def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
     """
-    ${script_name} ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" \
+    linum_fix_illumination_3d.py ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" \
         --n_processes ${params.processes} \
-        --percentile_max ${params.clip_percentile_upper}
+        --percentile_max ${params.clip_percentile_upper} ${gpu_flag}
     """
 }
 
@@ -331,73 +395,63 @@ process fix_illumination {
 // Stitching Processes
 // -----------------------------------------------------------------------------
 
-process generate_aip {
+process estimate_global_transform {
     publishDir "${params.output}/${task.process}", mode: 'copy'
 
     input:
-    tuple val(slice_id), path(mosaic_grid)
+    path("pool_input/*")
+    path(slice_config)
 
     output:
-    tuple val(slice_id), path("mosaic_grid_z${slice_id}_aip.ome.zarr")
+    path("global_affine.npy"), emit: transform
+    path("global_affine.json"), optional: true, emit: diagnostics
 
     script:
+    def slice_config_arg = slice_config.name != 'NO_SLICE_CONFIG' ? "--slice_config ${slice_config}" : ""
+    def histogram_arg = params.stitch_global_transform_histogram_match ? "--histogram_match" : ""
+    def empty_arg = params.stitch_global_transform_max_empty_fraction != null
+        ? "--max_empty_fraction ${params.stitch_global_transform_max_empty_fraction}"
+        : ""
+    def n_samples_arg = (params.stitch_global_transform_n_samples as int) > 0
+        ? "--n_samples ${params.stitch_global_transform_n_samples as int}"
+        : ""
+    def include_arg = params.stitch_global_transform_slices?.trim()
+        ? "--include_slice " + params.stitch_global_transform_slices.toString().split('[,\\s]+').join(' ')
+        : ""
+    def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
     """
-    linum_aip.py ${mosaic_grid} "mosaic_grid_z${slice_id}_aip.ome.zarr"
+    linum_estimate_global_transform.py pool_input global_affine.npy \
+        --overlap_fraction ${params.stitch_overlap_fraction} \
+        ${slice_config_arg} \
+        ${include_arg} \
+        ${histogram_arg} \
+        ${empty_arg} \
+        ${n_samples_arg} \
+        --seed ${params.stitch_global_transform_seed} \
+        --diagnostics_json global_affine.json \
+        -f ${gpu_flag}
     """
 }
 
-process estimate_xy_transformation {
+process stitch_3d_with_refinement {
     publishDir "${params.output}/${task.process}", mode: 'copy', pattern: "*_metrics.json"
 
     input:
-    tuple val(slice_id), path(aip)
-
-    output:
-    tuple val(slice_id), path("z${slice_id}_transform_xy.npy"), emit: transform
-    path("*_metrics.json"), optional: true, emit: metrics
-
-    script:
-    def script_name = params.use_gpu ? "linum_estimate_transform_gpu.py" : "linum_estimate_transform.py"
-    def gpu_flag = params.use_gpu ? "--use_gpu" : ""
-    def motor_flag = params.use_motor_positions_for_stitching ? "--use_motor_positions" : ""
-    def overlap_arg = "--initial_overlap ${params.stitch_overlap_fraction}"
-    """
-    ${script_name} ${aip} "z${slice_id}_transform_xy.npy" \
-        ${gpu_flag} ${motor_flag} ${overlap_arg}
-    """
-}
-
-process stitch_3d {
-    publishDir "${params.output}/${task.process}", mode: 'copy', pattern: "*_metrics.json"
-
-    input:
-    tuple val(slice_id), path(mosaic_grid), path(transform_xy)
+    tuple val(slice_id), path(mosaic_grid), path(input_transform)
 
     output:
     tuple val(slice_id), path("slice_z${slice_id}_stitch_3d.ome.zarr"), emit: stitched
     path("*_metrics.json"), optional: true, emit: metrics
 
     script:
-    """
-    linum_stitch_3d.py ${mosaic_grid} ${transform_xy} "slice_z${slice_id}_stitch_3d.ome.zarr" \
-        --blending_method ${params.stitch_blending_method}
-    """
-}
-
-process stitch_3d_with_refinement {
-    input:
-    tuple val(slice_id), path(mosaic_grid)
-
-    output:
-    tuple val(slice_id), path("slice_z${slice_id}_stitch_3d.ome.zarr")
-
-    script:
+    def transform_arg = input_transform.name != 'NO_TRANSFORM' ? "--input_transform ${input_transform}" : ""
     """
     linum_stitch_3d_refined.py ${mosaic_grid} "slice_z${slice_id}_stitch_3d.ome.zarr" \
         --overlap_fraction ${params.stitch_overlap_fraction} \
         --blending_method ${params.stitch_blending_method} \
         --refinement_mode blend_shift \
         --max_refinement_px ${params.max_blend_refinement_px} \
+        ${transform_arg} \
         -f
     """
 }
@@ -469,10 +523,9 @@ process normalize {
     path("*_metrics.json"), optional: true, emit: metrics
 
     script:
-    def script_name = params.use_gpu ? "linum_normalize_intensities_per_slice_gpu.py" : "linum_normalize_intensities_per_slice.py"
-    def gpu_flag = params.use_gpu ? "--use_gpu" : ""
+    def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
     """
-    ${script_name} ${image} "slice_z${slice_id}_normalize.ome.zarr" \
+    linum_normalize_intensities_per_slice.py ${image} "slice_z${slice_id}_normalize.ome.zarr" \
         --percentile_max ${params.clip_percentile_upper} \
         --min_contrast_fraction ${params.normalize_min_contrast} ${gpu_flag}
     """
@@ -486,38 +539,53 @@ process detect_rehoming_events {
     publishDir "${params.output}/${task.process}", mode: 'copy'
 
     input:
-    path shifts_csv
+    tuple path(shifts_csv), path(slice_config_in)
 
     output:
-    path "shifts_xy_clean.csv", emit: corrected_shifts
-    path "diagnostics/*",       emit: diagnostics, optional: true
+    path "shifts_xy_clean.csv",           emit: corrected_shifts
+    path "slice_config.csv",              optional: true, emit: slice_config
+    path "diagnostics/*",                 optional: true, emit: diagnostics
 
     script:
     def diag_arg = params.rehoming_diagnostics ? "--diagnostics diagnostics" : ""
     def frac_arg = params.rehoming_return_fraction ? "--return_fraction ${params.rehoming_return_fraction}" : ""
     def tile_fov_arg = params.tile_fov_mm ? "--tile_fov_mm ${params.tile_fov_mm}" : ""
+    def tile_tol_arg = (params.tile_fov_mm && params.tile_fov_tolerance != null) ? "--tile_fov_tolerance ${params.tile_fov_tolerance}" : ""
     def max_shift_arg = params.rehoming_max_shift_mm ? "--max_shift_mm ${params.rehoming_max_shift_mm}" : ""
+    def sc_args = slice_config_in.name != 'NO_SLICE_CONFIG'
+        ? "--slice_config_in ${slice_config_in} --slice_config_out slice_config.csv"
+        : ""
     """
-    linum_detect_rehoming.py ${shifts_csv} shifts_xy_clean.csv ${frac_arg} ${max_shift_arg} ${tile_fov_arg} ${diag_arg}
+    linum_detect_rehoming.py ${shifts_csv} shifts_xy_clean.csv \
+        ${frac_arg} ${max_shift_arg} ${tile_fov_arg} ${tile_tol_arg} ${diag_arg} \
+        ${sc_args}
     """
 }
 
+// Auto-assess slice quality after normalization. An existing slice_config.csv
+// (when supplied) is merged so manually-excluded slices stay excluded.
+// See docs/NEXTFLOW_WORKFLOWS.md "Authoring Notes" for the two-input pattern.
 process auto_assess_quality {
     publishDir "${params.output}/${task.process}", mode: 'copy'
 
     input:
     path "inputs/*"
+    path existing_slice_config
 
     output:
     path "slice_config.csv", emit: slice_config
 
     script:
+    def update_args = existing_slice_config.name != 'NO_SLICE_CONFIG'
+        ? "--update_existing --existing_config ${existing_slice_config}"
+        : ""
     """
     linum_assess_slice_quality.py inputs slice_config.csv \\
         --min_quality ${params.auto_assess_min_quality} \\
         --exclude_first ${params.auto_assess_exclude_first} \\
         --roi_size ${params.auto_assess_roi_size} \\
         --processes ${params.processes} \\
+        ${update_args} \\
         -f
     """
 }
@@ -540,10 +608,12 @@ process bring_to_common_space {
     def refine_arg = params.common_space_refine_unreliable ? "--refine_unreliable" : ""
     def discrepancy_arg = (params.common_space_refine_unreliable && params.common_space_refine_max_discrepancy_px > 0) ?
         "--refine_max_discrepancy_px ${params.common_space_refine_max_discrepancy_px}" : ""
+    def min_corr_arg = (params.common_space_refine_unreliable && params.common_space_refine_min_correlation > 0) ?
+        "--refine_min_correlation ${params.common_space_refine_min_correlation}" : ""
 
     """
     linum_align_mosaics_3d_from_shifts.py inputs shifts_xy.csv common_space \
-        ${slice_config_arg} ${excluded_args} ${refine_arg} ${discrepancy_arg}
+        ${slice_config_arg} ${excluded_args} ${refine_arg} ${discrepancy_arg} ${min_corr_arg}
     mv common_space/* .
     """
 }
@@ -563,6 +633,9 @@ process generate_common_space_preview {
     """
 }
 
+// Interpolate a single missing slice via z-aware morphing (zmorph).
+// On gate failure the zarr is omitted (hard skip); see
+// docs/SLICE_INTERPOLATION_FEATURE.md for the full failure policy.
 process interpolate_missing_slice {
     publishDir "${params.output}/${task.process}", mode: 'copy'
 
@@ -570,11 +643,16 @@ process interpolate_missing_slice {
     tuple val(missing_slice_id), path(slice_before), path(slice_after)
 
     output:
-    path "slice_z${missing_slice_id}_interpolated.ome.zarr", emit: zarr
+    path "slice_z${missing_slice_id}_interpolated.ome.zarr", optional: true, emit: zarr
     path "slice_z${missing_slice_id}_interpolated_preview.png", optional: true, emit: preview
+    path "slice_z${missing_slice_id}_interpolated_diagnostics.json", emit: diagnostics
+    path "slice_z${missing_slice_id}_manifest.csv", emit: manifest
 
     script:
     def preview_opt = params.interpolation_preview ? "--preview slice_z${missing_slice_id}_interpolated_preview.png" : ""
+    def slab_opt = params.interpolation_reference_slab_size ? "--reference_slab_size ${params.interpolation_reference_slab_size}" : ""
+    def fg_opt = params.interpolation_min_foreground_fraction != null ? "--min_foreground_fraction ${params.interpolation_min_foreground_fraction}" : ""
+    def ncc_opt = params.interpolation_min_ncc_improvement != null ? "--min_ncc_improvement ${params.interpolation_min_ncc_improvement}" : ""
     """
     linum_interpolate_missing_slice.py ${slice_before} ${slice_after} \
         "slice_z${missing_slice_id}_interpolated.ome.zarr" \
@@ -584,7 +662,34 @@ process interpolate_missing_slice {
         --max_iterations ${params.interpolation_max_iterations} \
         --overlap_search_window ${params.interpolation_overlap_search_window} \
         --min_overlap_correlation ${params.interpolation_min_overlap_correlation} \
+        ${slab_opt} \
+        ${fg_opt} \
+        ${ncc_opt} \
+        --slice_id ${missing_slice_id} \
+        --diagnostics slice_z${missing_slice_id}_interpolated_diagnostics.json \
+        --manifest_entry slice_z${missing_slice_id}_manifest.csv \
         ${preview_opt}
+    """
+}
+
+// Merge per-slice interpolation manifest fragments into slice_config.csv.
+// See docs/NEXTFLOW_WORKFLOWS.md "Authoring Notes" for the two-input pattern.
+process finalise_interpolation {
+    publishDir "${params.output}", mode: 'copy'
+
+    input:
+    path slice_config
+    path "fragments/*"
+
+    output:
+    path "slice_config_final.csv"
+
+    script:
+    """
+    linum_interpolate_missing_slice.py --finalise \\
+        --slice_config_in ${slice_config} \\
+        --slice_config_out slice_config_final.csv \\
+        --fragments fragments
     """
 }
 
@@ -611,26 +716,50 @@ process register_pairwise {
         --moving_z_index ${params.moving_slice_first_index} \
         --max_rotation_deg ${params.registration_max_rotation} \
         --max_translation_px ${params.registration_max_translation} \
+        --initial_alignment ${params.registration_initial_alignment} \
         ${rotation_flag}
     """
 }
 
-// Auto-exclude extended clusters of consecutive low-quality registrations.
-// Reads pairwise_registration_metrics.json from the registration output and
-// produces a CSV listing slice IDs whose transforms should be force-skipped
-// (motor-only positioning) during stacking.
+// Optional: re-register slice pairs that have a manual transform, using the
+// manual alignment as initialisation.  Produces a refined transform that
+// combines the manual correction with a tight image-based residual correction.
+// Only runs when params.refine_manual_transforms = true.
+process refine_manual_transforms {
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
+    input:
+    tuple path("slices/*"), path("transforms/*")
+
+    output:
+    path "*"
+
+    script:
+    """
+    linum_refine_manual_transforms.py slices transforms . \
+        --manual_transforms_dir ${params.manual_transforms_dir} \
+        --max_translation_px ${params.refine_max_translation_px} \
+        --max_rotation_deg ${params.refine_max_rotation_deg} -f
+    """
+}
+
+// Auto-exclude clusters of consecutive low-quality registrations by stamping
+// auto_excluded/auto_exclude_reason into slice_config.csv; stack reads them
+// via --slice_config and treats those slices as motor-only.
+// See docs/NEXTFLOW_WORKFLOWS.md "Authoring Notes" for the two-input pattern.
 process auto_exclude_slices {
     publishDir "$params.output/$task.process", mode: 'copy'
 
     input:
     path "transforms/*"
+    path slice_config_in
 
     output:
-    path "auto_exclude.csv", emit: csv
+    path "slice_config.csv", emit: slice_config
 
     script:
     """
-    linum_auto_exclude_slices.py transforms auto_exclude.csv \
+    linum_auto_exclude_slices.py transforms ${slice_config_in} slice_config.csv \
         --consecutive_threshold ${params.auto_exclude_consecutive} \
         --z_corr_threshold ${params.auto_exclude_z_corr}
     """
@@ -639,6 +768,26 @@ process auto_exclude_slices {
 // -----------------------------------------------------------------------------
 // Stacking Processes
 // -----------------------------------------------------------------------------
+
+// Export lightweight data package for the manual alignment tool.
+// Produces AIP images and copies pairwise transforms into a self-contained
+// directory that can be downloaded and opened by the manual alignment widget.
+process make_manual_align_package {
+    publishDir "$params.output/$task.process", mode: 'copy'
+
+    input:
+    tuple path("slices/*"), path("transforms/*")
+
+    output:
+    path("manual_align_package"), emit: pkg
+
+    script:
+    """
+    linum_export_manual_align.py slices transforms manual_align_package \
+        --level ${params.manual_align_level} \
+        --slices_remote_dir ${params.output}/bring_to_common_space
+    """
+}
 
 // Stacking: assembles common-space slices into a 3D volume using motor positions
 // for XY placement, pairwise registration for rotation/translation refinement,
@@ -651,7 +800,7 @@ process stack {
         saveAs: { fn -> fn.endsWith('.ome.zarr') ? null : fn }
 
     input:
-    tuple path("slices/*"), path(shifts_file), path("transforms/*"), path(auto_exclude_csv), val(subject_name), val(slice_ids_str)
+    tuple path("slices/*"), path(shifts_file), path("transforms/*"), path(slice_config), val(subject_name), val(slice_ids_str)
 
     output:
     tuple path("${subject_name}.ome.zarr"), path("${subject_name}.ome.zarr.zip"), path("${subject_name}.png"), path("${subject_name}_annotated.png"), emit: volume
@@ -660,81 +809,22 @@ process stack {
     path("stacking_decisions.csv"), optional: true, emit: stacking_decisions
 
     script:
-    def options = ""
+    def options = stackBlendingArgs() +
+                  stackZMatchingArgs() +
+                  stackPairwiseTransformArgs() +
+                  stackSliceConfigArg(slice_config) +
+                  stackManualOverrideArg() +
+                  stackCumulativeArgs() +
+                  stackSmoothingArgs() +
+                  " --no_xy_shift" +  // slices are already in common space
+                  pyramidArgs()
 
-    // Blending
-    if (params.stack_blend_enabled) options += " --blend"
-    if (params.blend_refinement_px > 0) options += " --blend_refinement_px ${params.blend_refinement_px}"
-    if (params.stack_blend_z_refine_vox > 0) options += " --blend_z_refine_vox ${params.stack_blend_z_refine_vox}"
-    if (params.blend_z_refine_min_confidence > 0) options += " --blend_z_refine_min_confidence ${params.blend_z_refine_min_confidence}"
-
-    // Z-matching
-    options += " --slicing_interval_mm ${params.registration_slicing_interval_mm}"
-    options += " --search_range_mm ${params.registration_allowed_drifting_mm}"
-    options += " --moving_z_first_index ${params.moving_slice_first_index}"
-    if (params.use_expected_z_overlap) options += " --use_expected_overlap"
-    if (params.z_overlap_min_corr > 0) options += " --z_overlap_min_corr ${params.z_overlap_min_corr}"
-    if (params.analyze_shifts) options += " --output_z_matches z_matches.csv"
-    options += " --output_stacking_decisions stacking_decisions.csv"
-
-    // Pairwise registration refinements
-    if (params.apply_pairwise_transforms) {
-        options += " --transforms_dir transforms"
-        if (params.apply_rotation_only) options += " --rotation_only"
-        options += " --max_rotation_deg ${params.max_rotation_deg}"
-        if (params.load_transform_min_zcorr > 0) options += " --load_min_zcorr ${params.load_transform_min_zcorr}"
-        if (params.load_transform_max_rotation > 0) options += " --load_max_rotation ${params.load_transform_max_rotation}"
-        if (params.skip_error_transforms) options += " --skip_error_transforms"
-        if (params.skip_warning_transforms) options += " --skip_warning_transforms"
-        options += " --confidence_high ${params.transform_confidence_high}"
-        options += " --confidence_low ${params.transform_confidence_low}"
-    }
-
-    // Auto-exclude: force motor-only stacking for low-quality clusters
-    if (auto_exclude_csv.name != 'NO_AUTO_EXCLUDE') {
-        options += " --force_skip_slices ${auto_exclude_csv}"
-    }
-
-    // Cumulative translation accumulation
-    if (params.stack_accumulate_translations) {
-        options += " --accumulate_translations"
-        if (params.stack_confidence_weight_translations)
-            options += " --confidence_weight_translations"
-        if (params.stack_max_cumulative_drift_px > 0)
-            options += " --max_cumulative_drift_px ${params.stack_max_cumulative_drift_px}"
-        // stack_max_pairwise_translation > 0 filters clamped translations; 0 = keep all.
-        // Set to 0 when skip_error_transforms=false to preserve re-homing boundary corrections.
-        if (params.stack_max_pairwise_translation > 0)
-            options += " --max_pairwise_translation ${params.stack_max_pairwise_translation}"
-    }
-
-    if (params.stack_smooth_window > 0) options += " --smooth_window ${params.stack_smooth_window}"
-
-    // Slices are already in common space; skip redundant XY shifting
-    options += " --no_xy_shift"
-
-    // Pyramid
-    if (params.pyramid_n_levels != null) {
-        options += " --n_levels ${params.pyramid_n_levels}"
-    } else {
-        def base_res = params.resolution > 0 ? params.resolution : 10
-        def valid_resolutions = params.pyramid_resolutions.findAll { it >= base_res }.sort()
-        if (!valid_resolutions.contains(base_res)) valid_resolutions = [base_res] + valid_resolutions
-        def pyramid_res_str = valid_resolutions.collect { it.toString() }.join(' ')
-        options += " --pyramid_resolutions ${pyramid_res_str}"
-        options += params.pyramid_make_isotropic ? " --make_isotropic" : " --no_isotropic"
-    }
-
-    def show_lines_flag = params.annotated_show_lines ? '--show_lines' : ''
-    def orient = params.ras_input_orientation?.trim()?.replace("'", '') ?: ''
-    def orientation_arg = orient ? "--orientation ${orient}" : ''
+    def annotated_args = annotatedScreenshotArgs(slice_ids_str)
     """
     linum_stack_slices_motor.py slices ${shifts_file} ${subject_name}.ome.zarr ${options}
     zip -r ${subject_name}.ome.zarr.zip ${subject_name}.ome.zarr
     linum_screenshot_omezarr.py ${subject_name}.ome.zarr ${subject_name}.png
-    linum_screenshot_omezarr_annotated.py ${subject_name}.ome.zarr ${subject_name}_annotated.png \
-        --slice_ids "${slice_ids_str}" \
-        --label_every ${params.annotated_label_every} ${show_lines_flag} ${orientation_arg}
+    linum_screenshot_omezarr_annotated.py ${subject_name}.ome.zarr ${subject_name}_annotated.png ${annotated_args}
     """
 }
 
@@ -753,39 +843,22 @@ process normalize_z_intensity {
 
     script:
     def n_slices_opt = n_slices > 0 ? "--n_serial_slices ${n_slices}" : ""
-    def show_lines_flag = params.annotated_show_lines ? '--show_lines' : ''
-    def orient = params.ras_input_orientation?.trim()?.replace("'", '') ?: ''
-    def orientation_arg = orient ? "--orientation ${orient}" : ''
-    def znorm_mode_opts = ""
-    if (params.znorm_mode == 'histogram') {
-        znorm_mode_opts = "--mode histogram --strength ${params.znorm_strength} --tissue_threshold ${params.znorm_tissue_threshold}"
-    } else {
-        znorm_mode_opts = "--mode percentile --smooth_sigma ${params.znorm_smooth_sigma} --percentile ${params.znorm_percentile} --max_scale ${params.znorm_max_scale} --min_scale ${params.znorm_min_scale} --strength ${params.znorm_strength}"
-    }
-    def znorm_pyramid_opts = ""
-    if (params.pyramid_n_levels != null) {
-        znorm_pyramid_opts += " --n_levels ${params.pyramid_n_levels}"
-    } else {
-        def base_res = params.resolution > 0 ? params.resolution : 10
-        def valid_resolutions = params.pyramid_resolutions.findAll { it >= base_res }.sort()
-        if (!valid_resolutions.contains(base_res)) valid_resolutions = [base_res] + valid_resolutions
-        def pyramid_res_str = valid_resolutions.collect { it.toString() }.join(' ')
-        znorm_pyramid_opts += " --pyramid_resolutions ${pyramid_res_str}"
-        znorm_pyramid_opts += params.pyramid_make_isotropic ? " --make_isotropic" : " --no_isotropic"
-    }
+    def znorm_opts = (params.znorm_mode == 'histogram')
+        ? "--mode histogram --strength ${params.znorm_strength} --tissue_threshold ${params.znorm_tissue_threshold}"
+        : "--mode percentile --smooth_sigma ${params.znorm_smooth_sigma} --percentile ${params.znorm_percentile} --max_scale ${params.znorm_max_scale} --min_scale ${params.znorm_min_scale} --strength ${params.znorm_strength}"
+    def annotated_args = annotatedScreenshotArgs(slice_ids_str)
+    def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
     """
     linum_normalize_z_intensity.py ${stacked_zarr} ${subject_name}.ome.zarr \
         ${n_slices_opt} \
-        ${znorm_mode_opts} \
-        ${znorm_pyramid_opts}
+        ${znorm_opts} \
+        ${pyramidArgs()} ${gpu_flag}
 
     zip -r ${subject_name}.ome.zarr.zip ${subject_name}.ome.zarr
 
     linum_screenshot_omezarr.py ${subject_name}.ome.zarr ${subject_name}.png
 
-    linum_screenshot_omezarr_annotated.py ${subject_name}.ome.zarr ${subject_name}_annotated.png \
-        --slice_ids "${slice_ids_str}" \
-        --label_every ${params.annotated_label_every} ${show_lines_flag} ${orientation_arg}
+    linum_screenshot_omezarr_annotated.py ${subject_name}.ome.zarr ${subject_name}_annotated.png ${annotated_args}
     """
 }
 
@@ -811,17 +884,7 @@ process align_to_ras {
     def rotation_arg = params.ras_initial_rotation ? "--initial-rotation ${params.ras_initial_rotation}" : ""
     def preview_arg = params.allen_preview ? "--preview ${subject_name}_ras_preview.png" : ""
     def orientation_preview_arg = params.ras_orientation_preview ? "--orientation-preview ${subject_name}_ras_orientation_preview.png" : ""
-    def ras_pyramid_opts = ""
-    if (params.pyramid_n_levels != null) {
-        ras_pyramid_opts += " --n-levels ${params.pyramid_n_levels}"
-    } else {
-        def base_res = params.resolution > 0 ? params.resolution : 10
-        def valid_resolutions = params.pyramid_resolutions.findAll { it >= base_res }.sort()
-        if (!valid_resolutions.contains(base_res)) valid_resolutions = [base_res] + valid_resolutions
-        def pyramid_res_str = valid_resolutions.collect { it.toString() }.join(' ')
-        ras_pyramid_opts += " --pyramid_resolutions ${pyramid_res_str}"
-        ras_pyramid_opts += params.pyramid_make_isotropic ? " --make_isotropic" : " --no_isotropic"
-    }
+    def ras_pyramid_opts = pyramidArgs('--n-levels')
     """
     linum_align_to_ras.py ${stacked_zarr} ${subject_name}_ras.ome.zarr \
         --allen-resolution ${params.allen_resolution} \
@@ -835,121 +898,6 @@ process align_to_ras {
 }
 
 // =============================================================================
-// HELPER FUNCTIONS
-// =============================================================================
-
-// Extract z## slice ID string from a filename; returns "unknown" if not found.
-def extractSliceId(filename) {
-    def name = filename instanceof Path ? filename.getName() : filename.toString()
-    def matcher = name =~ /z(\d+)/
-    return matcher ? matcher[0][1] : "unknown"
-}
-
-// Extract slice ID as integer; returns -1 if not found.
-def extractSliceIdInt(filename) {
-    def id = extractSliceId(filename)
-    return id == "unknown" ? -1 : id.toInteger()
-}
-
-// Return tuple(slice_id, file) for a given file path.
-def toSliceTuple(file_path) {
-    tuple(extractSliceId(file_path), file_path)
-}
-
-// Return sorted, comma-separated slice IDs from a list of files (e.g. "01,02,03,05").
-def extractSliceIdsString(fileList) {
-    fileList
-        .collect { extractSliceId(it) }
-        .findAll { it != "unknown" }
-        .sort { it.toInteger() }
-        .join(',')
-}
-
-// Remove duplicate and trailing slashes from a path string.
-def normalizePath(path) {
-    return path.replaceAll('/+', '/').replaceAll('/$', '')
-}
-
-// Join path components safely.
-def joinPath(base, filename) {
-    return "${normalizePath(base)}/${filename}"
-}
-
-// Parse a slice_config.csv and return the set of slice IDs marked for use.
-def parseSliceConfig(configPath) {
-    def slicesToUse = [] as Set
-    def slicesExcluded = [] as Set
-    def file = new File(configPath)
-
-    if (!file.exists()) error("Slice config file not found: ${configPath}")
-
-    file.withReader { reader ->
-        reader.readLine() // Skip header
-        reader.eachLine { line ->
-            def parts = line.split(',')
-            if (parts.size() >= 2) {
-                def sliceId = parts[0].trim()
-                def use = parts[1].trim().toLowerCase()
-                if (use in ['true', '1', 'yes']) slicesToUse.add(sliceId)
-                else slicesExcluded.add(sliceId)
-            }
-        }
-    }
-
-    log.info "Slice config: ${slicesToUse.size()} to USE, ${slicesExcluded.size()} EXCLUDED"
-    return slicesToUse
-}
-
-// Detect single-slice gaps in a sorted slice list.
-// Returns a list of [missingId, beforeId, afterId] tuples.
-def detectSingleGaps(sliceList) {
-    def gaps = []
-    def sliceIds = sliceList
-        .collect { extractSliceIdInt(it) }
-        .findAll { it >= 0 }
-        .sort()
-
-    for (int i = 0; i < sliceIds.size() - 1; i++) {
-        def current = sliceIds[i]
-        def next = sliceIds[i + 1]
-        def gap = next - current
-
-        if (gap == 2) {
-            def missingId = String.format("%02d", current + 1)
-            def beforeId = String.format("%02d", current)
-            def afterId = String.format("%02d", next)
-            gaps.add([missingId, beforeId, afterId])
-            log.info "Gap detected: slice ${missingId} (between ${beforeId} and ${afterId})"
-        } else if (gap > 2) {
-            log.warn "Multiple missing slices between ${current} and ${next} - cannot interpolate"
-        }
-    }
-    return gaps
-}
-
-// Parse debug_slices parameter; supports "25,26", "25-29", or "25,27-29".
-// Returns a set of zero-padded slice IDs, or null if not specified.
-def parseDebugSlices(debugSlicesStr) {
-    if (!debugSlicesStr || debugSlicesStr.trim().isEmpty()) return null
-
-    def sliceIds = [] as Set
-    debugSlicesStr.split(',').each { part ->
-        part = part.trim()
-        if (part.contains('-')) {
-            def rangeParts = part.split('-')
-            if (rangeParts.size() == 2) {
-                def start = rangeParts[0].trim().toInteger()
-                def end = rangeParts[1].trim().toInteger()
-                (start..end).each { sliceIds.add(String.format("%02d", it)) }
-            }
-        } else {
-            sliceIds.add(String.format("%02d", part.toInteger()))
-        }
-    }
-    return sliceIds
-}
-
-// =============================================================================
 // MAIN WORKFLOW
 // =============================================================================
 
@@ -957,22 +905,7 @@ workflow {
     README()
 
     def inputDir = normalizePath(params.input)
-
-    // Resolve subject name from path if not explicitly set
-    def subject_name = params.subject_name
-    if (!subject_name) {
-        def pathParts = inputDir.split('/')
-        def subMatch = pathParts.find { it ==~ /sub-\w+/ }
-        if (subMatch) {
-            subject_name = subMatch
-        } else {
-            def inputFile = file(inputDir)
-            def dirName = inputFile.getName()
-            subject_name = (dirName in ['mosaic-grids', 'mosaics', 'mosaic_grids', 'input', 'data'])
-                ? (inputFile.getParent()?.getName() ?: dirName)
-                : dirName
-        }
-    }
+    def subject_name = resolveSubjectName(inputDir)
     log.info "Subject: ${subject_name}"
     log.info "GPU: ${params.use_gpu ? 'ENABLED' : 'DISABLED'}"
 
@@ -993,14 +926,19 @@ workflow {
         or specify the path with --shifts_xy /path/to/shifts_xy.csv
         """
     }
-    shifts_xy = channel.of(file(shifts_xy_path))
+    // Value channel — fans out to many consumers; see "Authoring Notes" in
+    // docs/NEXTFLOW_WORKFLOWS.md.
+    shifts_xy = channel.value(file(shifts_xy_path))
 
     // Slice config (optional)
     def slice_config_path = params.slice_config ?: joinPath(inputDir, "slice_config.csv")
     def slicesToUse = null
     if (file(slice_config_path).exists()) {
-        slicesToUse = parseSliceConfig(slice_config_path)
         log.info "Slice config: ${slice_config_path}"
+        def parsed = parseSliceConfig(slice_config_path)
+        slicesToUse = parsed.use
+        def total = slicesToUse.size() + parsed.excluded.size()
+        log.info "Slice config: ${total} entries (${slicesToUse.size()} included, ${parsed.excluded.size()} excluded)"
     } else if (params.slice_config) {
         error("Slice config file not found: ${slice_config_path}")
     }
@@ -1010,17 +948,29 @@ workflow {
 
     def inputDirFile = file(inputDir)
     def mosaicFiles = inputDirFile.listFiles()
-        .findAll { it.isDirectory() && it.name.startsWith('mosaic_grid') && it.name.endsWith('.ome.zarr') && it.name =~ /z\d+/ }
-        .sort { it.name }
+        .findAll { f -> f.isDirectory() && f.name.startsWith('mosaic_grid') && f.name.endsWith('.ome.zarr') && f.name =~ /z\d+/ }
+        .sort { f -> f.name }
 
     if (mosaicFiles.isEmpty()) {
         error("No mosaic grids found in ${inputDir}. Expected: mosaic_grid*_z00.ome.zarr")
     }
-    log.info "Found ${mosaicFiles.size()} mosaic grids"
+
+    def selectedIds = mosaicFiles.collect { f -> extractSliceId(f) }.findAll { sid ->
+        if (debugSlices != null) return debugSlices.contains(sid)
+        if (slicesToUse != null) return slicesToUse.contains(sid)
+        return true
+    }
+    def skippedCount = mosaicFiles.size() - selectedIds.size()
+    if (skippedCount > 0) {
+        def reason = debugSlices != null ? "debug_slices filter" : "slice_config"
+        log.info "Found ${mosaicFiles.size()} mosaic grids; ${selectedIds.size()} selected, ${skippedCount} skipped (${reason})"
+    } else {
+        log.info "Found ${mosaicFiles.size()} mosaic grids; all selected"
+    }
 
     inputSlices = channel
         .fromList(mosaicFiles)
-        .map { toSliceTuple(it) }
+        .map { f -> toSliceTuple(f) }
         .filter { slice_id, _files ->
             if (debugSlices != null) {
                 def included = debugSlices.contains(slice_id)
@@ -1031,9 +981,11 @@ workflow {
             return true
         }
 
-    slice_config_channel = file(slice_config_path).exists()
-        ? channel.fromPath(slice_config_path)
-        : channel.of(file('NO_SLICE_CONFIG'))
+    def has_slice_config = file(slice_config_path).exists() || params.auto_assess_quality
+    // Value channel — consumed by auto_assess, common_space, finalise, stack.
+    slice_config_channel = channel.value(
+        file(slice_config_path).exists() ? file(slice_config_path) : file('NO_SLICE_CONFIG')
+    )
 
     if (params.analyze_shifts) {
         analyze_shifts(shifts_xy)
@@ -1045,8 +997,17 @@ workflow {
     illum_fixed = params.fix_illum_enabled ? fix_illumination(focal_fixed) : focal_fixed
 
     // Stage 2: XY Stitching (image-registration-based blend refinement)
-    stitch_3d_with_refinement(illum_fixed)
-    stitched_slices = stitch_3d_with_refinement.out
+    if (params.stitch_global_transform) {
+        pooled_mosaics = illum_fixed.map { _id, p -> p }.collect()
+        estimate_global_transform(pooled_mosaics, slice_config_channel)
+        stitch_inputs = illum_fixed.combine(estimate_global_transform.out.transform)
+    } else {
+        // Value channel so the placeholder can fan out to every per-slice tuple.
+        no_transform = channel.value(file('NO_TRANSFORM'))
+        stitch_inputs = illum_fixed.combine(no_transform)
+    }
+    stitch_3d_with_refinement(stitch_inputs)
+    stitched_slices = stitch_3d_with_refinement.out.stitched
 
     if (params.stitch_preview) {
         generate_stitch_preview(stitched_slices)
@@ -1057,25 +1018,31 @@ workflow {
     crop_interface(beam_profile_correction.out.corrected)
     normalize(crop_interface.out.cropped)
 
-    // Stage 3.5: Auto slice quality assessment (optional)
-    // Runs after normalization, generates a slice_config.csv that marks
-    // degraded slices. Replaces the static slice_config_channel for
-    // bring_to_common_space when enabled.
+    // Stage 3.5: Auto slice quality assessment (optional). Generates a
+    // slice_config.csv that marks degraded slices; an existing static
+    // slice_config.csv is merged so manually-excluded slices stay excluded.
+    // current_slice_config = the latest slice_config as it flows through the
+    // pipeline; rebound by auto_assess / detect_rehoming when each runs.
+    current_slice_config = slice_config_channel
     if (params.auto_assess_quality) {
         auto_assess_inputs = normalize.out.normalized
             .map { _id, norm_path -> norm_path }
             .collect()
-        auto_assess_quality(auto_assess_inputs)
-        effective_slice_config = auto_assess_quality.out.slice_config
-    } else {
-        effective_slice_config = slice_config_channel
+        auto_assess_quality(auto_assess_inputs, slice_config_channel)
+        current_slice_config = auto_assess_quality.out.slice_config
     }
 
-    // Stage 4: Common Space Alignment
-    // Optionally correct encoder glitch spikes before alignment.
+    // Stage 4: Common Space Alignment.
+    // detect_rehoming optionally corrects encoder-glitch spikes in the
+    // shifts file and (when a real slice_config exists) stamps
+    // rehomed/rehoming_reliable flags back into it.
     if (params.detect_rehoming) {
-        detect_rehoming_events(shifts_xy)
+        detect_rehoming_input = shifts_xy.combine(current_slice_config)
+        detect_rehoming_events(detect_rehoming_input)
         aligned_shifts = detect_rehoming_events.out.corrected_shifts
+        if (has_slice_config) {
+            current_slice_config = detect_rehoming_events.out.slice_config
+        }
     } else {
         aligned_shifts = shifts_xy
     }
@@ -1087,7 +1054,7 @@ workflow {
         .map { _meta, filename -> filename }
         .collect()
         .merge(aligned_shifts) { a, b -> tuple(a, b) }
-        .merge(effective_slice_config) { a, b -> tuple(a[0], a[1], b) }
+        .merge(current_slice_config) { a, b -> tuple(a[0], a[1], b) }
 
     bring_to_common_space(common_space_input)
 
@@ -1098,11 +1065,14 @@ workflow {
     if (params.common_space_preview) {
         preview_input = bring_to_common_space.out
             .flatten()
-            .map { toSliceTuple(it) }
+            .map { f -> toSliceTuple(f) }
         generate_common_space_preview(preview_input)
     }
 
-    // Stage 5: Missing Slice Interpolation (optional)
+    // Stage 5: Missing Slice Interpolation (optional).
+    // Single-slice gaps (use=false slices already filtered upstream) are
+    // interpolated with zmorph; per-slice diagnostics are merged into
+    // slice_config_final.csv. See docs/SLICE_INTERPOLATION_FEATURE.md.
     if (params.interpolate_missing_slices) {
         gaps_channel = slices_common_space
             .map { sliceList -> [detectSingleGaps(sliceList), sliceList] }
@@ -1112,14 +1082,28 @@ workflow {
                 if (gaps.isEmpty()) return []
 
                 gaps.collect { gap ->
-                    def missingId = gap[0], beforeId = gap[1], afterId = gap[2]
-                    def sliceBefore = sliceList.find { it.getName().contains("slice_z${beforeId}") }
-                    def sliceAfter = sliceList.find { it.getName().contains("slice_z${afterId}") }
+                    def (missingId, beforeId, afterId) = gap
+                    def sliceBefore = sliceList.find { f -> f.getName().contains("slice_z${beforeId}") }
+                    def sliceAfter = sliceList.find { f -> f.getName().contains("slice_z${afterId}") }
                     (sliceBefore && sliceAfter) ? tuple(missingId, sliceBefore, sliceAfter) : null
-                }.findAll { it != null }
+                }.findAll { item -> item != null }
             }
 
         interpolate_missing_slice(gaps_channel)
+
+        // Publish slice_config_final.csv as an artifact for the report.
+        // Intentionally NOT piped back into current_slice_config: when no
+        // gaps exist, interpolate_missing_slice does not run and finalise's
+        // output channel is empty, which would in turn empty out
+        // current_slice_config and silently skip stack. Stack only reads
+        // use/auto_excluded — neither column is modified here — so reading
+        // the upstream config is equivalent.
+        if (has_slice_config) {
+            finalise_interpolation(
+                current_slice_config,
+                interpolate_missing_slice.out.manifest.collect(),
+            )
+        }
 
         all_slices = slices_common_space
             .mix(interpolate_missing_slice.out.zarr.collect())
@@ -1142,50 +1126,57 @@ workflow {
 
     register_pairwise(pairs)
 
-    // Stage 7: Stacking
-    log.info "Stacking slices with registration refinements"
-
     slices_collected = all_slices.flatten().collect()
     transforms_collected = register_pairwise.out.collect()
 
-    // Auto-exclude: detect clusters of consecutive low-quality registrations
-    if (params.auto_exclude_enabled) {
-        auto_exclude_slices(transforms_collected)
-        auto_exclude_csv = auto_exclude_slices.out.csv
-    } else {
-        auto_exclude_csv = Channel.value(file('NO_AUTO_EXCLUDE'))
+    // Stage 6.5: Export manual-alignment package (optional).
+    if (params.export_manual_align) {
+        export_input = slices_collected
+            .combine(transforms_collected)
+            .map { items -> partitionSlicesAndTransforms(items) }
+        make_manual_align_package(export_input)
     }
 
+    // Stage 6.75: Refine manual transforms (optional). Re-runs pairwise
+    // registration initialised from each manual transform; non-manual pairs
+    // are copied unchanged. Refined outputs replace automated transforms.
+    if (params.refine_manual_transforms && params.manual_transforms_dir) {
+        log.info "Refining manual transforms from: ${params.manual_transforms_dir}"
+        refine_input = slices_collected
+            .combine(transforms_collected)
+            .map { items -> partitionSlicesAndTransforms(items) }
+        refine_manual_transforms(refine_input)
+        transforms_for_stack = refine_manual_transforms.out.collect()
+    } else {
+        transforms_for_stack = transforms_collected
+    }
+
+    // Stage 7: Stacking
+    log.info "Stacking slices with registration refinements"
+
+    // Auto-exclude: detect clusters of consecutive low-quality registrations.
+    // Stamps auto_excluded/auto_exclude_reason into slice_config so stack
+    // sees them via --slice_config. Requires a real slice_config.
+    stack_slice_config = current_slice_config
+    if (params.auto_exclude_enabled && has_slice_config) {
+        auto_exclude_slices(transforms_for_stack, current_slice_config)
+        stack_slice_config = auto_exclude_slices.out.slice_config
+    }
+
+    // Build stack_input with `merge` (preserves list-vs-file structure of each
+    // input). Earlier versions used `combine`, which flattens lists into a
+    // single tuple and forced fragile filename-based dispatch in `.map`.
     stack_input = slices_collected
-        .combine(shifts_xy)
-        .combine(transforms_collected)
-        .combine(auto_exclude_csv)
-        .map { items ->
-            def slices = []
-            def shifts = null
-            def transforms = []
-            def exclude_csv = null
-
-            items.each { item ->
-                def name = item.getName()
-                if (name == 'NO_AUTO_EXCLUDE' || name == 'auto_exclude.csv') {
-                    exclude_csv = item
-                } else if (name.endsWith('.csv')) {
-                    shifts = item
-                } else if (name.endsWith('.ome.zarr')) {
-                    slices << item
-                } else {
-                    transforms << item
-                }
-            }
-
-            def slice_ids_str = extractSliceIdsString(slices)
-            tuple(slices, shifts, transforms, exclude_csv, subject_name, slice_ids_str)
+        .merge(shifts_xy) { s, x -> tuple(s, x) }
+        .merge(transforms_for_stack) { acc, t -> tuple(acc[0], acc[1], t) }
+        .merge(stack_slice_config) { acc, sc -> tuple(acc[0], acc[1], acc[2], sc) }
+        .map { slices, shifts, transforms, sc ->
+            tuple(slices, shifts, transforms, sc, subject_name, extractSliceIdsString(slices))
         }
 
     stack(stack_input)
     stack_output = stack.out.volume
-    stack_metadata = stack_input.map { slices, shifts, transforms, exclude_csv, name, ids_str ->
+    stack_metadata = stack_input.map { _slices, _shifts, _transforms, _sc, name, ids_str ->
         tuple(name, ids_str.split(',').size(), ids_str)
     }
 
@@ -1194,7 +1185,7 @@ workflow {
         log.info "Normalizing Z-direction intensity drift (sigma=${params.znorm_smooth_sigma} slices)"
         znorm_input = stack_output
             .combine(stack_metadata)
-            .map { zarr, zip, png, annotated, name, n, ids_str -> tuple(zarr, name, n, ids_str) }
+            .map { zarr, _zip, _png, _annotated, name, n, ids_str -> tuple(zarr, name, n, ids_str) }
         normalize_z_intensity(znorm_input)
         final_stack_output = normalize_z_intensity.out
     } else {
@@ -1212,71 +1203,42 @@ workflow {
         align_to_ras(final_stack_output, subject_name)
     }
 
-    // Stage 11: Diagnostic Analyses (optional; enable via diagnostic_mode or individual flags)
-    def runRotationAnalysis = params.diagnostic_mode || params.analyze_rotation_drift
-    def runMotorOnlyStitch = params.diagnostic_mode || params.motor_only_stitch
-    def runMotorOnlyStack = params.diagnostic_mode || params.motor_only_stack
-    def runDilationDiagnostics = params.diagnostic_mode || params.analyze_tile_dilation
-    def runAcquisitionRotation = params.diagnostic_mode || params.analyze_acquisition_rotation
-
+    // Stage 11: Diagnostics (optional). Toggle individually or via diagnostic_mode.
     if (params.diagnostic_mode) {
-        log.info "DIAGNOSTIC MODE enabled:"
-        log.info "  - Acquisition rotation analysis"
-        log.info "  - Registration rotation drift"
-        log.info "  - Tile dilation analysis"
-        log.info "  - Motor-only stitching (per-slice)"
-        log.info "  - Motor-only stacking (3D volume)"
+        log.info "DIAGNOSTIC MODE enabled (acq rotation, rotation drift, motor-only stitch/stack)"
     }
 
-    if (runAcquisitionRotation) {
+    if (diagEnabled('analyze_acquisition_rotation')) {
         analyze_acquisition_rotation(shifts_xy, register_pairwise.out.collect())
     }
 
-    if (runRotationAnalysis) {
+    if (diagEnabled('analyze_rotation_drift')) {
         analyze_rotation_drift(register_pairwise.out.collect())
     }
 
-    if (runDilationDiagnostics) {
-        log.warn "Tile dilation analysis skipped: requires AIP-based XY transform estimation,"
-        log.warn "  which is not part of the current pipeline. To analyze tile dilation,"
-        log.warn "  run estimate_xy_transformation separately."
-    }
-
-    if (runMotorOnlyStitch) {
-        stitch_motor_only(illum_fixed)
-    }
-
-    if (runMotorOnlyStack) {
+    if (diagEnabled('motor_only_stack')) {
         motor_only_stack_input = normalize.out.normalized
-            .map { slice_id, file -> file }
+            .map { _id, slice_file -> slice_file }
             .collect()
         stack_motor_only(motor_only_stack_input, shifts_xy)
     }
 
-    // Compare motor-only vs refined stitching
-    def runStitchingComparison = params.compare_stitching || params.diagnostic_mode
-    if (runStitchingComparison) {
+    // motor_only_stitch is also a prerequisite for compare_stitching, so run it
+    // whenever either is requested. A second `stitch_motor_only(illum_fixed)`
+    // call would emit the same channel twice, which Nextflow forbids.
+    def runMotorStitch = diagEnabled('motor_only_stitch')
+    def runComparison = params.compare_stitching || params.diagnostic_mode
+    if (runMotorStitch || runComparison) {
+        stitch_motor_only(illum_fixed)
+    }
+
+    if (runComparison) {
         log.info "Running stitching comparison (motor-only vs refined)..."
 
         stitch_refined(illum_fixed)
 
-        if (!runMotorOnlyStitch) {
-            stitch_motor_only(illum_fixed)
-        }
-
-        motor_stitch_with_id = stitch_motor_only.out
-            .map { file ->
-                def match = file.getName() =~ /slice_z(\d+)/
-                def slice_id = match ? match[0][1] : "unknown"
-                tuple(slice_id, file)
-            }
-
-        refined_stitch_with_id = stitch_refined.out[0]
-            .map { file ->
-                def match = file.getName() =~ /slice_z(\d+)/
-                def slice_id = match ? match[0][1] : "unknown"
-                tuple(slice_id, file)
-            }
+        motor_stitch_with_id = stitch_motor_only.out.map { f -> toSliceTuple(f) }
+        refined_stitch_with_id = stitch_refined.out[0].map { f -> toSliceTuple(f) }
 
         comparison_input = motor_stitch_with_id
             .combine(refined_stitch_with_id, by: 0)
