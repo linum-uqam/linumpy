@@ -141,15 +141,22 @@ linum_diagnose_pipeline.py --benchmark
 
 ## GPU-Accelerated Scripts
 
-| GPU Script | CPU Equivalent | Typical Speedup |
-|------------|----------------|-----------------|
-| `linum_estimate_transform_gpu.py` | `linum_estimate_transform.py` | 8-47x |
-| `linum_create_mosaic_grid_3d_gpu.py` | `linum_create_mosaic_grid_3d.py` | 5-12x |
-| `linum_resample_mosaic_grid_gpu.py` | `linum_resample_mosaic_grid.py` | 5-12x |
-| `linum_normalize_intensities_per_slice_gpu.py` | `linum_normalize_intensities_per_slice.py` | 4-10x |
-| `linum_fix_illumination_3d_gpu.py` | `linum_fix_illumination_3d.py` | 2-5x |
-| `linum_assess_slice_quality_gpu.py` | `linum_assess_slice_quality.py` | 3-8x |
-| `linum_aip_gpu.py` | `linum_aip_png.py` | ≤1x (mean projection; transfer overhead dominates for typical sizes) |
+All scripts now accept `--use_gpu` / `--no-use_gpu` (default: `--use_gpu`).
+GPU acceleration is enabled automatically when a CUDA device is detected; no
+separate `_gpu.py` variant is needed.
+
+| Script | GPU-accelerated operation | Typical Speedup |
+|--------|--------------------------|-----------------|
+| `linum_estimate_transform.py` | FFT / phase correlation | 8-47x |
+| `linum_create_mosaic_grid_3d.py` | Volume resize | 5-12x |
+| `linum_resample_mosaic_grid.py` | Volume resize | 5-12x |
+| `linum_normalize_intensities_per_slice.py` | Gaussian filter, Otsu threshold | 4-10x |
+| `linum_fix_illumination_3d.py` | BaSiCPy via JAX/CUDA | 2-5x |
+| `linum_assess_slice_quality.py` | SSIM, morphology | 3-8x |
+| `linum_aip_png.py` | Mean projection | ≤1x |
+| `linum_generate_mosaic_aips.py` | Mean projection | ≤1x |
+| `linum_normalize_z_intensity.py` | Scale-factor computation | varies |
+| `linum_estimate_global_transform.py` | Phase correlation | 8-16x |
 
 ---
 

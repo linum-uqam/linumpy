@@ -177,57 +177,44 @@ if missing:
 
 ---
 
-## Outlier Filtering
+## Correcting Erroneous Shifts
 
 ### Problem
 
-The shifts file may contain erroneous large shifts due to:
-- Stage positioning errors during acquisition
-- Mechanical issues with the microscope stage
+The shifts file may contain erroneous large values due to:
+- Encoder glitch spikes (stage reports a large step that the next step reverses)
+- Mosaic grid expansion between slices (legacy shifts files where `xmin_mm`
+  jumps by whole tile columns as tissue grows)
+- Genuine stage re-homing events (preserved — not an artefact)
 - Metadata recording errors
 
-These outliers cause slices to drift out of the common volume during alignment.
+Uncorrected, these errors cause slices to drift out of the common volume.
 
-### Solution: IQR-Based Filtering
+### Solution: Re-homing Detection (pipeline default)
 
-The `linum_align_mosaics_3d_from_shifts.py` script supports automatic outlier detection and correction:
+Use `linum_detect_rehoming.py` (run automatically by the 3D reconstruction
+pipeline when `detect_rehoming = true`) to emit a corrected shifts CSV:
 
 ```bash
-linum_align_mosaics_3d_from_shifts.py mosaics/ shifts_xy.csv output/ \
-    --filter_outliers --outlier_method iqr
+linum_detect_rehoming.py shifts_xy.csv shifts_xy_clean.csv \
+    --return_fraction 0.4 \
+    --max_shift_mm 0.5 \
+    --tile_fov_mm 0.875   # only for legacy shifts files
 ```
 
-### Outlier Detection Methods
+**Detection criterion (encoder glitch spike):**
 
-| Method | Description | Best For |
-|--------|-------------|----------|
-| `iqr` | Uses Interquartile Range (Q3 + 1.5×IQR) to detect outliers, replaces with local median | Most cases (recommended) |
-| `local` | Uses fixed threshold, replaces with local median of neighbors | When threshold is known |
-| `median` | Uses fixed threshold, replaces with global median | Simple cases |
-| `clamp` | Limits magnitude to max_shift_mm while preserving direction | When direction matters |
-| `zero` | Replaces outliers with zero shift | When shifts are unreliable |
-
-### How IQR Detection Works
-
-```python
-# Calculate shift magnitudes
-magnitude = sqrt(x_shift_mm² + y_shift_mm²)
-
-# IQR-based threshold
-Q1 = 25th percentile of magnitudes
-Q3 = 75th percentile of magnitudes
-IQR = Q3 - Q1
-threshold = Q3 + 1.5 × IQR
-
-# Outliers are shifts with magnitude > threshold
+```text
+|step[i] + step[i±1]| < return_fraction × |step[i]|
 ```
 
-### Example
+i.e. the round-trip magnitude is less than `return_fraction` times the single-
+step magnitude (default `0.4` → adjacent step reverses more than 60%). Spike
+steps are zeroed; genuine re-homing events (large step that stays) are preserved.
 
-For a typical dataset:
-- Q1 = 0.115 mm, Q3 = 0.331 mm, IQR = 0.216 mm
-- Threshold = 0.331 + 1.5 × 0.216 = 0.655 mm
-- Any shift > 0.655 mm is flagged as an outlier
+The output CSV adds a `reliable` column (`0` when the corrected step is still
+large or uncertain), consumed downstream by
+`linum_align_mosaics_3d_from_shifts.py --refine_unreliable`.
 
 ### Pipeline Configuration
 
@@ -235,11 +222,26 @@ In `nextflow.config`:
 
 ```groovy
 params {
-    filter_shift_outliers = true  // Enable outlier filtering (recommended)
-    outlier_method = 'iqr'        // Auto-detect using IQR
-    outlier_iqr_multiplier = 1.5  // IQR multiplier (standard: 1.5)
-    max_shift_mm = 0.5            // Only used if method != 'iqr'
+    // Re-homing detection (upstream of common-space alignment)
+    detect_rehoming         = true
+    rehoming_return_fraction = 0.4
+    rehoming_max_shift_mm    = 0.5
+    tile_fov_mm              = null  // 0.875 only for legacy shifts files
+
+    // Image-based refinement of reliable=0 transitions
+    common_space_refine_unreliable          = false
+    common_space_refine_max_discrepancy_px  = 0
+    common_space_refine_min_correlation     = 0.0
 }
+```
+
+### Analysing shifts independently
+
+Use `linum_analyze_shifts.py` to produce a drift report and outlier plot
+without modifying the shifts file:
+
+```bash
+linum_analyze_shifts.py shifts_xy.csv output_dir/ --iqr_multiplier 1.5
 ```
 
 ---
