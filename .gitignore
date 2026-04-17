@@ -143,6 +143,9 @@ venv.bak/
 .dmypy.json
 dmypy.json
 
+# ruff
+.ruff_cache/
+
 # Pyre type checker
 .pyre/
 
@@ -165,6 +168,9 @@ cython_debug/
 # Nextflow files
 .nextflow/
 *.nextflow.log*
+
+# Standalone tools (separate git repos)
+tools/
 workflows/work/
 *work/
 
@@ -184,3 +190,8 @@ workflows/work/
 
 # Temp code file
 draft.py
+
+# Exculde subject data folders (symlinks)
+sub-*
+
+.python-version
