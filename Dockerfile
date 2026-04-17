@@ -19,5 +19,5 @@ RUN apt-get update && apt-get install -y \
 # Install with uv
 COPY linumpy ./linumpy
 COPY scripts ./scripts
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock README.md .python-version ./
 RUN uv sync --frozen --no-dev
