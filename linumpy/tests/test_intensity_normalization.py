@@ -205,3 +205,22 @@ def test_apply_histogram_matching_range_preserved():
     result = apply_histogram_matching(vol, n_serial_slices=2, n_bins=64)
     assert float(result.min()) >= 0.0
     assert float(result.max()) <= 1.0 + 1e-5
+
+
+def test_apply_histogram_matching_preserves_background():
+    """Voxels at or below the tissue threshold must not be modified."""
+    rng = np.random.default_rng(9)
+    vol = rng.random((8, 12, 12)).astype(np.float32)
+    # Carve out a clear background region (exact zeros) that must stay zero.
+    vol[:, :3, :3] = 0.0
+    result = apply_histogram_matching(vol, n_serial_slices=2, n_bins=64, tissue_threshold=0.0)
+    assert np.all(result[:, :3, :3] == 0.0)
+
+
+def test_apply_histogram_matching_identity_on_flat_volume():
+    """Matching to its own histogram should be (approximately) identity on tissue."""
+    rng = np.random.default_rng(10)
+    vol = rng.random((6, 16, 16)).astype(np.float32) * 0.5 + 0.25
+    result = apply_histogram_matching(vol, n_serial_slices=1, n_bins=256)
+    # Single section => reference == source => identity up to binning resolution.
+    assert float(np.mean(np.abs(result - vol))) < 2e-2

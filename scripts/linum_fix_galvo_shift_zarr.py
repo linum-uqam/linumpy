@@ -57,12 +57,12 @@ Update slice_config.csv after fixing::
 import linumpy.config.threads  # noqa: F401
 
 import argparse
-import csv
 from pathlib import Path
 
 import numpy as np
 from tqdm.auto import tqdm
 
+from linumpy.io import slice_config as slice_config_io
 from linumpy.io.zarr import OmeZarrWriter
 from linumpy.geometry.interface import detect_galvo_band_in_tile, detect_galvo_shift
 from linumpy.cli.args import add_overwrite_arg, assert_output_exists
@@ -647,44 +647,24 @@ def _apply_fix(
 
 
 def _update_slice_config(config_path: Path, slice_id: int, confidence: float, fix_applied: bool, mode: str):
-    """Update galvo_confidence and galvo_fix columns for one slice."""
-    rows = []
-    fieldnames = None
-    with Path(config_path).open(newline="") as f:
-        reader = csv.DictReader(f)
-        if reader.fieldnames is None:
-            raise ValueError(f"Empty or malformed CSV: {config_path}")
-        fieldnames = list(reader.fieldnames)
-        for row in reader:
-            rows.append(dict(row))
-
-    updated = False
-    for row in rows:
-        if int(row["slice_id"]) == slice_id:
-            if "galvo_confidence" in row:
-                row["galvo_confidence"] = f"{confidence:.3f}"
-            if "galvo_fix" in row:
-                row["galvo_fix"] = "true" if fix_applied else "false"
-            if "notes" in row:
-                existing = row.get("notes", "")
-                tag = f"zarr_retrofix_{mode}"
-                row["notes"] = f"{existing}; {tag}".strip("; ") if existing else tag
-            updated = True
-            break
-
-    if not updated:
-        print(f"  Warning: slice_id {slice_id:02d} not found in {config_path}")
+    """Stamp ``galvo_confidence`` / ``galvo_fix`` / ``notes`` for one slice."""
+    rows = slice_config_io.read(config_path)
+    sid = slice_config_io.normalize_slice_id(slice_id)
+    if sid not in rows:
+        print(f"  Warning: slice_id {sid} not found in {config_path}")
         return
 
-    with Path(config_path).open("w", newline="") as f:
-        writer_csv = csv.DictWriter(f, fieldnames=fieldnames)
-        writer_csv.writeheader()
-        writer_csv.writerows(rows)
+    row = rows[sid]
+    row["galvo_confidence"] = f"{confidence:.3f}"
+    row["galvo_fix"] = "true" if fix_applied else "false"
+    tag = f"zarr_retrofix_{mode}"
+    existing_notes = row.get("notes", "")
+    row["notes"] = f"{existing_notes}; {tag}".strip("; ") if existing_notes else tag
+
+    slice_config_io.write(config_path, rows.values())
 
     print(
-        f"Updated {config_path}  →  slice {slice_id:02d}: "
-        f"galvo_fix={'true' if fix_applied else 'false'}, "
-        f"confidence={confidence:.3f}"
+        f"Updated {config_path}  →  slice {sid}: galvo_fix={'true' if fix_applied else 'false'}, confidence={confidence:.3f}"
     )
 
 
@@ -791,7 +771,7 @@ def main():
     n_cy = arr.shape[2] // chunk_y
 
     print("\nMosaic info (level 0):")
-    print(f"  shape        = {arr.shape}  (Z, X, Y)")
+    print(f"  shape        = {arr.shape}  (Z, Y, X)")
     print(f"  tile chunks  = ({chunk_x}, {chunk_y}) px in (X, Y)")
     print(f"  tile grid    = {n_cx} × {n_cy} tiles")
     if args.mode == "fix":

@@ -35,6 +35,9 @@ Two normalization modes are available (--mode):
     (white matter stays brighter than grey matter) while correcting
     section-to-section drift without uniformly darkening bright sections.
 
+GPU acceleration is used when available (--use_gpu, default on).
+Falls back to CPU automatically if no GPU is detected.
+
 Usage examples
 --------------
 # Histogram matching (recommended for OCT serial sections)
@@ -47,17 +50,21 @@ linum_normalize_z_intensity.py input.ome.zarr output.ome.zarr \\
 # Save a diagnostic plot
 linum_normalize_z_intensity.py input.ome.zarr output.ome.zarr \\
     --n_serial_slices 64 --plot correction_curve.png
+
+# Force CPU fallback
+linum_normalize_z_intensity.py input.ome.zarr output.ome.zarr --no-use_gpu
 """
 
 import argparse
 
 import numpy as np
 
-from linumpy.io.zarr import AnalysisOmeZarrWriter, read_omezarr
-from linumpy.intensity.normalization import (
-    apply_histogram_matching,
-    compute_scale_factors,
+from linumpy.gpu import GPU_AVAILABLE, print_gpu_info
+from linumpy.gpu.normalization import (
+    apply_histogram_matching_gpu,
+    compute_scale_factors_gpu,
 )
+from linumpy.io.zarr import AnalysisOmeZarrWriter, read_omezarr
 
 
 def _build_arg_parser():
@@ -130,7 +137,7 @@ def _build_arg_parser():
         "Use values < 1 to apply a gentler correction when the\n"
         "default is too aggressive. [%(default)s]",
     )
-    p.add_argument("--plot", type=str, default=None, help="Optional path to save a diagnostic PNG.")
+    p.add_argument("--plot", type=str, default=None, help="Optional path to save a diagnostic PNG (percentile mode only).")
     p.add_argument(
         "--pyramid_resolutions",
         type=float,
@@ -148,6 +155,13 @@ def _build_arg_parser():
         "--make_isotropic", action="store_true", default=True, help="Resample to isotropic voxels at each pyramid level."
     )
     p.add_argument("--no_isotropic", dest="make_isotropic", action="store_false")
+    p.add_argument(
+        "--use_gpu",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Use GPU acceleration if available.",
+    )
+    p.add_argument("--verbose", action="store_true", help="Print GPU information.")
     return p
 
 
@@ -200,18 +214,27 @@ def main():
     parser = _build_arg_parser()
     args = parser.parse_args()
 
+    use_gpu = args.use_gpu and GPU_AVAILABLE
+    if args.verbose:
+        print_gpu_info()
+        print(f"Using GPU: {use_gpu}")
+        if args.use_gpu and not GPU_AVAILABLE:
+            print("GPU requested but not available, falling back to CPU")
+
     print(f"Loading {args.in_zarr} ...")
     vol_da, res = read_omezarr(args.in_zarr, level=0)
     vol = vol_da[:].astype(np.float32)
-    print(f"Volume shape: Z={vol.shape[0]}, X={vol.shape[1]}, Y={vol.shape[2]}")
+    print(f"Volume shape: Z={vol.shape[0]}, Y={vol.shape[1]}, X={vol.shape[2]}")
 
     if args.mode == "histogram":
         print(
             f"Mode: histogram matching "
             f"({'serial-slice mode, n=' + str(args.n_serial_slices) if args.n_serial_slices else 'Z-plane mode'}), "
-            f"n_bins={args.n_bins}, strength={args.strength} ..."
+            f"n_bins={args.n_bins}, strength={args.strength}, gpu={use_gpu} ..."
         )
-        vol_matched = apply_histogram_matching(vol, args.n_serial_slices, args.n_bins, args.tissue_threshold)
+        vol_matched = apply_histogram_matching_gpu(
+            vol, args.n_serial_slices, args.n_bins, args.tissue_threshold, use_gpu=use_gpu
+        )
         vol_matched = np.clip(vol_matched, 0.0, 1.0)
 
         if args.strength < 1.0:
@@ -227,19 +250,19 @@ def main():
         print(
             f"Mode: percentile scaling "
             f"({'serial-slice mode, n=' + str(args.n_serial_slices) if args.n_serial_slices else 'Z-plane mode'}), "
-            f"sigma={args.smooth_sigma}, percentile={args.percentile}, strength={args.strength} ..."
+            f"sigma={args.smooth_sigma}, percentile={args.percentile}, strength={args.strength}, gpu={use_gpu} ..."
         )
-        scale_factors, raw_metrics, smoothed, _boundaries = compute_scale_factors(
+        scale_factors, raw_metrics, smoothed, _boundaries = compute_scale_factors_gpu(
             vol,
             n_serial_slices=args.n_serial_slices,
             smooth_sigma=args.smooth_sigma,
             percentile=args.percentile,
             min_scale=args.min_scale,
             max_scale=args.max_scale,
+            use_gpu=use_gpu,
         )
 
         if args.strength < 1.0:
-            # Blend scale factors toward 1.0 (no correction) by the strength factor
             scale_factors = 1.0 + args.strength * (scale_factors - 1.0)
             print(
                 f"Adjusted scale factor range after strength={args.strength}: "

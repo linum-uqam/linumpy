@@ -25,7 +25,7 @@ def save_orthogonal_views(
     Parameters
     ----------
     image : array-like
-        3D volume (Z, X, Y) - as returned by read_omezarr.
+        3D volume (Z, Y, X) - as returned by read_omezarr.
     out_path : str
         Output figure path (e.g. 'view.png').
     z_slice, x_slice, y_slice : int or None
@@ -201,7 +201,7 @@ _GROUP_PLANE = {
 def _panel_labels_from_orientation(orientation: str):
     """Derive anatomical panel labels from a 3-letter orientation code.
 
-    Validates the code using :func:`linumpy.utils.orientation.parse_orientation_code`
+    Validates the code using :func:`linumpy.imaging.orientation.parse_orientation_code`
     then computes panel names and axis labels from the source-dimension letters.
 
     The volume has shape (Z=dim0, Y=dim1, X=dim2).
@@ -224,7 +224,7 @@ def _panel_labels_from_orientation(orientation: str):
         and *fixed_label* is the axis letter that is held constant.
         Returns ``None`` for an invalid code.
     """
-    from linumpy.utils.orientation import parse_orientation_code
+    from linumpy.imaging.orientation import parse_orientation_code
 
     code = orientation.strip("'\" ").upper()
     try:
@@ -252,6 +252,61 @@ def _panel_labels_from_orientation(orientation: str):
     )
 
 
+def _crop_to_tissue_bbox(
+    image: np.ndarray,
+    x_slice: int | None,
+    y_slice: int | None,
+    margin_frac: float = 0.02,
+) -> tuple[np.ndarray, int | None, int | None]:
+    """Crop a 3D volume to its non-zero bounding box with a small margin.
+
+    Parameters
+    ----------
+    image : ndarray
+        3D volume (Z, Y, X).
+    x_slice, y_slice : int or None
+        Current slice indices; adjusted to the cropped coordinate system.
+    margin_frac : float
+        Fractional margin around the bounding box (default 2%).
+
+    Returns
+    -------
+    cropped : ndarray
+        Cropped volume.
+    x_slice_new, y_slice_new : int or None
+        Adjusted slice indices, clamped to valid range.
+    """
+    nz, ny, nx = image.shape
+    # Project to find non-zero extent along each axis
+    any_yz = np.any(image, axis=(1, 2))  # shape (Z,)
+    any_zx = np.any(image, axis=(0, 2))  # shape (Y,)
+    any_zy = np.any(image, axis=(0, 1))  # shape (X,)
+
+    def _bounds(mask: np.ndarray, size: int, margin: int) -> tuple[int, int]:
+        indices = np.nonzero(mask)[0]
+        if len(indices) == 0:
+            return 0, size
+        lo = max(0, int(indices[0]) - margin)
+        hi = min(size, int(indices[-1]) + 1 + margin)
+        return lo, hi
+
+    mz = max(1, int(nz * margin_frac))
+    my = max(1, int(ny * margin_frac))
+    mx = max(1, int(nx * margin_frac))
+
+    z0, z1 = _bounds(any_yz, nz, mz)
+    y0, y1 = _bounds(any_zx, ny, my)
+    x0, x1 = _bounds(any_zy, nx, mx)
+
+    cropped = image[z0:z1, y0:y1, x0:x1]
+
+    # Adjust slice indices into cropped coordinate system
+    new_x = None if x_slice is None else max(0, min(x_slice - y0, y1 - y0 - 1))
+    new_y = None if y_slice is None else max(0, min(y_slice - x0, x1 - x0 - 1))
+
+    return cropped, new_x, new_y
+
+
 def save_annotated_views(
     image,
     out_path: str,
@@ -265,13 +320,14 @@ def save_annotated_views(
     zarr_path: str | None = None,
     orientation: str | None = None,
     voxel_size: list | None = None,
+    crop_to_tissue: bool = False,
 ) -> None:
     """Save anatomically-labelled orthogonal views with Z-slice index annotations.
 
     Parameters
     ----------
     image : array-like
-        3D volume (Z, X, Y).
+        3D volume (Z, Y, X).
     out_path : str
         Output figure path.
     n_input_slices : int or None
@@ -298,11 +354,19 @@ def save_annotated_views(
         ``read_omezarr``).  Used to set the correct physical aspect ratio so
         that cross-sections look geometrically correct.  If None, aspect='equal'
         (1 pixel = 1 pixel, which distorts anisotropic volumes).
+    crop_to_tissue : bool
+        When True, crop the volume to the non-zero bounding box (with a small
+        margin) before rendering.  This removes empty space caused by motor
+        drift and canvas inflation, making the tissue fill the panels.
     """
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+
+    # Optionally crop to the tissue bounding box before rendering.
+    if crop_to_tissue:
+        image, x_slice, y_slice = _crop_to_tissue_bbox(image, x_slice, y_slice)
 
     n_z_voxels, n_rows, n_cols = image.shape[0], image.shape[1], image.shape[2]
 

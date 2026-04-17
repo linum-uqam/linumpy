@@ -53,6 +53,12 @@ def _build_arg_parser():
         "Auto-read from OME-Zarr metadata when not provided.\n"
         "Used for correct physical aspect ratio in cross-section views.",
     )
+    p.add_argument(
+        "--crop_to_tissue",
+        action="store_true",
+        help="Crop the volume to the non-zero tissue bounding box before\n"
+        "rendering.  Removes empty space from motor drift / canvas inflation.",
+    )
     return p
 
 
@@ -96,6 +102,7 @@ def main():
         zarr_path=str(in_path),
         orientation=args.orientation,
         voxel_size=voxel_size,
+        crop_to_tissue=args.crop_to_tissue,
     )
 
 

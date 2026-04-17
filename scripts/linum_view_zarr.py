@@ -20,8 +20,8 @@ def _build_arg_parser():
         nargs=3,
         type=float,
         default=[1.0] * 3,
-        metavar=("z", "x", "y"),
-        help="Resolution in micrometer in the Z, X, Y order. "
+        metavar=("z", "y", "x"),
+        help="Resolution in micrometer in the Z, Y, X order. "
         "For an isotropic resolution, provide a single value. (default=%(default)s)",
     )
 

@@ -7,6 +7,17 @@ Consolidated from linum_resample_mosaic_grid.py.
 import numpy as np
 
 
+def resolution_is_mm(source_res) -> bool:
+    """Heuristic: source resolution in mm if all components < 1, otherwise µm.
+
+    Used across the pipeline to accept either unit in OME-Zarr metadata or
+    CLI arguments without breaking legacy data. Pixel sizes below 1 µm would
+    imply sub-nanometre voxels, so the heuristic is safe for all realistic
+    acquisitions.
+    """
+    return float(source_res[0]) < 1.0
+
+
 def resample_mosaic_grid(vol, source_res, target_res_um, n_levels=5, out_path=None):
     """Resample a mosaic grid volume to a target isotropic resolution.
 
@@ -39,8 +50,7 @@ def resample_mosaic_grid(vol, source_res, target_res_um, n_levels=5, out_path=No
         raise ValueError("vol must have a 'chunks' attribute (dask or zarr array)")
 
     # Convert target resolution to same unit as source_res
-    # source_res values < 1 are assumed mm; >= 1 are assumed µm
-    target_res = target_res_um / 1000.0 if source_res[0] < 1.0 else float(target_res_um)
+    target_res = target_res_um / 1000.0 if resolution_is_mm(source_res) else float(target_res_um)
 
     scaling_factor = np.asarray(source_res) / target_res
     tile_00 = np.array(vol[: tile_shape[0], : tile_shape[1], : tile_shape[2]])
@@ -68,7 +78,7 @@ def resample_mosaic_grid(vol, source_res, target_res_um, n_levels=5, out_path=No
                 :, i * out_tile_shape[1] : (i + 1) * out_tile_shape[1], j * out_tile_shape[2] : (j + 1) * out_tile_shape[2]
             ] = rescale(current_vol, scaling_factor, order=1, preserve_range=True, anti_aliasing=True)
 
-        out_res = [target_res] * 3 if source_res[0] < 1.0 else [target_res_um] * 3
+        out_res = [target_res] * 3 if resolution_is_mm(source_res) else [target_res_um] * 3
         out_zarr.finalize(out_res, n_levels)
         return None
     else:

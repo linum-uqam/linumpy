@@ -19,7 +19,8 @@ import numpy as np
 import zarr
 
 from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
-from linumpy.geometry.crop import crop_below_interface
+from linumpy.geometry.resampling import resolution_is_mm
+from linumpy.geometry.interface import crop_below_interface
 from linumpy.metrics import collect_interface_crop_metrics
 
 
@@ -65,7 +66,8 @@ def main():
     # Load volume
     vol, res = read_omezarr(input_path, level=0)
     print("Loaded volume shape:", vol.shape)
-    resolution_um = res[0] * 1000
+    # res may be stored in mm (NGFF convention) or µm (legacy). Convert to µm.
+    resolution_um = res[0] * 1000 if resolution_is_mm(res) else float(res[0])
 
     vol_crop, avg_iface = crop_below_interface(
         vol,

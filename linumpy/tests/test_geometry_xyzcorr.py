@@ -67,9 +67,9 @@ def test_detect_interface_z_empty_volume():
 
 
 def _make_zxy_vol(n_z=60, n_x=16, n_y=16, interface_z=20):
-    """Return (Z, X, Y) volume as produced by read_omezarr."""
+    """Return (Z, Y, X) volume as produced by read_omezarr."""
     vol_xyz = _make_vol_with_interface(n_z=n_z, n_x=n_x, n_y=n_y, interface_z=interface_z)
-    return np.transpose(vol_xyz, (2, 0, 1))  # (Z, X, Y)
+    return np.transpose(vol_xyz, (2, 0, 1))  # (Z, Y, X)
 
 
 def test_crop_below_interface_returns_tuple():

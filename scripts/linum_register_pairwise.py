@@ -25,7 +25,13 @@ import numpy as np
 import SimpleITK as sitk
 
 from linumpy.io.zarr import read_omezarr
-from linumpy.registration.transforms import create_transform, find_best_z, register_refinement
+from linumpy.registration.transforms import (
+    centre_of_mass_offset,
+    create_transform,
+    find_best_z,
+    gradient_magnitude_alignment,
+    register_refinement,
+)
 from linumpy.cli.args import add_overwrite_arg
 from linumpy.metrics import collect_pairwise_registration_metrics
 
@@ -52,14 +58,34 @@ def _build_arg_parser():
     # Refinement
     ref_group = p.add_argument_group("Refinement")
     ref_group.add_argument(
-        "--enable_rotation", action="store_true", default=True, help="Enable rotation correction [%(default)s]"
+        "--enable_rotation",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Enable rotation correction. Use --no-enable_rotation to disable. [%(default)s]",
     )
-    ref_group.add_argument("--no_rotation", dest="enable_rotation", action="store_false")
+    # Legacy alias retained for backward-compatibility with the Nextflow pipeline
+    # (workflows/reconst_3d/soct_3d_reconst.nf still emits --no_rotation).
+    ref_group.add_argument(
+        "--no_rotation",
+        dest="enable_rotation",
+        action="store_false",
+        help=argparse.SUPPRESS,
+    )
     ref_group.add_argument(
         "--max_rotation_deg", type=float, default=5.0, help="Maximum rotation correction in degrees [%(default)s]"
     )
     ref_group.add_argument(
         "--max_translation_px", type=float, default=20.0, help="Maximum translation refinement in pixels [%(default)s]"
+    )
+    ref_group.add_argument(
+        "--initial_alignment",
+        choices=["none", "com", "gradient", "both"],
+        default="both",
+        help="Initial alignment method before refinement:\n"
+        "  none     - no initial alignment\n"
+        "  com      - centre of mass alignment\n"
+        "  gradient - gradient magnitude phase correlation\n"
+        "  both     - try gradient first, fall back to com [%(default)s]",
     )
 
     # Output
@@ -151,6 +177,26 @@ def main():
     fixed_slice = np.array(fixed_vol[best_z])
     fixed_norm = normalize(fixed_slice)
 
+    # Compute initial alignment offset
+    initial_offset = None
+    if args.initial_alignment != "none":
+        if args.initial_alignment in ("gradient", "both"):
+            dy, dx = gradient_magnitude_alignment(fixed_norm, moving_norm)
+            mag = np.sqrt(dy**2 + dx**2)
+            if mag > 1.0:
+                initial_offset = (dy, dx)
+                logger.info(f"Gradient magnitude initial offset: dy={dy:.1f}, dx={dx:.1f}")
+
+        if initial_offset is None and args.initial_alignment in ("com", "both"):
+            dy, dx = centre_of_mass_offset(fixed_norm, moving_norm)
+            mag = np.sqrt(dy**2 + dx**2)
+            if mag > 1.0:
+                initial_offset = (dy, dx)
+                logger.info(f"Centre of mass initial offset: dy={dy:.1f}, dx={dx:.1f}")
+
+        if initial_offset is None:
+            logger.info("No significant initial offset detected, starting from identity")
+
     # Compute refinement
     logger.info(f"Computing refinement (rotation={args.enable_rotation})...")
     tx, ty, angle_deg, metric = register_refinement(
@@ -159,6 +205,7 @@ def main():
         enable_rotation=args.enable_rotation,
         max_rotation_deg=args.max_rotation_deg,
         max_translation_px=args.max_translation_px,
+        initial_offset=initial_offset,
     )
 
     logger.info(f"Refinement: tx={tx:.2f}px, ty={ty:.2f}px, rot={angle_deg:.3f}°")
@@ -170,6 +217,23 @@ def main():
 
     # Save offsets
     np.savetxt(str(out_dir / args.out_offsets), np.array([best_z, args.moving_z_index]), fmt="%d")
+
+    # Detect interpolated neighbours. Registrations where either volume is a
+    # synthetic (interpolated) slice produce unreliable rotation/translation
+    # because one side of the pair is a blend of non-overlapping tissue. We
+    # still run the registration (so a .tfm exists), but force the metrics
+    # into the "error" status so the downstream stacking gate
+    # (skip_error_status in linum_stack_slices_motor.py) discards the
+    # transform and falls back to motor-only positioning for that slice.
+    fixed_is_interpolated = "_interpolated" in Path(args.in_fixed).name
+    moving_is_interpolated = "_interpolated" in Path(args.in_moving).name
+    touches_interpolated = fixed_is_interpolated or moving_is_interpolated
+    if touches_interpolated:
+        logger.warning(
+            "Registration involves an interpolated slice "
+            f"(fixed={fixed_is_interpolated}, moving={moving_is_interpolated}); "
+            "marking transform as unreliable."
+        )
 
     # Collect metrics using standard collector
     collect_pairwise_registration_metrics(
@@ -191,8 +255,27 @@ def main():
             "max_translation_px": args.max_translation_px,
             "z_correlation": float(z_correlation),
             "z_deviation": int(z_deviation),
+            "fixed_is_interpolated": bool(fixed_is_interpolated),
+            "moving_is_interpolated": bool(moving_is_interpolated),
         },
     )
+
+    if touches_interpolated:
+        # Re-save the metrics JSON with a forced error status so
+        # stack_slices_motor discards this transform via skip_error_status.
+        import json
+
+        metrics_file = out_dir / "pairwise_registration_metrics.json"
+        if metrics_file.exists():
+            with metrics_file.open() as f:
+                data = json.load(f)
+            data["overall_status"] = "error"
+            data.setdefault("errors", []).append("One or both inputs are an interpolated slice; transform is synthetic.")
+            if "registration_confidence" in data.get("metrics", {}):
+                data["metrics"]["registration_confidence"]["value"] = 0.0
+                data["metrics"]["registration_confidence"]["status"] = "error"
+            with metrics_file.open("w") as f:
+                json.dump(data, f, indent=2)
 
     logger.info(f"Results saved to {out_dir}")
 

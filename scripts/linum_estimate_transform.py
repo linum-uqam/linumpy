@@ -3,6 +3,9 @@
 """
 Estimate the affine transform used to compute tile positions in a 2D mosaic grid.
 
+GPU acceleration is used when available (--use_gpu, default on) for phase
+correlation. Falls back to CPU if no GPU is detected or --no-use_gpu is passed.
+
 Two modes are available:
 1. Registration-based (default): Uses phase correlation to find optimal tile positions
 2. Motor-position-based (--use_motor_positions): Uses expected tile spacing based on
@@ -19,15 +22,20 @@ from linumpy.config.threads import configure_all_libraries
 
 import argparse
 import logging
+import random
 from pathlib import Path
 
 import numpy as np
 import SimpleITK as sitk
 import zarr
+from skimage.exposure import match_histograms
+from skimage.filters import threshold_otsu
 
+from linumpy.gpu import GPU_AVAILABLE, print_gpu_info
+from linumpy.gpu.fft_ops import phase_correlation
 from linumpy.io.zarr import read_omezarr
-from linumpy.mosaic import grid as mosaic_grid
-from linumpy.registration.transforms import compute_motor_transform, estimate_mosaic_transform
+from linumpy.stitching import mosaic_grid
+from linumpy.registration.transforms import compute_motor_transform
 from linumpy.metrics import collect_xy_transform_metrics
 
 configure_all_libraries()
@@ -69,8 +77,6 @@ def _build_arg_parser():
         help="Maximum number of tile pairs to use for the optimization. (default=%(default)s)",
     )
     p.add_argument("--seed", type=int, help="Seed value for the random number generator")
-
-    # Motor position mode
     p.add_argument(
         "--use_motor_positions",
         action="store_true",
@@ -79,23 +85,33 @@ def _build_arg_parser():
         "corresponding to the precise motor/stage positions from acquisition.\n"
         "Recommended when motor positions are reliable.",
     )
-
+    p.add_argument(
+        "--use_gpu",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Use GPU acceleration if available. [%(default)s]",
+    )
+    p.add_argument("--verbose", "-v", action="store_true", help="Print GPU information.")
     return p
 
 
 def main():
-    # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
 
-    # Parameters
     input_images = args.input_images
     if isinstance(input_images, str):
         input_images = [input_images]
     output_transform = Path(args.output_transform)
     max_empty_fraction = args.maximum_empty_fraction
+    use_gpu = args.use_gpu and GPU_AVAILABLE
 
-    # Compute the tile shape
+    if args.verbose:
+        print_gpu_info()
+        print(f"Using GPU: {use_gpu}")
+    if args.use_gpu and not GPU_AVAILABLE:
+        logger.info("GPU requested but not available, falling back to CPU phase correlation")
+
     tile_shape = args.tile_shape
     if isinstance(tile_shape, int):
         tile_shape = [tile_shape] * 2
@@ -104,18 +120,20 @@ def main():
     elif len(tile_shape) > 2:
         tile_shape = tile_shape[0:2]
 
+    img = None
     if input_images[0].rstrip("/").endswith(".ome.zarr"):
         img, _ = read_omezarr(input_images[0], level=0)
-        tile_shape = list(img.chunks[-2:])  # Get last 2 dimensions (Y, X)
+        tile_shape = list(img.chunks[-2:])
     elif input_images[0].rstrip("/").endswith(".zarr"):
         img = zarr.open(input_images[0], mode="r")
         tile_shape = list(img.chunks[-2:])
 
-    # Check the output filename extensions
     assert output_transform.name.endswith(".npy"), "output_transform must be a .npy file"
 
+    n_tiles_x = None
+    n_tiles_y = None
+
     if args.use_motor_positions:
-        # Motor-position mode: compute transform from expected overlap
         logger.info(f"Using motor positions with {args.initial_overlap * 100:.1f}% overlap")
         logger.info(f"Tile shape: {tile_shape}")
 
@@ -127,12 +145,15 @@ def main():
         logger.info(f"  Step Y: {transform[0, 0]:.1f} px")
         logger.info(f"  Step X: {transform[1, 1]:.1f} px")
 
-    else:
-        # Registration mode: use phase correlation
-        logger.info("Using image-based registration (phase correlation)")
+        if img is not None:
+            n_tiles_y = img.shape[-2] // tile_shape[0]
+            n_tiles_x = img.shape[-1] // tile_shape[1]
 
-        # Load all input images
+    else:
+        logger.info(f"Using image-based registration (phase correlation, GPU={use_gpu})")
+
         mosaics = []
+        thresholds = []
         for file in input_images:
             if file.rstrip("/").endswith(".ome.zarr"):
                 img, _ = read_omezarr(str(file), level=0)
@@ -144,15 +165,74 @@ def main():
                 image = sitk.GetArrayFromImage(sitk.ReadImage(str(file)))
             mosaic = mosaic_grid.MosaicGrid(image, tile_shape=tile_shape, overlap_fraction=args.initial_overlap)
             mosaics.append(mosaic)
+            thresholds.append(threshold_otsu(mosaic.image))
 
-        # Estimate transform
-        transform, residuals, tile_count = estimate_mosaic_transform(mosaics, max_empty_fraction, args.n_samples, args.seed)
+        rows = []
+        rows_px = []
+        cols = []
+        cols_px = []
+        tile_count = 0
+
+        if args.seed is not None:
+            random.seed(args.seed)
+        mosaic_idx = list(range(len(mosaics)))
+        random.shuffle(mosaic_idx)
+
+        for m_id in mosaic_idx:
+            mosaic = mosaics[m_id]
+            thresh = thresholds[m_id]
+
+            for i in range(mosaic.n_tiles_x):
+                for j in range(mosaic.n_tiles_y):
+                    if tile_count > args.n_samples:
+                        break
+
+                    neighbors, tiles = mosaic.get_neighbors_around_tile(i, j)
+                    for _n, t in zip(neighbors, tiles, strict=False):
+                        r = t[0] - i
+                        c = t[1] - j
+
+                        o1, o2, p1, _p2 = mosaic.get_neighbor_overlap_from_pos((i, j), t)
+
+                        o1_empty = np.sum(o1 <= thresh) > max_empty_fraction * o1.size
+                        o2_empty = np.sum(o2 <= thresh) > max_empty_fraction * o2.size
+                        if o1_empty or o2_empty:
+                            continue
+
+                        o2 = match_histograms(o2, o1)
+
+                        result = phase_correlation(o1, o2, use_gpu=use_gpu)
+                        if isinstance(result, tuple):
+                            (dx, dy), _ = result
+                        else:
+                            dx, dy = result
+
+                        r_px = p1[2] - mosaic.tile_size_x + dx if r == -1 else p1[0] + dx
+                        c_px = p1[3] - mosaic.tile_size_y + dy if c == -1 else p1[1] + dy
+
+                        rows.append(r)
+                        cols.append(c)
+                        rows_px.append(r_px)
+                        cols_px.append(c_px)
+
+                        tile_count += 1
+
+        a = np.zeros((len(rows) * 2, 4))
+        b = np.zeros((len(rows) * 2, 1))
+        for i in range(len(rows)):
+            a[2 * i, :] = [rows[i], cols[i], 0, 0]
+            b[2 * i, 0] = rows_px[i]
+            a[2 * i + 1, :] = [0, 0, rows[i], cols[i]]
+            b[2 * i + 1, 0] = cols_px[i]
+
+        result = np.linalg.lstsq(a, b, rcond=None)
+        transform = result[0].reshape((2, 2))
+        residuals = result[1] if len(result[1]) > 0 else np.array([0.0])
 
         logger.info(f"Registration-based transform (from {tile_count} tile pairs):")
         logger.info(f"  Step Y: {transform[0, 0]:.1f} px (expected: {tile_shape[0] * (1 - args.initial_overlap):.1f})")
         logger.info(f"  Step X: {transform[1, 1]:.1f} px (expected: {tile_shape[1] * (1 - args.initial_overlap):.1f})")
 
-        # Compare with expected motor positions
         expected_step_y = tile_shape[0] * (1 - args.initial_overlap)
         expected_step_x = tile_shape[1] * (1 - args.initial_overlap)
         diff_y = (transform[0, 0] - expected_step_y) / expected_step_y * 100
@@ -162,28 +242,14 @@ def main():
             logger.warning(f"Registration differs from motor positions by Y={diff_y:.1f}%, X={diff_x:.1f}%")
             logger.warning("Consider using --use_motor_positions if motor positions are reliable")
 
-    # Save the transform
-    output_transform.parent.mkdir(exist_ok=True, parents=True)
-    np.save(str(output_transform), transform)
-    logger.info(f"Transform saved to {output_transform}")
-
-    # Determine grid dimensions for accumulated error computation
-    n_tiles_x = None
-    n_tiles_y = None
-    if args.use_motor_positions:
-        # img may be defined if input was a zarr
-        try:
-            # img.shape[-2] = rows, img.shape[-1] = cols
-            n_tiles_y = img.shape[-2] // tile_shape[0]
-            n_tiles_x = img.shape[-1] // tile_shape[1]
-        except NameError:
-            pass  # non-zarr input; tile counts unknown
-    else:
         if mosaics:
             n_tiles_x = mosaics[0].n_tiles_x
             n_tiles_y = mosaics[0].n_tiles_y
 
-    # Collect metrics using helper function
+    output_transform.parent.mkdir(exist_ok=True, parents=True)
+    np.save(str(output_transform), transform)
+    logger.info(f"Transform saved to {output_transform}")
+
     collect_xy_transform_metrics(
         transform=transform,
         tile_pairs_used=tile_count,
@@ -191,7 +257,7 @@ def main():
         residuals=residuals,
         output_path=output_transform,
         input_paths=input_images,
-        params={"initial_overlap": args.initial_overlap, "use_motor_positions": args.use_motor_positions},
+        params={"initial_overlap": args.initial_overlap, "use_gpu": use_gpu, "use_motor_positions": args.use_motor_positions},
         n_tiles_x=n_tiles_x,
         n_tiles_y=n_tiles_y,
     )

@@ -81,23 +81,30 @@ def detect_shift_units(resolution) -> tuple[float, float]:
     return res_x_um, res_y_um
 
 
-def convert_shifts_to_pixels(cumsum_mm: dict, resolution_um: float) -> dict:
+def convert_shifts_to_pixels(cumsum_mm: dict, resolution_um) -> dict:
     """Convert mm cumulative shifts to pixel shifts.
 
     Parameters
     ----------
     cumsum_mm : dict
         Mapping from slice_id to (dx_mm, dy_mm).
-    resolution_um : float
-        Resolution in microns per pixel (isotropic XY assumed).
+    resolution_um : float or sequence of two floats
+        Resolution in microns per pixel. A scalar implies isotropic XY; pass
+        ``(res_x_um, res_y_um)`` to handle anisotropic mosaics such as OCT
+        data where the A-line and B-scan resolutions differ.
 
     Returns
     -------
     dict
         Mapping from slice_id to (dx_px, dy_px).
     """
-    mm_to_px = 1000.0 / resolution_um
-    return {slice_id: (dx_mm * mm_to_px, dy_mm * mm_to_px) for slice_id, (dx_mm, dy_mm) in cumsum_mm.items()}
+    try:
+        res_x_um, res_y_um = float(resolution_um[0]), float(resolution_um[1])
+    except (TypeError, IndexError):
+        res_x_um = res_y_um = float(resolution_um)
+    mm_to_px_x = 1000.0 / res_x_um
+    mm_to_px_y = 1000.0 / res_y_um
+    return {slice_id: (dx_mm * mm_to_px_x, dy_mm * mm_to_px_y) for slice_id, (dx_mm, dy_mm) in cumsum_mm.items()}
 
 
 def center_shifts(cumsum_px: dict, slice_ids: list) -> dict:

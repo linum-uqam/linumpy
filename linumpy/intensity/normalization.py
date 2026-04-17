@@ -21,7 +21,7 @@ def normalize_volume(
     Parameters
     ----------
     vol : np.ndarray
-        Input volume with shape (Z, X, Y).
+        Input volume with shape (Z, Y, X).
     agarose_mask : np.ndarray
         2D binary mask indicating agarose regions (shape X, Y).
     percentile_max : float
@@ -211,25 +211,66 @@ def _build_cdf(values: np.ndarray, n_bins: int):
     return bin_centers, cdf
 
 
+def _build_tissue_cdf(flat_values: np.ndarray, n_bins: int, tissue_threshold: float):
+    """Build a CDF of tissue voxels (strictly above tissue_threshold).
+
+    Unlike ``_build_cdf``, this avoids materialising a tissue-only copy of the
+    input array by using ``np.histogram``'s ``range`` parameter with a small
+    positive epsilon to exclude the background. For large volumes this saves
+    an allocation on the order of the volume itself.
+
+    Parameters
+    ----------
+    flat_values : np.ndarray, 1-D, in [0, 1]
+        Full (tissue + background) flat intensity array.
+    n_bins : int
+    tissue_threshold : float
+        Voxels strictly greater than this are considered tissue.
+
+    Returns
+    -------
+    bin_centers : np.ndarray
+    cdf : np.ndarray, normalized to [0, 1]
+    tissue_count : int
+    """
+    # Choose a lower edge that excludes background voxels (value == threshold).
+    # For threshold == 0 this reliably drops exact zeros; for small positive
+    # thresholds it drops <= threshold. Bin centers remain within [0, 1].
+    lo = tissue_threshold + max(1e-6, tissue_threshold * 1e-6)
+    lo = min(lo, 1.0)
+    hist, edges = np.histogram(flat_values, bins=n_bins, range=(lo, 1.0))
+    bin_centers = 0.5 * (edges[:-1] + edges[1:])
+    total = int(hist.sum())
+    cdf = np.cumsum(hist).astype(np.float64)
+    if cdf[-1] > 0:
+        cdf /= cdf[-1]
+    return bin_centers, cdf, total
+
+
 def _match_chunk_to_reference(
     chunk: np.ndarray, ref_bins: np.ndarray, ref_cdf: np.ndarray, n_bins: int, tissue_threshold: float = 0.0
 ) -> np.ndarray:
     """Map chunk intensities to match the reference CDF.
 
     Only voxels above tissue_threshold are mapped; background stays unchanged.
+
+    Implementation note: uses a small (n_bins-sized) ``src_bin -> matched``
+    lookup table so that the per-voxel work collapses from two large
+    ``np.interp`` calls to a single one plus a ``np.where``.
     """
-    flat = chunk.ravel().astype(np.float32)
-    tissue_mask = flat > tissue_threshold
-    if tissue_mask.sum() < 500:
+    # Avoid an unnecessary copy when the input is already float32 (the main
+    # driver casts the whole volume up front).
+    flat = np.ascontiguousarray(chunk, dtype=np.float32).ravel()
+
+    src_bins, src_cdf, tissue_count = _build_tissue_cdf(flat, n_bins, tissue_threshold)
+    if tissue_count < 500:
         return chunk
 
-    tissue = flat[tissue_mask]
-    src_bins, src_cdf = _build_cdf(tissue, n_bins)
-    src_percentiles = np.interp(tissue, src_bins, src_cdf)
-    matched = np.interp(src_percentiles, ref_cdf, ref_bins)
+    # LUT on bin centers: src intensity percentile -> matched reference intensity.
+    matched_lut = np.interp(src_cdf, ref_cdf, ref_bins)
 
-    result = flat.copy()
-    result[tissue_mask] = matched
+    mapped = np.interp(flat, src_bins, matched_lut).astype(np.float32, copy=False)
+    result = np.where(flat > tissue_threshold, mapped, flat)
     return result.reshape(chunk.shape)
 
 
@@ -256,16 +297,14 @@ def apply_histogram_matching(vol: np.ndarray, n_serial_slices, n_bins: int, tiss
         Histogram-matched volume.
     """
     flat_all = vol.ravel()
-    tissue_all = flat_all[flat_all > tissue_threshold]
-    if tissue_all.size < 500:
+    ref_bins, ref_cdf, tissue_count = _build_tissue_cdf(flat_all, n_bins, tissue_threshold)
+    if tissue_count < 500:
         return vol
-
-    ref_bins, ref_cdf = _build_cdf(tissue_all.astype(np.float64), n_bins)
 
     bounds = _chunk_boundaries(vol.shape[0], n_serial_slices)
 
     out = np.empty_like(vol)
-    for _i, (s, e) in enumerate(bounds):
+    for s, e in bounds:
         chunk = vol[s:e]
         out[s:e] = _match_chunk_to_reference(chunk, ref_bins, ref_cdf, n_bins, tissue_threshold)
 
