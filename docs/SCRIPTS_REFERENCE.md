@@ -144,16 +144,6 @@ Resample mosaic grid to different resolution.
 linum_resample_mosaic_grid.py <input.ome.zarr> <output.ome.zarr> -r <resolution>
 ```
 
-### linum_resample_mosaic_grid_gpu.py
-
-GPU-accelerated version of mosaic grid resampling (5-12x speedup).
-
-```bash
-linum_resample_mosaic_grid_gpu.py <input.ome.zarr> <output.ome.zarr> -r <resolution> --use_gpu
-```
-
-Falls back to CPU if GPU is not available.
-
 ---
 
 ## Preprocessing
@@ -340,6 +330,7 @@ linum_stitch_3d_refined.py <mosaic_grid.ome.zarr> <output.ome.zarr> \
     [--blending_method {none,average,diffusion}] \
     [--refinement_mode blend_shift] \
     [--max_refinement_px <pixels>] \
+    [--input_transform <transform.npy>] \
     [--output_refinements <refinements.json>]
 ```
 
@@ -349,7 +340,36 @@ linum_stitch_3d_refined.py <mosaic_grid.ome.zarr> <output.ome.zarr> \
 | `--blending_method` | Tile blending method: `none`, `average`, `diffusion` |
 | `--refinement_mode` | How refinement shifts are used (e.g. `blend_shift`) |
 | `--max_refinement_px` | Maximum sub-pixel refinement shift (pixels) |
+| `--input_transform` | Pre-computed global 2×2 affine (from `linum_estimate_global_transform.py`) |
 | `--output_refinements` | Optional JSON file to save refinement data |
+
+### linum_estimate_global_transform.py
+
+Estimate a single 2×2 tile-placement affine pooled across many 3D mosaic grids.
+Instrument geometry is slice-invariant, so using one fitted transform for every
+slice removes per-slice scale/rotation jitter that the default refined stitcher
+introduces when the least-squares fit is underdetermined on small or sparse grids.
+
+```bash
+linum_estimate_global_transform.py <mosaics_dir> <output_transform.npy> \
+    [--slices <id1,id2,...>] \
+    [--histogram_match] \
+    [--max_empty_fraction <frac>] \
+    [--n_samples <n>] \
+    [--seed <seed>]
+```
+
+The output `.npy` can be passed to `linum_stitch_3d_refined.py --input_transform`.
+
+### linum_analyze_stitch_affine.py
+
+Per-slice affine diagnostic for the refined stitching step. Inspects
+`estimate_xy_transformation` outputs (or the refined stitcher's
+`refinements.json`) and reports scale / rotation drift across slices.
+
+```bash
+linum_analyze_stitch_affine.py <input_dir> <output_dir>
+```
 
 ### linum_stitch_motor_only.py
 
@@ -434,40 +454,150 @@ linum_estimate_xy_shift_from_metadata.py <tiles_dir> <output.csv> \
 
 ### linum_align_mosaics_3d_from_shifts.py
 
-Align mosaics to common space using shifts file. This script brings all slices into a common coordinate system based on the physical positions recorded by the microscope.
+Align mosaics to a common XY canvas using the shifts CSV. Each mosaic is resampled to a common shape and translated using cumulative shifts; when slices are excluded via `--slice_config`, their shifts are accumulated so the remaining slices stay aligned.
+
+Large erroneous shifts should be corrected **upstream** with
+`linum_detect_rehoming.py` (see below) before running this script. This script
+no longer implements outlier filtering directly.
 
 ```bash
 linum_align_mosaics_3d_from_shifts.py <mosaics_dir> <shifts.csv> <output_dir> \
     [--slice_config <config.csv>] \
-    [--filter_outliers] \
-    [--outlier_method {clamp,median,zero,local,iqr}] \
-    [--max_shift_mm <mm>] \
-    [--iqr_multiplier <mult>] \
-    [--no_center_drift]
+    [--excluded_slice_mode {keep,local_median,median,zero}] \
+    [--excluded_slice_window <n>] \
+    [--no_center_drift] \
+    [--refine_unreliable] \
+    [--refine_max_discrepancy_px <px>] \
+    [--refine_min_correlation <0-1>]
 ```
 
-**Options:**
-- `--slice_config`: Optional CSV file to filter which slices to process
-- `--filter_outliers`: Enable outlier detection and filtering (recommended)
-- `--outlier_method`: Method to handle outliers:
-  - `clamp`: Limit shift magnitude to `--max_shift_mm`
-  - `median`: Replace with global median of non-outliers
-  - `zero`: Replace with zero shift
-  - `local`: Replace with local median of neighbors (preserves trends)
-  - `iqr`: Auto-detect using IQR statistics and replace with local median (recommended)
-- `--max_shift_mm`: Maximum allowed shift in mm (default: 0.5, only used if method != 'iqr')
-- `--iqr_multiplier`: IQR multiplier for outlier detection (default: 1.5, only with 'iqr' method)
-- `--no_center_drift`: Don't center drift around middle slice
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--slice_config` | — | Optional slice-config CSV to filter slices |
+| `--excluded_slice_mode` | `keep` | Handling for shifts of excluded slices: `keep`, `local_median`, `median`, `zero` |
+| `--excluded_slice_window` | `2` | Neighbor window for `local_median` replacement |
+| `--no_center_drift` | off | Disable centering drift around middle slice |
+| `--refine_unreliable` | off | For transitions flagged `reliable=0`, use 2-D phase correlation to replace the metadata shift (requires scikit-image) |
+| `--refine_max_discrepancy_px` | `0` | Reject image-based estimates differing from metadata by more than this many pixels (0 = accept all) |
+| `--refine_min_correlation` | `0.0` | Minimum NCC to accept an image-based refinement |
 
-**Example with outlier filtering:**
+### linum_detect_rehoming.py
+
+Detect and correct two classes of spurious inter-slice shifts in a shifts CSV:
+
+1. **Mosaic grid expansion** (`--tile_fov_mm`): the acquisition software may add
+   or remove a tile column between slices, causing `xmin_mm` to jump by ±N × tile_FOV
+   even though the tissue did not move. These steps are persistent and look like
+   valid re-homing events to the spike detector; correct them first.
+2. **Encoder glitch spikes**: a large step immediately self-cancelled by the next
+   step (no real repositioning). Detected via a return-fraction criterion and
+   zeroed out, while genuine re-homing events (large step that stays) are preserved.
+
 ```bash
-linum_align_mosaics_3d_from_shifts.py mosaics/ shifts_xy.csv output/ \
-    --slice_config slice_config.csv \
-    --filter_outliers \
-    --outlier_method iqr
+linum_detect_rehoming.py <in_shifts.csv> <out_shifts.csv> \
+    [--tile_fov_mm <mm>] \
+    [--tile_fov_tolerance <frac>] \
+    [--return_fraction <frac>] \
+    [--max_shift_mm <mm>] \
+    [--report_json <report.json>] \
+    [--plot <plot.png>]
 ```
 
-**Note:** The shifts file may contain erroneous large shifts due to stage positioning errors. The IQR-based filtering automatically detects these outliers and replaces them with reasonable values based on neighboring shifts.
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--tile_fov_mm` | — | Tile field-of-view in mm; enables mosaic-expansion correction (legacy shifts files only) |
+| `--tile_fov_tolerance` | `0.05` | Fractional tolerance around each tile-FOV multiple |
+| `--return_fraction` | `0.4` | Spike sensitivity: adjacent step must reverse > (1 − return_fraction) of current step |
+| `--max_shift_mm` | `0.5` | Steps below this magnitude are not checked for spikes |
+| `--report_json` | — | Write detection report with per-slice decisions |
+| `--plot` | — | Save a PNG comparing original and corrected shifts |
+
+Output CSV columns include a `reliable` flag (0 when the corrected step is still
+large or uncertain), consumed downstream by
+`linum_align_mosaics_3d_from_shifts.py --refine_unreliable`.
+
+### linum_auto_exclude_slices.py
+
+Detect extended clusters of consecutive low-quality pairwise registrations and
+produce a slice-config fragment listing slice IDs to force-skip (motor-only)
+during stacking. Reads `pairwise_registration_metrics.json` files from each
+`register_pairwise` output subdirectory.
+
+```bash
+linum_auto_exclude_slices.py <register_pairwise_dir> <output_slice_config.csv> \
+    [--existing_slice_config <config.csv>] \
+    [--consecutive <n>] \
+    [--z_corr <threshold>]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--existing_slice_config` | — | Merge auto-exclusion flags into an existing slice config |
+| `--consecutive` | `3` | Minimum consecutive low-quality pairs to trigger exclusion |
+| `--z_corr` | `0.6` | Z-correlation threshold below which a pair is low-quality |
+
+### linum_interpolate_missing_slice.py
+
+Interpolate a single missing slice from its two neighbours. Uses **z-aware
+morphing** (`zmorph`) by default: an affine transform between the boundary
+planes of the neighbours is computed and applied fractionally through the gap
+so each output plane smoothly morphs from the before-neighbour to the after-
+neighbour. When zmorph's quality gates reject the fit, the slot is left as a
+genuine gap (no zarr output) and the failure is stamped into
+`slice_config_final.csv`. `average` and `weighted` are available as explicit
+baselines.
+
+See [SLICE_INTERPOLATION_FEATURE.md](SLICE_INTERPOLATION_FEATURE.md) for the
+physical model and parameter-tuning guidance.
+
+```bash
+linum_interpolate_missing_slice.py <slice_before.ome.zarr> <slice_after.ome.zarr> <output.ome.zarr> \
+    [--method {zmorph,average,weighted}] \
+    [--blend_method {gaussian,linear}] \
+    [--registration_metric {MSE,MI,CC,AntsCC}] \
+    [--max_iterations <n>] \
+    [--overlap_search_window <n>] \
+    [--min_overlap_correlation <0-1>] \
+    [--reference_slab_size <n>] \
+    [--min_foreground_fraction <0-1>] \
+    [--min_ncc_improvement <val>] \
+    [--manifest <fragment.csv>] \
+    [--diagnostics <diag.json>]
+
+# Finalise mode: merge per-slice manifest fragments into slice_config.csv
+linum_interpolate_missing_slice.py --finalise \
+    --slice_config_in <in.csv> --slice_config_out <out.csv> \
+    --fragments_dir <manifests/>
+```
+
+### linum_export_manual_align.py
+
+Export a lightweight data package (AIP images + automated transforms) for
+interactive manual alignment. Consumed by the `tools/manual-align/` web tool;
+outputs land in `export_manual_align/` when `--export_manual_align` is set in
+the reconstruction pipeline.
+
+```bash
+linum_export_manual_align.py <common_space_dir> <register_pairwise_dir> <output_dir> \
+    [--level <pyramid_level>] \
+    [--slice_config <config.csv>]
+```
+
+### linum_refine_manual_transforms.py
+
+Refine manually-corrected pairwise slice transforms with tight image-based
+registration. For each pair with a manual transform, warps the moving slice
+with the manual transform then runs a small-search-window registration to
+correct sub-pixel / sub-degree residuals. The composed transform is emitted
+with `source="manual_refined"`. Pairs without a manual transform are copied
+through unchanged.
+
+```bash
+linum_refine_manual_transforms.py <slices_dir> <transforms_dir> <out_dir> \
+    [--manual_transforms_dir <dir>] \
+    [--max_translation_px <px>] \
+    [--max_rotation_deg <deg>]
+```
 
 ### linum_apply_slices_transforms.py
 
@@ -622,14 +752,6 @@ linum_assess_slice_quality.py <mosaics_dir> <output_slice_config.csv> \
 | `--min_quality` | Automatically exclude slices below this quality score |
 | `--exclude_first` | Exclude the first N calibration slices |
 | `--update_existing` | Update an existing slice config with quality info |
-
-### linum_assess_slice_quality_gpu.py
-
-GPU-accelerated version of `linum_assess_slice_quality.py` (3-8x speedup). Accepts the same arguments plus `--use_gpu / --no-use_gpu`.
-
-```bash
-linum_assess_slice_quality_gpu.py <mosaics_dir> <output_slice_config.csv> [options]
-```
 
 ### linum_analyze_registration_transforms.py
 
@@ -794,6 +916,37 @@ linum_generate_pipeline_report.py <pipeline_output_dir> report.html --title "My 
 ## Utilities
 
 
+### linum_clean_raw_data.py
+
+Clean up raw S-OCT acquisitions by removing processed `.bin` files and keeping
+only the metadata (`metadata.json`, `info.txt`). Moves quick-stitch images to
+`quick_stitches/` and slice directories to `metadata/`, preserving the overall
+directory structure. Useful for archiving subjects once mosaic grids have been
+generated.
+
+```bash
+linum_clean_raw_data.py <data_directory> [--dry-run] [-v]
+```
+
+### linum_fix_galvo_shift_zarr.py
+
+Fix galvo-shift artefacts directly on an already-assembled mosaic grid
+OME-Zarr when the raw `.bin` files are no longer available. Each zarr chunk
+corresponds to one OCT tile, so the same dark-band detector used for raw tiles
+is applied to a sample of chunks, and the fix is a circular roll (`np.roll`)
+of each chunk. `--mode undo` reverses a previously applied fix (for false-
+positive detections).
+
+```bash
+linum_fix_galvo_shift_zarr.py <input.ome.zarr> <output.ome.zarr> \
+    [--detect_only] \
+    [--mode {apply,undo}] \
+    [--band_shift <pixels>] \
+    [--band_width <pixels>] \
+    [--n_pixel_return <n>] \
+    [--galvo_threshold <0-1>]
+```
+
 ### linum_extract_pyramid_levels.py
 
 Extract one or more pyramid levels from an OME-Zarr volume and save as NIfTI files. Useful for exporting analysis-specific resolutions without converting the full volume.
@@ -955,80 +1108,6 @@ linum_benchmark_gpu.py --output results.json --iterations 10
 | `--full` | Run with multiple sizes |
 | `--sizes` | Custom sizes to test |
 | `--skip-correctness` | Skip result verification |
-
-### linum_estimate_transform_gpu.py
-
-GPU-accelerated transform estimation using phase correlation.
-
-```bash
-linum_estimate_transform_gpu.py <input_images> <output.npy> [--use_gpu] [-v]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--initial_overlap` | Initial overlap fraction (default: 0.3) |
-| `--tile_shape` | Tile shape in pixels |
-| `--n_samples` | Max tile pairs for optimization |
-| `--use_gpu/--no-use_gpu` | Enable/disable GPU |
-
-### linum_create_mosaic_grid_3d_gpu.py
-
-GPU-accelerated mosaic grid creation with galvo detection.
-
-```bash
-linum_create_mosaic_grid_3d_gpu.py <output.ome.zarr> --from_tiles_list <tiles> [options]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--resolution` | Output resolution in µm/pixel |
-| `--fix_galvo_shift` | Enable galvo correction |
-| `--galvo_threshold` | Galvo detection threshold (default: 0.6) |
-| `--use_gpu/--no-use_gpu` | Enable/disable GPU |
-
-### linum_normalize_intensities_per_slice_gpu.py
-
-GPU-accelerated normalization of intensities per slice (4-10x speedup).
-
-```bash
-linum_normalize_intensities_per_slice_gpu.py <input.ome.zarr> <output.ome.zarr> \
-    [--percentile_max <pmax>] \
-    [--use_gpu/--no-use_gpu]
-```
-
-### linum_fix_illumination_3d_gpu.py
-
-GPU-accelerated illumination correction using BaSiCPy on JAX (2-5x speedup). Requires JAX GPU setup — see [GPU_ACCELERATION.md](GPU_ACCELERATION.md#jax-gpu-for-basicpy-fix_illumination).
-
-```bash
-linum_fix_illumination_3d_gpu.py <input.ome.zarr> <output.ome.zarr> \
-    [--n_processes <n>] \
-    [--use_gpu/--no-use_gpu]
-```
-
-### linum_generate_mosaic_aips_gpu.py
-
-GPU-accelerated version of `linum_generate_mosaic_aips.py`. Note: mean projection offers no genuine speedup (≤1x); this script is provided for pipeline consistency.
-
-```bash
-linum_generate_mosaic_aips_gpu.py <mosaics_dir> <output_dir> \
-    [--level <pyramid_level>] \
-    [--use_gpu/--no-use_gpu]
-```
-
-### GPU Script Comparison
-
-| GPU Script | CPU Equivalent | Accelerated Operations |
-|------------|----------------|------------------------|
-| `linum_estimate_transform_gpu.py` | `linum_estimate_transform.py` | FFT (9-47x), phase correlation (8-16x) |
-| `linum_create_mosaic_grid_3d_gpu.py` | `linum_create_mosaic_grid_3d.py` | Resize (5-12x) |
-| `linum_resample_mosaic_grid_gpu.py` | `linum_resample_mosaic_grid.py` | Resize (5-12x) |
-| `linum_normalize_intensities_per_slice_gpu.py` | `linum_normalize_intensities_per_slice.py` | Normalization (4-10x) |
-| `linum_fix_illumination_3d_gpu.py` | `linum_fix_illumination_3d.py` | BaSiCPy via JAX (2-5x) |
-| `linum_assess_slice_quality_gpu.py` | `linum_assess_slice_quality.py` | SSIM, morphology (3-8x) |
-| `linum_generate_mosaic_aips_gpu.py` | `linum_generate_mosaic_aips.py` | AIP mean projection (≤1x) |
-
-*Note: `linum_aip_gpu.py` exists but offers no speedup for mean projection (0.5x = GPU is 2x slower due to transfer overhead). Use `linum_aip_png.py` or `linum_generate_mosaic_aips.py` instead.*
 
 ---
 

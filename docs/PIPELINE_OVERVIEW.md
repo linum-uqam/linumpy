@@ -46,8 +46,12 @@ Mosaic Grids (*.ome.zarr) + shifts_xy.csv + slice_config.csv
 │ • Beam profile correction     │
 │ • Crop at interface           │
 │ • Normalize intensities       │
+│ • [opt] Auto-assess quality   │
+│ • [opt] Detect re-homing      │
 │ • Align to common space       │
+│ • [opt] Interpolate gaps      │
 │ • Pairwise registration       │
+│ • [opt] Auto-exclude clusters │
 │ • Stack into 3D volume        │
 │ • [opt] Z-intensity normalize │
 │ • [opt] Register to atlas     │
@@ -240,22 +244,43 @@ bring_to_common_space
 ```
 - Aligns all slices using XY shifts from microscope metadata
 - Resamples to common shape
-- **Outlier Filtering** (enabled by default):
-  - Detects erroneous large shifts using IQR statistics
-  - Replaces outliers with local median of neighboring shifts
-  - Prevents slices from drifting out of the common volume
-- Centers drift around the middle slice to keep tissue centered
+- **Re-homing detection** (`detect_rehoming = true`, default): encoder glitch
+  spikes (large step that self-cancels with the adjacent step) are zeroed
+  before alignment. Genuine re-homing events (large step that stays) are
+  preserved. Optional `tile_fov_mm` also corrects mosaic-column expansion
+  artefacts in legacy shifts files.
+- **Excluded-slice handling**: shifts involving excluded slices are replaced
+  using the neighbours (`local_median` by default).
+- **Optional image-based refinement** (`common_space_refine_unreliable`) uses
+  2-D phase correlation to recompute shifts flagged `reliable=0`.
+- Centres drift around the middle slice to keep tissue in the common volume.
 
 **Key Parameters:**
-- `filter_shift_outliers`: Enable outlier filtering (default: `true`)
-- `outlier_method`: Detection method - `iqr` recommended (default: `'iqr'`)
-- `outlier_iqr_multiplier`: IQR multiplier for detection (default: `1.5`)
+- `detect_rehoming`, `rehoming_return_fraction`, `rehoming_max_shift_mm`
+- `tile_fov_mm` (legacy shifts only)
+- `common_space_refine_unreliable` + `common_space_refine_min_correlation`
+- `common_space_excluded_slice_mode` (`keep` | `local_median` | `median` | `zero`)
 
 **Debugging:**
-- Enable `common_space_preview = true` to generate preview images
-- Check `bring_to_common_space/` output directory for aligned slices
+- Enable `common_space_preview = true` for aligned-slice previews
+- Enable `rehoming_diagnostics = true` for a `rehoming_report.json` / plot
+- Check `bring_to_common_space/` for the aligned slices
 
-#### 11. Slice Registration
+#### 11. Missing Slice Interpolation (Optional)
+
+```
+interpolate_missing_slice
+```
+- Fills single-slice gaps using the two neighbouring slices
+- Enabled by `interpolate_missing_slices = true` (default)
+- Default method is **zmorph** (z-aware morphing via fractional affine
+  transforms on the boundary planes) — see [SLICE_INTERPOLATION_FEATURE.md](SLICE_INTERPOLATION_FEATURE.md)
+- When zmorph's quality gates fail the slot stays a genuine gap (no zarr
+  emitted) — nothing is fabricated
+- `finalise_interpolation` merges per-slice manifest fragments into
+  `slice_config_final.csv`
+
+#### 12. Slice Registration
 
 ```
 register_pairwise
@@ -268,7 +293,7 @@ register_pairwise
 
 The `bring_to_common_space` step (step 10) provides initial XY alignment using microscope metadata, while pairwise registration fine-tunes the alignment between adjacent slices.
 
-#### 12. Volume Stacking
+#### 13. Volume Stacking
 
 ```
 stack
@@ -513,9 +538,10 @@ Common issues indicated by metrics:
 **Cause:** Small registration biases accumulate over many slices.
 
 **Solutions:**
-- Enable registration masks: `--create_registration_masks true` (focuses registration on tissue)
-- Enable outlier filtering: `--filter_shift_outliers true --outlier_method iqr`
-- Use `--stack_no_accumulate_transforms true` since slices are already aligned
+- Enable re-homing detection: `--detect_rehoming true` (default) to remove encoder glitch spikes
+- For legacy shifts files, also set `--tile_fov_mm 0.875` (or your tile FOV) to correct mosaic-expansion jumps
+- Enable image-based refinement for uncertain transitions: `--common_space_refine_unreliable true`
+- Start from `-profile conservative` (rotation-only transform application, tight confidence gating)
 
 #### Shadowing/Banding Effect
 
@@ -558,25 +584,34 @@ output/
 ├── fix_focal_curvature/              # Curvature-corrected mosaics
 ├── fix_illumination/                 # Illumination-corrected mosaics
 ├── generate_aip/                     # AIP projections
-├── estimate_xy_transformation/       # XY transforms
+├── estimate_xy_transformation/       # XY transforms (per-slice or global)
 ├── stitch_3d/                        # Stitched 3D slices
 ├── beam_profile_correction/          # PSF-corrected slices
 ├── crop_interface/                   # Cropped slices
 ├── normalize/                        # Normalized slices
+├── auto_assess_quality/              # (auto_assess_quality = true) Quality-stamped slice_config.csv
+├── detect_rehoming/                  # Corrected shifts_xy_clean.csv + diagnostics (when enabled)
 ├── bring_to_common_space/            # Aligned slices
-├── create_registration_masks/        # Registration masks (with *_metrics.json)
-├── register_pairwise/                # Pairwise transforms (with *_metrics.json)
+├── interpolate_missing_slice/        # (interpolate_missing_slices = true)
+│   ├── slice_z*.ome.zarr             #   (only when interpolation succeeded)
+│   └── manifests/                    #   Per-slice CSV fragments
+├── finalise_interpolation/           # slice_config_final.csv
+├── register_pairwise/                # Pairwise transforms + metrics.json
+├── auto_exclude_slices/              # (auto_exclude_enabled) slice_config with auto_excluded flags
+├── export_manual_align/              # (export_manual_align) AIPs + transforms for manual tool
 ├── stack/
-│   ├── 3d_volume.ome.zarr           # Final 3D volume
-│   ├── 3d_volume.ome.zarr.zip       # Compressed volume
-│   └── 3d_volume.png                # Preview image
-├── normalize_z_intensity/           # Z-normalized volume (only when normalize_z_slices = true)
+│   ├── 3d_volume.ome.zarr            # Final 3D volume
+│   ├── 3d_volume.ome.zarr.zip        # Compressed volume
+│   ├── z_matches.csv                 # Z-overlap decisions
+│   ├── stacking_decisions.csv        # Per-slice transform loading decisions
+│   └── 3d_volume.png                 # Preview image
+├── normalize_z_intensity/            # (normalize_z_slices) Z-normalized volume
 │   └── 3d_volume_znorm.ome.zarr
-├── align_to_ras/                    # RAS alignment (only when align_to_ras_enabled = true)
-│   ├── {subject}_ras.ome.zarr       # RAS-aligned volume (all pyramid levels)
-│   ├── {subject}_ras_transform.tfm  # Registration transform (SimpleITK)
-│   └── {subject}_ras_preview.png    # 3-panel alignment comparison
-├── diagnostics/                     # (only when diagnostic_mode = true or individual flags set)
+├── align_to_ras/                     # (align_to_ras_enabled)
+│   ├── {subject}_ras.ome.zarr        #   RAS-aligned volume (all pyramid levels)
+│   ├── {subject}_ras_transform.tfm   #   Registration transform (SimpleITK)
+│   └── {subject}_ras_preview.png     #   3-panel alignment comparison
+├── diagnostics/                      # (diagnostic_mode or individual flags)
 │   ├── rotation_analysis/
 │   ├── acquisition_rotation/
 │   ├── dilation_analysis/

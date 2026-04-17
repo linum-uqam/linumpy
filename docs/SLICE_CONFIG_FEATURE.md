@@ -5,12 +5,17 @@
 
 ## Overview
 
-The slice configuration feature allows users to control which slices are included in the 3D reconstruction pipeline. This is essential when:
+`slice_config.csv` is the **single source of truth for per-slice pipeline decisions**. It controls which slices are included in the 3D reconstruction pipeline and records how every stage has acted on each slice, in a machine- and human-readable audit trail.
 
-- Some slices have quality issues (motion artifacts, bad cuts, etc.)
-- You want to reconstruct only a subset of the data
-- Debugging reconstruction issues with specific slices
-- Reviewing which slices have galvo shift artifacts detected
+Typical uses:
+
+- Exclude slices with quality issues (motion artifacts, bad cuts, calibration slices).
+- Reconstruct only a subset of the data.
+- Audit which slices had galvo shift corrections applied.
+- Audit which slices were rehomed, auto-excluded, or interpolated.
+- Debug reconstruction issues by inspecting per-slice flags and notes.
+
+All reads and writes from Python code go through the shared `linumpy.io.slice_config` module (`read`, `write`, `stamp`, `stamp_many`, `merge_fragments`, `filter_slices_to_use`, `force_skip_slices`) so the schema stays consistent across scripts. **Raw numeric metrics no longer live in `slice_config.csv`** — only pipeline-relevant booleans, decisions, and short reasons. Full numeric diagnostics are written to the end-of-pipeline report and per-slice JSON files.
 
 ---
 
@@ -45,55 +50,91 @@ This caused errors when:
 
 ### Slice Configuration File
 
-A CSV file (`slice_config.csv`) controls which slices to include:
+A CSV file (`slice_config.csv`) records per-slice pipeline decisions. Below is a fully-populated example after a complete run:
 
-**Basic format:**
 ```csv
-slice_id,use,notes
-00,true,
-01,true,
-02,false,Motion artifact during cut
-03,true,
-04,true,
-05,false,Bad image quality
+slice_id,use,quality_score,galvo_confidence,galvo_fix,rehomed,rehoming_reliable,auto_excluded,auto_exclude_reason,interpolated,interpolation_failed,interpolation_method_used,interpolation_fallback_reason,notes
+00,false,0.000,0.234,false,false,,false,,false,false,,,calibration_slice
+01,true,0.812,0.891,true,false,,false,,false,false,,,
+02,false,0.198,0.756,true,false,,false,,true,false,zmorph,,Motion artifact — interpolated
+07,false,0.092,0.612,false,false,,false,,false,true,,low_overlap_ncc,zmorph hard-skipped — slot is a gap
+03,true,0.756,0.512,false,true,true,false,,false,false,,,rehomed after tile-column expansion
+04,true,0.744,0.189,false,false,,true,noisy cluster (3 consecutive),false,false,,,
+05,true,0.834,0.923,true,false,,false,,false,false,,,
 ```
 
-**With galvo detection (when `detect_galvo = true`):**
-```csv
-slice_id,use,galvo_confidence,galvo_fix,notes
-00,true,0.234,false,
-01,true,0.891,true,
-02,false,0.756,true,Motion artifact
-03,true,0.512,false,
-04,true,0.189,false,
-05,true,0.923,true,
-```
+A minimal `slice_config.csv` (only required columns) still works — missing columns default to `false`/empty and are filled in as each pipeline stage stamps its flags.
 
-### File Format
+### Canonical columns
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `slice_id` | string | Two-digit slice identifier (e.g., "00", "01") |
-| `use` | boolean | `true`/`false` whether to include this slice |
-| `galvo_confidence` | float | (Optional) Galvo detection confidence score (0-1) |
-| `galvo_fix` | boolean | (Optional) Whether galvo fix would be applied |
-| `notes` | string | Optional notes explaining exclusion |
+The schema is defined by `linumpy.io.slice_config.CANONICAL_COLUMNS` and is enforced by every writer in the pipeline:
 
-### Boolean Values
+| Column | Type | Written by | Description |
+|--------|------|------------|-------------|
+| `slice_id` | string | generator | Two-digit slice identifier (e.g., "00", "01"). **Required key.** |
+| `use` | boolean | generator / quality / galvo | Whether to include this slice. `false` → filtered out downstream. |
+| `quality_score` | float | `linum_assess_slice_quality[_gpu].py` | Weighted quality score in [0, 1]. |
+| `galvo_confidence` | float | `linum_generate_slice_config.py`, `linum_fix_galvo_shift_zarr.py` | Galvo detection confidence (0–1). |
+| `galvo_fix` | boolean | `linum_generate_slice_config.py`, `linum_fix_galvo_shift_zarr.py` | Whether the galvo shift fix was applied. |
+| `rehomed` | boolean | `linum_detect_rehoming.py` | `true` if the slice was corrected for a rehoming event (tile-column expansion or encoder glitch). |
+| `rehoming_reliable` | boolean | `linum_detect_rehoming.py` | `true` if the motor-based correction was within `max_shift_mm`; `false` flags it for image-based verification. |
+| `auto_excluded` | boolean | `linum_auto_exclude_slices.py` | `true` if the slice was automatically excluded by the low-quality cluster detector. |
+| `auto_exclude_reason` | string | `linum_auto_exclude_slices.py` | Short human-readable reason (e.g. `noisy cluster (3 consecutive)`). |
+| `interpolated` | boolean | `linum_interpolate_missing_slice.py --finalise` | `true` if this slice was successfully interpolated from its neighbours (a zarr was produced). |
+| `interpolation_failed` | boolean | `linum_interpolate_missing_slice.py --finalise` | `true` if zmorph was attempted but hit a quality gate; no zarr was produced and the slot is a gap in the final volume. |
+| `interpolation_method_used` | string | `linum_interpolate_missing_slice.py --finalise` | Method actually used (`zmorph`, `weighted`, `average`). Empty when `interpolation_failed=true`. |
+| `interpolation_fallback_reason` | string | `linum_interpolate_missing_slice.py --finalise` | Reason zmorph hard-skipped (`low_overlap_ncc`, `reg_did_not_improve`, ...), or empty on success. |
+| `notes` | string | any stage | Free-form human-readable annotation. Stages append with `; ` separators. |
 
-The `use` column accepts:
+> **Raw numeric metrics** (SSIM, edge score, variance ratio, NCC values, affine determinants, ...) are deliberately **not** in `slice_config.csv`. They live in per-slice JSON diagnostics and in the end-of-pipeline quality report.
+
+### Boolean values
+
+The `use` column (and all other booleans) accepts:
 - **True**: `true`, `1`, `yes`
 - **False**: `false`, `0`, `no`
 
-### Galvo Detection Columns
+All booleans are **written back as lowercase `true`/`false`** to stay consistent with Nextflow-style CSVs.
+
+### Galvo detection columns
 
 When `detect_galvo = true` in the preprocessing pipeline:
-- **galvo_confidence**: Detection confidence (0.0 - 1.0)
+- **galvo_confidence**: Detection confidence (0.0 – 1.0)
   - High (≥0.6): Galvo artifact likely present
   - Low (<0.6): No clear artifact detected
 - **galvo_fix**: Whether the fix would be applied during mosaic creation
   - `true`: Confidence ≥ threshold, fix applied
   - `false`: Confidence < threshold, fix skipped
+
+### Rehoming columns
+
+When `detect_rehoming = true` in the 3D reconstruction pipeline, `linum_detect_rehoming.py` stamps:
+- **rehomed** (`true`/`false`) — the slice transition had an N×`tile_fov_mm` step or an encoder glitch that was corrected.
+- **rehoming_reliable** (`true`/`false`) — whether the motor-based fix was within `max_shift_mm`. `false` means the downstream `common_space_refine_unreliable` stage should verify the correction against image data.
+
+### Auto-exclusion columns
+
+`linum_auto_exclude_slices.py` reads pairwise registration metrics and stamps:
+- **auto_excluded** (`true`/`false`) — slice is in a noisy cluster.
+- **auto_exclude_reason** (string) — short human-readable reason.
+
+This replaces the old `auto_exclude.csv` side-file.
+
+### Interpolation columns
+
+After `finalise_interpolation`, any slice that reached `linum_interpolate_missing_slice.py` gets one of two states:
+
+- **Success** — a reconstructed zarr was produced:
+  - `interpolated=true`, `interpolation_failed=false`
+  - `interpolation_method_used` = `zmorph` / `weighted` / `average`
+  - `interpolation_fallback_reason` empty
+
+- **Hard skip** — zmorph hit a quality gate, no zarr was produced, the slot stays a gap:
+  - `interpolated=false`, `interpolation_failed=true`
+  - `interpolation_method_used` empty
+  - `interpolation_fallback_reason` = one of `low_overlap_ncc`, `no_foreground_planes`, `registration_exception`, `reg_did_not_improve`, `affine_determinant_non_positive`
+
+The pipeline never fabricates a slice from a weighted blend when registration fails; blending two neighbours that could not be registered introduces ghost contours and would also be made-up data. See [`SLICE_INTERPOLATION_FEATURE.md`](SLICE_INTERPOLATION_FEATURE.md) for the interpolation algorithm details and rationale.
 
 ---
 
@@ -101,7 +142,7 @@ When `detect_galvo = true` in the preprocessing pipeline:
 
 ### Automatic Quality Detection
 
-The `linum_assess_slice_quality.py` script (and GPU version `linum_assess_slice_quality_gpu.py`) can analyze mosaic grids to detect quality issues and update the slice configuration.
+The `linum_assess_slice_quality.py` script can analyze mosaic grids to detect quality issues and update the slice configuration. GPU acceleration is enabled by default (pass `--no-use_gpu` to disable).
 
 **Quality Metrics:**
 | Metric | Weight | Description |
@@ -122,17 +163,19 @@ The first slice in an acquisition is typically a **calibration slice** that is t
 1. **Automatic exclusion**: Use `--exclude_first N` to exclude the first N slices (default: 1)
 2. **Thickness detection**: Use `--detect_calibration` to automatically detect slices that are significantly thicker than the median
 
-### Quality Assessment with Extended Format
+### Quality Assessment Output
 
-When quality assessment is enabled, the config file includes additional columns:
+When quality assessment runs, the writer only populates canonical columns:
 
 ```csv
-slice_id,use,quality_score,ssim_mean,edge_score,variance_score,depth,exclude_reason
-00,false,0.000,0.000,0.000,0.000,120,calibration_slice
-01,true,0.756,0.891,0.612,0.534,85,
-02,false,0.198,0.231,0.112,0.198,85,low_quality
-03,true,0.812,0.923,0.701,0.645,85,
+slice_id,use,quality_score,notes
+00,false,0.000,calibration_slice
+01,true,0.812,
+02,false,0.198,low_quality (quality_score<0.3)
+03,true,0.923,
 ```
+
+Raw per-metric numbers (SSIM, edge, variance, tissue depth) are available in the pipeline report and in the per-slice JSON diagnostics — they are *not* duplicated in `slice_config.csv`.
 
 ### Usage Examples
 
@@ -148,8 +191,8 @@ linum_assess_slice_quality.py /path/to/mosaics slice_config.csv \
 linum_assess_slice_quality.py /path/to/mosaics slice_config.csv \
     --min_quality 0.3
 
-# GPU-accelerated quality assessment
-linum_assess_slice_quality_gpu.py /path/to/mosaics slice_config.csv
+# GPU-accelerated quality assessment (default; pass --no-use_gpu to disable)
+linum_assess_slice_quality.py /path/to/mosaics slice_config.csv --use_gpu
 
 # Report only (don't write file)
 linum_assess_slice_quality.py /path/to/mosaics slice_config.csv --report_only
@@ -419,25 +462,24 @@ process generate_slice_config {
 
 ```groovy
 // Parameter in nextflow.config
-params.slice_config = ""  // Optional path to slice_config.csv
+params.slice_config = ""        // Optional path to slice_config.csv
+params.auto_assess_quality = false  // If true, bootstrap a slice_config.csv from quality assessment
 
-// Workflow logic
-def slicesToUse = null
-if (params.slice_config && params.slice_config != "") {
-    slicesToUse = parseSliceConfig(params.slice_config)
-    log.info "Slice config loaded: using ${slicesToUse.size()} slices"
-}
+// Workflow logic (simplified)
+def slice_config_path = params.slice_config ?: "${params.output}/slice_config.csv"
+def has_slice_config = file(slice_config_path).exists() || params.auto_assess_quality
 
-// Filter input slices
-inputSlices = channel
-    .fromFilePairs(...)
-    .filter { slice_id, _files ->
-        if (slicesToUse != null) {
-            return slicesToUse.contains(slice_id)
-        }
-        return true
-    }
+// Filter slices using slice_config.csv (python-side; the workflow just passes the path through).
+// Each stage that has something to stamp takes the current slice_config as input and
+// emits an updated one:
+current_slice_config = Channel.fromPath(slice_config_path)
+    | detect_rehoming_events          // stamps rehomed / rehoming_reliable
+    | finalise_interpolation          // stamps interpolated / interpolation_method_used / ...
+    | auto_exclude_slices             // stamps auto_excluded / auto_exclude_reason
+    // ... the final slice_config.csv is what `stack` reads via --slice_config
 ```
+
+All Python-side slice filtering (e.g. `linum_estimate_global_transform.py`) uses `linumpy.io.slice_config.filter_slices_to_use()` — there is no Groovy `parseSliceConfig` helper to maintain.
 
 ---
 
@@ -520,7 +562,8 @@ cat /output/slice_config.csv
 # Edit if needed (set use=false for bad slices)
 nano /output/slice_config.csv
 
-# Reconstruction
+# Reconstruction (the pipeline updates slice_config.csv in place as it runs,
+# publishing the final version as slice_config_final.csv)
 nextflow run soct_3d_reconst.nf \
     --input /output \
     --slice_config /output/slice_config.csv
@@ -536,7 +579,7 @@ nextflow run soct_3d_reconst.nf \
 # Generate config from existing shifts file
 linum_generate_slice_config.py /output/shifts_xy.csv slice_config.csv --from_shifts
 
-# Edit to exclude slice 2
+# Edit to exclude slice 2 (only canonical columns are needed)
 # slice_id,use,notes
 # 00,true,
 # 01,true,
@@ -548,6 +591,10 @@ nextflow run soct_3d_reconst.nf \
     --input /output \
     --slice_config slice_config.csv
 ```
+
+### Inspecting the final audit trail
+
+After a run, `${params.output}/slice_config_final.csv` contains the full per-slice trail: quality, galvo, rehoming, auto-exclusion, and interpolation flags. Combined with the pipeline report and per-slice JSON diagnostics it tells the complete story of what happened to each slice.
 
 ---
 
@@ -570,15 +617,117 @@ The pipeline performs validation:
 
 ---
 
+## Python API: `linumpy.io.slice_config`
+
+All code that reads or writes `slice_config.csv` goes through this module. This guarantees schema consistency and makes scripts trivial to update when the schema evolves.
+
+```python
+from linumpy.io import slice_config as slice_config_io
+
+# Read (returns OrderedDict[slice_id -> row dict], keys preserved in file order).
+rows = slice_config_io.read("slice_config.csv")
+
+# Stamp a single slice: adds/overrides columns, extends canonical schema if needed.
+rows = slice_config_io.stamp(rows, "03", {"interpolated": True, "interpolation_method_used": "zmorph"})
+
+# Stamp many slices at once.
+rows = slice_config_io.stamp_many(rows, {
+    "03": {"rehomed": True, "rehoming_reliable": False},
+    "07": {"rehomed": True, "rehoming_reliable": True},
+})
+
+# Merge a directory of per-slice manifest fragments (used by finalise_interpolation).
+rows = slice_config_io.merge_fragments(rows, "interpolate_missing_slice/")
+
+# Filter down to slices with use=true (respects auto_excluded via force_skip_slices).
+to_process = slice_config_io.filter_slices_to_use(rows)
+
+# Or, mark all auto_excluded+use=false slices as "skip" for stacking.
+rows_for_stack = slice_config_io.force_skip_slices(rows)
+
+# Write back: booleans serialised as lowercase true/false; canonical columns first.
+slice_config_io.write("slice_config_next.csv", rows)
+```
+
+Key design rules:
+
+- **Canonical columns come first** in the output, in the order defined by `CANONICAL_COLUMNS`. Extra columns from an older file are preserved at the end (but new code should not rely on extras).
+- **Stamping is additive**: existing values are overwritten, but other columns are left alone. This lets the CSV accumulate information as it flows through the pipeline.
+- **Appending notes**: stamping the `notes` column with the `append_notes=True` flag joins the new note with the existing one using `"; "` so earlier annotations survive.
+- **No raw metrics**: writers are expected not to add columns like `ssim_mean` or `affine_determinant` — those belong in reports/diagnostics.
+
+---
+
+## Pipeline flow: `slice_config.csv` as a flowing artifact
+
+In the 3D reconstruction pipeline (`workflows/reconst_3d/soct_3d_reconst.nf`), a single `slice_config.csv` channel flows through each stage that has something to stamp. Each stage takes the *current* `slice_config.csv` as input and emits an updated one:
+
+```
+[preproc slice_config.csv or auto-generated]
+        │
+        ▼
+detect_rehoming_events        ──►  slice_config.csv (+rehomed, +rehoming_reliable)
+        │
+        ▼
+[interpolate_missing_slice produces per-slice manifest fragments]
+        │
+        ▼
+finalise_interpolation        ──►  slice_config_final.csv
+                                   (+interpolated, +interpolation_method_used,
+                                    +interpolation_fallback_reason)
+        │
+        ▼
+auto_exclude_slices           ──►  slice_config.csv (+auto_excluded, +auto_exclude_reason)
+        │
+        ▼
+stack (linum_stack_slices_motor.py --slice_config)
+        │   — reads the final slice_config.csv, uses force_skip_slices()
+        ▼
+downstream stages (normalize_z, align_to_ras, generate_report)
+        │   — read the same slice_config_final.csv
+        ▼
+[pipeline report shows the complete audit trail per slice]
+```
+
+There is no separate `auto_exclude.csv`, no separate interpolation manifest CSV, and no script dedicated to merging manifests into the config. Each stage stamps its own flags in place.
+
+---
+
+## Concurrency
+
+The pipeline runs many processes in parallel, but `slice_config.csv` is **never written to concurrently**. The design is race-free by construction, not by locking:
+
+1. **Single writer per stage.** Every Nextflow process that updates `slice_config.csv` takes the current version as an *input path* (staged into its own work directory) and emits a *new* CSV as an output. Nextflow copies outputs into the next consumer's work directory; nothing reads and writes the same file at the same time.
+
+2. **Per-slice fan-out uses fragments, not shared writes.** Per-slice stages (interpolation, pairwise registration, ...) are the only ones that fan out. They each emit a small per-slice fragment (e.g. `slice_z{NN}_manifest.csv`) to their own work directory. Fragment filenames are unique per slice, so two parallel tasks cannot collide.
+
+3. **Sequential consolidation.** Fragments are aggregated via `.collect()` and consumed by a single downstream process (e.g. `finalise_interpolation`) that runs one instance, calls `linumpy.io.slice_config.merge_fragments`, and writes a new CSV. All updates to `slice_config.csv` therefore funnel through a single writer.
+
+4. **No in-place updates.** `linumpy.io.slice_config.stamp` / `merge_fragments` always write to a *new* `slice_config_out` path. A consumer reading the old version never observes a half-written file. This also keeps Nextflow's `-resume` cache semantics working — inputs to each stage are content-addressed and immutable.
+
+5. **No file locking in `linumpy.io.slice_config`.** If you invoke these helpers from ad-hoc scripts outside of Nextflow, make sure each writer targets a distinct output path. The module relies on the pipeline's channel discipline for mutual exclusion.
+
+See `linumpy/io/slice_config.py` for the concurrency contract in the module docstring.
+
+---
+
 ## Files Changed
 
 | File | Changes |
 |------|---------|
-| `scripts/linum_generate_slice_config.py` | **NEW** - Generate slice config |
-| `scripts/linum_align_mosaics_3d_from_shifts.py` | Fixed indexing bug, added `--slice_config` |
-| `workflows/preproc/preproc_rawtiles.nf` | Added `generate_slice_config` process |
-| `workflows/reconst_3d/soct_3d_reconst.nf` | Added slice filtering logic |
-| `workflows/reconst_3d/nextflow.config` | Added `slice_config` parameter |
+| `linumpy/io/slice_config.py` | **NEW** — canonical schema + `read`/`write`/`stamp`/`stamp_many`/`merge_fragments`/`filter_slices_to_use`/`force_skip_slices`. |
+| `scripts/linum_generate_slice_config.py` | Uses `linumpy.io.slice_config` for writes; canonical columns only. |
+| `scripts/linum_assess_slice_quality[_gpu].py` | Refactored to use `linumpy.io.slice_config`; dropped `ssim_mean`/`edge_score`/`variance_score`/`depth` columns. |
+| `scripts/linum_detect_rehoming.py` | Added `--slice_config_in`/`--slice_config_out`; stamps `rehomed` + `rehoming_reliable`. |
+| `scripts/linum_auto_exclude_slices.py` | Stamps `auto_excluded` + `auto_exclude_reason` directly on `slice_config.csv` (no more side-file). |
+| `scripts/linum_interpolate_missing_slice.py` | Added `--finalise` mode: merges per-slice manifest fragments into `slice_config.csv`. |
+| `scripts/linum_stack_slices_motor.py` | Accepts `--slice_config`; uses `slice_config_io.force_skip_slices()`. `--force_skip_slices` removed. |
+| `scripts/linum_align_mosaics_3d_from_shifts.py` | Fixed indexing bug, added `--slice_config`, now uses shared reader. |
+| `scripts/linum_estimate_global_transform[_gpu].py`, `linum_analyze_stitch_affine.py`, `linum_fix_galvo_shift_zarr.py` | Switched to shared `linumpy.io.slice_config` reader/writer. |
+| `scripts/linum_update_slice_config_with_interpolation.py` | **REMOVED** — replaced by `linum_interpolate_missing_slice.py --finalise`. |
+| `workflows/preproc/preproc_rawtiles.nf` | Adds `generate_slice_config` process. |
+| `workflows/reconst_3d/soct_3d_reconst.nf` | Threads `slice_config.csv` through `detect_rehoming_events` → `finalise_interpolation` → `auto_exclude_slices` → `stack`. |
+| `workflows/reconst_3d/nextflow.config` | `slice_config` parameter; `auto_assess_quality` can bootstrap one. |
 
 ---
 

@@ -220,29 +220,74 @@ These parameters control how tiles within each slice are assembled in XY.
 | `stitch_blending_method` | `'diffusion'` | Tile blending: `'none'`, `'average'`, `'diffusion'` |
 | `max_blend_refinement_px` | `10` | Maximum sub-pixel refinement shift for blending (pixels) |
 
-#### Common Space Alignment
-
-Aligns each slice into a shared XY canvas using `shifts_xy.csv` motor positions, with optional outlier and step filtering.
+**Global tile-placement transform** (optional). When enabled, one 2×2 affine is
+fitted across a pool of mid-brain mosaic grids (instrument geometry is slice-
+invariant) and re-used for every slice. This removes per-slice scale/rotation
+jitter that the default refined stitcher introduces when the LS fit is
+underdetermined on small or sparse grids.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `filter_shift_outliers` | `true` | Enable outlier filtering (strongly recommended) |
-| `outlier_method` | `'iqr'` | Detection method: `iqr`, `local`, `median`, `clamp`, or `zero` |
-| `outlier_iqr_multiplier` | `1.5` | IQR multiplier for outlier detection |
-| `max_shift_mm` | `0.5` | Maximum allowed shift (mm) — floor on IQR threshold |
-| `common_space_max_step_mm` | `0.5` | Maximum per-step shift change (mm, 0 = disabled) |
-| `common_space_step_window` | `3` | Window size for step outlier detection |
-| `common_space_step_method` | `'local_median'` | Step correction method: `local_median`, `clamp`, `local_mad` |
-| `common_space_step_mad_threshold` | `3.0` | MADs above local median to flag a step outlier (only with `local_mad`) |
-| `common_space_excluded_slice_mode` | `'local_median'` | Shift interpolation for excluded slices |
-| `common_space_excluded_slice_window` | `2` | Window for excluded slice interpolation |
+| `stitch_global_transform` | `false` | Enable pooled global affine estimation |
+| `stitch_global_transform_slices` | `''` | Optional comma-separated slice IDs to pool from (empty = all) |
+| `stitch_global_transform_histogram_match` | `true` | Match overlap histograms before phase correlation |
+| `stitch_global_transform_max_empty_fraction` | `0.9` | Otsu-based empty-overlap filter fraction (null = simpler check) |
+| `stitch_global_transform_n_samples` | `2048` | Max pooled pairs for the LS fit (0 = use all) |
+| `stitch_global_transform_seed` | `0` | Random seed for pair sub-sampling |
 
-**Outlier Methods:**
-- `iqr` (recommended): Auto-detect outliers using IQR statistics, replace with local median
-- `local`: Replace outliers with local median of neighboring shifts
-- `median`: Replace outliers with global median
-- `clamp`: Limit magnitude to `max_shift_mm` while preserving direction
-- `zero`: Replace outliers with zero shift
+#### Common Space Alignment
+
+Aligns each slice into a shared XY canvas using `shifts_xy.csv` motor positions.
+Erroneous shifts are corrected **upstream** via re-homing detection rather than
+post-hoc outlier filtering.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `detect_rehoming` | `true` | Correct encoder glitch spikes (round-trip steps) before alignment |
+| `rehoming_return_fraction` | `0.4` | Spike sensitivity: lower = fewer corrections (adjacent step must reverse > (1−this) of current) |
+| `rehoming_max_shift_mm` | `0.5` | Steps below this magnitude are not checked for spikes |
+| `tile_fov_mm` | `null` | Tile field-of-view (mm); set only for legacy shifts files where `xmin_mm` jumped by whole tile columns |
+| `tile_fov_tolerance` | `0.05` | Fractional tolerance around each tile-FOV multiple |
+| `common_space_excluded_slice_mode` | `'local_median'` | Handling for excluded-slice shifts: `keep`, `local_median`, `median`, `zero` |
+| `common_space_excluded_slice_window` | `2` | Window size for `local_median` replacement |
+| `common_space_refine_unreliable` | `false` | Re-estimate `reliable=0` transitions with 2-D phase cross-correlation |
+| `common_space_refine_max_discrepancy_px` | `0` | Reject image-based estimates differing from motor by more than this (0 = accept all) |
+| `common_space_refine_min_correlation` | `0.0` | Minimum NCC to accept an image-based refinement |
+
+#### Missing Slice Interpolation
+
+Fill single-slice gaps in the normalized slice sequence. Two-or-more consecutive
+gaps are not interpolated (insufficient information) and remain as holes.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `interpolate_missing_slices` | `true` | Interpolate single-slice gaps |
+| `interpolation_method` | `'zmorph'` | Method: `zmorph` (z-aware morphing), `weighted`, `average` |
+| `interpolation_blend_method` | `'gaussian'` | Blend: `gaussian` (feathered edges) or `linear` |
+| `interpolation_registration_metric` | `'MSE'` | Similarity metric for boundary-plane registration |
+| `interpolation_max_iterations` | `1000` | Maximum registration iterations |
+| `interpolation_overlap_search_window` | `5` | Z-planes to search at each boundary for best overlap pair |
+| `interpolation_min_overlap_correlation` | `0.3` | Pre-registration NCC threshold below which zmorph falls back |
+| `interpolation_reference_slab_size` | `3` | Planes averaged around boundary reference plane |
+| `interpolation_min_foreground_fraction` | `0.1` | Minimum foreground fraction for a boundary plane |
+| `interpolation_min_ncc_improvement` | `0.05` | Min post-reg NCC improvement to accept the transform |
+
+When zmorph's quality gates fail the slot is left as a genuine gap (no zarr
+output); a manifest fragment and diagnostics JSON are still emitted. See
+[SLICE_INTERPOLATION_FEATURE.md](SLICE_INTERPOLATION_FEATURE.md) for details.
+
+#### Automatic Slice Quality Assessment
+
+Runs `linum_assess_slice_quality` on normalized slices and stamps a
+`slice_config.csv` that marks degraded slices for exclusion before the common-
+space step.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `auto_assess_quality` | `false` | Enable automatic quality assessment |
+| `auto_assess_min_quality` | `0.3` | Exclude slices with quality score below this |
+| `auto_assess_exclude_first` | `1` | Exclude first N calibration slices automatically |
+| `auto_assess_roi_size` | `1024` | Centre-crop size in XY for quality metrics (0 = full plane) |
 
 #### Pairwise Registration
 
@@ -253,6 +298,7 @@ Computes small corrections (rotation, sub-pixel translation) between consecutive
 | `registration_transform` | `'euler'` | Transform type: `euler` (XY + rotation) or `translation` (XY only) |
 | `registration_max_translation` | `200.0` | Optimizer bound on translation (pixels) |
 | `registration_max_rotation` | `5.0` | Optimizer bound on rotation (degrees) |
+| `registration_initial_alignment` | `'both'` | Initial alignment before refinement: `none`, `com`, `gradient`, or `both` |
 | `moving_slice_first_index` | `4` | Starting Z-index in the moving volume |
 | `registration_slicing_interval_mm` | `0.200` | Physical slice thickness (mm) |
 | `registration_allowed_drifting_mm` | `0.100` | Z-search range (mm) |
@@ -266,25 +312,66 @@ and correlation or physics-based Z-matching.
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `stack_blend_enabled` | `true` | Blend overlapping regions between slices |
+| `blend_refinement_px` | `0` | Z-blend refinement: phase-correlation XY correction in the overlap zone before blending (0 = disabled) |
+| `stack_blend_z_refine_vox` | `5` | Z-blend position refinement: search up to N voxels below the expected boundary for the best-correlated plane |
 
-**Stacking parameters:**
+**Motor stacking / transform application:**
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `use_expected_z_overlap` | `true` | Use expected Z-overlap instead of correlation-based matching |
 | `apply_pairwise_transforms` | `true` | Apply pairwise registration transforms during stacking |
-| `apply_rotation_only` | `false` | Apply only the rotation component from registration (keeps XY from motor) |
+| `apply_rotation_only` | `false` | Apply only the rotation component (keeps XY from motor) |
 | `max_rotation_deg` | `5.0` | Clamp rotation values larger than this before application |
-| `skip_error_transforms` | `true` | Skip transforms flagged as `error` status (prevents artifacts near interpolated slices) |
-| `skip_warning_transforms` | `true` | Skip transforms flagged as `warning` status |
+
+**Confidence-based transform degradation.** A confidence score (0–1) is computed from Z-correlation, translation magnitude and rotation.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `transform_confidence_high` | `0.6` | Above this: full transform applied |
+| `transform_confidence_low` | `0.3` | Between low and high: rotation-only; below low: skipped |
+| `z_overlap_min_corr` | `0.5` | Fall back to expected Z-overlap below this NCC score |
+| `blend_z_refine_min_confidence` | `0.5` | Min confidence to run blend Z-refinement (else use expected overlap) |
+
+**Transform gating:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `skip_error_transforms` | `true` | Skip transforms flagged `overall_status="error"` |
+| `skip_warning_transforms` | `true` | Skip transforms flagged `overall_status="warning"` |
+| `load_transform_min_zcorr` | `0.0` | Metric-based gating: min z_correlation to load a transform (0 = disabled) |
+| `load_transform_max_rotation` | `0.0` | Metric-based gating: max rotation (degrees) (0 = disabled) |
+
+**Auto-exclude extended low-quality clusters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `auto_exclude_enabled` | `true` | Enable automatic cluster detection |
+| `auto_exclude_consecutive` | `3` | Min consecutive low-quality pairs to trigger exclusion |
+| `auto_exclude_z_corr` | `0.6` | Z-correlation threshold below which a pair is low-quality |
+
+**Translation accumulation & smoothing:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
 | `stack_accumulate_translations` | `true` | Accumulate pairwise translations as cumulative canvas offsets |
-| `stack_confidence_weight_translations` | `true` | Weight each pairwise translation by its confidence score before accumulating |
-| `stack_max_cumulative_drift_px` | `0` | Maximum cumulative translation drift from motor baseline (pixels). 0 = unlimited |
-| `stack_max_pairwise_translation` | `0` | Max pairwise translation (pixels) included in accumulation (0 = include all) |
-| `stitch_rehoming_enabled` | `false` | Apply one-time segment offset at re-homing event boundaries |
+| `stack_confidence_weight_translations` | `true` | Weight each translation by its confidence before accumulating |
+| `stack_max_cumulative_drift_px` | `50` | Max cumulative translation drift from motor baseline (0 = unlimited) |
+| `stack_max_pairwise_translation` | `0` | Values near this limit are assumed optimizer-boundary hits and zeroed out (0 = accumulate all) |
+| `stack_smooth_window` | `5` | Moving-average window (slices) for smoothing per-slice rotations (0 = disabled) |
+| `stack_translation_smooth_sigma` | `3.0` | Gaussian sigma (slices) for smoothing accumulated translations (0 = disabled) |
+| `stack_translation_min_zcorr` | `0.2` | Min z_correlation to use a slice's translation in accumulation |
+
+**Legacy post-hoc rehoming (for re-stacking old data):**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `stitch_rehoming_enabled` | `false` | Apply one-time segment offset at re-homing event boundaries during stacking |
 | `stitch_rehoming_threshold_mm` | `0.7` | Motor shift magnitude that identifies a re-homing event (mm) |
-| `stitch_rehoming_use_motor` | `false` | Use motor delta instead of pairwise registration for re-homing corrections |
-| `stack_smooth_window` | `5` | Moving-average window for smoothing accumulated translations and rotations (0 = disabled) |
+| `stitch_rehoming_use_motor` | `false` | Use motor delta instead of pairwise registration for the correction |
+
+Modern pipelines should rely on `detect_rehoming` in common-space alignment
+instead of these stacking-time corrections.
 
 **Output pyramid:**
 
@@ -421,15 +508,33 @@ allen_registration_level = 2
 
 ---
 
+#### Manual Alignment Export
+
+Export a lightweight data package for interactive manual alignment of pairwise
+slice transforms (`tools/manual-align/`). When manually corrected transforms
+exist, the stack step can pick them up and optionally re-refine them with a
+tight image-based registration.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `export_manual_align` | `false` | Export manual alignment data after `register_pairwise` |
+| `manual_align_level` | `1` | Pyramid level for AIP export (0 = full, 1 = 2×, …) |
+| `manual_transforms_dir` | `''` | Directory of manually-corrected transforms; overrides automated ones for matching slices |
+| `refine_manual_transforms` | `false` | Re-run pairwise registration on manual pairs, seeded from the manual transform |
+| `refine_max_translation_px` | `10` | Max residual translation searched during refinement (pixels) |
+| `refine_max_rotation_deg` | `2.0` | Max residual rotation searched during refinement (degrees) |
+
 #### Previews & Reports
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `stitch_preview` | `true` | Generate stitched slice preview images |
 | `common_space_preview` | `false` | Generate common space alignment previews |
+| `rehoming_diagnostics` | `false` | Save `rehoming_report.json` + `rehoming_plot.png` |
 | `interpolation_preview` | `false` | Generate interpolated slice previews |
 | `generate_report` | `true` | Generate HTML quality report after stacking |
 | `report_verbose` | `false` | Include detailed per-slice metrics in report |
+| `report_format` | `'zip'` | `'html'` (lightweight) or `'zip'` (HTML + bundled previews) |
 | `annotated_label_every` | `1` | Label every Nth slice in annotated preview (1 = all slices) |
 | `annotated_show_lines` | `false` | Draw slice boundary lines on annotated preview |
 
@@ -724,6 +829,27 @@ nextflow run workflow.nf --resolution 5 --processes 8
 
 ## Execution Profiles
 
+### Reconstruction Robustness Presets
+
+The 3D reconstruction workflow ships with three preset profiles that bundle
+related stacking/registration parameters:
+
+| Profile | When to use |
+|---------|-------------|
+| `conservative` (default behaviour) | Trusts motor positions for XY, applies rotation-only from registration, skips unreliable transforms, interpolates single-slice gaps. Recommended starting point. |
+| `aggressive` | Uses full pairwise transforms (XY + rotation) and accumulates them cumulatively. Best alignment when registration is reliable, degrades badly when it is not. |
+| `minimal` | Motor-only stacking — ignores all pairwise registration. Most stable and fastest; use when motor positions are reliable and registration consistently fails. |
+
+```bash
+# Pick a robustness preset
+nextflow run soct_3d_reconst.nf -profile conservative --input ... --output ...
+nextflow run soct_3d_reconst.nf -profile aggressive   --input ... --output ...
+nextflow run soct_3d_reconst.nf -profile minimal      --input ... --output ...
+```
+
+Individual parameters may still be overridden on the command line on top of a
+profile.
+
 ### Local Execution
 
 ```bash
@@ -892,6 +1018,201 @@ profiles {
 # Set work directory
 nextflow run workflow.nf -w /fast/storage/work
 ```
+
+---
+
+## Authoring Notes (linumpy reconstruction workflow)
+
+These notes apply specifically to `workflows/reconst_3d/soct_3d_reconst.nf` and
+explain a few patterns and pitfalls that the workflow file otherwise had to
+re-document inline. Refer to this section before changing the channel topology.
+
+### Value vs queue channels
+
+Nextflow has two channel kinds, with very different consumption semantics:
+
+- **Queue channels** are consumed once. When two operators read from the same
+  queue channel, only the first one observes the data; the second sees an
+  empty channel. Any process that depends (directly or transitively) on an
+  empty channel is silently skipped — there is no error.
+- **Value channels** can be consumed any number of times by any number of
+  downstream operators. They are the safe default for inputs that fan out.
+
+In the reconstruction workflow several channels fan out to multiple
+consumers. They must therefore be value channels:
+
+| Channel             | Consumers                                                              |
+|---------------------|------------------------------------------------------------------------|
+| `shifts_xy`         | `analyze_shifts`, `detect_rehoming`, `bring_to_common_space`, `stack`, `analyze_acquisition_rotation`, `stack_motor_only` |
+| `slice_config_channel` / `current_slice_config` | `auto_assess`, `detect_rehoming`, `bring_to_common_space`, `finalise_interpolation`, `auto_exclude_slices`, `stack` |
+| `no_transform`      | `stitch_3d_with_refinement` (combined with every slice tuple)           |
+
+To create a value channel from a file path, use `channel.value(file(path))`,
+**not** `channel.of(file(path))` or `channel.fromPath(path)` — the latter two
+produce queue channels that exhaust after the first consumer.
+
+### Auto-promotion of process outputs
+
+Nextflow DSL2 auto-promotes a process output to a value channel when **all**
+of the process's inputs are value channels. The reconstruction workflow
+relies on this: once the source channels above are value channels, every
+downstream `process.out` we re-assign to `current_slice_config` is also a
+value channel — no `.first()` is needed to convert it.
+
+If you ever introduce a queue input into one of those processes (e.g. by
+collecting per-slice tuples without `.collect()`), the corresponding output
+will revert to a queue channel and `current_slice_config` will silently
+exhaust the next time it is consumed twice.
+
+### `.first()` is a last resort
+
+`.first()` converts a queue channel to a value channel by emitting only the
+first value. We avoid it in the reconstruction workflow because:
+
+1. When applied to a value channel it triggers the warning
+   `WARN: The operator first is useless when applied to a value channel which returns a single value by definition`.
+2. Whenever it is *needed* it indicates that a source or upstream process is
+   producing a queue channel where it shouldn't — usually a sign that one of
+   the source-channel rules above was violated.
+
+Prefer fixing the upstream channel kind. Reach for `.first()` only when an
+external API genuinely returns a queue channel that you cannot influence.
+
+### `tuple path(...), path(...)` + `.combine()` flattens lists
+
+When a process input is declared as a tuple of paths and the upstream
+channel is built with `.combine()` against a `.collect()`-ed list:
+
+```groovy
+auto_assess_inputs = normalize.out.normalized.map { _id, p -> p }.collect()  // list of paths
+auto_assess_quality(auto_assess_inputs.combine(existing_slice_config))
+```
+
+…Nextflow flattens the collected list into the tuple binding, so the first
+zarr in the list is bound to the slot that was supposed to receive the
+config CSV (we observed this as
+`IsADirectoryError: Is a directory: 'slice_z02_normalize.ome.zarr'`).
+
+The fix is to declare each item as a separate input and pass them as
+separate positional arguments:
+
+```groovy
+process auto_assess_quality {
+    input:
+    path "inputs/*"
+    path existing_slice_config
+}
+
+auto_assess_quality(auto_assess_inputs, channel.value(existing_slice_config_file))
+```
+
+The same pattern applies to `finalise_interpolation` and
+`auto_exclude_slices`.
+
+### Slice config flow
+
+Several stages produce or consume a per-slice configuration CSV
+(`slice_config.csv`). The flow is:
+
+```
+slice_config_channel
+   └── (auto_assess_quality, optional) ──┐
+                                         ▼
+                       effective_slice_config (value)
+                                         │
+                                         ▼
+                          current_slice_config (value)
+                                         │
+              ┌──────────────────────────┼──────────────────────────┐
+              ▼                          ▼                          ▼
+      detect_rehoming           bring_to_common_space     finalise_interpolation
+              │                                                    │
+              └────► current_slice_config (re-bound) ◄──────────────┘
+                                         │
+                                         ▼
+                              auto_exclude_slices
+                                         │
+                                         ▼
+                            stack_slice_config (value)
+                                         │
+                                         ▼
+                                       stack
+```
+
+Every assignment along that flow is a value channel, so the same config can
+be merged into `bring_to_common_space` and combined into `stack_input`
+without exhaustion.
+
+### Hard-skip behaviour for failed interpolation
+
+`interpolate_missing_slice` produces an *optional* `zarr` output. When
+zmorph's quality gates reject the interpolation it emits a manifest fragment
+with `interpolation_failed=true` and no zarr; `finalise_interpolation`
+stamps that into `slice_config_final.csv` and the slot stays a genuine gap
+in the stacked volume. See [`SLICE_INTERPOLATION_FEATURE.md`](SLICE_INTERPOLATION_FEATURE.md)
+for the full policy.
+
+### `finalise_interpolation` is published-only
+
+`finalise_interpolation.out` is **not** rebound to `current_slice_config`
+even though it logically refines it. Two reasons:
+
+1. When there are no single-slice gaps, `interpolate_missing_slice` is not
+   invoked; its `.manifest` channel never emits; `manifest.collect()`
+   therefore does not emit either; `finalise_interpolation` is not invoked;
+   and `finalise_interpolation.out` is an empty channel. Rebinding
+   `current_slice_config` to that empty channel propagates the emptiness
+   downstream and **silently skips `stack`** (and everything after it).
+2. `linum_stack_slices_motor.py` only reads `use` and `auto_excluded` from
+   the slice config (via `slice_config_io.force_skip_slices`).
+   `finalise_interpolation` only adds `interpolated` and
+   `interpolation_failed`, so it does not change any column that `stack`
+   acts on. The published `slice_config_final.csv` is consumed directly
+   from the output directory by `linum_generate_pipeline_report.py`, which
+   gracefully falls back to `slice_config.csv` if the final file is absent.
+
+Treat `finalise_interpolation` as an artifact-emitting side effect; do not
+rebind its output into the channel chain.
+
+### File layout (linumpy reconstruction workflow)
+
+```
+workflows/reconst_3d/
+├── soct_3d_reconst.nf   main workflow + per-stage processes
+├── diagnostics.nf       optional diagnostic processes (rotation analyses,
+│                        motor-only stitch / stack, comparison)
+└── nextflow.config      defaults; subject overrides live next to the data
+```
+
+`soct_3d_reconst.nf` is organised top-down:
+
+1. **Helper functions** — small Groovy utilities reused across processes
+   (`gpuScript`, `pyramidArgs`, `annotatedScreenshotArgs`, `extractSliceId`,
+   per-concern `stack*Args` builders, etc.). Keep new helpers here so the
+   pipeline body stays declarative.
+2. **`include`** of `diagnostics.nf` for the optional analyses.
+3. **Process definitions**, grouped by stage (utility → preprocessing →
+   stitching → corrections → alignment → registration → stacking).
+4. **`workflow {}`** — the actual stage-by-stage wiring.
+
+When adding a new process: prefer extending an existing helper to copy-pasting
+shell-arg blocks (e.g. add another `stack*Args()` rather than an inline
+60-line `if` chain inside the process script).
+
+### GPU flag
+
+Each process that performs GPU-accelerated work passes `--use_gpu` or
+`--no-use_gpu` based on `params.use_gpu`. Use the pattern:
+
+```groovy
+def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
+"""
+linum_foo.py ... ${gpu_flag}
+"""
+```
+
+There is no longer a separate `<stem>_gpu.py` script; all GPU-capable scripts
+have a single unified name and accept `--use_gpu`/`--no-use_gpu`.
 
 ---
 

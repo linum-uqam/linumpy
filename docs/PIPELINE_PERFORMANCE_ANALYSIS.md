@@ -24,7 +24,6 @@ However, the 8x slowdown (4-6h → 32h) suggests **additional factors** may be a
 
 **Fix Applied**: Added `configure_all_libraries()` calls after SimpleITK import in:
 - `linum_estimate_transform.py`
-- `linum_estimate_transform_gpu.py`
 - `linum_interpolate_missing_slice.py`
 - `linum_stack_slices_3d.py` (deprecated)
 
