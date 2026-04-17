@@ -13,14 +13,15 @@ AVAILABLE_RESOLUTIONS = [10, 25, 50, 100]
 
 
 def numpy_to_sitk_image(volume: np.ndarray, spacing: tuple, cast_dtype=None) -> sitk.Image:
-    """Convert numpy array (Z, X, Y) to SimpleITK image format.
+    """Convert numpy array (Z, Y, X) to SimpleITK image format.
 
     Parameters
     ----------
     volume : np.ndarray
-        3D volume with shape (Z, X, Y)
+        3D volume with shape (Z, Y, X) matching the project-wide convention
+        (axis 0 = Z/depth, axis 1 = Y/row, axis 2 = X/column).
     spacing : tuple
-        Voxel spacing in mm (res_z, res_x, res_y)
+        Voxel spacing in mm as (res_z, res_y, res_x).
     cast_dtype : numpy dtype or None
         If provided, cast the volume to this dtype before creating the SITK image
         (useful for registration where float32 is expected). If None, preserve
@@ -31,15 +32,15 @@ def numpy_to_sitk_image(volume: np.ndarray, spacing: tuple, cast_dtype=None) -> 
     sitk.Image
         SimpleITK image with proper spacing and orientation
     """
-    # Note: volume is (Z, X, Y), SimpleITK GetImageFromArray interprets as (Z, Y, X)
-    # So we transpose: (Z, X, Y) -> (Z, Y, X) to match SimpleITK's expectation
-    vol_for_sitk = np.transpose(volume, (0, 2, 1))
-    vol_for_sitk = vol_for_sitk.astype(cast_dtype) if cast_dtype is not None else vol_for_sitk.copy()
+    # sitk.GetImageFromArray interprets a numpy array with shape (Z, Y, X) as a
+    # SITK image with size (X, Y, Z), so no transpose is needed.  The SITK call
+    # copies the buffer into its own storage, so we only allocate an extra
+    # numpy array when an explicit dtype cast is requested.
+    vol_for_sitk = volume.astype(cast_dtype, copy=False) if cast_dtype is not None else volume
     vol_sitk = sitk.GetImageFromArray(vol_for_sitk)
-    # Spacing: SimpleITK uses (X, Y, Z) = (width, height, depth)
-    # Our spacing is (res_z, res_x, res_y), so:
-    # X spacing = res_x, Y spacing = res_y, Z spacing = res_z
-    vol_sitk.SetSpacing([spacing[1], spacing[2], spacing[0]])  # (x, y, z) in SimpleITK
+    # Spacing: SimpleITK uses (X, Y, Z) = (width, height, depth).
+    # Our spacing is (res_z, res_y, res_x), so SITK spacing is (res_x, res_y, res_z).
+    vol_sitk.SetSpacing([spacing[2], spacing[1], spacing[0]])
     vol_sitk.SetOrigin([0, 0, 0])
     vol_sitk.SetDirection([1, 0, 0, 0, 1, 0, 0, 0, 1])
     return vol_sitk
@@ -92,6 +93,13 @@ def download_template(resolution: int, cache: bool = True, cache_dir: str = ".da
 def download_template_ras_aligned(resolution: int, cache: bool = True, cache_dir: str = ".data/") -> sitk.Image:
     """Download a 3D average mouse brain and align it to RAS+ orientation.
 
+    The Allen CCF v3 template is stored in PIR orientation
+    (SITK axes ``(X, Y, Z) = (AP, DV, ML)`` with ``+X = Posterior``,
+    ``+Y = Inferior``, ``+Z = Right``).  Converting to RAS+
+    (``+X = Right``, ``+Y = Anterior``, ``+Z = Superior``) requires
+    ``PermuteAxes((2, 0, 1))`` followed by flipping **both** the Y and Z
+    axes (I → S and P → A).
+
     Parameters
     ----------
     resolution
@@ -114,9 +122,11 @@ def download_template_ras_aligned(resolution: int, cache: bool = True, cache_dir
     vol.SetOrigin([0.0, 0.0, 0.0])
     vol.SetDirection([1, 0, 0, 0, 1, 0, 0, 0, 1])
 
-    # Apply the transform to RAS
+    # Convert PIR → RAS:
+    #   PermuteAxes((2, 0, 1)) maps (P, I, R) → (R, P, I)
+    #   Flip Y (P → A) and Z (I → S) to reach (R, A, S).
     vol = sitk.PermuteAxes(vol, (2, 0, 1))
-    vol = sitk.Flip(vol, (False, False, True))
+    vol = sitk.Flip(vol, (False, True, True))
     # After permuting/flipping, also ensure origin/direction are identity/zero
     vol.SetOrigin([0.0, 0.0, 0.0])
     vol.SetDirection([1, 0, 0, 0, 1, 0, 0, 0, 1])
@@ -139,9 +149,9 @@ def register_3d_rigid_to_allen(
     Parameters
     ----------
     moving_image : np.ndarray
-        3D brain volume to register (shape: Z, X, Y)
+        3D brain volume to register (shape: Z, Y, X)
     moving_spacing : tuple
-        Voxel spacing in mm (res_z, res_x, res_y)
+        Voxel spacing in mm (res_z, res_y, res_x)
     allen_resolution : int
         Allen template resolution in micron (default: 100)
     metric : str
@@ -167,7 +177,65 @@ def register_3d_rigid_to_allen(
     # Download and prepare Allen atlas in RAS orientation
     allen_atlas = download_template_ras_aligned(allen_resolution, cache=True)
 
-    # Convert moving image to SimpleITK format
+    # If the moving image is coarser than the Allen atlas along any axis,
+    # downsample the atlas to match the moving resolution.  The registration
+    # cost is dominated by the fixed (Allen) image size, so downsampling the
+    # atlas up-front is much cheaper than upsampling moving to a finer grid
+    # that carries no additional information.
+    moving_min_spacing_mm = min(moving_spacing)
+    allen_spacing_mm = allen_atlas.GetSpacing()
+    allen_min_spacing_mm = min(allen_spacing_mm)
+    if moving_min_spacing_mm > allen_min_spacing_mm * 1.2:
+        target_spacing_mm = float(moving_min_spacing_mm)
+        allen_size = allen_atlas.GetSize()
+        new_size = [max(1, round(sz * sp / target_spacing_mm)) for sz, sp in zip(allen_size, allen_spacing_mm, strict=False)]
+        ref = sitk.Image(new_size, allen_atlas.GetPixelIDValue())
+        ref.SetOrigin(allen_atlas.GetOrigin())
+        ref.SetDirection(allen_atlas.GetDirection())
+        ref.SetSpacing((target_spacing_mm,) * 3)
+        resampler = sitk.ResampleImageFilter()
+        resampler.SetReferenceImage(ref)
+        resampler.SetInterpolator(sitk.sitkLinear)
+        resampler.SetDefaultPixelValue(0)
+        allen_atlas = resampler.Execute(allen_atlas)
+        if verbose:
+            print(
+                f"Downsampled Allen atlas to match moving spacing: "
+                f"{allen_spacing_mm} mm → {allen_atlas.GetSpacing()} mm, "
+                f"size {allen_size} → {allen_atlas.GetSize()}"
+            )
+
+    # Crop moving image to tissue bounding box to reduce volume size.
+    # Large motor drift during acquisition inflates the canvas with empty space,
+    # causing the Allen-domain resampling to clip away brain tissue.  Cropping
+    # first keeps the volume compact so most of the brain survives resampling,
+    # giving the optimizer a much better cost-function landscape.
+    margin_voxels = 10
+    crop_origin_mm = (0.0, 0.0, 0.0)  # physical offset in (Z, Y, X) order
+    nonzero_coords = np.nonzero(moving_image)
+    if len(nonzero_coords[0]) > 0:
+        bbox_slices = tuple(
+            slice(
+                max(0, int(dim.min()) - margin_voxels),
+                min(moving_image.shape[ax], int(dim.max()) + margin_voxels + 1),
+            )
+            for ax, dim in enumerate(nonzero_coords)
+        )
+        crop_origin_mm = (
+            bbox_slices[0].start * moving_spacing[0],
+            bbox_slices[1].start * moving_spacing[1],
+            bbox_slices[2].start * moving_spacing[2],
+        )
+        cropped = moving_image[bbox_slices]
+        if verbose:
+            print(f"Cropped tissue bounding box: {moving_image.shape} -> {cropped.shape}")
+        moving_image = cropped
+
+    # Convert moving image to SimpleITK format.
+    # Origin stays at (0,0,0) so the compact brain sits at the start of physical
+    # space and overlaps with the Allen atlas domain during resampling.  The crop
+    # offset is added to the final transform's translation after registration so
+    # the transform remains valid for the original (uncropped) full volume.
     moving_sitk = numpy_to_sitk_image(moving_image, moving_spacing)
 
     # Compute a preliminary brain centre BEFORE any resampling.
@@ -389,5 +457,24 @@ def register_3d_rigid_to_allen(
         print(f"Final transform: rotation={final_params[:3]}, translation={final_params[3:]}")
         print(f"Fixed image size: {fixed_image.GetSize()}, spacing: {fixed_image.GetSpacing()}")
         print(f"Moving image size: {moving_image_sitk.GetSize()}, spacing: {moving_image_sitk.GetSpacing()}")
+
+    # Restore crop offset in the translation so the transform is valid for the
+    # full original (uncropped) brain volume.  Derivation:
+    #   T(p) = R(p-c)+c+t maps Allen coords to cropped-brain coords (origin=0).
+    #   Same tissue in full brain is at (cropped_coord + crop_origin_mm).
+    #   So t_full = t_crop + crop_origin_sitk  (center c cancels out).
+    if any(v != 0.0 for v in crop_origin_mm):
+        params = list(final_transform.GetParameters())
+        # SITK Euler3D params: (rx, ry, rz, tx, ty, tz) in SITK XYZ order
+        # numpy axis order (Z, Y, X)  ->  SITK (X, Y, Z):
+        params[3] += crop_origin_mm[2]  # SITK X = numpy axis 2
+        params[4] += crop_origin_mm[1]  # SITK Y = numpy axis 1
+        params[5] += crop_origin_mm[0]  # SITK Z = numpy axis 0
+        final_transform.SetParameters(params)
+        if verbose:
+            print(
+                f"Adjusted translation for crop: +"
+                f"[{crop_origin_mm[2]:.3f}, {crop_origin_mm[1]:.3f}, {crop_origin_mm[0]:.3f}] mm (SITK XYZ)"
+            )
 
     return final_transform, stop_condition, error

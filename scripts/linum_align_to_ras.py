@@ -150,28 +150,36 @@ def create_registration_progress_callback(
     callable
         Progress callback function compatible with SimpleITK registration
     """
-    iteration_history = []
     total_iterations = [0]
-    estimated_total = max_iterations * n_resolution_levels * 0.6
+    level_counter = [0]
+    last_iteration = [-1]
+    # Worst-case budget (used only as the denominator for the progress bar).
+    estimated_total = float(max_iterations * n_resolution_levels)
 
     def callback(method):
         """Update progress during registration iterations."""
         iteration = method.GetOptimizerIteration()
         metric = method.GetMetricValue()
 
-        # Track iterations (reset detection for multi-resolution)
-        if iteration_history and iteration <= iteration_history[-1]:
-            pass  # New resolution level started
+        # Detect resolution-level transitions (iteration counter resets to 0
+        # when SimpleITK starts the next pyramid level).
+        if iteration < last_iteration[0]:
+            level_counter[0] += 1
+        last_iteration[0] = iteration
 
-        iteration_history.append(iteration)
         total_iterations[0] += 1
 
         if pbar is not None:
-            progress_ratio = min(1.0, total_iterations[0] / estimated_total)
+            # Blend "within-level" progress with completed levels so the bar
+            # advances smoothly across resolutions and does not stall when a
+            # level converges early or hits max_iterations.
+            within_level = min(1.0, (iteration + 1) / max_iterations)
+            level_progress = (level_counter[0] + within_level) / n_resolution_levels
+            progress_ratio = min(1.0, max(level_progress, total_iterations[0] / estimated_total))
             target_step = registration_start_step + int(registration_steps * progress_ratio)
             if target_step > pbar.n:
                 pbar.n = target_step
-                pbar.set_postfix_str(f"metric={metric:.6f}")
+                pbar.set_postfix_str(f"metric={metric:.6f} level={level_counter[0] + 1}/{n_resolution_levels}")
                 pbar.refresh()
 
     return callback
@@ -194,7 +202,8 @@ def sitk_transform_to_affine_matrix(transform: sitk.Transform) -> np.ndarray:
     Returns
     -------
     np.ndarray
-        4x4 affine matrix in (Z, X, Y) coordinate ordering
+        4x4 affine matrix in (Z, Y, X) coordinate ordering, matching the
+        OME-NGFF axis declaration used by the pipeline.
     """
     if isinstance(transform, sitk.Euler3DTransform):
         center = np.array(transform.GetCenter())
@@ -229,8 +238,8 @@ def sitk_transform_to_affine_matrix(transform: sitk.Transform) -> np.ndarray:
     else:
         raise ValueError(f"Unsupported transform type: {type(transform)}")
 
-    # Permute from SimpleITK (X, Y, Z) to our (Z, X, Y) ordering
-    permute = np.array([[0, 0, 1, 0], [1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, 1]])
+    # Permute from SimpleITK (X, Y, Z) to our (Z, Y, X) ordering (OME-NGFF axis order).
+    permute = np.array([[0, 0, 1, 0], [0, 1, 0, 0], [1, 0, 0, 0], [0, 0, 0, 1]])
     return permute @ matrix @ permute.T
 
 
@@ -391,10 +400,13 @@ def compute_centered_reference_and_transform(
 
     # Composite transform for resampling:
     #   output point → (shift) → fixed space → (T) → moving space
-    # SimpleITK CompositeTransform applies transforms in the order added (first = first applied).
+    # SimpleITK CompositeTransform applies transforms in REVERSE order of
+    # addition (the most recently added transform is applied first, matching
+    # ITK's stack convention).  To obtain ``transform(shift(p))`` we must add
+    # ``transform`` first and ``shift`` last.
     composite = sitk.CompositeTransform(3)
-    composite.AddTransform(shift_transform)  # output → fixed
-    composite.AddTransform(transform)  # fixed → moving
+    composite.AddTransform(transform)  # added first  → applied last (fixed → moving)
+    composite.AddTransform(shift_transform)  # added last → applied first (output → fixed)
 
     return ref, composite
 
@@ -459,6 +471,14 @@ def apply_transform_to_zarr(
         vol = apply_orientation_transform(vol, orientation_permutation, orientation_flips)
         resolution = reorder_resolution(resolution, orientation_permutation)
 
+    # Compute a tissue-representative background value on the numpy array
+    # BEFORE allocating the (potentially large) SimpleITK float32 copy.  Using
+    # this as the default pixel value avoids black borders that would skew
+    # downstream normalization and visualization.
+    nonzero_mask = vol > 0
+    bg_value = float(np.percentile(vol[nonzero_mask], 1)) if nonzero_mask.any() else 0.0
+    del nonzero_mask
+
     # Convert to SimpleITK
     vol_sitk = allen.numpy_to_sitk_image(vol, resolution, cast_dtype=np.float32)
     del vol  # free original volume before resampling
@@ -467,11 +487,10 @@ def apply_transform_to_zarr(
     # Compute reference image and modified transform that centers the output
     reference, centered_transform = compute_centered_reference_and_transform(vol_sitk, transform)
 
-    # Resample
     resampler = sitk.ResampleImageFilter()
     resampler.SetReferenceImage(reference)
     resampler.SetInterpolator(sitk.sitkLinear)
-    resampler.SetDefaultPixelValue(0)
+    resampler.SetDefaultPixelValue(bg_value)
     resampler.SetTransform(centered_transform)
 
     transformed_sitk = resampler.Execute(vol_sitk)
@@ -480,8 +499,7 @@ def apply_transform_to_zarr(
     del transformed_sitk  # free SimpleITK image after extracting numpy array
     update_pbar()
 
-    # Convert from SITK (Z, Y, X) to our (Z, X, Y) ordering
-    transformed = np.transpose(transformed, (0, 2, 1))
+    # GetArrayFromImage already yields numpy (Z, Y, X) matching our convention.
     update_pbar()
 
     # Convert back to original dtype
@@ -529,7 +547,7 @@ def create_input_preview(input_path: str, output_path: str, level: int = 0):
     vmin, vmax = np.percentile(vol, [1, 99])
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 14))
-    fig.suptitle(f"Input Volume Preview\nShape: {vol.shape} (Z, X, Y), Resolution: {resolution} mm", fontsize=14, y=0.98)
+    fig.suptitle(f"Input Volume Preview\nShape: {vol.shape} (Z, Y, X), Resolution: {resolution} mm", fontsize=14, y=0.98)
 
     # Axial slice (dim0 midpoint)
     axes[0, 0].imshow(vol[z_mid, :, :].T, cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
@@ -627,28 +645,30 @@ def create_alignment_preview(
         # Create reference and centered transform
         reference, centered_transform = compute_centered_reference_and_transform(vol_sitk, transform)
 
+        vol_arr = sitk.GetArrayViewFromImage(vol_sitk)
+        nonzero = vol_arr[vol_arr > 0]
+        bg_value = float(np.percentile(nonzero, 1)) if len(nonzero) > 0 else 0.0
         resampler = sitk.ResampleImageFilter()
         resampler.SetReferenceImage(reference)
         resampler.SetInterpolator(sitk.sitkLinear)
-        resampler.SetDefaultPixelValue(0)
+        resampler.SetDefaultPixelValue(bg_value)
         resampler.SetTransform(centered_transform)
         transformed_sitk = resampler.Execute(vol_sitk)
-        vol_aligned = np.transpose(sitk.GetArrayFromImage(transformed_sitk), (0, 2, 1))
+        vol_aligned = sitk.GetArrayFromImage(transformed_sitk)
     update_pbar()
 
     # Load Allen template at native resolution for reference
     # We'll just show it as a reference, not spatially aligned
     allen_sitk = allen.download_template_ras_aligned(allen_resolution, cache=True)
     allen_template = sitk.GetArrayFromImage(allen_sitk)
-    # Convert from SITK (Z, Y, X) to our (Z, X, Y) ordering
-    allen_template = np.transpose(allen_template, (0, 2, 1))
+    # GetArrayFromImage already yields numpy (Z, Y, X) matching our convention.
     update_pbar()
 
     # Helper functions
     def get_center_slices(vol):
         """Get center slices in each plane."""
-        z, x, y = vol.shape[0] // 2, vol.shape[1] // 2, vol.shape[2] // 2
-        return vol[z, :, :], vol[:, x, :], vol[:, :, y]
+        z, y, x = vol.shape[0] // 2, vol.shape[1] // 2, vol.shape[2] // 2
+        return vol[z, :, :], vol[:, y, :], vol[:, :, x]
 
     def get_display_range(vol):
         """Get display range from non-zero values."""
