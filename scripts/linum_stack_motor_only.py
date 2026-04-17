@@ -288,7 +288,7 @@ def main():
     logger.info(f"Resolution: Z={res_z_um:.2f} µm, Y={res_y_um:.2f} µm, X={res_x_um:.2f} µm")
 
     # Convert shifts to pixels (use X resolution for both X and Y for simplicity)
-    cumsum_px = convert_shifts_to_pixels(cumsum_mm, res_x_um)
+    cumsum_px = convert_shifts_to_pixels(cumsum_mm, (res_x_um, res_y_um))
 
     # Filter to only slices we have files for
     available_ids = sorted(slice_files.keys())
@@ -375,8 +375,9 @@ def main():
 
     # Finalize with pyramid
     logger.info("Finalizing and generating pyramid levels...")
-    resolution = [res_z_um, res_y_um, res_x_um]
-    output.finalize(resolution, n_levels=3)
+    # AnalysisOmeZarrWriter.finalize expects resolution in mm.
+    resolution_mm = [res_z_um / 1000.0, res_y_um / 1000.0, res_x_um / 1000.0]
+    output.finalize(resolution_mm, n_levels=3)
 
     # Generate preview if requested
     if args.preview:

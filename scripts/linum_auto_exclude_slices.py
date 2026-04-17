@@ -1,33 +1,36 @@
 #!/usr/bin/env python3
 """Detect extended clusters of consecutive low-quality pairwise registrations
-and output a list of slice IDs whose transforms should be force-skipped during
-stacking (motor-only positioning).
+and stamp the affected slices as auto-excluded in ``slice_config.csv``.
 
-Reads ``pairwise_registration_metrics.json`` files from the registration output
-directory.  When *N* or more consecutive slice pairs all have
-``z_correlation < threshold``, the interior slices of that cluster are flagged
-for force-skipping.
+Reads ``pairwise_registration_metrics.json`` files from the registration
+output directory. Any cluster of consecutive slice pairs of length at least
+``--consecutive_threshold`` whose ``z_correlation`` values are all below
+``--z_corr_threshold`` marks *every* slice in that cluster (including the
+endpoints) with ``auto_excluded=true`` / ``auto_exclude_reason=consecutive_low_z_corr``.
+Downstream stacking then treats those slices as motor-only (``use=false`` OR
+``auto_excluded=true`` → force-skip).
 
 Usage
 -----
-    linum_auto_exclude_slices.py transforms/ auto_exclude.csv \
+    linum_auto_exclude_slices.py transforms/ slice_config_in.csv slice_config_out.csv \\
         --consecutive_threshold 3 --z_corr_threshold 0.4
 """
 
 import argparse
-import csv
 import json
 import logging
 import os
 import re
 from pathlib import Path
 
+from linumpy.io import slice_config as slice_config_io
+
 logger = logging.getLogger(__name__)
 
 
 def build_parser():
     p = argparse.ArgumentParser(
-        description="Detect consecutive low-quality registration clusters and output a force-skip list for stacking.",
+        description=__doc__,
         formatter_class=argparse.RawTextHelpFormatter,
     )
     p.add_argument(
@@ -35,7 +38,16 @@ def build_parser():
         type=Path,
         help="Directory containing per-slice subdirectories with pairwise_registration_metrics.json files.",
     )
-    p.add_argument("output_csv", type=Path, help="Output CSV listing slice IDs to force-skip.")
+    p.add_argument(
+        "slice_config_in",
+        type=Path,
+        help="Input slice_config.csv.",
+    )
+    p.add_argument(
+        "slice_config_out",
+        type=Path,
+        help="Output slice_config.csv (stamped with auto_excluded / auto_exclude_reason).",
+    )
     p.add_argument(
         "--consecutive_threshold",
         type=int,
@@ -51,15 +63,12 @@ def build_parser():
 def load_registration_metrics(transforms_dir: Path):
     """Load z_correlation from each pairwise_registration_metrics.json.
 
-    Returns a sorted list of (moving_slice_id: int, z_correlation: float).
+    Returns a sorted list of ``(moving_slice_id: int, z_correlation: float)``.
     The moving slice ID is extracted from the directory name.
     """
     metrics = []
     pattern = re.compile(r"slice_z(\d+)")
 
-    # os.walk with followlinks=True is used instead of Path.rglob() because
-    # Nextflow stages input directories as symlinks; rglob does not follow
-    # symlinks in Python 3.12+.
     found_files = []
     for root, _dirs, files in os.walk(str(transforms_dir), followlinks=True):
         if "pairwise_registration_metrics.json" in files:
@@ -83,8 +92,8 @@ def load_registration_metrics(transforms_dir: Path):
 def find_bad_clusters(metrics, consecutive_threshold, z_corr_threshold):
     """Find clusters of consecutive slice pairs where z_corr < threshold.
 
-    Returns a list of clusters, each being a list of (slice_id, z_corr).
-    Only clusters with length >= consecutive_threshold are included.
+    Returns a list of clusters, each being a list of ``(slice_id, z_corr)``.
+    Only clusters with length ``>= consecutive_threshold`` are included.
     """
     clusters = []
     current_cluster = []
@@ -97,7 +106,6 @@ def find_bad_clusters(metrics, consecutive_threshold, z_corr_threshold):
                 clusters.append(current_cluster)
             current_cluster = []
 
-    # Don't forget the last cluster
     if len(current_cluster) >= consecutive_threshold:
         clusters.append(current_cluster)
 
@@ -110,18 +118,15 @@ def main():
 
     metrics = load_registration_metrics(args.transforms_dir)
     if not metrics:
-        logger.warning("No registration metrics found in %s", args.transforms_dir)
-        # Write empty CSV
-        with Path(args.output_csv).open("w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["slice_id", "z_correlation", "exclude_reason"])
+        logger.warning("No registration metrics found in %s — copying slice_config unchanged", args.transforms_dir)
+        slice_config_io.stamp_many(args.slice_config_in, args.slice_config_out, {})
         return
 
     logger.info("Loaded %d registration metrics", len(metrics))
 
     clusters = find_bad_clusters(metrics, args.consecutive_threshold, args.z_corr_threshold)
 
-    exclude_slices = []
+    updates: dict[str, dict[str, object]] = {}
     for cluster in clusters:
         ids = [s[0] for s in cluster]
         corrs = [s[1] for s in cluster]
@@ -133,26 +138,20 @@ def main():
             min(corrs),
             max(corrs),
         )
-        for slice_id, z_corr in cluster:
-            exclude_slices.append(
-                {
-                    "slice_id": slice_id,
-                    "z_correlation": round(z_corr, 4),
-                    "exclude_reason": "consecutive_low_z_corr",
-                }
-            )
+        for slice_id, _z_corr in cluster:
+            sid = slice_config_io.normalize_slice_id(slice_id)
+            updates[sid] = {
+                "auto_excluded": True,
+                "auto_exclude_reason": "consecutive_low_z_corr",
+            }
 
-    # Write output CSV
-    with Path(args.output_csv).open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["slice_id", "z_correlation", "exclude_reason"])
-        writer.writeheader()
-        writer.writerows(exclude_slices)
+    slice_config_io.stamp_many(args.slice_config_in, args.slice_config_out, updates)
 
     logger.info(
         "Auto-exclude: %d slices in %d cluster(s) → %s",
-        len(exclude_slices),
+        len(updates),
         len(clusters),
-        args.output_csv,
+        args.slice_config_out,
     )
 
 

@@ -70,7 +70,16 @@ def compute_motor_positions(
 
 
 def compute_registration_refinements(
-    volume: np.ndarray, tile_shape: tuple, nx: int, ny: int, overlap_fraction: float, max_refinement_px: float = 10.0
+    volume: np.ndarray,
+    tile_shape: tuple,
+    nx: int,
+    ny: int,
+    overlap_fraction: float,
+    max_refinement_px: float = 10.0,
+    *,
+    histogram_match: bool = False,
+    max_empty_fraction: float | None = None,
+    use_gpu: bool = False,
 ) -> dict:
     """Correlate neighboring tiles within a slice to measure displacement errors.
 
@@ -96,6 +105,23 @@ def compute_registration_refinements(
     max_refinement_px : float
         Maximum residual shift retained for blend refinement. Larger residuals
         are clamped. Does not affect the absolute displacements in 'pairs'.
+    histogram_match : bool, keyword-only
+        If True, match the intensity histogram of the second overlap to the
+        first before phase correlation.  Improves robustness when tile-edge
+        illumination is uneven; disabled by default to preserve existing
+        behaviour.
+    max_empty_fraction : float or None, keyword-only
+        If set, use an Otsu threshold on the central plane to classify
+        tissue vs background, and skip any pair whose overlap contains more
+        than this fraction of background pixels (mirrors the behaviour of
+        ``linumpy.stitching.registration.estimate_mosaic_transform``).
+        When ``None`` (default), the prior ``mean(overlap > 0) < 0.1``
+        heuristic is used.
+    use_gpu : bool, keyword-only
+        If True, run the pairwise phase correlations via
+        :func:`linumpy.gpu.fft_ops.phase_correlation` (CuPy-accelerated).
+        Falls back silently to the CPU path when CuPy / a CUDA device is
+        not available. Default is False.
 
     Returns
     -------
@@ -105,6 +131,27 @@ def compute_registration_refinements(
         displacements used for affine model estimation.
     """
     from linumpy.registration.transforms import pairWisePhaseCorrelation
+
+    gpu_phase_correlation: Any = None
+    if use_gpu:
+        try:
+            from linumpy.gpu import GPU_AVAILABLE
+            from linumpy.gpu.fft_ops import phase_correlation as _gpu_phase_correlation
+
+            if GPU_AVAILABLE:
+                gpu_phase_correlation = _gpu_phase_correlation
+            else:
+                logger.info("use_gpu=True but no CUDA device detected; falling back to CPU phase correlation")
+        except ImportError as e:
+            logger.info("use_gpu=True but GPU stack unavailable (%s); falling back to CPU", e)
+
+    def _phase_correlate(ov1: np.ndarray, ov2: np.ndarray) -> tuple[float, float]:
+        """Return (axis-0 shift, axis-1 shift) for vol2 relative to vol1."""
+        if gpu_phase_correlation is not None:
+            translation, _ = gpu_phase_correlation(ov1, ov2, use_gpu=True)
+            return float(translation[0]), float(translation[1])
+        axis0, axis1 = pairWisePhaseCorrelation(ov1, ov2)
+        return float(axis0), float(axis1)
 
     tile_height, tile_width = tile_shape[1], tile_shape[2]
     overlap_y = int(tile_height * overlap_fraction)
@@ -124,6 +171,26 @@ def compute_registration_refinements(
     all_shifts = []
     z_mid = volume.shape[0] // 2
 
+    empty_threshold: float | None = None
+    if max_empty_fraction is not None:
+        from skimage.filters import threshold_otsu
+
+        plane = np.asarray(volume[z_mid])
+        positive = plane[plane > 0]
+        if positive.size > 0:
+            empty_threshold = float(threshold_otsu(positive))
+
+    match_histograms_fn = None
+    if histogram_match:
+        from skimage.exposure import match_histograms as _match_histograms
+
+        match_histograms_fn = _match_histograms
+
+    def _is_empty(ov: np.ndarray) -> bool:
+        if empty_threshold is not None and max_empty_fraction is not None:
+            return bool(np.sum(ov <= empty_threshold) > max_empty_fraction * ov.size)
+        return bool(np.mean(ov > 0) < 0.1)
+
     # Horizontal refinements (between columns: tile (i,j) → (i,j+1))
     # The expected displacement is (0, step_x); registration measures residual
     for i in range(nx):
@@ -136,12 +203,15 @@ def compute_registration_refinements(
             overlap1 = volume[z_mid, r1_start:r1_end, c1_end - overlap_x : c1_end]
             overlap2 = volume[z_mid, r1_start:r1_end, c2_start : c2_start + overlap_x]
 
-            if np.mean(overlap1 > 0) < 0.1 or np.mean(overlap2 > 0) < 0.1:
+            if _is_empty(overlap1) or _is_empty(overlap2):
                 continue
+
+            if match_histograms_fn is not None:
+                overlap2 = match_histograms_fn(overlap2, overlap1)
 
             refinements["stats"]["total_pairs"] += 1
             try:
-                dy, dx = pairWisePhaseCorrelation(overlap1, overlap2)
+                dy, dx = _phase_correlate(overlap1, overlap2)
 
                 # Store absolute displacement for affine estimation (unclamped)
                 # Horizontal pair: row_delta=0, col_delta=1
@@ -180,12 +250,15 @@ def compute_registration_refinements(
             overlap1 = volume[z_mid, r1_end - overlap_y : r1_end, c_start:c_end]
             overlap2 = volume[z_mid, r2_start : r2_start + overlap_y, c_start:c_end]
 
-            if np.mean(overlap1 > 0) < 0.1 or np.mean(overlap2 > 0) < 0.1:
+            if _is_empty(overlap1) or _is_empty(overlap2):
                 continue
+
+            if match_histograms_fn is not None:
+                overlap2 = match_histograms_fn(overlap2, overlap1)
 
             refinements["stats"]["total_pairs"] += 1
             try:
-                dy, dx = pairWisePhaseCorrelation(overlap1, overlap2)
+                dy, dx = _phase_correlate(overlap1, overlap2)
 
                 # Store absolute displacement for affine estimation (unclamped)
                 # Vertical pair: row_delta=1, col_delta=0
@@ -288,19 +361,183 @@ def estimate_affine_from_pairs(pairs: list, tile_shape: tuple, overlap_fraction:
     return transform, diagnostics
 
 
+def pool_pairs_and_fit_global_affine(
+    volumes: list[tuple[str, Any]],
+    overlap_fraction: float,
+    *,
+    histogram_match: bool = False,
+    max_empty_fraction: float | None = None,
+    n_samples: int | None = None,
+    seed: int = 0,
+    use_gpu: bool = False,
+) -> tuple[np.ndarray, dict]:
+    """Pool neighbor-tile pair measurements across many mosaic grids and fit one affine.
+
+    For each ``(slice_id, path)`` entry, load only the central Z plane of the
+    OME-Zarr volume and call :func:`compute_registration_refinements` with the
+    supplied options.  All resulting pairs are concatenated, optionally
+    sub-sampled with a deterministic seed, and fed to
+    :func:`estimate_affine_from_pairs` for a single 2×2 affine fit.
+
+    Parameters
+    ----------
+    volumes : list of (slice_id, path)
+        Each ``path`` must be a string or :class:`pathlib.Path` pointing at a
+        ``*.ome.zarr`` mosaic grid.
+    overlap_fraction : float
+        Expected tile overlap fraction (must match acquisition).
+    histogram_match : bool, keyword-only
+        Forwarded to :func:`compute_registration_refinements`.
+    max_empty_fraction : float or None, keyword-only
+        Forwarded to :func:`compute_registration_refinements`.
+    n_samples : int or None, keyword-only
+        If set and the pooled pair count exceeds this value, a reproducible
+        random sub-sample of size ``n_samples`` is drawn before fitting.
+    seed : int, keyword-only
+        Seed used when sub-sampling.  Ignored when ``n_samples`` is None.
+    use_gpu : bool, keyword-only
+        Forwarded to :func:`compute_registration_refinements`.
+
+    Returns
+    -------
+    transform : np.ndarray
+        Fitted 2×2 affine matrix.
+    diagnostics : dict
+        Full diagnostics including per-slice stats, pooled pair count,
+        chosen backend label, and the output of
+        :func:`estimate_affine_from_pairs`.
+    """
+    import random as _random
+
+    from linumpy.io.zarr import read_omezarr
+
+    tile_shape_ref: tuple | None = None
+    all_pairs: list[dict] = []
+    per_slice_stats: list[dict] = []
+
+    for slice_id, zarr_path in volumes:
+        vol, _ = read_omezarr(str(zarr_path), level=0)
+        tile_shape = tuple(vol.chunks)
+        if len(tile_shape) != 3:
+            logger.warning("slice %s: unexpected chunks %s, skipping", slice_id, tile_shape)
+            continue
+        if tile_shape_ref is None:
+            tile_shape_ref = tile_shape
+        elif tile_shape[1:] != tile_shape_ref[1:]:
+            logger.warning(
+                "slice %s: tile shape %s differs from reference %s — pooling across different "
+                "tile sizes is not supported. Skipping.",
+                slice_id,
+                tile_shape,
+                tile_shape_ref,
+            )
+            continue
+
+        nx = vol.shape[1] // tile_shape[1]
+        ny = vol.shape[2] // tile_shape[2]
+        if nx == 0 or ny == 0:
+            logger.warning("slice %s: too few tiles (nx=%d ny=%d), skipping", slice_id, nx, ny)
+            continue
+
+        z_mid_full = vol.shape[0] // 2
+        logger.info(
+            "slice %s: shape=%s tile=%s grid=%dx%d z_mid=%d (hist_match=%s empty_frac=%s use_gpu=%s)",
+            slice_id,
+            tuple(vol.shape),
+            tile_shape,
+            nx,
+            ny,
+            z_mid_full,
+            histogram_match,
+            max_empty_fraction,
+            use_gpu,
+        )
+        z_plane = np.asarray(vol[z_mid_full : z_mid_full + 1])
+
+        refinements = compute_registration_refinements(
+            z_plane,
+            tile_shape,
+            nx,
+            ny,
+            overlap_fraction,
+            histogram_match=histogram_match,
+            max_empty_fraction=max_empty_fraction,
+            use_gpu=use_gpu,
+        )
+        pairs = refinements["pairs"]
+        stats = dict(refinements["stats"])
+        stats["slice_id"] = slice_id
+        stats["nx"] = int(nx)
+        stats["ny"] = int(ny)
+        per_slice_stats.append(stats)
+        logger.info(
+            "slice %s: %d valid pairs collected (total=%d)",
+            slice_id,
+            stats["valid_pairs"],
+            stats["total_pairs"],
+        )
+        all_pairs.extend(pairs)
+
+    if tile_shape_ref is None:
+        raise ValueError("No usable mosaic grids produced pair measurements.")
+
+    total_pooled = len(all_pairs)
+    logger.info("pooled pair count: %d", total_pooled)
+
+    sampled = False
+    if n_samples is not None and total_pooled > n_samples:
+        rng = _random.Random(seed)
+        all_pairs = rng.sample(all_pairs, n_samples)
+        sampled = True
+        logger.info("random-sampled to %d pairs (seed=%d)", len(all_pairs), seed)
+
+    transform, fit_diag = estimate_affine_from_pairs(all_pairs, tile_shape_ref, overlap_fraction)
+    diagnostics: dict[str, Any] = {
+        "n_volumes": len(per_slice_stats),
+        "n_pairs_pooled_total": total_pooled,
+        "n_pairs_used": len(all_pairs),
+        "tile_shape": list(tile_shape_ref),
+        "overlap_fraction": overlap_fraction,
+        "histogram_match": bool(histogram_match),
+        "max_empty_fraction": max_empty_fraction,
+        "sampled_n": n_samples,
+        "seed": seed if sampled else None,
+        "backend": "gpu" if use_gpu else "cpu",
+        "transform": transform.tolist(),
+        "displacement_model": _extract_displacement_params(transform, tile_shape_ref, overlap_fraction),
+        "lstsq_residual": fit_diag.get("lstsq_residual"),
+        "fallback": fit_diag.get("fallback", False),
+        "per_slice_stats": per_slice_stats,
+    }
+    return transform, diagnostics
+
+
 def _extract_displacement_params(transform: np.ndarray, tile_shape: tuple, overlap_fraction: float) -> dict:
     """Extract Lefebvre motor model parameters from a 2x2 affine transform.
 
-    Given the fitted transform ``A`` where ``pixel_pos = A @ [i, j]^T``,
-    extract the scan-to-stage rotation θ, the non-perpendicularity angle φ,
-    and the effective overlap fractions Ox, Oy.
+    Given the fitted transform ``A`` where ``(dy, dx) = A @ (row_delta, col_delta)``,
+    recover the scan-to-stage rotation θ, the motor-axis angle φ, and the
+    effective per-direction overlap fractions Ox, Oy.
 
-    References: Lefebvre et al. 2017, Eqs 3–6.
+    Derivation (Lefebvre et al. 2017, Eqs. 1–6).  In image coordinates
+    (y-down, x-right) the horizontal motor step (``col_delta = 1``) has
+    image displacement
+
+        (dy, dx) = (b, d) = nx·(1 - Ox)·(-sin θ, cos θ)
+
+    so that ``θ = arctan2(-b, d)`` and ``Ox = 1 - sqrt(b**2 + d**2) / nx``
+    with ``nx = tile_w``.  The vertical motor step (``row_delta = 1``) has
+
+        (dy, dx) = (a, c) = ny·(1 - Oy)·(sin(φ - θ), cos(φ - θ))
+
+    so that ``φ - θ = arctan2(a, c)`` and ``Oy = 1 - sqrt(a**2 + c**2) / ny`` with
+    ``ny = tile_h``.  Perfectly perpendicular motors correspond to
+    ``φ = 90°`` (not zero).
 
     Parameters
     ----------
     transform : np.ndarray
-        2×2 affine matrix.
+        2×2 affine matrix fitted by :func:`estimate_affine_from_pairs`.
     tile_shape : tuple
         Tile dimensions (z, height, width).
     overlap_fraction : float
@@ -315,23 +552,23 @@ def _extract_displacement_params(transform: np.ndarray, tile_shape: tuple, overl
     c, d = transform[1, 0], transform[1, 1]
     tile_h, tile_w = tile_shape[1], tile_shape[2]
 
-    # θ: rotation between scanning and stage reference frames
-    # From vertical displacements: tan(θ) = -c / a  (Eq 3)
-    theta_rad = np.arctan2(-c, a) if abs(a) > 1e-6 else 0.0
+    # θ: scan-to-stage rotation, from the horizontal motor step (b, d) (Eq. 3).
+    # tan(θ) = -b / d
+    theta_rad = np.arctan2(-b, d) if abs(d) > 1e-6 else 0.0
 
-    # φ: non-perpendicularity between motor X and Y axes
-    # From horizontal displacements: tan(φ - θ) = -b / d  (Eq 4 rearranged)
-    phi_minus_theta = np.arctan2(-b, d) if abs(d) > 1e-6 else 0.0
+    # φ - θ: from the vertical motor step (a, c) (Eq. 4).
+    # tan(φ - θ) = a / c  (image-frame y-down convention folds the paper's
+    # negative-sine into the atan2 arguments).
+    phi_minus_theta = np.arctan2(a, c) if abs(c) > 1e-6 else np.pi / 2.0
     phi_rad = phi_minus_theta + theta_rad
 
-    # Effective overlap fractions
-    # Ox = 1 - |vertical step along row axis| / tile_height
-    vertical_step = np.sqrt(a**2 + c**2)
-    Ox_fraction = 1.0 - vertical_step / tile_h
-
-    # Oy = 1 - |horizontal step along col axis| / tile_width
+    # Ox: overlap along the horizontal motor axis (Eq. 5).
     horizontal_step = np.sqrt(b**2 + d**2)
-    Oy_fraction = 1.0 - horizontal_step / tile_w
+    Ox_fraction = 1.0 - horizontal_step / tile_w
+
+    # Oy: overlap along the vertical motor axis (Eq. 6).
+    vertical_step = np.sqrt(a**2 + c**2)
+    Oy_fraction = 1.0 - vertical_step / tile_h
 
     return {
         "theta_deg": float(np.degrees(theta_rad)),
