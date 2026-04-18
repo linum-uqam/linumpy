@@ -187,6 +187,38 @@ def add_z_slice_labels(
 # Orientation helpers
 # ---------------------------------------------------------------------------
 
+
+def _debug_log_panels(message: str, **fields):
+    """NDJSON instrumentation gated on ``LINUMPY_DEBUG_LOG``.
+
+    Captures actual runtime panel-label assignments for orthogonal-view
+    figures so we can verify after-fix behaviour against user reports.
+    """
+    import json
+    import os
+    import time
+    from pathlib import Path
+
+    path = os.environ.get("LINUMPY_DEBUG_LOG")
+    if not path:
+        return
+    try:
+        entry = {
+            "id": f"log_{int(time.time() * 1000)}_views",
+            "timestamp": int(time.time() * 1000),
+            "sessionId": "6fa1b3",
+            "runId": "panels-fix",
+            "hypothesisId": "H3",
+            "location": "linumpy/utils/visualization.py",
+            "message": message,
+            "data": fields,
+        }
+        with Path(path).open("a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
+
+
 # Map from anatomical letter to target-axis group index (0=S/I, 1=R/L, 2=A/P)
 _LETTER_GROUP = {"S": 0, "I": 0, "R": 1, "L": 1, "A": 2, "P": 2}
 
@@ -398,6 +430,16 @@ def save_annotated_views(
 
     image_zy = np.array(image[:, x_slice, :])
     image_zx = np.array(image[:, :, y_slice])
+
+    _debug_log_panels(
+        "save_annotated_views: panel decisions",
+        vol_shape=list(image.shape),
+        orientation=str(orientation),
+        x_slice=int(x_slice),
+        y_slice=int(y_slice),
+        title1=title1,
+        title2=title2,
+    )
 
     # Compute physical aspect ratios so cross-sections look geometrically correct.
     # image shape is (Z, Y, X); voxel_size is [res_z, res_y, res_x] (mm, ZYX order).

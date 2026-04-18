@@ -13,8 +13,6 @@ bounded by the largest serial-section chunk regardless of total volume size.
 
 from __future__ import annotations
 
-import os
-
 import numpy as np
 
 from linumpy.preproc.normalization import (
@@ -25,46 +23,6 @@ from linumpy.preproc.normalization import (
 )
 
 from . import GPU_AVAILABLE
-
-
-def _gpu_mem_log(message: str, **fields):
-    """Append a single NDJSON line with a CuPy memory snapshot.
-
-    Active only when ``LINUMPY_GPU_MEM_LOG`` points to a writable path so the
-    instrumentation costs nothing in production runs. Used to verify post-fix
-    that peak device usage stays bounded.
-    """
-    path = os.environ.get("LINUMPY_GPU_MEM_LOG")
-    if not path:
-        return
-    try:
-        import json
-        import time
-
-        import cupy as cp
-
-        mempool = cp.get_default_memory_pool()
-        free, total = cp.cuda.runtime.memGetInfo()
-        entry = {
-            "id": f"log_{int(time.time() * 1000)}_znorm",
-            "timestamp": int(time.time() * 1000),
-            "sessionId": "6fa1b3",
-            "runId": "znorm-chunked",
-            "hypothesisId": "H1",
-            "location": "linumpy/gpu/normalization.py",
-            "message": message,
-            "data": {
-                "device_free_bytes": int(free),
-                "device_total_bytes": int(total),
-                "mempool_used_bytes": int(mempool.used_bytes()),
-                "mempool_total_bytes": int(mempool.total_bytes()),
-                **fields,
-            },
-        }
-        with open(path, "a") as f:  # noqa: PTH123
-            f.write(json.dumps(entry) + "\n")
-    except Exception:
-        pass
 
 
 def _robust_percentile_gpu(chunk, percentile: float) -> float:
@@ -111,8 +69,6 @@ def compute_scale_factors_gpu(
     bounds = _chunk_boundaries(n_z, n_serial_slices)
     n_chunks = len(bounds)
 
-    _gpu_mem_log("compute_scale_factors_gpu: start", vol_shape=list(vol.shape), vol_bytes=int(vol.nbytes))
-
     raw_metrics = np.zeros(n_chunks, dtype=np.float64)
     mempool = cp.get_default_memory_pool()
     for i, (s, e) in enumerate(bounds):
@@ -120,8 +76,6 @@ def compute_scale_factors_gpu(
         raw_metrics[i] = _robust_percentile_gpu(chunk_gpu, percentile)
         del chunk_gpu
         mempool.free_all_blocks()
-
-    _gpu_mem_log("compute_scale_factors_gpu: chunks done", n_chunks=n_chunks)
 
     smoothed = _smooth_weighted(raw_metrics, sigma=smooth_sigma)
     valid = smoothed > 0
@@ -179,13 +133,6 @@ def apply_histogram_matching_gpu(
     bin_centers = 0.5 * (edges[:-1] + edges[1:])
     mempool = cp.get_default_memory_pool()
 
-    _gpu_mem_log(
-        "apply_histogram_matching_gpu: start",
-        vol_shape=list(vol.shape),
-        vol_bytes=int(vol.nbytes),
-        n_chunks=len(bounds),
-    )
-
     # Pass 1: accumulate global reference histogram by streaming chunks.
     ref_hist = cp.zeros(n_bins, dtype=cp.int64)
     for s, e in bounds:
@@ -205,8 +152,6 @@ def apply_histogram_matching_gpu(
     if float(ref_cdf[-1]) > 0:
         ref_cdf /= ref_cdf[-1]
     del ref_hist
-
-    _gpu_mem_log("apply_histogram_matching_gpu: ref CDF built", ref_total=ref_total)
 
     # Pass 2: per-section histogram match, streaming. The output is assembled
     # in host RAM (matching the CPU path), so the GPU only ever holds one
@@ -232,8 +177,6 @@ def apply_histogram_matching_gpu(
         out[s:e] = cp.asnumpy(result.reshape(chunk_gpu.shape))
         del chunk_gpu, flat, src_hist, src_cdf, matched_lut, mapped, result
         mempool.free_all_blocks()
-
-    _gpu_mem_log("apply_histogram_matching_gpu: done")
 
     del ref_cdf, bin_centers, edges
     mempool.free_all_blocks()

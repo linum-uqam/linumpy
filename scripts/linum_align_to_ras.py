@@ -37,6 +37,37 @@ DEFAULT_MAX_ITERATIONS = 1000
 DEFAULT_METRIC = "MI"
 
 
+def _debug_log(message: str, **fields):
+    """Append an NDJSON line describing a slicing/labelling decision.
+
+    Active only when ``LINUMPY_DEBUG_LOG`` is set, so production runs pay
+    nothing. Used to capture runtime evidence of which volume conventions
+    each preview function actually receives.
+    """
+    import os
+
+    path = os.environ.get("LINUMPY_DEBUG_LOG")
+    if not path:
+        return
+    try:
+        import time
+
+        entry = {
+            "id": f"log_{int(time.time() * 1000)}_panels",
+            "timestamp": int(time.time() * 1000),
+            "sessionId": "6fa1b3",
+            "runId": "panels-fix",
+            "hypothesisId": "H1",
+            "location": "linum_align_to_ras.py",
+            "message": message,
+            "data": fields,
+        }
+        with Path(path).open("a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
+
+
 def _build_arg_parser():
     """Build the command-line argument parser."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
@@ -633,6 +664,14 @@ def create_alignment_preview(
     if orientation_permutation is not None:
         vol_original = apply_orientation_transform(vol_original, orientation_permutation, orientation_flips)
         orig_res = reorder_resolution(tuple(orig_res), orientation_permutation)
+
+    # apply_orientation_transform yields linumpy convention (S, R, A): dim0=S,
+    # dim1=R, dim2=A. The aligned and Allen-template volumes below are in
+    # standard RAS — numpy (S, A, R): dim0=S, dim1=A, dim2=R. Permute the
+    # original to (S, A, R) here so all three columns share one convention and
+    # a single set of "Axial / Coronal / Sagittal" labels applies uniformly.
+    vol_original = np.transpose(vol_original, (0, 2, 1))
+    orig_res = (orig_res[0], orig_res[2], orig_res[1])
     update_pbar()
 
     # Load aligned volume from output file, or compute it
@@ -706,11 +745,21 @@ def create_alignment_preview(
     fig, axes = plt.subplots(3, 3, figsize=(18, 18))
     fig.suptitle("Alignment Preview: Original vs Aligned vs Allen Template (Reference)", fontsize=16)
 
-    # Plane labels (anatomical, RAS+ convention):
-    #   row 0: vol[z, :, :]  fixes Z=S  → AXIAL    (shows Y=A × X=R)
-    #   row 1: vol[:, y, :]  fixes Y=A  → CORONAL  (shows Z=S × X=R)
-    #   row 2: vol[:, :, x]  fixes X=R  → SAGITTAL (shows Z=S × Y=A)
-    plane_names = ["Axial (XY)", "Coronal (XZ)", "Sagittal (YZ)"]
+    # All three volumes are in standard RAS, numpy (S, A, R):
+    #   dim0=S (Superior), dim1=A (Anterior), dim2=R (Right).
+    # Slicing → anatomical plane:
+    #   vol[z, :, :]  fixes S → AXIAL    (rows=A, cols=R)
+    #   vol[:, y, :]  fixes A → CORONAL  (rows=S, cols=R)
+    #   vol[:, :, x]  fixes R → SAGITTAL (rows=S, cols=A)
+    plane_names = ["Axial (AR)", "Coronal (SR)", "Sagittal (SA)"]
+
+    _debug_log(
+        "create_alignment_preview: shapes & labels",
+        original_shape=list(vol_original.shape),
+        aligned_shape=list(vol_aligned.shape),
+        allen_shape=list(allen_template.shape),
+        plane_names=plane_names,
+    )
 
     for row, plane_name in enumerate(plane_names):
         # Original - use .T for row 0 (XY plane) to match display convention
@@ -817,35 +866,48 @@ def create_orientation_preview(
     subtitle = f"({', '.join(applied)} applied)" if applied else "(no corrections applied)"
 
     z_mid = vol.shape[0] // 2
-    x_mid = vol.shape[1] // 2
-    y_mid = vol.shape[2] // 2
+    y_mid = vol.shape[1] // 2
+    x_mid = vol.shape[2] // 2
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
     fig.suptitle(
         f"Orientation Preview — {subtitle}\n"
-        f"Shape: {vol.shape}  |  After corrections: Z=S (Superior), X=R (Right), Y=A (Anterior)",
+        f"Shape: {vol.shape}  |  After corrections: dim0=S (Superior), dim1=R (Right), dim2=A (Anterior)",
         fontsize=11,
     )
 
-    # Axial (mid-Z): rows=Y (A), cols=X (R)
+    # After apply_orientation_transform the volume is in linumpy convention
+    # (S, R, A): dim0=S (Superior), dim1=R (Right), dim2=A (Anterior).
+    # Slicing → anatomical plane:
+    #   vol[z, :, :]   fixes S → AXIAL    (rows=R, cols=A)
+    #   vol[:, y, :]   fixes R → SAGITTAL (rows=S, cols=A)
+    #   vol[:, :, x]   fixes A → CORONAL  (rows=S, cols=R)
+    # `.T` on the axial view + row reversal on the others orients the figure
+    # so Superior is up and Right/Anterior point in the natural directions.
     axes[0].imshow(vol[z_mid, :, :].T, cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
-    axes[0].set_title(f"Axial  (Z={z_mid})")
-    axes[0].set_xlabel("X  (← L    R →)")
-    axes[0].set_ylabel("Y  (← P    A →)")
+    axes[0].set_title(f"Axial  (dim0=S={z_mid})")
+    axes[0].set_xlabel("dim1=R  (← L    R →)")
+    axes[0].set_ylabel("dim2=A  (← P    A →)")
 
-    # Mid-axis-1 (claimed-Y=A) → fixing A gives a CORONAL plane
-    # (rows=Z=S flipped, cols=X=R)
-    axes[1].imshow(vol[::-1, x_mid, :], cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
-    axes[1].set_title(f"Coronal  (Y={x_mid})")
-    axes[1].set_xlabel("X  (← L    R →)")
-    axes[1].set_ylabel("Z  (← I    S →)")
+    axes[1].imshow(vol[::-1, y_mid, :], cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
+    axes[1].set_title(f"Sagittal  (dim1=R={y_mid})")
+    axes[1].set_xlabel("dim2=A  (← P    A →)")
+    axes[1].set_ylabel("dim0=S  (← I    S →)")
 
-    # Mid-axis-2 (claimed-X=R) → fixing R gives a SAGITTAL plane
-    # (rows=Z=S flipped, cols=Y=A)
-    axes[2].imshow(vol[::-1, :, y_mid], cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
-    axes[2].set_title(f"Sagittal  (X={y_mid})")
-    axes[2].set_xlabel("Y  (← P    A →)")
-    axes[2].set_ylabel("Z  (← I    S →)")
+    axes[2].imshow(vol[::-1, :, x_mid], cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
+    axes[2].set_title(f"Coronal  (dim2=A={x_mid})")
+    axes[2].set_xlabel("dim1=R  (← L    R →)")
+    axes[2].set_ylabel("dim0=S  (← I    S →)")
+
+    _debug_log(
+        "create_orientation_preview: slicing decisions",
+        vol_shape=list(vol.shape),
+        panels=[
+            {"axes": 0, "slice": f"vol[{z_mid}, :, :].T", "fixed_axis": "dim0=S", "plane": "Axial"},
+            {"axes": 1, "slice": f"vol[::-1, {y_mid}, :]", "fixed_axis": "dim1=R", "plane": "Sagittal"},
+            {"axes": 2, "slice": f"vol[::-1, :, {x_mid}]", "fixed_axis": "dim2=A", "plane": "Coronal"},
+        ],
+    )
 
     plt.tight_layout()
     Path(preview_path).parent.mkdir(parents=True, exist_ok=True)
