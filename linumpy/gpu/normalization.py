@@ -5,9 +5,15 @@ and :func:`linumpy.preproc.normalization.apply_histogram_matching`.
 
 Each helper falls back to the CPU implementation when CuPy or a CUDA device
 is unavailable, so callers can pass ``use_gpu=True`` unconditionally.
+
+The GPU helpers stream the volume to the device chunk-by-chunk. The full
+volume is **never** materialised on the GPU; this keeps peak device usage
+bounded by the largest serial-section chunk regardless of total volume size.
 """
 
 from __future__ import annotations
+
+import os
 
 import numpy as np
 
@@ -19,6 +25,46 @@ from linumpy.preproc.normalization import (
 )
 
 from . import GPU_AVAILABLE
+
+
+def _gpu_mem_log(message: str, **fields):
+    """Append a single NDJSON line with a CuPy memory snapshot.
+
+    Active only when ``LINUMPY_GPU_MEM_LOG`` points to a writable path so the
+    instrumentation costs nothing in production runs. Used to verify post-fix
+    that peak device usage stays bounded.
+    """
+    path = os.environ.get("LINUMPY_GPU_MEM_LOG")
+    if not path:
+        return
+    try:
+        import json
+        import time
+
+        import cupy as cp
+
+        mempool = cp.get_default_memory_pool()
+        free, total = cp.cuda.runtime.memGetInfo()
+        entry = {
+            "id": f"log_{int(time.time() * 1000)}_znorm",
+            "timestamp": int(time.time() * 1000),
+            "sessionId": "6fa1b3",
+            "runId": "znorm-chunked",
+            "hypothesisId": "H1",
+            "location": "linumpy/gpu/normalization.py",
+            "message": message,
+            "data": {
+                "device_free_bytes": int(free),
+                "device_total_bytes": int(total),
+                "mempool_used_bytes": int(mempool.used_bytes()),
+                "mempool_total_bytes": int(mempool.total_bytes()),
+                **fields,
+            },
+        }
+        with open(path, "a") as f:  # noqa: PTH123
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
 
 
 def _robust_percentile_gpu(chunk, percentile: float) -> float:
@@ -44,8 +90,10 @@ def compute_scale_factors_gpu(
     """GPU-accelerated per-Z-plane linear scale factors for percentile normalization.
 
     Mirrors :func:`linumpy.preproc.normalization.compute_scale_factors` but runs
-    the expensive per-chunk percentile on the GPU. The small 1-D Gaussian
-    smoothing is done on the CPU (SciPy) as it is negligible in cost.
+    the expensive per-chunk percentile on the GPU. Each serial-section chunk is
+    streamed to the device individually; the full volume is never resident on
+    the GPU. The small 1-D Gaussian smoothing is done on the CPU (SciPy) as it
+    is negligible in cost.
     """
     if not (use_gpu and GPU_AVAILABLE):
         return compute_scale_factors(
@@ -63,13 +111,17 @@ def compute_scale_factors_gpu(
     bounds = _chunk_boundaries(n_z, n_serial_slices)
     n_chunks = len(bounds)
 
-    vol_gpu = cp.asarray(vol, dtype=cp.float32)
-    raw_metrics = np.zeros(n_chunks, dtype=np.float64)
-    for i, (s, e) in enumerate(bounds):
-        raw_metrics[i] = _robust_percentile_gpu(vol_gpu[s:e], percentile)
+    _gpu_mem_log("compute_scale_factors_gpu: start", vol_shape=list(vol.shape), vol_bytes=int(vol.nbytes))
 
-    del vol_gpu
-    cp.get_default_memory_pool().free_all_blocks()
+    raw_metrics = np.zeros(n_chunks, dtype=np.float64)
+    mempool = cp.get_default_memory_pool()
+    for i, (s, e) in enumerate(bounds):
+        chunk_gpu = cp.asarray(vol[s:e], dtype=cp.float32)
+        raw_metrics[i] = _robust_percentile_gpu(chunk_gpu, percentile)
+        del chunk_gpu
+        mempool.free_all_blocks()
+
+    _gpu_mem_log("compute_scale_factors_gpu: chunks done", n_chunks=n_chunks)
 
     smoothed = _smooth_weighted(raw_metrics, sigma=smooth_sigma)
     valid = smoothed > 0
@@ -87,19 +139,13 @@ def compute_scale_factors_gpu(
     return scale_factors, raw_metrics, smoothed, boundaries
 
 
-def _build_tissue_cdf_gpu(flat_values, n_bins: int, tissue_threshold: float):
-    """GPU version of ``_build_tissue_cdf``. Operates on a CuPy flat array."""
+def _histogram_edges_gpu(n_bins: int, tissue_threshold: float):
+    """Reproducible bin edges shared across all chunks (matches CPU CDF range)."""
     import cupy as cp
 
     lo = tissue_threshold + max(1e-6, tissue_threshold * 1e-6)
     lo = min(lo, 1.0)
-    hist, edges = cp.histogram(flat_values, bins=n_bins, range=(lo, 1.0))
-    bin_centers = 0.5 * (edges[:-1] + edges[1:])
-    total = int(hist.sum())
-    cdf = cp.cumsum(hist).astype(cp.float64)
-    if float(cdf[-1]) > 0:
-        cdf /= cdf[-1]
-    return bin_centers, cdf, total
+    return cp.linspace(lo, 1.0, n_bins + 1, dtype=cp.float64)
 
 
 def apply_histogram_matching_gpu(
@@ -112,8 +158,11 @@ def apply_histogram_matching_gpu(
     """GPU-accelerated per-section histogram matching to a global reference.
 
     Mirrors :func:`linumpy.preproc.normalization.apply_histogram_matching` and
-    returns identical output (up to floating-point rounding). Falls back to the
-    CPU implementation when no GPU is available.
+    returns identical output (up to floating-point rounding). The volume is
+    streamed chunk-by-chunk to the device in two passes — one to accumulate the
+    global reference histogram and one to apply the per-section LUT — so peak
+    GPU memory stays on the order of a single chunk regardless of volume size.
+    Falls back to the CPU implementation when no GPU is available.
     """
     if not (use_gpu and GPU_AVAILABLE):
         return apply_histogram_matching(
@@ -125,32 +174,69 @@ def apply_histogram_matching_gpu(
 
     import cupy as cp
 
-    vol_gpu = cp.asarray(vol, dtype=cp.float32)
-    flat_all = vol_gpu.ravel()
-    ref_bins, ref_cdf, tissue_count = _build_tissue_cdf_gpu(flat_all, n_bins, tissue_threshold)
-    if tissue_count < 500:
-        del vol_gpu
-        cp.get_default_memory_pool().free_all_blocks()
+    bounds = _chunk_boundaries(vol.shape[0], n_serial_slices)
+    edges = _histogram_edges_gpu(n_bins, tissue_threshold)
+    bin_centers = 0.5 * (edges[:-1] + edges[1:])
+    mempool = cp.get_default_memory_pool()
+
+    _gpu_mem_log(
+        "apply_histogram_matching_gpu: start",
+        vol_shape=list(vol.shape),
+        vol_bytes=int(vol.nbytes),
+        n_chunks=len(bounds),
+    )
+
+    # Pass 1: accumulate global reference histogram by streaming chunks.
+    ref_hist = cp.zeros(n_bins, dtype=cp.int64)
+    for s, e in bounds:
+        chunk_gpu = cp.asarray(vol[s:e], dtype=cp.float32)
+        h, _ = cp.histogram(chunk_gpu.ravel(), bins=edges)
+        ref_hist += h
+        del chunk_gpu, h
+        mempool.free_all_blocks()
+
+    ref_total = int(ref_hist.sum())
+    if ref_total < 500:
+        del ref_hist
+        mempool.free_all_blocks()
         return vol
 
-    bounds = _chunk_boundaries(vol.shape[0], n_serial_slices)
-    out_gpu = cp.empty_like(vol_gpu)
+    ref_cdf = cp.cumsum(ref_hist).astype(cp.float64)
+    if float(ref_cdf[-1]) > 0:
+        ref_cdf /= ref_cdf[-1]
+    del ref_hist
+
+    _gpu_mem_log("apply_histogram_matching_gpu: ref CDF built", ref_total=ref_total)
+
+    # Pass 2: per-section histogram match, streaming. The output is assembled
+    # in host RAM (matching the CPU path), so the GPU only ever holds one
+    # chunk plus its working buffers.
+    out = np.empty_like(vol)
     for s, e in bounds:
-        chunk = vol_gpu[s:e]
-        flat = chunk.ravel()
-        src_bins, src_cdf, tissue_count_chunk = _build_tissue_cdf_gpu(flat, n_bins, tissue_threshold)
-        if tissue_count_chunk < 500:
-            out_gpu[s:e] = chunk
+        chunk_gpu = cp.asarray(vol[s:e], dtype=cp.float32)
+        flat = chunk_gpu.ravel()
+        src_hist, _ = cp.histogram(flat, bins=edges)
+        src_total = int(src_hist.sum())
+        if src_total < 500:
+            out[s:e] = vol[s:e]
+            del chunk_gpu, flat, src_hist
+            mempool.free_all_blocks()
             continue
 
-        matched_lut = cp.interp(src_cdf, ref_cdf, ref_bins)
-        mapped = cp.interp(flat, src_bins, matched_lut).astype(cp.float32, copy=False)
+        src_cdf = cp.cumsum(src_hist).astype(cp.float64)
+        if float(src_cdf[-1]) > 0:
+            src_cdf /= src_cdf[-1]
+        matched_lut = cp.interp(src_cdf, ref_cdf, bin_centers)
+        mapped = cp.interp(flat, bin_centers, matched_lut).astype(cp.float32, copy=False)
         result = cp.where(flat > tissue_threshold, mapped, flat)
-        out_gpu[s:e] = result.reshape(chunk.shape)
+        out[s:e] = cp.asnumpy(result.reshape(chunk_gpu.shape))
+        del chunk_gpu, flat, src_hist, src_cdf, matched_lut, mapped, result
+        mempool.free_all_blocks()
 
-    out = cp.asnumpy(out_gpu)
-    del vol_gpu, out_gpu
-    cp.get_default_memory_pool().free_all_blocks()
+    _gpu_mem_log("apply_histogram_matching_gpu: done")
+
+    del ref_cdf, bin_centers, edges
+    mempool.free_all_blocks()
     return out
 
 
