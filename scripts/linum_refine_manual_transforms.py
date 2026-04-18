@@ -387,34 +387,6 @@ def main() -> None:
         )
         logger.info(f"  z{slice_id:02d}: final    tx={final_tx:.2f} ty={final_ty:.2f} rot={final_rot:.3f}°")
 
-        # region agent log
-        # DEBUG-6fa1b3 (runId=refine-sitk-convention): record the final tfm
-        # that is about to be written so the post-fix stack can be
-        # cross-checked against pre-fix values.
-        try:
-            import json as _dbg_json
-            import time as _dbg_time
-
-            _dbg_entry = {
-                "sessionId": "6fa1b3",
-                "runId": "refine-sitk-convention",
-                "hypothesisId": "H14-signflip",
-                "location": "linum_refine_manual_transforms.py:write_tfm",
-                "message": "refine-stored-tfm-sitk-convention",
-                "timestamp": int(_dbg_time.time() * 1000),
-                "data": {
-                    "sid": int(slice_id),
-                    "final_tx": float(final_tx),
-                    "final_ty": float(final_ty),
-                    "final_rot_deg": float(final_rot),
-                },
-            }
-            with Path("/scratch/workspace/debug-6fa1b3.log").open("a") as _dbg_f:
-                _dbg_f.write(_dbg_json.dumps(_dbg_entry) + "\n")
-        except Exception as _dbg_exc:
-            logger.warning(f"debug log write failed: {_dbg_exc}")
-        # endregion
-
         # Write output. The manual tfm, the refinement delta, and the
         # composed final tfm are all in SimpleITK output->input (point-map)
         # convention now that _warp_moving and the manual-align widget both

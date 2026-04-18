@@ -706,7 +706,11 @@ def create_alignment_preview(
     fig, axes = plt.subplots(3, 3, figsize=(18, 18))
     fig.suptitle("Alignment Preview: Original vs Aligned vs Allen Template (Reference)", fontsize=16)
 
-    plane_names = ["Axial (XY)", "Sagittal (XZ)", "Coronal (YZ)"]
+    # Plane labels (anatomical, RAS+ convention):
+    #   row 0: vol[z, :, :]  fixes Z=S  → AXIAL    (shows Y=A × X=R)
+    #   row 1: vol[:, y, :]  fixes Y=A  → CORONAL  (shows Z=S × X=R)
+    #   row 2: vol[:, :, x]  fixes X=R  → SAGITTAL (shows Z=S × Y=A)
+    plane_names = ["Axial (XY)", "Coronal (XZ)", "Sagittal (YZ)"]
 
     for row, plane_name in enumerate(plane_names):
         # Original - use .T for row 0 (XY plane) to match display convention
@@ -829,16 +833,18 @@ def create_orientation_preview(
     axes[0].set_xlabel("X  (← L    R →)")
     axes[0].set_ylabel("Y  (← P    A →)")
 
-    # Sagittal (mid-X): rows=Z (S, flipped), cols=Y (A)
+    # Mid-axis-1 (claimed-Y=A) → fixing A gives a CORONAL plane
+    # (rows=Z=S flipped, cols=X=R)
     axes[1].imshow(vol[::-1, x_mid, :], cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
-    axes[1].set_title(f"Sagittal  (X={x_mid})")
-    axes[1].set_xlabel("Y  (← P    A →)")
+    axes[1].set_title(f"Coronal  (Y={x_mid})")
+    axes[1].set_xlabel("X  (← L    R →)")
     axes[1].set_ylabel("Z  (← I    S →)")
 
-    # Coronal (mid-Y): rows=Z (S, flipped), cols=X (R)
+    # Mid-axis-2 (claimed-X=R) → fixing R gives a SAGITTAL plane
+    # (rows=Z=S flipped, cols=Y=A)
     axes[2].imshow(vol[::-1, :, y_mid], cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
-    axes[2].set_title(f"Coronal  (Y={y_mid})")
-    axes[2].set_xlabel("X  (← L    R →)")
+    axes[2].set_title(f"Sagittal  (X={y_mid})")
+    axes[2].set_xlabel("Y  (← P    A →)")
     axes[2].set_ylabel("Z  (← I    S →)")
 
     plt.tight_layout()
