@@ -238,18 +238,23 @@ def find_best_overlap_planes(
         )
         return nz_before - 1, 0, float("-inf")
 
-    before_norms = {z: _normalize_plane_for_ncc(vol_before[z]) for z in before_zs}
-    after_norms = {z: _normalize_plane_for_ncc(vol_after[z]) for z in after_zs}
+    h, w = vol_before.shape[1], vol_before.shape[2]
+    margin = min(h, w) // 4
+    roi = (slice(margin, h - margin), slice(margin, w - margin))
+    # Normalise on the ROI (not the full plane) so the resulting arrays are
+    # zero-mean / unit-std over the region that actually goes into the NCC.
+    # Normalising on the full plane — where OCT backgrounds are mostly zero —
+    # leaves the central tissue ROI with a strongly positive mean, which
+    # inflates `mean(a*b)` well beyond the [-1, 1] range expected for NCC.
+    before_norms = {z: _normalize_plane_for_ncc(vol_before[z][roi]) for z in before_zs}
+    after_norms = {z: _normalize_plane_for_ncc(vol_after[z][roi]) for z in after_zs}
 
     best_corr = -np.inf
     ref_before = before_zs[-1]
     ref_after = after_zs[0]
-    h, w = vol_before.shape[1], vol_before.shape[2]
-    margin = min(h, w) // 4
-    roi = (slice(margin, h - margin), slice(margin, w - margin))
     for zb in before_zs:
         for za in after_zs:
-            corr = float(np.mean(before_norms[zb][roi] * after_norms[za][roi]))
+            corr = float(np.mean(before_norms[zb] * after_norms[za]))
             if corr > best_corr:
                 best_corr = corr
                 ref_before = zb
