@@ -308,7 +308,7 @@ slice_z00_normalize.ome.zarr
 ### Napari (Recommended)
 
 ```bash
-pip install napari[all]
+uv pip install 'napari[all]'
 napari mosaic_grid_3d_z00.ome.zarr
 ```
 
