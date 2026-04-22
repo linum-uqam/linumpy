@@ -403,23 +403,59 @@ rotation smoothing, auto-exclude, and richer diagnostics.
 Stack slices into a 3D volume using motor positions for XY placement and correlation-based Z matching. This is the primary stacking script used by the pipeline.
 
 ```bash
-linum_stack_slices_motor.py <slices_dir> <shifts_file> <transforms_dir> <output.ome.zarr> \
-    [--blending {none,average,max,feather}] \
-    [--apply_rotation_only] \
-    [--max_rotation_deg <degrees>] \
+linum_stack_slices_motor.py <slices_dir> <shifts_file> <output.ome.zarr> \
+    [--transforms_dir <dir>] \
+    [--rotation_only] \
+    [--max_rotation_deg 1.0] \
+    [--accumulate_translations] \
+    [--max_pairwise_translation 0] \
+    [--confidence_weight_translations] \
+    [--max_cumulative_drift_px 0] \
+    [--smooth_window 0] \
+    [--translation_smooth_sigma 0] \
     [--skip_error_transforms] \
-    [--rehoming_threshold_mm <mm>] \
-    [--smooth_window <n>]
+    [--skip_warning_transforms] \
+    [--no_xy_shift] \
+    [--slicing_interval_mm 0.200] \
+    [--search_range_mm 0.100] \
+    [--use_expected_overlap] \
+    [--z_overlap_min_corr 0.5] \
+    [--moving_z_first_index 8] \
+    [--blend] \
+    [--blend_depth] \
+    [--blend_refinement_px 0] \
+    [--blend_z_refine_vox 0] \
+    [--pyramid_resolutions 10 25 50 100] \
+    [--make_isotropic | --no_isotropic] \
+    [--max_slices <n>] \
+    [--output_z_matches] \
+    [--output_stacking_decisions] \
+    [--confidence_high 0.6] \
+    [--confidence_low 0.3] \
+    [--blend_z_refine_min_confidence 0.5] \
+    [--slice_config <config.csv>] \
+    [--load_min_zcorr <val>] \
+    [--load_max_rotation <deg>] \
+    [--translation_min_zcorr <val>] \
+    [--manual_transforms_dir <dir>]
 ```
 
-| Option | Description |
-|--------|-------------|
-| `--blending` | Blending method for overlapping regions |
-| `--apply_rotation_only` | Apply only the rotation component from pairwise registration |
-| `--max_rotation_deg` | Clamp rotations larger than this value |
-| `--skip_error_transforms` | Skip transforms with error status |
-| `--rehoming_threshold_mm` | Motor shift threshold to detect re-homing events |
-| `--smooth_window` | Moving-average window for smoothing per-slice rotations |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--transforms_dir` | — | Directory of pairwise registration transforms |
+| `--rotation_only` | off | Apply only the rotation component from pairwise transforms |
+| `--max_rotation_deg` | `1.0` | Clamp rotations larger than this value (degrees) |
+| `--accumulate_translations` | off | Accumulate pairwise translations as cumulative canvas offsets |
+| `--max_pairwise_translation` | `0` | Zero out translations near this optimizer-boundary limit (0 = accumulate all) |
+| `--confidence_weight_translations` | off | Weight translations by confidence before accumulating |
+| `--max_cumulative_drift_px` | `0` | Cap cumulative drift from motor baseline (0 = unlimited) |
+| `--smooth_window` | `0` | Moving-average window (slices) for per-slice rotation smoothing (0 = disabled) |
+| `--translation_smooth_sigma` | `0` | Gaussian sigma (slices) for smoothing accumulated translations (0 = disabled) |
+| `--skip_error_transforms` | off | Skip transforms flagged `overall_status="error"` |
+| `--skip_warning_transforms` | off | Skip transforms flagged `overall_status="warning"` |
+| `--no_xy_shift` | off | Ignore XY shifts from motor CSV (stack without XY displacement) |
+| `--slice_config` | — | CSV to filter which slices are included / motor-only |
+| `--load_max_rotation` | — | Metric-based gate: skip transforms with rotation above this threshold |
 
 ### linum_stack_motor_only.py
 
@@ -626,20 +662,30 @@ Two outputs are produced per pair:
 
 ```bash
 linum_register_pairwise.py <fixed.ome.zarr> <moving.ome.zarr> <output_dir> \
-    [--slicing_interval_mm <mm>] \
-    [--search_range_mm <mm>] \
-    [--robustness {0,1,2}] \
-    [--use_mask] \
-    [--mask_dir <dir>]
+    [--slicing_interval_mm 0.200] \
+    [--search_range_mm 0.100] \
+    [--moving_z_index 0] \
+    [--enable_rotation | --no-enable_rotation] \
+    [--max_rotation_deg 5.0] \
+    [--max_translation_px 20.0] \
+    [--initial_alignment {none,com,gradient,both}] \
+    [--out_transform transform.tfm] \
+    [--out_offsets offsets.txt] \
+    [--screenshot <path>]
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--slicing_interval_mm` | `0.05` | Expected physical slice thickness in mm |
-| `--search_range_mm` | `0.1` | Z search range around expected overlap |
-| `--robustness` | `1` | Robustness level: 0=fast, 1=balanced, 2=thorough |
-| `--use_mask` | off | Use tissue masks to focus registration on tissue regions |
-| `--mask_dir` | — | Directory containing mask OME-Zarr files |
+| `--slicing_interval_mm` | `0.200` | Expected physical slice thickness in mm |
+| `--search_range_mm` | `0.100` | Z search range around expected overlap |
+| `--moving_z_index` | `0` | Starting Z-index in the moving volume |
+| `--enable_rotation` | on | Enable rotation in the transform (use `--no-enable_rotation` to disable) |
+| `--max_rotation_deg` | `5.0` | Maximum rotation to consider (degrees) |
+| `--max_translation_px` | `20.0` | Maximum translation per axis (pixels) |
+| `--initial_alignment` | `both` | Pre-registration alignment: `none`, `com`, `gradient`, or `both` |
+| `--out_transform` | `transform.tfm` | Output SimpleITK transform path |
+| `--out_offsets` | `offsets.txt` | Output Z-index correspondence path |
+| `--screenshot` | — | Save a PNG of the registration result |
 
 ---
 
@@ -1035,11 +1081,9 @@ linum_suggest_params.py <shifts_file> <output_dir> \
 **Estimated parameters:**
 
 From `shifts_xy.csv`:
-- `stitch_rehoming_threshold_mm` — re-homing boundary threshold (MAD-robust detection)
-- `stitch_rehoming_enabled` — true if re-homing events are detected
-- `stitch_rehoming_use_motor` — always recommended true when re-homing is present
-- `max_shift_mm` — IQR upper bound of normal inter-slice shifts
-- `common_space_max_step_mm` — 95th percentile of consecutive normal shift changes
+- `max_shift_mm` — IQR upper bound of normal inter-slice shifts (used for `rehoming_max_shift_mm`)
+- `common_space_max_step_mm` — 95th percentile of consecutive normal shift changes (used for `common_space_excluded_slice_mode` tuning)
+- `interpolate_missing_slices` — suggested based on gap pattern in shift data
 
 From `--data_dir` (raw data directory):
 - `registration_slicing_interval_mm` — from `slice_thickness` in `metadata.json` / `state.json`

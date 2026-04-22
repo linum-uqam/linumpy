@@ -98,21 +98,18 @@ nextflow run preproc_rawtiles.nf \
 | `processes` | `1` | Parallel Python processes per task (CPU mode only) |
 | `max_mosaic_forks` | `4` | Max concurrent `create_mosaic_grid` GPU jobs |
 | `max_aip_forks` | `4` | Max concurrent `generate_aip` GPU jobs |
-| `max_quality_forks` | `2` | Max concurrent `assess_slice_quality` GPU jobs |
 | `axial_resolution` | `1.36` | Axial resolution (µm) |
 | `resolution` | `-1` | Output resolution (-1 = full native resolution) |
 | `sharding_factor` | `4` | Zarr sharding (NxN chunks/shard) |
 | `fix_galvo_shift` | `true` | Correct galvo shifts |
 | `fix_camera_shift` | `false` | Correct camera shifts |
+| `preprocess` | `false` | Apply rotation/flip preprocessing (true for legacy data) |
 | `galvo_confidence_threshold` | `0.6` | Minimum confidence to apply galvo fix |
 | `generate_slice_config` | `true` | Generate slice_config.csv |
 | `exclude_first_slices` | `1` | Number of leading slices to mark as excluded |
 | `detect_galvo` | `false` | Include galvo detection results in slice_config.csv |
 | `generate_previews` | `false` | Generate orthogonal view previews of mosaic grids |
 | `generate_aips` | `false` | Generate AIP images from mosaic grids for QC |
-| `assess_quality` | `false` | Run quality assessment and update slice_config |
-| `min_quality_score` | `0.2` | Minimum quality score to include slice (0 = report only) |
-| `quality_sample_depth` | `10` | Z-planes sampled per slice during quality assessment |
 
 ### Outputs
 
@@ -362,17 +359,6 @@ and correlation or physics-based Z-matching.
 | `stack_translation_smooth_sigma` | `3.0` | Gaussian sigma (slices) for smoothing accumulated translations (0 = disabled) |
 | `stack_translation_min_zcorr` | `0.2` | Min z_correlation to use a slice's translation in accumulation |
 
-**Legacy post-hoc rehoming (for re-stacking old data):**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `stitch_rehoming_enabled` | `false` | Apply one-time segment offset at re-homing event boundaries during stacking |
-| `stitch_rehoming_threshold_mm` | `0.7` | Motor shift magnitude that identifies a re-homing event (mm) |
-| `stitch_rehoming_use_motor` | `false` | Use motor delta instead of pairwise registration for the correction |
-
-Modern pipelines should rely on `detect_rehoming` in common-space alignment
-instead of these stacking-time corrections.
-
 **Output pyramid:**
 
 | Parameter | Default | Description |
@@ -542,7 +528,7 @@ tight image-based registration.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `analyze_shifts` | `false` | Generate shifts analysis report and drift plots |
+| `analyze_shifts` | `true` | Generate shifts analysis report and drift plots |
 | `debug_slices` | `""` | Comma-separated slice IDs or ranges to process (e.g. `"25,26"` or `"25-29"`); leave empty to process all |
 
 The `analyze_shifts` option runs drift analysis on the shifts file before processing, producing:
@@ -559,7 +545,6 @@ Diagnostic mode enables additional analysis processes for troubleshooting recons
 | `diagnostic_mode` | `false` | Master switch: enables all diagnostic analyses |
 | `analyze_rotation_drift` | `false` | Analyze cumulative rotation between slices |
 | `analyze_acquisition_rotation` | `false` | Analyze acquisition-time rotation from shifts + registration |
-| `analyze_tile_dilation` | `false` | Analyze tile position refinements for scale drift (works best with `max_blend_refinement_px = 0`) |
 | `motor_only_stitch` | `false` | Stitch slices using motor positions only (no image registration) |
 | `motor_only_stack` | `false` | Stack slices using motor positions only (no pairwise registration) |
 | `compare_stitching` | `false` | Compare motor-only vs refined stitching side-by-side |
@@ -588,36 +573,42 @@ Diagnostic outputs are written to `{output}/diagnostics/` and include rotation p
 ```
 output/
 ├── README/readme.txt
+├── analyze_shifts/                     # Only when analyze_shifts = true
 ├── resample_mosaic_grid/
 ├── fix_focal_curvature/
 ├── fix_illumination/
-├── generate_aip/
-├── estimate_xy_transformation/
-├── stitch_3d/
+├── stitch_3d_with_refinement/
+├── previews/stitched_slices/           # Only when stitch_preview = true
 ├── beam_profile_correction/
 ├── crop_interface/
 ├── normalize/
+├── detect_rehoming_events/             # Only when detect_rehoming = true
+├── auto_assess_quality/                # Only when auto_assess_quality = true
 ├── bring_to_common_space/
+├── common_space_previews/              # Only when common_space_preview = true
+├── interpolate_missing_slice/          # Only when interpolate_missing_slices = true
+├── finalise_interpolation/
 ├── register_pairwise/
+├── auto_exclude_slices/                # Only when auto_exclude_enabled = true
 ├── stack/
-│   ├── 3d_volume.ome.zarr
-│   ├── 3d_volume.ome.zarr.zip
-│   └── 3d_volume.png
+│   ├── {subject}.ome.zarr
+│   ├── {subject}.ome.zarr.zip
+│   ├── {subject}.png
+│   └── {subject}_annotated.png
 ├── normalize_z_intensity/              # Only when normalize_z_slices = true
-│   └── 3d_volume_znorm.ome.zarr
+│   └── {subject}_znorm.ome.zarr
 ├── align_to_ras/                       # Only when align_to_ras_enabled = true
-│   ├── {subject}_ras.ome.zarr          # RAS-aligned volume (all pyramid levels)
-│   ├── {subject}_ras_transform.tfm     # Registration transform (SimpleITK)
-│   └── {subject}_ras_preview.png       # 3-panel alignment comparison
+│   ├── {subject}_ras.ome.zarr
+│   ├── {subject}_ras_transform.tfm
+│   └── {subject}_ras_preview.png
 ├── diagnostics/                        # Only when diagnostic_mode = true or individual flags set
 │   ├── rotation_analysis/
 │   ├── acquisition_rotation/
-│   ├── dilation_analysis/
-│   ├── aggregated_dilation/
 │   ├── motor_only_stitch/
+│   ├── refined_stitch/
 │   ├── motor_only_stack/
 │   └── stitch_comparison/
-└── {subject}_quality_report.html
+└── {subject}_quality_report.html       # Only when generate_report = true
 ```
 
 ---
@@ -632,10 +623,8 @@ Both workflows support GPU acceleration using NVIDIA CUDA via CuPy. GPU processi
 |----------|---------|----------------|
 | `preproc_rawtiles.nf` | `create_mosaic_grid` | Galvo detection, volume resize |
 | `preproc_rawtiles.nf` | `generate_aip` | Mean projection |
-| `preproc_rawtiles.nf` | `assess_slice_quality` | SSIM, edge detection (Sobel) |
 | `soct_3d_reconst.nf` | `resample_mosaic_grid` | Volume resize |
 | `soct_3d_reconst.nf` | `fix_illumination` | BaSiCPy background correction (JAX on GPU) |
-| `soct_3d_reconst.nf` | `estimate_xy_transformation` | Phase correlation (FFT) |
 | `soct_3d_reconst.nf` | `normalize` | Intensity normalization, percentile clipping |
 
 ### Usage
@@ -665,7 +654,7 @@ params {
 
 For GPU support:
 - NVIDIA GPU with CUDA support
-- CuPy installed: `pip install cupy-cuda12x`
+- CuPy installed: `uv pip install cupy-cuda12x`
 - See [GPU_ACCELERATION.md](GPU_ACCELERATION.md) for detailed setup
 
 ### Expected Speedups
