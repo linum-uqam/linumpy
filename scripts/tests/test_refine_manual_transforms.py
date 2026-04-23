@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import SimpleITK as sitk
-import zarr
+import zarr.storage
 
 
 def _load_script_module():
