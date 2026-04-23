@@ -26,7 +26,8 @@ import numpy as np
 from linumpy.cli.args import add_overwrite_arg, assert_output_exists
 from linumpy.io.zarr import AnalysisOmeZarrWriter, read_omezarr
 from linumpy.mosaic.stacking import apply_xy_shift, blend_overlap_xy
-from linumpy.shifts.utils import center_shifts, convert_shifts_to_pixels, load_shifts_csv
+from linumpy.stack_alignment.io import load_shifts_csv
+from linumpy.stack_alignment.units import center_shifts, convert_shifts_to_pixels
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

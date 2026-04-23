@@ -1,7 +1,7 @@
 """GPU-accelerated Z-intensity normalization for serial OCT stacks.
 
-Provides CuPy-based versions of :func:`linumpy.preproc.normalization.compute_scale_factors`
-and :func:`linumpy.preproc.normalization.apply_histogram_matching`.
+Provides CuPy-based versions of :func:`linumpy.intensity.normalization.compute_scale_factors`
+and :func:`linumpy.intensity.normalization.apply_histogram_matching`.
 
 Each helper falls back to the CPU implementation when CuPy or a CUDA device
 is unavailable, so callers can pass ``use_gpu=True`` unconditionally.
@@ -47,7 +47,7 @@ def compute_scale_factors_gpu(
 ):
     """GPU-accelerated per-Z-plane linear scale factors for percentile normalization.
 
-    Mirrors :func:`linumpy.preproc.normalization.compute_scale_factors` but runs
+    Mirrors :func:`linumpy.intensity.normalization.compute_scale_factors` but runs
     the expensive per-chunk percentile on the GPU. Each serial-section chunk is
     streamed to the device individually; the full volume is never resident on
     the GPU. The small 1-D Gaussian smoothing is done on the CPU (SciPy) as it
@@ -111,7 +111,7 @@ def apply_histogram_matching_gpu(
 ) -> np.ndarray:
     """GPU-accelerated per-section histogram matching to a global reference.
 
-    Mirrors :func:`linumpy.preproc.normalization.apply_histogram_matching` and
+    Mirrors :func:`linumpy.intensity.normalization.apply_histogram_matching` and
     returns identical output (up to floating-point rounding). The volume is
     streamed chunk-by-chunk to the device in two passes — one to accumulate the
     global reference histogram and one to apply the per-section LUT — so peak

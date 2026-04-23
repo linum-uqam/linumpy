@@ -38,7 +38,7 @@ from linumpy.mosaic.stacking import (
     find_z_overlap,
     refine_z_blend_overlap,
 )
-from linumpy.shifts.utils import load_shifts_csv
+from linumpy.stack_alignment.io import load_shifts_csv
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
