@@ -7,7 +7,7 @@ from various processing steps in the 3D reconstruction pipeline.
 
 Usage:
     # Use step-specific collectors (recommended)
-    from linumpy.utils.metrics import collect_mask_metrics, collect_pairwise_registration_metrics
+    from linumpy.metrics import collect_mask_metrics, collect_pairwise_registration_metrics
 
     # In your script:
     mask = create_mask(vol, ...)
@@ -18,7 +18,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 
@@ -28,18 +28,19 @@ logger = logging.getLogger(__name__)
 class MetricsEncoder(json.JSONEncoder):
     """Custom JSON encoder to handle numpy types."""
 
-    def default(self, obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        elif isinstance(obj, np.floating):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, np.bool_):
-            return bool(obj)
-        elif isinstance(obj, Path):
-            return str(obj)
-        return super().default(obj)
+    def default(self, o: Any) -> Any:
+        """Serialize numpy and Path types to JSON-compatible values."""
+        if isinstance(o, np.integer):
+            return int(o)
+        elif isinstance(o, np.floating):
+            return float(o)
+        elif isinstance(o, np.ndarray):
+            return o.tolist()
+        elif isinstance(o, np.bool_):
+            return bool(o)
+        elif isinstance(o, Path):
+            return str(o)
+        return super().default(o)
 
 
 class PipelineMetrics:
@@ -51,7 +52,7 @@ class PipelineMetrics:
     """
 
     # Quality thresholds for common metrics (can be overridden)
-    DEFAULT_THRESHOLDS = {
+    DEFAULT_THRESHOLDS: ClassVar[dict] = {
         # Mean squared error of the registration transform (normalized, unitless)
         "registration_error": {"warning": 0.05, "error": 0.15},
         # Euclidean magnitude of the estimated translation vector (pixels)
@@ -90,7 +91,7 @@ class PipelineMetrics:
         "interface_max_depth_fraction": {"error": 0.5},
     }
 
-    def __init__(self, step_name: str, output_dir: str | None = None):
+    def __init__(self, step_name: str, output_dir: str | None = None) -> None:
         """
         Initialize metrics collector.
 
@@ -116,7 +117,7 @@ class PipelineMetrics:
         threshold_name: str | None = None,
         custom_thresholds: dict | None = None,
         description: str | None = None,
-    ):
+    ) -> None:
         """
         Add a metric with optional quality assessment.
 
@@ -161,7 +162,7 @@ class PipelineMetrics:
 
         self.metrics[name] = metric_entry
 
-    def add_info(self, name: str, value: Any, description: str | None = None):
+    def add_info(self, name: str, value: Any, description: str | None = None) -> None:
         """
         Add informational data (not quality-assessed).
 
@@ -235,17 +236,17 @@ class PipelineMetrics:
         else:
             filepath = Path(filename)
 
-        with open(filepath, "w") as f:
+        with filepath.open("w") as f:
             json.dump(self.to_dict(), f, indent=2, cls=MetricsEncoder)
 
         return filepath
 
-    def log_issues(self):
+    def log_issues(self) -> None:
         """Log any warnings or errors to the logger."""
         for w in self.warnings:
-            logger.warning(f"Metric warning: {w}")
+            logger.warning("Metric warning: %s", w)
         for e in self.errors:
-            logger.error(f"Metric error: {e}")
+            logger.error("Metric error: %s", e)
 
 
 # =============================================================================
@@ -256,7 +257,7 @@ class PipelineMetrics:
 def collect_mask_metrics(
     mask: np.ndarray,
     input_vol: np.ndarray,
-    output_path: str | Path,
+    output_path: Path,
     input_path: str | None = None,
     params: dict | None = None,
 ) -> PipelineMetrics:
@@ -329,7 +330,7 @@ def collect_normalization_metrics(
     agarose_mask: np.ndarray,
     otsu_threshold: float,
     background_thresholds: np.ndarray,
-    output_path: str | Path,
+    output_path: Path,
     input_path: str | None = None,
     params: dict | None = None,
 ) -> PipelineMetrics:
@@ -401,7 +402,7 @@ def collect_xy_transform_metrics(
     tile_pairs_used: int,
     tile_shape: tuple[int, int],
     residuals: np.ndarray,
-    output_path: str | Path,
+    output_path: Path,
     input_paths: list[str] | None = None,
     params: dict | None = None,
     n_tiles_x: int | None = None,
@@ -523,7 +524,7 @@ def collect_pairwise_registration_metrics(
     rotation_deg: float,
     best_z_index: int,
     expected_z_index: int,
-    output_path: str | Path,
+    output_path: Path,
     fixed_path: str | None = None,
     moving_path: str | None = None,
     params: dict | None = None,
@@ -605,7 +606,7 @@ def collect_interface_crop_metrics(
     input_shape: tuple[int, ...],
     output_shape: tuple[int, ...],
     resolution_um: float,
-    output_path: str | Path,
+    output_path: Path,
     input_path: str | None = None,
     padding_needed: bool = False,
 ) -> PipelineMetrics:
@@ -681,7 +682,7 @@ def collect_interface_crop_metrics(
 def collect_psf_compensation_metrics(
     psf: np.ndarray,
     agarose_coverage: float,
-    output_path: str | Path,
+    output_path: Path,
     input_path: str | None = None,
     fit_gaussian: bool = False,
 ) -> PipelineMetrics:
@@ -750,7 +751,7 @@ def collect_stack_metrics(
     z_offsets: np.ndarray,
     num_slices: int,
     resolution: list[float],
-    output_path: str | Path,
+    output_path: Path,
     blend_enabled: bool = False,
     normalize_enabled: bool = False,
 ) -> PipelineMetrics:
@@ -821,7 +822,7 @@ def collect_stitch_3d_metrics(
     output_shape: tuple[int, ...],
     num_tiles: int,
     resolution: list[float],
-    output_path: str | Path,
+    output_path: Path,
     input_path: str | None = None,
     blending_method: str = "diffusion",
 ) -> PipelineMetrics:
@@ -880,7 +881,7 @@ def collect_stitch_3d_metrics(
 # =============================================================================
 
 
-def load_metrics(filepath: str | Path) -> dict:
+def load_metrics(filepath: Path) -> dict:
     """
     Load metrics from a JSON file.
 
@@ -894,11 +895,11 @@ def load_metrics(filepath: str | Path) -> dict:
     dict
         Loaded metrics dictionary.
     """
-    with open(filepath) as f:
+    with Path(filepath).open() as f:
         return json.load(f)
 
 
-def aggregate_metrics(metrics_dir: str | Path, pattern: str = "*_metrics.json") -> dict[str, list[dict]]:
+def aggregate_metrics(metrics_dir: Path, pattern: str = "*_metrics.json") -> dict[str, list[dict]]:
     """
     Aggregate all metrics files from a directory.
 
@@ -926,7 +927,7 @@ def aggregate_metrics(metrics_dir: str | Path, pattern: str = "*_metrics.json") 
             metrics["source_file"] = str(metrics_file)
             aggregated[step_name].append(metrics)
         except Exception as e:
-            logger.warning(f"Could not load {metrics_file}: {e}")
+            logger.warning("Could not load %s: %s", metrics_file, e)
 
     return aggregated
 
