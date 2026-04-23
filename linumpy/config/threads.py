@@ -13,6 +13,7 @@ The module configures thread limits for:
 - NumExpr (NUMEXPR_NUM_THREADS)
 - Numba (NUMBA_NUM_THREADS)
 - Dask (via dask.config)
+- PyTorch (via torch.set_num_threads / torch.set_num_interop_threads)
 - SimpleITK (via ProcessObject.SetGlobalDefaultNumberOfThreads)
 
 Environment variables (checked in order of precedence):
@@ -29,6 +30,7 @@ Known gaps that can cause CPU usage spikes:
 To ensure proper limiting, scripts should call configure_all_libraries() after imports.
 """
 
+import contextlib
 import multiprocessing
 import os
 import sys
@@ -37,11 +39,12 @@ import sys
 _thread_config_applied = False
 
 
-def get_max_threads():
+def get_max_threads() -> int:
     """
     Calculate the maximum number of threads to use based on environment variables.
 
-    Returns:
+    Returns
+    -------
         int: Maximum number of threads to use
     """
     total_cpus = multiprocessing.cpu_count()
@@ -63,7 +66,7 @@ def get_max_threads():
     return total_cpus
 
 
-def configure_thread_limits():
+def configure_thread_limits() -> int:
     """
     Configure thread limits for numerical libraries.
 
@@ -79,10 +82,8 @@ def configure_thread_limits():
 
     # If OMP_NUM_THREADS is already set, use that value instead
     if "OMP_NUM_THREADS" in os.environ:
-        try:
+        with contextlib.suppress(ValueError):
             max_threads = int(os.environ["OMP_NUM_THREADS"])
-        except ValueError:
-            pass
 
     # Set environment variables for all common threading libraries
     # Set ALL of them unconditionally to ensure consistency
@@ -96,22 +97,10 @@ def configure_thread_limits():
         "GOTO_NUM_THREADS",  # GotoBLAS
         "BLIS_NUM_THREADS",  # BLIS
         "ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS",  # SimpleITK/ITK
-        "XLA_FLAGS",  # JAX/XLA thread pool (set below with special format)
     ]
 
     for var in thread_vars:
-        if var == "XLA_FLAGS":
-            # XLA flags use a special format
-            # This limits JAX's XLA thread pool (used by BaSiCPy)
-            xla_flags = os.environ.get("XLA_FLAGS", "")
-            if "--xla_cpu_multi_thread_eigen=false" not in xla_flags:
-                # Disable multi-threading in XLA's Eigen backend for better control
-                new_flags = (
-                    f"{xla_flags} --xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads={max_threads}".strip()
-                )
-                os.environ["XLA_FLAGS"] = new_flags
-        else:
-            os.environ[var] = str(max_threads)
+        os.environ[var] = str(max_threads)
 
     # Also set dask configuration via environment variable
     # This limits dask's thread pool before dask is imported
@@ -120,9 +109,10 @@ def configure_thread_limits():
     return max_threads
 
 
-def configure_dask():
+def configure_dask() -> None:
     """
     Configure dask's thread pool after dask is imported.
+
     Call this after dask has been imported.
     """
     try:
@@ -136,9 +126,10 @@ def configure_dask():
         pass
 
 
-def configure_sitk():
+def configure_sitk() -> None:
     """
     Configure SimpleITK's global thread pool.
+
     Call this after SimpleITK has been imported.
 
     NOTE: This is a major source of CPU oversubscription! SimpleITK's
@@ -154,14 +145,31 @@ def configure_sitk():
         pass
 
 
-def apply_threadpool_limits():
+def configure_torch() -> None:
+    """
+    Configure PyTorch's intra- and inter-op thread pools (used by BaSiCPy).
+
+    Call this after torch has been imported.
+    """
+    try:
+        import torch
+
+        max_threads = int(os.environ.get("OMP_NUM_THREADS", multiprocessing.cpu_count()))
+        torch.set_num_threads(max_threads)
+        torch.set_num_interop_threads(max_threads)
+    except (ImportError, RuntimeError):
+        pass
+
+
+def apply_threadpool_limits() -> object | None:
     """
     Apply thread limits using threadpoolctl after libraries are loaded.
 
     This provides runtime control over thread pools that may not respect
     environment variables. Call this after numpy/scipy are imported.
 
-    Returns:
+    Returns
+    -------
         threadpoolctl.ThreadpoolController context or None if not available
     """
     try:
@@ -177,7 +185,7 @@ def apply_threadpool_limits():
         return None
 
 
-def configure_all_libraries():
+def configure_all_libraries() -> int:
     """
     Configure thread limits for ALL known libraries that have been imported.
 
@@ -190,7 +198,8 @@ def configure_all_libraries():
     3. Runtime threadpool limiting via threadpoolctl
     4. Numba's thread pool
 
-    Returns:
+    Returns
+    -------
         int: The configured thread limit
     """
     global _thread_config_applied
@@ -204,6 +213,10 @@ def configure_all_libraries():
     # Configure dask if imported
     if "dask" in sys.modules:
         configure_dask()
+
+    # Configure torch if imported (used by BaSiCPy)
+    if "torch" in sys.modules:
+        configure_torch()
 
     # Configure numba if imported
     if "numba" in sys.modules:
@@ -221,12 +234,14 @@ def configure_all_libraries():
     return max_threads
 
 
-def get_thread_info():
+def get_thread_info() -> dict:
     """
     Get diagnostic information about current thread configuration.
+
     Useful for debugging CPU usage issues.
 
-    Returns:
+    Returns
+    -------
         dict: Thread configuration information
     """
     info = {
@@ -260,7 +275,7 @@ def get_thread_info():
     return info
 
 
-def print_thread_info():
+def print_thread_info() -> None:
     """Print thread configuration for debugging."""
     info = get_thread_info()
     print(f"CPU cores: {info['total_cpus']}")
@@ -273,9 +288,9 @@ def print_thread_info():
         print(f"  {lib}: {val}")
 
 
-def worker_initializer():
+def worker_initializer() -> None:
     """
-    Initializer function for multiprocessing workers.
+    Initialize multiprocessing workers.
 
     Use this as the `initializer` argument for multiprocessing.Pool or
     concurrent.futures.ProcessPoolExecutor to ensure worker processes
@@ -283,7 +298,7 @@ def worker_initializer():
 
     Example:
         from multiprocessing import Pool
-        from linumpy._thread_config import worker_initializer
+        from linumpy.config.threads import worker_initializer
 
         with Pool(n_workers, initializer=worker_initializer) as pool:
             results = pool.map(my_function, data)
