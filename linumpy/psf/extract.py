@@ -1,17 +1,26 @@
+"""Extract PSF parameters (focal depth, Rayleigh length) from a stitched mosaic."""
+
 import numpy as np
 from scipy.ndimage import binary_dilation, binary_fill_holes, gaussian_filter
 from scipy.stats import zscore
 from skimage.filters import threshold_li
 from skimage.morphology import disk
 
-from linumpy.preproc.icorr import confocalPSF, fit_TissueConfocalModel
-from linumpy.preproc.xyzcorr import findTissueInterface
+from linumpy.geometry.interface import find_tissue_interface
+from linumpy.intensity.psf_model import confocal_psf, fit_tissue_confocal_model
 
 
 # TODO: Fine-tune default values for 10x microscope or give heuristic
 # for fixing them.
-def extract_psfParametersFromMosaic(vol, f=0.01, nProfiles=10, zr_0=610.0, res=6.5, nIterations=15):
-    """Computes the confocal PSF from a slice
+def extract_psf_parameters_from_mosaic(
+    vol: np.ndarray,
+    f: float = 0.01,
+    n_profiles: int = 10,
+    zr_0: float = 610.0,
+    res: float = 6.5,
+    n_iterations: int = 15,
+) -> tuple[float, float]:
+    """Compute the confocal PSF from a slice.
 
     Parameters
     ----------
@@ -19,12 +28,14 @@ def extract_psfParametersFromMosaic(vol, f=0.01, nProfiles=10, zr_0=610.0, res=6
         A stitched tissue slice with axes in order (x, y, z).
     f : float
         Smoothing factor (in fraction of image size).
-    nProfiles : int
+    n_profiles : int
         Number of intensity profile to use.
     zr_0 : float
         Initial Rayleigh length to use in micron (default=%(default)s for a 3X objective)
     res : float
         Z resolution (in micron).
+    n_iterations : int
+        Number of fitting iterations.
 
     Returns
     -------
@@ -32,13 +43,12 @@ def extract_psfParametersFromMosaic(vol, f=0.01, nProfiles=10, zr_0=610.0, res=6
         Focal depth (zf) and Rayleigh length (zr) in micron
 
     """
-
     nx, ny, nz = vol.shape
     k = int(0.5 * f * (nx + ny))
     aip = vol.mean(axis=2)
 
     # Compute water-tissue interface
-    interface = findTissueInterface(vol).astype(int)
+    interface = find_tissue_interface(vol).astype(int)
 
     # Compute the agarose mask with the li thresholding method
     thresh = threshold_li(aip)
@@ -51,49 +61,51 @@ def extract_psfParametersFromMosaic(vol, f=0.01, nProfiles=10, zr_0=610.0, res=6
     zmin = np.percentile(interface[mask_agarose], 2.5)
 
     # Get the average iProfile / interface depth
-    profilePerInterfaceDepth = np.zeros((nProfiles, nz))
-    for ii in range(nProfiles):
+    profile_per_interface_depth = np.zeros((n_profiles, nz))
+    for ii in range(n_profiles):
         for z in range(nz):
-            profilePerInterfaceDepth[ii, z] = np.mean(vol[:, :, z][mask_agarose * (interface == zmin + ii)])
+            profile_per_interface_depth[ii, z] = np.mean(vol[:, :, z][mask_agarose * (interface == zmin + ii)])
 
     # Detect outliers
-    iProfile_gradient = np.abs(gaussian_filter(profilePerInterfaceDepth, sigma=(0, 2), order=1))
-    profile_mask = np.abs(zscore(iProfile_gradient, axis=1)) <= 1.0
-    for ii in range(nProfiles):
+    i_profile_gradient = np.abs(gaussian_filter(profile_per_interface_depth, sigma=(0, 2), order=1))
+    profile_mask = np.abs(zscore(i_profile_gradient, axis=1)) <= 1.0
+    for ii in range(n_profiles):
         profile_mask[ii, 0 : int(zmin + ii)] = 0
 
     z = np.linspace(0, nz * res, nz)
-    zf_list = list()
-    zr_list = list()
-    total_err = list()
-    for z0 in range(nProfiles):
+    zf_list = []
+    zr_list = []
+    total_err = []
+    for z0 in range(n_profiles):
         # Find the coarse alignment of the focus based on
         # pre-established Rayleigh length from thorlab
-        errList = list()
+        err_list = []
         for zf in range(nz):
-            a = profilePerInterfaceDepth[z0, zf]
-            synthetic_signal = confocalPSF(z, zf, zr_0, a)
-            err = np.abs(synthetic_signal - profilePerInterfaceDepth[z0, :])
+            a = profile_per_interface_depth[z0, zf]
+            synthetic_signal = confocal_psf(z, zf, zr_0, a)
+            err = np.abs(synthetic_signal - profile_per_interface_depth[z0, :])
             err = np.mean(err[profile_mask[z0, :]])
-            errList.append(err)
+            err_list.append(err)
 
-        errList = np.array(errList)
-        zf = np.argmin(errList) * res
-        a = profilePerInterfaceDepth[z0, int(zf / res)]
+        err_list = np.array(err_list)
+        zf = np.argmin(err_list) * res
+        a = profile_per_interface_depth[z0, int(zf / res)]
+        zr: float = float(zr_0)
+        output: dict = {}
 
         if not (np.isnan(a)):
             last_zr = zr_0
-            for _ in range(nIterations):
+            for _ in range(n_iterations):
                 # Optimize the model (without using attenuation)
-                iProfile = profilePerInterfaceDepth[z0, :]
-                output = fit_TissueConfocalModel(
-                    iProfile,
+                i_profile = profile_per_interface_depth[z0, :]
+                output = fit_tissue_confocal_model(
+                    i_profile,
                     int(z0 + zmin),
                     last_zr,
                     res,
-                    returnParameters=True,
-                    return_fullModel=True,
-                    useBumpModel=True,
+                    return_parameters=True,
+                    return_full_model=True,
+                    use_bump_model=True,
                 )
                 zf = output["parameters"]["zf"]
                 zr = output["parameters"]["zr"]
@@ -101,7 +113,7 @@ def extract_psfParametersFromMosaic(vol, f=0.01, nProfiles=10, zr_0=610.0, res=6
 
             zf_list.append(zf)
             zr_list.append(zr)
-            err_fit = (output["tissue_psf"] - profilePerInterfaceDepth[z0, :]) ** 2.0
+            err_fit = (output["tissue_psf"] - profile_per_interface_depth[z0, :]) ** 2.0
             total_err.append(np.mean(err_fit))
 
     min_err = np.argmin(total_err)
@@ -109,31 +121,3 @@ def extract_psfParametersFromMosaic(vol, f=0.01, nProfiles=10, zr_0=610.0, res=6
     zr_final = zr_list[min_err]
 
     return zf_final, zr_final
-
-
-def get_3dPSF(zf, zr, res, volshape):
-    """Generate a 3D PSF based on Gaussian beam parameters.
-
-    Parameters
-    ----------
-    zf : float
-        Focal depth in microns
-    zr : float
-        Rayleigh length in microns
-    res : float
-        Axial resolution in micron / pixel
-    volshape : (3,) list of int
-        Output volume shape in pixel
-
-    Returns
-    -------
-    ndarray
-        3D PSF of shape 'volshape'
-    """
-    # TODO: Invert axes to agree with OME-zarr convention?
-    nx, ny, nz = volshape[0:3]
-    z = np.linspace(0, res * nz, nz)
-    psf = confocalPSF(z, zf, zr)
-    psf = np.tile(np.reshape(psf, (1, 1, nz)), (nx, ny, 1))
-
-    return psf
