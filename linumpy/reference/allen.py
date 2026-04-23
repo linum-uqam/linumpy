@@ -1,6 +1,4 @@
-"""
-Methods to download data from the Allen Institute
-"""
+"""Methods to download data from the Allen Institute."""
 
 from pathlib import Path
 
@@ -12,7 +10,8 @@ AVAILABLE_RESOLUTIONS = [10, 25, 50, 100]
 
 
 def download_template(resolution: int, cache: bool = True, cache_dir: str = ".data/") -> sitk.Image:
-    """Download a 3D average mouse brain
+    """Download a 3D average mouse brain.
+
     Parameters
     ----------
     resolution
@@ -21,6 +20,7 @@ def download_template(resolution: int, cache: bool = True, cache_dir: str = ".da
         Keep the downloaded volume in cache
     cache_dir
         Cache directory
+
     Returns
     -------
     Allen average mouse brain.
@@ -41,7 +41,7 @@ def download_template(resolution: int, cache: bool = True, cache_dir: str = ".da
     if not (nrrd_file.is_file()):
         # Download the template
         response = requests.get(url, stream=True)
-        with open(nrrd_file, "wb") as f:
+        with nrrd_file.open("wb") as f:
             for data in tqdm(response.iter_content()):
                 f.write(data)
 
