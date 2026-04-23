@@ -22,7 +22,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=[1.0] * 3,
         metavar=("z", "y", "x"),
         help="Resolution in micrometer in the Z, Y, X order. "
-        "For an isotropic resolution, provide a single value. (default=%(default)s)",
+        "For an isotropic resolution, provide a single value. [%(default)s]",
     )
 
     return p

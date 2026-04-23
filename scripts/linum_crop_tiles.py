@@ -19,10 +19,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "output_image", type=Path, default=None, help="Full path to the cropped mosaic grid image (must be .tiff or .tif)"
     )
-    p.add_argument("--xmin", type=int, default=0, help="Minimum x limit in pixel (default=%(default)s)")
-    p.add_argument("--xmax", type=int, default=-1, help="Minimum x limit in pixel (default=%(default)s)")
-    p.add_argument("--ymin", type=int, default=0, help="Minimum y limit in pixel (default=%(default)s)")
-    p.add_argument("--ymax", type=int, default=-1, help="Minimum y limit in pixel (default=%(default)s)")
+    p.add_argument("--xmin", type=int, default=0, help="Minimum x limit in pixel [%(default)s]")
+    p.add_argument("--xmax", type=int, default=-1, help="Minimum x limit in pixel [%(default)s]")
+    p.add_argument("--ymin", type=int, default=0, help="Minimum y limit in pixel [%(default)s]")
+    p.add_argument("--ymax", type=int, default=-1, help="Minimum y limit in pixel [%(default)s]")
     p.add_argument(
         "-t",
         "--tile_shape",
@@ -30,7 +30,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=400,
         help="Tile shape in pixel. You can provide both the row and col shape if different. Additional "
-        "shapes will be ignored. (default=%(default)s)",
+        "shapes will be ignored. [%(default)s]",
     )
 
     return p

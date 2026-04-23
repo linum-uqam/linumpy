@@ -32,8 +32,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help='Comma-separated list of actual slice IDs (e.g., "05,12,18"). '
         "If provided, these will be shown instead of sequential numbers.",
     )
-    p.add_argument("--font_size", type=int, default=7, help="Font size for slice labels (default: 7)")
-    p.add_argument("--label_every", type=int, default=1, help="Label every Nth slice (default: 1, label all)")
+    p.add_argument("--font_size", type=int, default=7, help="Font size for slice labels [%(default)s]")
+    p.add_argument("--label_every", type=int, default=1, help="Label every Nth slice (1 = label all) [%(default)s]")
     p.add_argument("--show_lines", action="store_true", help="Draw horizontal lines at slice boundaries")
     p.add_argument(
         "--orientation",

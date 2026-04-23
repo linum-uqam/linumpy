@@ -24,7 +24,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default="none",
         choices=["none", "average", "diffusion"],
-        help="Blending method. (default=%(default)s)",
+        help="Blending method. [%(default)s]",
     )
     p.add_argument(
         "-t",
@@ -33,7 +33,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=512,
         help="Tile shape in pixel. You can provide both the row and col shape if different. Additional "
-        "shapes will be ignored. (default=%(default)s)",
+        "shapes will be ignored. [%(default)s]",
     )
     return p
 

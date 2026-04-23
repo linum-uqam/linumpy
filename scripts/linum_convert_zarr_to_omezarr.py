@@ -24,7 +24,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         nargs="+",
         type=float,
         default=[1.0],
-        help="Resolution of the image in microns. (default=%(default)s)",
+        help="Resolution of the image in microns. [%(default)s]",
     )
     p.add_argument("--n_levels", type=int, default=5, help="Number of levels in pyramidal decomposition. [%(default)s]")
 

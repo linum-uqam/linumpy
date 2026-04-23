@@ -36,10 +36,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=512,
         help="Tile shape in pixel. You can provide both the row and col shape if different. Additional "
-        "shapes will be ignored. (default=%(default)s)",
+        "shapes will be ignored. [%(default)s]",
     )
     p.add_argument(
-        "--n_samples", type=int, default=512, help="Maximum number of tiles to use for the optimization. (default=%(default)s)"
+        "--n_samples", type=int, default=512, help="Maximum number of tiles to use for the optimization. [%(default)s]"
     )
     p.add_argument("--use_log", action="store_true", help="Perform optimization and correction in log space.")
     p.add_argument("--working_size", type=int, default=128)

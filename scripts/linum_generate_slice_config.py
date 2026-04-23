@@ -55,7 +55,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     source_group.add_argument("--from_shifts", action="store_true", help="Input is an existing shifts_xy.csv file")
 
     p.add_argument("--exclude", nargs="+", type=int, default=[], help="List of slice IDs to exclude (set use=false)")
-    p.add_argument("--exclude_first", type=int, default=1, help="Exclude first N slices as calibration slices (default: 1)")
+    p.add_argument("--exclude_first", type=int, default=1, help="Exclude first N slices as calibration slices [%(default)s]")
 
     # Galvo detection options
     galvo_group = p.add_argument_group("Galvo Detection", "Detect galvo shift artifacts in raw tiles")
@@ -66,7 +66,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--tiles_dir", type=str, default=None, help="Raw tiles directory for galvo detection (if input is shifts file)"
     )
     galvo_group.add_argument(
-        "--galvo_threshold", type=float, default=0.6, help="Confidence threshold for galvo fix (default: 0.6)"
+        "--galvo_threshold", type=float, default=0.6, help="Confidence threshold for galvo fix [%(default)s]"
     )
 
     add_overwrite_arg(p)

@@ -93,9 +93,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--n_calibration_slices",
         type=int,
         default=1,
-        help="Number of leading calibration slices to skip when\n"
-        "reading per-slice metadata (default: 1, i.e. skip\n"
-        "slice_z00 which is a calibration slice). [%(default)s]",
+        help="Number of leading calibration slices to skip when reading per-slice metadata [%(default)s].",
     )
     p.add_argument(
         "--axial_res_um",

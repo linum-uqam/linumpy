@@ -22,7 +22,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("output_dir", help="Output directory for comparison results")
     p.add_argument("--label1", type=str, default="Motor-only", help="Label for first volume [%(default)s]")
     p.add_argument("--label2", type=str, default="Refined", help="Label for second volume [%(default)s]")
-    p.add_argument("--z_slice", type=int, default=None, help="Z-slice to compare (default: middle)")
+    p.add_argument("--z_slice", type=int, default=None, help="Z-slice to compare. Uses middle slice when None.")
     p.add_argument("--tile_step", type=int, default=60, help="Approximate tile step for seam detection [%(default)s]")
     return p
 

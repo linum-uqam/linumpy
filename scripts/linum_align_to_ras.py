@@ -80,28 +80,30 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_ALLEN_RESOLUTION,
         choices=allen.AVAILABLE_RESOLUTIONS,
-        help=f"Allen atlas resolution in micron (default: {DEFAULT_ALLEN_RESOLUTION})",
+        help="Allen atlas resolution in micron [%(default)s]",
     )
     p.add_argument(
         "--metric",
         type=str,
         default=DEFAULT_METRIC,
         choices=["MI", "MSE", "CC", "AntsCC"],
-        help=f"Registration metric (default: {DEFAULT_METRIC})",
+        help="Registration metric [%(default)s]",
     )
     p.add_argument(
         "--max-iterations",
         type=int,
         default=DEFAULT_MAX_ITERATIONS,
-        help=f"Maximum registration iterations (default: {DEFAULT_MAX_ITERATIONS})",
+        help="Maximum registration iterations [%(default)s]",
     )
     p.add_argument(
         "--store-transform-only", action="store_true", help="Store transform in metadata only (don't resample volume)"
     )
-    p.add_argument("--level", type=int, default=0, help="Pyramid level to use for registration (default: 0 = full resolution)")
-    p.add_argument("--chunks", type=int, nargs=3, default=None, help="Chunk size for output zarr (default: use input chunks)")
+    p.add_argument("--level", type=int, default=0, help="Pyramid level for registration (0 = full resolution) [%(default)s]")
     p.add_argument(
-        "--n-levels", type=int, default=None, help="Number of pyramid levels for output (default: use Allen atlas resolutions)"
+        "--chunks", type=int, nargs=3, default=None, help="Chunk size for output zarr. Uses input chunks when None."
+    )
+    p.add_argument(
+        "--n-levels", type=int, default=None, help="Number of pyramid levels for output. Uses Allen atlas levels when None."
     )
     p.add_argument(
         "--pyramid_resolutions",

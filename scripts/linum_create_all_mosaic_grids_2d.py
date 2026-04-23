@@ -23,17 +23,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--resolution",
         type=float,
         default=-1,
-        help="Output isotropic resolution in micron per pixel. "
-        "(Use -1 to keep the original resolution). (default=%(default)s)",
+        help="Output isotropic resolution in micron per pixel. (Use -1 to keep the original resolution). [%(default)s]",
     )
-    p.add_argument(
-        "-e", "--extension", default=".tiff", choices=[".tiff", ".zarr"], help="Output extension (default=%(default)s)"
-    )
+    p.add_argument("-e", "--extension", default=".tiff", choices=[".tiff", ".zarr"], help="Output extension [%(default)s]")
     p.add_argument(
         "--n_cpus",
         type=int,
         default=-1,
-        help="Number of CPUs to use for parallel processing (default=%(default)s). If -1, all CPUs - 1 are used.",
+        help="Number of CPUs to use for parallel processing [%(default)s]. If -1, all CPUs - 1 are used.",
     )
 
     return p

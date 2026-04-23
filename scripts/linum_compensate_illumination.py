@@ -40,7 +40,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=400,
         help="Tile shape in pixel. You can provide both the row and col shape if different. Additional "
-        "shapes will be ignored. (default=%(default)s)",
+        "shapes will be ignored. [%(default)s]",
     )
     return p
 

@@ -19,9 +19,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input", type=Path, help="Full path to a 3D .nii file")
     p.add_argument("zarr_directory", type=Path, help="Full path to the .zarr directory")
-    p.add_argument("--chunk_size", type=int, default=128, help="Chunk size in pixel (default=%(default)s)")
-    p.add_argument("--n_levels", type=int, default=5, help="Number of levels in the pyramid.  (default=%(default)s)")
-    p.add_argument("--normalize", action="store_true", help="Normalize the data (default=%(default)s)")
+    p.add_argument("--chunk_size", type=int, default=128, help="Chunk size in pixel [%(default)s]")
+    p.add_argument("--n_levels", type=int, default=5, help="Number of levels in the pyramid.  [%(default)s]")
+    p.add_argument("--normalize", action="store_true", help="Normalize the data [%(default)s]")
     return p
 
 

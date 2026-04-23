@@ -31,13 +31,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("output_volume", help="Assembled volume filename (must be a .zarr)")
     p.add_argument("--xy_shifts", required=False, default=None, help="CSV file containing the xy shifts for each slice")
-    p.add_argument("--resolution_xy", type=float, default=1.0, help="Lateral (xy) resolution in micron. (default=%(default)s)")
+    p.add_argument("--resolution_xy", type=float, default=1.0, help="Lateral (xy) resolution in micron. [%(default)s]")
     p.add_argument(
         "--resolution_z",
         type=float,
         default=1.0,
-        help="Axial (z) resolution in micron, corresponding to the z distance "
-        "between images in the stack. (default=%(default)s)",
+        help="Axial (z) resolution in micron, corresponding to the z distance between images in the stack. [%(default)s]",
     )
     return p
 

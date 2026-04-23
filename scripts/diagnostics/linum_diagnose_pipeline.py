@@ -4,7 +4,7 @@ Diagnostic script for linumpy 3D reconstruction pipeline performance.
 
 This script checks the server configuration to identify bottlenecks:
 - CPU core detection and thread configuration
-- GPU availability and CUDA setup
+- GPU availability and CUDA setup (CuPy for linumpy GPU ops; PyTorch for BaSiCPy)
 - Memory availability
 - Nextflow parameter recommendations
 - Performance baseline tests
@@ -86,7 +86,6 @@ class SystemDiagnostics:
             "NUMEXPR_NUM_THREADS",
             "NUMBA_NUM_THREADS",
             "ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS",
-            "XLA_FLAGS",
             "LINUMPY_MAX_CPUS",
             "LINUMPY_RESERVED_CPUS",
         ]
@@ -277,6 +276,7 @@ class SystemDiagnostics:
             ("numpy", "numpy"),
             ("scipy", "scipy"),
             ("basicpy", "basicpy"),
+            ("torch", "torch"),
             ("pqdm", "pqdm"),
             ("dask", "dask"),
             ("zarr", "zarr"),
@@ -378,147 +378,24 @@ class SystemDiagnostics:
             print_subheader("GPU Performance")
             self._run_gpu_benchmark()
 
-    def _get_cuda12_ld_path(self, debug: bool = False) -> tuple[str, list[str]]:
-        """Build LD_LIBRARY_PATH for CUDA 12 compatible libraries."""
-        import contextlib
-        import importlib.util
-        import site
-        import sysconfig
-
-        # Collect all site-packages dirs (uv venvs may order them differently)
-        site_packages_dirs = []
-        with contextlib.suppress(Exception):
-            site_packages_dirs.extend(site.getsitepackages())
-        for key in ("purelib", "platlib"):
-            with contextlib.suppress(Exception):
-                p = sysconfig.get_path(key)
-                if p and p not in site_packages_dirs:
-                    site_packages_dirs.append(p)
-
-        cuda_paths = []
-
-        # Method 1: Check for system CUDA 12 installation
-        system_cuda_paths = [
-            "/usr/local/cuda-12.4/lib64",
-            "/usr/local/cuda-12/lib64",
-            "/usr/local/cuda/lib64",
-        ]
-        for cuda_path in system_cuda_paths:
-            cublas_path = os.path.join(cuda_path, "libcublas.so.12")
-            if os.path.exists(cublas_path):
-                cuda_paths.append(cuda_path)
-                if debug:
-                    print(f"    Found system CUDA 12: {cuda_path}")
-                break
-
-        # Method 2: -cu12 pip packages, searched across all site-packages dirs.
-        # nvidia-nccl-cu12 must be >=2.21.5 for torch compat (ncclCommWindowDeregister).
-        cu12_lib_dirs = [
-            "nvidia/cublas/lib",
-            "nvidia/cuda_runtime/lib",
-            "nvidia/cusolver/lib",
-            "nvidia/cusparse/lib",
-            "nvidia/cufft/lib",
-            "nvidia/cudnn/lib",
-            "nvidia/nvjitlink/lib",
-            "nvidia/nccl/lib",
-        ]
-        for sp in site_packages_dirs:
-            for lib_dir in cu12_lib_dirs:
-                full_path = os.path.join(sp, lib_dir)
-                if os.path.isdir(full_path) and full_path not in cuda_paths:
-                    cuda_paths.append(full_path)
-                    if debug:
-                        print(f"    Found nvidia lib: {full_path}")
-
-        # Method 3: torch/lib — located via importlib to be reliable across venv types
-        try:
-            torch_spec = importlib.util.find_spec("torch")
-            if torch_spec and torch_spec.origin:
-                torch_lib = os.path.join(os.path.dirname(torch_spec.origin), "lib")
-                if os.path.isdir(torch_lib) and torch_lib not in cuda_paths:
-                    cuda_paths.append(torch_lib)
-                    if debug:
-                        print(f"    Found torch lib: {torch_lib}")
-        except Exception:
-            pass
-
-        # Build clean LD_LIBRARY_PATH
-        new_ld_path = ":".join(cuda_paths)
-
-        return new_ld_path, cuda_paths
-
     def _run_basic_benchmark(self) -> None:
-        """Run BaSiC benchmark in subprocess with proper LD_LIBRARY_PATH for CUDA."""
-        try:
-            new_ld_path, cuda_paths = self._get_cuda12_ld_path(debug=False)
-
-            if not cuda_paths:
-                print("  ⚠️  No CUDA libraries found")
-                print("     Run: source scripts/fix_jax_cuda_plugin.sh")
-                return
-
-            # Show paths being used
-            print(f"  Using {len(cuda_paths)} CUDA library paths")
-
-            benchmark_code = """
+        """Run BaSiC benchmark (BaSiCPy 2.0+ uses PyTorch backend)."""
+        benchmark_code = """
 import sys
-import os
-import ctypes
-
-# Debug: print LD_LIBRARY_PATH
-ld_path = os.environ.get('LD_LIBRARY_PATH', '')
-paths = [p for p in ld_path.split(':') if p]
-print(f"DEBUG_LD_PATHS:{len(paths)}")
-
-# Debug: Check if key .so.12 files exist in LD_LIBRARY_PATH
-for p in paths[:3]:  # Check first 3 paths
-    import glob
-    so12_files = glob.glob(os.path.join(p, "*.so.12"))
-    if so12_files:
-        print(f"DEBUG_SO12_PATH:{p}:{len(so12_files)}")
-
-# CRITICAL: Preload CUDA libraries BEFORE importing JAX
-# This ensures the correct libraries from cu13/lib are used
-print("DEBUG_STAGE:preloading_cuda")
-for lib in [
-    'libcudart.so.12', 'libcublas.so.12', 'libcublasLt.so.12',
-    'libcusolver.so.12', 'libcufft.so.12', 'libcusparse.so.12',
-    'libnccl.so.2', 'libnvJitLink.so.12',
-]:
-    for path in paths:
-        lib_path = os.path.join(path, lib)
-        if os.path.exists(lib_path):
-            try:
-                ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
-            except:
-                pass
-            break
-
 import time
 import numpy as np
 
 try:
-    # Try to import JAX first to get better error messages
-    print("DEBUG_STAGE:importing_jax")
-    import jax
+    import torch
+    has_cuda = torch.cuda.is_available()
+    mode = "GPU" if has_cuda else "CPU"
+    print(f"DEBUG_TORCH_MODE:{mode}")
+    if has_cuda:
+        print(f"DEBUG_TORCH_DEVICE:{torch.cuda.get_device_name(0)}")
 
-    # Try to initialize JAX with CUDA before importing BaSiC
-    print("DEBUG_STAGE:checking_devices")
-    devices = jax.devices()
-    device_strs = [str(d) for d in devices]
-    print(f"DEBUG_JAX_DEVICES:{','.join(device_strs)}")
-
-    has_gpu = any('cuda' in str(d).lower() for d in devices)
-    mode = "GPU" if has_gpu else "CPU"
-    print(f"DEBUG_JAX_MODE:{mode}")
-
-    print("DEBUG_STAGE:importing_basicpy")
     from basicpy import BaSiC
-
     tiles = np.random.rand(16, 256, 256).astype(np.float32) * 1000
 
-    print("DEBUG_STAGE:fitting")
     start = time.perf_counter()
     optimizer = BaSiC(get_darkfield=False, max_iterations=100)
     optimizer.fit(tiles)
@@ -531,56 +408,23 @@ except Exception as e:
     traceback.print_exc()
     sys.exit(1)
 """
-
-            # Create a clean environment with ONLY our verified CUDA paths
-            # Don't use os.environ.copy() to avoid inheriting polluted paths
-            env = {}
-            # Copy essential env vars but NOT LD_LIBRARY_PATH
-            essential_vars = [
-                "PATH",
-                "HOME",
-                "USER",
-                "LANG",
-                "TERM",
-                "SHELL",
-                "PYTHONPATH",
-                "VIRTUAL_ENV",
-                "CONDA_PREFIX",
-                "PYENV_ROOT",
-            ]
-            for var in essential_vars:
-                if var in os.environ:
-                    env[var] = os.environ[var]
-
-            # Set our clean LD_LIBRARY_PATH
-            env["LD_LIBRARY_PATH"] = new_ld_path
-
-            # Debug: show what we're setting
-            if self.verbose:
-                print(f"  Setting clean LD_LIBRARY_PATH: {new_ld_path}")
-
+        try:
             result = subprocess.run(
-                [sys.executable, "-c", benchmark_code], capture_output=True, text=True, timeout=120, env=env
+                [sys.executable, "-c", benchmark_code],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env=dict(os.environ),
             )
 
-            # Parse debug info and result
             success_line = None
-            last_stage = None
             for line in result.stdout.strip().split("\n"):
-                if line.startswith("DEBUG_LD_PATHS:"):
-                    n_paths = line.split(":")[1]
-                    print(f"  LD_LIBRARY_PATH has {n_paths} entries")
-                elif line.startswith("DEBUG_SO12_PATH:"):
-                    parts = line.split(":")
-                    path, count = parts[1], parts[2]
-                    print(f"  Found {count} .so.12 files in: {os.path.basename(path)}/")
-                elif line.startswith("DEBUG_JAX_DEVICES:"):
-                    devices = line.split(":")[1]
-                    print(f"  JAX devices: {devices}")
-                elif line.startswith("DEBUG_JAX_MODE:"):
-                    _ = line.split(":")[1]
-                elif line.startswith("DEBUG_STAGE:"):
-                    last_stage = line.split(":")[1]
+                if line.startswith("DEBUG_TORCH_MODE:"):
+                    mode = line.split(":", 1)[1]
+                    print(f"  PyTorch mode: {mode}")
+                elif line.startswith("DEBUG_TORCH_DEVICE:"):
+                    device = line.split(":", 1)[1]
+                    print(f"  GPU device: {device}")
                 elif line.startswith("SUCCESS:"):
                     success_line = line
 
@@ -591,23 +435,16 @@ except Exception as e:
                 print(f"  BaSiC fit 16 tiles @ (256, 256): {elapsed:.2f}s ({mode})")
                 self.results["linumpy"]["basic_16x256"] = elapsed
                 if mode == "GPU":
-                    print("  ✅ JAX GPU acceleration working")
+                    print("  ✅ PyTorch GPU acceleration working")
                 else:
-                    print("  ⚠️  Running on CPU - check CUDA 12 library setup")
+                    print("  ⚠️  Running on CPU (no CUDA GPU detected)")
             else:
-                # Real failure - analyze the error
                 error_out = result.stderr + result.stdout
-                if last_stage:
-                    print(f"  Failed during stage: {last_stage}")
                 self._handle_basic_error(error_out)
-
-                # Show full traceback if verbose
                 if self.verbose:
                     print("\n  --- Full subprocess output ---")
-                    print("  STDOUT:")
                     for line in result.stdout.split("\n")[-20:]:
                         print(f"    {line}")
-                    print("  STDERR:")
                     for line in result.stderr.split("\n")[-30:]:
                         print(f"    {line}")
 
@@ -620,131 +457,24 @@ except Exception as e:
         """Handle BaSiC benchmark errors with specific guidance."""
         error_lower = error_out.lower()
 
-        if "libcublas" in error_lower or "cannot open shared object" in error_lower:
-            print("  ❌ BaSiC failed: CUDA 12 libraries not in LD_LIBRARY_PATH")
-            print("")
-            print("     The nvidia-*-cu12 packages are installed but not accessible.")
-            print("     You need to set LD_LIBRARY_PATH before running:")
-            print("")
-            print("     Quick test:")
-            print("       jax_cuda12_env() {")
-            print('         local sp=$(python -c "import site; print(site.getsitepackages()[0])")')
-            print(
-                '         echo "${sp}/nvidia/cublas/lib:${sp}/nvidia/cuda_runtime/lib:${sp}/nvidia/cudnn/lib:${sp}/nvidia/cufft/lib:${sp}/nvidia/cusolver/lib:${sp}/nvidia/cusparse/lib:${LD_LIBRARY_PATH}"'
-            )
-            print("       }")
-            print("       LD_LIBRARY_PATH=$(jax_cuda12_env) linum_diagnose_pipeline.py --benchmark")
-            print("")
-            print("     See docs/GPU_ACCELERATION.md for permanent setup.")
-        elif "cuda_plugin_extension" in error_lower and "not found" in error_lower:
-            # This is a JAX plugin loading issue, not a library path issue
-            print("  ❌ BaSiC failed: JAX CUDA plugin extension not found")
-            print("")
-            print("     The JAX CUDA plugin failed to load its native extension.")
-            print("     This happens when the plugin can't find compatible CUDA libraries at load time.")
-            print("")
-            print("     The 'cuda_plugin_extension is not found' message means JAX fell back to CPU")
-            print("     but then tried to use GPU operations which failed.")
-            print("")
-            print("     FIX: Reinstall JAX CUDA plugin with correct LD_LIBRARY_PATH set FIRST:")
-            print("")
-            print("       # 1. Set LD_LIBRARY_PATH before reinstalling")
-            print('       SP=$(python -c "import site; print(site.getsitepackages()[0])")')
-            print(
-                '       export LD_LIBRARY_PATH="${SP}/nvidia/cublas/lib:${SP}/nvidia/cuda_runtime/lib:${SP}/nvidia/nvjitlink/lib:${SP}/nvidia/cudnn/lib:${SP}/nvidia/cu13/lib"'
-            )
-            print("")
-            print("       # 2. Reinstall JAX CUDA plugin")
-            print("       pip uninstall jax-cuda12-plugin jax-cuda12-pjrt -y")
-            print("       pip install jax-cuda12-plugin==0.4.23")
-            print("")
-            print("       # 3. Test")
-            print('       python -c "import jax; print(jax.devices())"')
-        elif "build_gesvd_descriptor" in error_lower or "cusolver" in error_lower:
-            print("  ❌ BaSiC failed: CUDA cusolver library issue")
-            print("")
-            if "nonetype" in error_lower or "none" in error_lower:
-                print("     JAX couldn't initialize the cusolver library.")
-                print("     This is usually caused by the CUDA plugin failing to load.")
-                print("")
-                print("     Check for 'cuda_plugin_extension is not found' warning when importing JAX.")
-                print("     If present, the plugin needs to be reinstalled with LD_LIBRARY_PATH set.")
-                print("")
-                print("     FIX:")
-                print("       # Set LD_LIBRARY_PATH first")
-                print('       SP=$(python -c "import site; print(site.getsitepackages()[0])")')
-                print(
-                    '       export LD_LIBRARY_PATH="${SP}/nvidia/cublas/lib:${SP}/nvidia/cuda_runtime/lib:${SP}/nvidia/cusolver/lib:${SP}/nvidia/cudnn/lib"'
-                )
-                print("")
-                print("       # Or run the fix script:")
-                print("       source scripts/fix_jax_cuda_plugin.sh")
-            else:
-                print("     cusolver initialization failed. Check JAX CUDA plugin status:")
-                print('       python -c "import jax; print(jax.devices())"')
-        elif "executable stack" in error_lower or "enable executable stack" in error_lower:
-            print("  ❌ BaSiC failed: Kernel blocking JAX CUDA plugin (executable stack)")
-            print("")
-            print("     The kernel is blocking xla_cuda_plugin.so because it has an executable stack.")
-            print("     This is a security feature in modern Linux kernels.")
-            print("")
-            print("     FIX:")
-            print("       # Install patchelf")
-            print("       sudo apt install patchelf")
-            print("")
-            print("       # Clear the executable stack flag")
-            print(
-                '       patchelf --clear-execstack $(python -c "import jax_plugins.xla_cuda12; print(jax_plugins.xla_cuda12.__path__[0])")/xla_cuda_plugin.so'
-            )
-            print("")
-            print("       # Test")
-            print('       python -c "import jax; print(jax.devices())"')
-            print("")
-            print("     NOTE: You need to re-run patchelf after reinstalling jax-cuda12-plugin.")
-        elif "cuda_plugin_extension" in error_lower or "xla_cuda12" in error_lower:
-            print("  ❌ BaSiC failed: JAX CUDA plugin issue")
-            print("")
-            # Check for specific sub-errors
-            if "undefined symbol" in error_lower:
-                print("     The JAX CUDA plugin has undefined symbols - likely a library version mismatch.")
-                print("")
-                print("     Run: source scripts/fix_jax_cuda_plugin.sh")
-                print("     This installs pinned nvidia package versions compatible with JAX 0.4.23.")
-            elif "no module" in error_lower or "import" in error_lower:
-                print("     The JAX CUDA plugin module failed to import.")
-                print("")
-                print("     Run: source scripts/fix_jax_cuda_plugin.sh")
-            else:
-                print("     The JAX CUDA 12 plugin failed to load.")
-                print("")
-                print("     Run: source scripts/fix_jax_cuda_plugin.sh")
-            print("")
-            # Show the actual error for debugging
-            print("     Full error (for debugging):")
-            # Extract just the last exception line
-            for line in reversed(error_out.split("\n")):
-                line = line.strip()
-                if line and not line.startswith("Traceback") and not line.startswith("File "):
-                    print(f"       {line[:150]}")
-                    break
-            # In verbose mode, show the full traceback
-            if self.verbose:
-                print("")
-                print("     Complete output (--verbose mode):")
-                for line in error_out.split("\n")[-30:]:  # Last 30 lines
-                    print(f"       {line}")
+        if "no module named 'basicpy'" in error_lower:
+            print("  ❌ BaSiC failed: basicpy not installed")
+            print("     Install: pip install basicpy")
+        elif "no module named 'torch'" in error_lower:
+            print("  ❌ BaSiC failed: PyTorch not installed")
+            print("     Install: pip install torch")
+        elif "cuda" in error_lower and "out of memory" in error_lower:
+            print("  ❌ BaSiC failed: GPU out of memory")
+            print("     BaSiC will automatically fall back to CPU if GPU is unavailable.")
         else:
-            # Show the actual error
             for line in error_out.split("\n"):
                 if line.startswith("ERROR:"):
                     print(f"  ❌ BaSiC failed: {line[6:]}")
                     break
             else:
                 print(f"  ❌ BaSiC failed: {error_out[:200]}")
-            # In verbose mode, show more
             if self.verbose:
-                print("")
-                print("     Complete output (--verbose mode):")
+                print("\n     Complete output (--verbose mode):")
                 for line in error_out.split("\n")[-30:]:
                     print(f"       {line}")
 

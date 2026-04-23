@@ -106,7 +106,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--band_offset",
         type=int,
         default=0,
-        help="Shift detected band_start by ±N pixels to fine-tune without re-running detection (default: 0).",
+        help="Shift detected band_start by ±N pixels to fine-tune without re-running detection [%(default)s].",
     )
     detect_group.add_argument(
         "--shift",
@@ -124,7 +124,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--min_confidence",
         type=float,
         default=0.2,
-        help="Minimum detection confidence to proceed with fix in auto mode (default: 0.2).",
+        help="Minimum detection confidence to proceed with fix in auto mode [%(default)s].",
     )
 
     config_group = p.add_argument_group("Slice config update")
@@ -147,7 +147,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=2,
         help="Pyramid level used for the preview (0=full res). Default: 2 (4× downsampled, faster). ",
     )
-    preview_group.add_argument("--cmap", default="magma", help="Colormap for the preview (default: magma).")
+    preview_group.add_argument("--cmap", default="magma", help="Colormap for the preview [%(default)s].")
 
     scan_group = p.add_argument_group(
         "Band-start scan",

@@ -29,8 +29,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
     # Optional argument
     p.add_argument("-m", "--mask", default=None, help="Optional tissue mask (.ome.zarr)")
-    p.add_argument("--s_xy", default=0.0, type=float, help="Lateral smoothing sigma (default=%(default)s)")
-    p.add_argument("--s_z", default=5.0, type=float, help="Axial smoothing sigma (default=%(default)s)")
+    p.add_argument("--s_xy", default=0.0, type=float, help="Lateral smoothing sigma [%(default)s]")
+    p.add_argument("--s_z", default=5.0, type=float, help="Axial smoothing sigma [%(default)s]")
 
     return p
 

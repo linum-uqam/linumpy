@@ -20,7 +20,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--normalize",
         action="store_true",
-        help="Normalize the data (default=%(default)s)",
+        help="Normalize the data [%(default)s]",
     )
     return p
 

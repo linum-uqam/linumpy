@@ -38,7 +38,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default="OCT",
         choices=["OCT", "PSOCT"],
-        help="Type of the data to process (default=%(default)s)",
+        help="Type of the data to process [%(default)s]",
     )
     input_g = p.add_argument_group("input")
     input_mutex_g = input_g.add_mutually_exclusive_group(required=True)
@@ -91,10 +91,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     psoct_options_g.add_argument("--angle_index", type=int, default=0, help="Angle index to process")
     psoct_options_g.add_argument("--return_complex", type=bool, default=False, help="Return Complex64 or Float32 data type")
     psoct_options_g.add_argument(
-        "--crop_first_index", type=int, default=320, help="First index for cropping on the z axis (default=%(default)s)"
+        "--crop_first_index", type=int, default=320, help="First index for cropping on the z axis [%(default)s]"
     )
     psoct_options_g.add_argument(
-        "--crop_second_index", type=int, default=750, help="Second index for cropping on the z axis (default=%(default)s)"
+        "--crop_second_index", type=int, default=750, help="Second index for cropping on the z axis [%(default)s]"
     )
     return p
 

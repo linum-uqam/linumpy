@@ -81,9 +81,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--format",
         choices=["html", "text", "zip", "auto"],
         default="auto",
-        help="Output format. 'auto' infers from extension. (default=%(default)s)",
+        help="Output format. 'auto' infers from extension. [%(default)s]",
     )
-    p.add_argument("--title", default="Pipeline Quality Report", help="Report title. (default=%(default)s)")
+    p.add_argument("--title", default="Pipeline Quality Report", help="Report title. [%(default)s]")
     p.add_argument("--verbose", action="store_true", help="Include all metric details in the report.")
     p.add_argument(
         "--overview_png", type=Path, default=None, help="Path to the main volume PNG screenshot (embedded in summary)."
@@ -91,12 +91,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--annotated_png", type=Path, default=None, help="Path to the annotated volume PNG screenshot (embedded in summary)."
     )
-    p.add_argument(
-        "--max_overview_width", type=int, default=900, help="Max pixel width for overview images. (default=%(default)s)"
-    )
-    p.add_argument(
-        "--max_thumb_width", type=int, default=380, help="Max pixel width for gallery thumbnails. (default=%(default)s)"
-    )
+    p.add_argument("--max_overview_width", type=int, default=900, help="Max pixel width for overview images. [%(default)s]")
+    p.add_argument("--max_thumb_width", type=int, default=380, help="Max pixel width for gallery thumbnails. [%(default)s]")
     p.add_argument("--no_images", action="store_true", help="Disable image discovery for zip bundles.")
     return p
 

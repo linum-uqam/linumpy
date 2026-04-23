@@ -23,7 +23,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--z_slice", type=int, help="Slice index along first axis.")
     p.add_argument("--x_slice", type=int, help="Slice index along the second axis.")
     p.add_argument("--y_slice", type=int, help="Slice index along the last axis.")
-    p.add_argument("--cmap", default="magma", help="Colormap for the figure (default: magma).")
+    p.add_argument("--cmap", default="magma", help="Colormap for the figure [%(default)s].")
     return p
 
 

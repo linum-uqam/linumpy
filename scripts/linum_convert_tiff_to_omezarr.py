@@ -49,10 +49,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("in_dimensions", nargs=3, type=float, help="Dimensions of the input data (X,Y,Z).")
     p.add_argument(
-        "--resolution", type=float, default=None, help="Output isotropic resolution in micron per pixel. (default=%(default)s)"
+        "--resolution", type=float, default=None, help="Output isotropic resolution in micron per pixel. [%(default)s]"
     )
     p.add_argument("--chunks", nargs=3, type=int, help="Chunks of the output zarr file.")
-    p.add_argument("--n_levels", type=int, default=5, help="Number of levels in the pyramid. (default=%(default)s)")
+    p.add_argument("--n_levels", type=int, default=5, help="Number of levels in the pyramid. [%(default)s]")
     p.add_argument("out_zarr", help="Output zarr file.")
     p.add_argument(
         "--zarr_root",

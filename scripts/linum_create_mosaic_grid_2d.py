@@ -35,21 +35,18 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--resolution",
         type=float,
         default=-1,
-        help="Output isotropic resolution in micron per pixel. "
-        "(Use -1 to keep the original resolution). (default=%(default)s)",
+        help="Output isotropic resolution in micron per pixel. (Use -1 to keep the original resolution). [%(default)s]",
     )
-    p.add_argument("-z", "--slice", type=int, default=0, help="Slice to process (default=%(default)s)")
+    p.add_argument("-z", "--slice", type=int, default=0, help="Slice to process [%(default)s]")
     p.add_argument(
         "--n_cpus",
         type=int,
         default=-1,
-        help="Number of CPUs to use for parallel processing (default=%(default)s). If -1, all CPUs - 1 are used.",
+        help="Number of CPUs to use for parallel processing [%(default)s]. If -1, all CPUs - 1 are used.",
     )
-    p.add_argument("--normalize", action="store_true", help="Normalize the mosaic (default=%(default)s)")
-    p.add_argument(
-        "--saturation", type=float, default=99.9, help="Saturation value for the normalization (default=%(default)s)"
-    )
-    p.add_argument("-c", "--config", type=str, default=None, help="JSON mosaic configuration file (default=%(default)s)")
+    p.add_argument("--normalize", action="store_true", help="Normalize the mosaic [%(default)s]")
+    p.add_argument("--saturation", type=float, default=99.9, help="Saturation value for the normalization [%(default)s]")
+    p.add_argument("-c", "--config", type=str, default=None, help="JSON mosaic configuration file [%(default)s]")
 
     return p
 

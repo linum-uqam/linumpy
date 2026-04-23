@@ -52,7 +52,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--initial_overlap",
         type=float,
         default=0.2,
-        help="Initial/expected overlap fraction between 0 and 1. (default=%(default)s)",
+        help="Initial/expected overlap fraction between 0 and 1. [%(default)s]",
     )
     p.add_argument(
         "-t",
@@ -62,19 +62,19 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=400,
         help="Tile shape in pixel. You can provide both the row and col shape if different. Additional "
         "shapes will be ignored. Note that this will be ignored if a zarr is provided. "
-        "The zarr chunks will be used instead. (default=%(default)s)",
+        "The zarr chunks will be used instead. [%(default)s]",
     )
     p.add_argument(
         "--maximum_empty_fraction",
         type=float,
         default=0.9,
-        help="Maximum empty pixel fraction within an overlap to tolerate (default=%(default)s)",
+        help="Maximum empty pixel fraction within an overlap to tolerate [%(default)s]",
     )
     p.add_argument(
         "--n_samples",
         type=int,
         default=512,
-        help="Maximum number of tile pairs to use for the optimization. (default=%(default)s)",
+        help="Maximum number of tile pairs to use for the optimization. [%(default)s]",
     )
     p.add_argument("--seed", type=int, help="Seed value for the random number generator")
     p.add_argument(
