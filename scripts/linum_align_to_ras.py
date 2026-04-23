@@ -497,7 +497,7 @@ def apply_transform_to_zarr(
     if chunks is None:
         chunks = getattr(vol_zarr, "chunks", None)
     if chunks is None:
-        chunks = (128,) * len(vol_zarr.shape)  # ty: ignore[unresolved-attribute]
+        chunks = (128,) * len(vol_zarr.shape)
 
     vol = np.asarray(vol_zarr[:])
     original_dtype = vol.dtype
