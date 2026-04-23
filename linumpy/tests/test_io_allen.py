@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 import SimpleITK as sitk
 
-from linumpy.io import allen
+from linumpy.reference import allen
 
 # ---------------------------------------------------------------------------
 # Synthetic PIR-oriented Allen template

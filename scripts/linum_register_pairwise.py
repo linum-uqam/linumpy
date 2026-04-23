@@ -24,7 +24,9 @@ from pathlib import Path
 import numpy as np
 import SimpleITK as sitk
 
+from linumpy.cli.args import add_overwrite_arg
 from linumpy.io.zarr import read_omezarr
+from linumpy.metrics import collect_pairwise_registration_metrics
 from linumpy.registration.transforms import (
     centre_of_mass_offset,
     create_transform,
@@ -32,8 +34,6 @@ from linumpy.registration.transforms import (
     gradient_magnitude_alignment,
     register_refinement,
 )
-from linumpy.cli.args import add_overwrite_arg
-from linumpy.metrics import collect_pairwise_registration_metrics
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

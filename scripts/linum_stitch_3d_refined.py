@@ -18,7 +18,7 @@ blending quality at tile boundaries.
 """
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import json
@@ -28,8 +28,8 @@ from pathlib import Path
 import numpy as np
 
 from linumpy.io.zarr import read_omezarr
-from linumpy.stitching.mosaic_grid import addVolumeToMosaic
-from linumpy.stitching.motor import (
+from linumpy.mosaic.grid import add_volume_to_mosaic
+from linumpy.mosaic.motor import (
     apply_blend_shift_refinement,
     compute_affine_output_shape,
     compute_affine_positions,
@@ -170,7 +170,7 @@ def stitch_with_refinements(
                     pos[1] += avg_dx
 
             # Add tile to mosaic
-            addVolumeToMosaic(tile, pos, output, blendingMethod=blending_method)
+            add_volume_to_mosaic(tile, pos, output, blendingMethod=blending_method)
 
     return output
 
@@ -221,7 +221,7 @@ def main():
     if args.input_transform:
         transform = np.load(args.input_transform)
         logger.info(f"Loaded pre-computed transform from {args.input_transform}")
-        from linumpy.stitching.motor import _extract_displacement_params
+        from linumpy.mosaic.motor import _extract_displacement_params
 
         diagnostics = _extract_displacement_params(transform, tile_shape, args.overlap_fraction)
         diagnostics["fallback"] = False
@@ -288,7 +288,7 @@ def main():
     save_omezarr(da.from_array(output), str(output_file), resolution, n_levels=3)
 
     # Collect metrics
-    from linumpy.utils.metrics import PipelineMetrics
+    from linumpy.metrics import PipelineMetrics
 
     metrics = PipelineMetrics("stitch_3d_refined", str(output_file.parent))
     metrics.add_info("input_volume", str(input_file), "Input mosaic grid path")

@@ -44,14 +44,14 @@ import dask.array as da
 import matplotlib.pyplot as plt
 import numpy as np
 
+from linumpy.cli.args import add_overwrite_arg, assert_output_exists
 from linumpy.io import slice_config as slice_config_io
 from linumpy.io.zarr import read_omezarr, save_omezarr
-from linumpy.stitching.interpolation import (
+from linumpy.mosaic.interpolation import (
     interpolate_average,
     interpolate_weighted,
     interpolate_z_morph,
 )
-from linumpy.cli.args import add_overwrite_arg, assert_output_exists
 
 configure_all_libraries()
 

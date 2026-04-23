@@ -17,10 +17,10 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from tqdm import tqdm
 
+from linumpy.geometry.resampling import resolution_is_mm
 from linumpy.gpu import GPU_AVAILABLE, print_gpu_info
 from linumpy.gpu.interpolation import resize
 from linumpy.io import OmeZarrWriter, read_omezarr
-from linumpy.geometry.resampling import resolution_is_mm
 
 
 def _build_arg_parser():

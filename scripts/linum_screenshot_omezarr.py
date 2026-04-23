@@ -12,8 +12,8 @@ import linumpy.config.threads  # noqa: F401
 import argparse
 from pathlib import Path
 
-from linumpy.io.zarr import read_omezarr
 from linumpy.imaging.visualization import save_orthogonal_views
+from linumpy.io.zarr import read_omezarr
 
 
 def _build_arg_parser():

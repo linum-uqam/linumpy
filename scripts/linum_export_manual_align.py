@@ -29,7 +29,7 @@ The package can be downloaded locally and opened directly by the
 ``linumpy-manual-align`` Napari plugin without needing the full 3-D volumes.
 """
 
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import json

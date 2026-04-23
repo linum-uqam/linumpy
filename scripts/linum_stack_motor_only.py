@@ -14,7 +14,7 @@ The script reads the shifts file and positions each slice according to its cumul
 XY shift, without any image-based registration refinement.
 """
 
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import logging
@@ -23,10 +23,10 @@ from pathlib import Path
 
 import numpy as np
 
+from linumpy.cli.args import add_overwrite_arg, assert_output_exists
 from linumpy.io.zarr import AnalysisOmeZarrWriter, read_omezarr
+from linumpy.mosaic.stacking import apply_xy_shift, blend_overlap_xy
 from linumpy.shifts.utils import center_shifts, convert_shifts_to_pixels, load_shifts_csv
-from linumpy.stitching.stacking import apply_xy_shift, blend_overlap_xy
-from linumpy.utils.io import add_overwrite_arg, assert_output_exists
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

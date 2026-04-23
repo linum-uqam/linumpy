@@ -52,7 +52,8 @@ def move_item(source: Path, destination: Path, destination_label: str, dry_run: 
         destination_label: Label for logging (e.g., "quick_stitches/", "metadata/")
         dry_run: If True, only log what would be done
 
-    Returns:
+    Returns
+    -------
         True if moved (or would be moved), False if skipped
     """
     # Check if destination already exists
@@ -96,7 +97,8 @@ def move_quick_stitches(data_dir: Path, dry_run: bool = False) -> int:
     Move quick stitch images to the quick_stitches directory.
     Note: The original files in the tiles directories will be deleted after moving.
 
-    Returns:
+    Returns
+    -------
         Number of files moved
     """
     quick_stitch_dir = data_dir / "quick_stitches"
@@ -156,7 +158,8 @@ def delete_processing_files(data_dir: Path, dry_run: bool = False) -> int:
     """
     Delete processing files (ROI and tile cleaning images).
 
-    Returns:
+    Returns
+    -------
         Number of files deleted
     """
     processing_files = find_processing_files(data_dir)
@@ -182,7 +185,8 @@ def delete_cache_files(data_dir: Path, dry_run: bool = False) -> int:
     """
     Delete OS cache files.
 
-    Returns:
+    Returns
+    -------
         Number of files deleted
     """
     cache_files = find_cache_files(data_dir)
@@ -208,7 +212,8 @@ def delete_bin_files(data_dir: Path, dry_run: bool = False) -> int:
     """
     Delete all .bin files in the data directory.
 
-    Returns:
+    Returns
+    -------
         Number of files deleted
     """
     bin_files = find_bin_files(data_dir)
@@ -241,7 +246,8 @@ def move_slices_to_metadata(data_dir: Path, dry_run: bool = False) -> int:
     """
     Move all slice directories to a metadata subdirectory.
 
-    Returns:
+    Returns
+    -------
         Number of slice directories moved
     """
     metadata_dir = data_dir / "metadata"
@@ -267,7 +273,8 @@ def verify_structure(data_dir: Path) -> bool:
     """
     Verify that the data directory has the expected structure.
 
-    Returns:
+    Returns
+    -------
         True if structure is valid, False otherwise
     """
     if not data_dir.exists():
@@ -293,7 +300,8 @@ def clean_raw_data(data_dir: Path, dry_run: bool = False) -> dict:
     """
     Main function to clean raw data.
 
-    Returns:
+    Returns
+    -------
         Dictionary with statistics about the cleanup
     """
     logger.info(f"Cleaning raw data in: {data_dir}")

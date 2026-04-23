@@ -312,6 +312,7 @@ def apply_transform(ty, tx, theta, coordinates):
     theta: float or ndarray of shape (nz,)
         Rotation around z axis in radians. The center of rotation
         is the center of the image.
+
     Returns
     -------
     coordinates: ndarray (nz, ny, nx, 3)

@@ -3,11 +3,11 @@
 
 For each input ``mosaic_grid_*.ome.zarr`` volume, load only the central Z
 plane and call
-:func:`linumpy.stitching.motor.compute_registration_refinements` to
+:func:`linumpy.mosaic.motor.compute_registration_refinements` to
 measure per-pair absolute tile displacements via phase correlation.
 Pairs from every input are concatenated into one pool and a single 2×2
 affine transform is fitted via
-:func:`~linumpy.stitching.motor.estimate_affine_from_pairs`.
+:func:`~linumpy.mosaic.motor.estimate_affine_from_pairs`.
 
 The resulting transform captures instrument-level geometry (scan-to-stage
 rotation θ, motor non-perpendicularity φ, effective per-axis step in
@@ -25,7 +25,7 @@ detected.
 """
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import json
@@ -38,7 +38,7 @@ import numpy as np
 
 from linumpy.gpu import GPU_AVAILABLE, print_gpu_info
 from linumpy.io import slice_config as slice_config_io
-from linumpy.stitching.motor import pool_pairs_and_fit_global_affine
+from linumpy.mosaic.motor import pool_pairs_and_fit_global_affine
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

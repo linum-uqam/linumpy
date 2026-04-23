@@ -416,7 +416,7 @@ def refine_z_blend_overlap(
     """
     from scipy.ndimage import shift as ndi_shift
 
-    from linumpy.registration.transforms import pairWisePhaseCorrelation
+    from linumpy.registration.transforms import pair_wise_phase_correlation
 
     fixed_2d = np.mean(existing, axis=0).astype(np.float32)
     moving_2d = np.mean(moving_overlap, axis=0).astype(np.float32)
@@ -426,7 +426,7 @@ def refine_z_blend_overlap(
         return moving_overlap, 0.0
 
     try:
-        shift = pairWisePhaseCorrelation(fixed_2d, moving_2d)
+        shift = pair_wise_phase_correlation(fixed_2d, moving_2d)
         dy, dx = float(shift[0]), float(shift[1])
     except Exception as e:
         logger.debug(f"Z-blend phase correlation failed: {e}")

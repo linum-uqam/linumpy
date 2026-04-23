@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from linumpy.preproc.normalization import (
+from linumpy.intensity.normalization import (
     _chunk_boundaries,
     _smooth_weighted,
     apply_histogram_matching,

@@ -14,7 +14,7 @@ class OCT:
     Spectral-domain OCT class to reconstruct the data.
 
     Parameters
-    ==========
+    ----------
     directory: string
         Path to the directory containing the raw tiles and info file.
     axial_res: float, optional
@@ -32,6 +32,7 @@ class OCT:
 
     def read_scan_info(self, filename: str | Path):
         """Read the scan information file
+
         Parameters
         ----------
         filename
@@ -55,6 +56,7 @@ class OCT:
         self, crop: bool = True, fix_galvo_shift: bool | int | None = True, fix_camera_shift: bool = False
     ) -> np.ndarray:
         """Load an image dataset
+
         Parameters
         ----------
         crop

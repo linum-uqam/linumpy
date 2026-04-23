@@ -20,11 +20,11 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 
+from linumpy.cli.args import add_overwrite_arg, assert_output_exists
+from linumpy.imaging.transform import apply_xy_shift
 from linumpy.io import slice_config as slice_config_io
 from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.stack_alignment.filter import build_cumulative_shifts
-from linumpy.cli.args import add_overwrite_arg, assert_output_exists
-from linumpy.imaging.transform import apply_xy_shift
 
 
 def _build_arg_parser():

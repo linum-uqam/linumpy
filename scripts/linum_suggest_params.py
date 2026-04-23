@@ -54,7 +54,7 @@ Both layouts are detected automatically when --data_dir is provided.
 import contextlib
 
 with contextlib.suppress(ImportError):
-    import linumpy._thread_config  # noqa: F401
+    import linumpy.config.threads  # noqa: F401
 
 import argparse
 import json
@@ -526,7 +526,6 @@ def build_report(shift_stats: dict, acq: dict, shifts_path: str) -> str:
 
 def build_config_snippet(shift_stats: dict, acq: dict, args) -> str:
     """Return a nextflow.config parameter block with estimated values."""
-
     # ── Resolution ───────────────────────────────────────────────────────────
     if args.resolution_um:
         res_um = int(args.resolution_um)

@@ -23,7 +23,7 @@ downstream manual-alignment baseline.
 """
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import csv
@@ -37,7 +37,7 @@ import numpy as np
 
 from linumpy.io import slice_config as slice_config_io
 from linumpy.io.zarr import read_omezarr
-from linumpy.stitching.motor import compute_registration_refinements, estimate_affine_from_pairs
+from linumpy.mosaic.motor import compute_registration_refinements, estimate_affine_from_pairs
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

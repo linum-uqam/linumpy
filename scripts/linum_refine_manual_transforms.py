@@ -24,7 +24,7 @@ Output directory structure mirrors the input transforms_dir:
             ...
 """
 
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import json
@@ -36,9 +36,10 @@ from pathlib import Path
 import numpy as np
 import SimpleITK as sitk
 
+from linumpy.cli.args import add_overwrite_arg
 from linumpy.io.zarr import read_omezarr
-from linumpy.stitching.registration import create_transform, register_refinement
-from linumpy.utils.io import add_overwrite_arg
+from linumpy.registration.refinement import register_refinement
+from linumpy.registration.transforms import create_transform
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -169,7 +170,7 @@ def _warp_moving(moving: np.ndarray, tx: float, ty: float, rot_deg: float, cx: f
     """Apply a 2D rigid transform to *moving* using SimpleITK.
 
     The resampling uses SimpleITK's standard output->input convention -- the
-    same convention used by ``linumpy.stitching.stacking.apply_2d_transform``
+    same convention used by ``linumpy.mosaic.stacking.apply_2d_transform``
     (the downstream consumer of the refined tfm) and by
     ``linum_register_pairwise.py`` (the automated producer). Positive ``tx``
     therefore shifts content LEFT in the output (equivalent to
@@ -182,7 +183,6 @@ def _warp_moving(moving: np.ndarray, tx: float, ty: float, rot_deg: float, cx: f
     rot_deg : float  Rotation in degrees (CCW positive).
     cx, cy : float  Rotation centre in (x, y) = (col, row).
     """
-
     out = moving.astype(np.float32)
     if abs(rot_deg) < 0.01 and abs(tx) < 1e-6 and abs(ty) < 1e-6:
         return out
@@ -364,7 +364,6 @@ def main() -> None:
             enable_rotation=True,
             max_rotation_deg=args.max_rotation_deg,
             max_translation_px=args.max_translation_px,
-            initial_offset=None,
         )
         logger.info(f"  z{slice_id:02d}: refinement delta tx={delta_tx:.2f} ty={delta_ty:.2f} rot={delta_rot:.3f}°")
 

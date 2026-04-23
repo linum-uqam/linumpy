@@ -64,7 +64,7 @@ def detect_and_fix_galvo_shift(volume, n_pixel_return=40, threshold=0.5, axis=1,
     dict
         Detection results with 'shift', 'confidence', 'fixed' keys
     """
-    from linumpy.preproc.xyzcorr import detect_galvo_shift
+    from linumpy.geometry.galvo import detect_galvo_shift
 
     # Compute AIP
     aip = np.mean(volume, axis=0)

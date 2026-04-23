@@ -29,9 +29,9 @@ from skimage.filters import threshold_otsu
 from tqdm import tqdm
 
 from linumpy.io.zarr import AnalysisOmeZarrWriter, read_omezarr
-from linumpy.mosaic.grid import getDiffusionBlendingWeights
-from linumpy.registration.transforms import apply_transform
 from linumpy.metrics import collect_stack_metrics
+from linumpy.mosaic.grid import get_diffusion_blending_weights
+from linumpy.registration.sitk import apply_transform
 
 configure_all_libraries()
 
@@ -255,7 +255,7 @@ def main():
             blending_mask_fixed = get_tissue_mask(output_vol[stack_offset : stack_offset + register_vol.shape[0]])
             blending_mask_moving = get_tissue_mask(register_vol)
 
-            alphas = getDiffusionBlendingWeights(blending_mask_fixed, blending_mask_moving, factor=2)
+            alphas = get_diffusion_blending_weights(blending_mask_fixed, blending_mask_moving, factor=2)
         else:
             alphas = 1
 

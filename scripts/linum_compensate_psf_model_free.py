@@ -14,9 +14,9 @@ import matplotlib
 import numpy as np
 from skimage.filters import threshold_otsu
 
-from linumpy.io.zarr import read_omezarr, save_omezarr
-from linumpy.geometry.interface import find_tissue_interface
 from linumpy.geometry.crop import mask_under_interface
+from linumpy.geometry.interface import find_tissue_interface
+from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.metrics import collect_psf_compensation_metrics
 
 matplotlib.use("Agg")

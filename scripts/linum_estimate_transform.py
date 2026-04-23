@@ -34,9 +34,9 @@ from skimage.filters import threshold_otsu
 from linumpy.gpu import GPU_AVAILABLE, print_gpu_info
 from linumpy.gpu.fft_ops import phase_correlation
 from linumpy.io.zarr import read_omezarr
-from linumpy.stitching import mosaic_grid
-from linumpy.registration.transforms import compute_motor_transform
 from linumpy.metrics import collect_xy_transform_metrics
+from linumpy.mosaic import grid as mosaic_grid
+from linumpy.registration.transforms import compute_motor_transform
 
 configure_all_libraries()
 

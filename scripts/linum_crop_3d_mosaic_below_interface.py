@@ -18,9 +18,9 @@ import dask.array as da
 import numpy as np
 import zarr
 
-from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
+from linumpy.geometry.crop import crop_below_interface
 from linumpy.geometry.resampling import resolution_is_mm
-from linumpy.geometry.interface import crop_below_interface
+from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
 from linumpy.metrics import collect_interface_crop_metrics
 
 

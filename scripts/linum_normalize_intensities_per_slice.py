@@ -21,8 +21,8 @@ import numpy as np
 from linumpy.gpu import GPU_AVAILABLE, print_gpu_info
 from linumpy.gpu.array_ops import threshold_otsu
 from linumpy.gpu.morphology import gaussian_filter
-from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.intensity.normalization import normalize_volume
+from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.metrics import collect_normalization_metrics
 
 

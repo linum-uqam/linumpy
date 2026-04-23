@@ -9,7 +9,7 @@ directly to the zarr file (resampling) or stored in OME-Zarr metadata.
 """
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import json
@@ -21,13 +21,13 @@ import numpy as np
 import SimpleITK as sitk
 from tqdm.auto import tqdm
 
-from linumpy.io import allen
-from linumpy.io.zarr import AnalysisOmeZarrWriter, read_omezarr
-from linumpy.utils.orientation import (
+from linumpy.imaging.orientation import (
     apply_orientation_transform,
     parse_orientation_code,
     reorder_resolution,
 )
+from linumpy.io.zarr import AnalysisOmeZarrWriter, read_omezarr
+from linumpy.reference import allen
 
 matplotlib.use("Agg")  # Non-interactive backend
 
@@ -148,7 +148,7 @@ def _build_arg_parser():
 
 
 # =============================================================================
-# Orientation utilities — imported from linumpy.utils.orientation
+# Orientation utilities — imported from linumpy.imaging.orientation
 # (parse_orientation_code, apply_orientation_transform, reorder_resolution)
 # =============================================================================
 

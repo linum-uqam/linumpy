@@ -114,7 +114,7 @@ def compute_registration_refinements(
         If set, use an Otsu threshold on the central plane to classify
         tissue vs background, and skip any pair whose overlap contains more
         than this fraction of background pixels (mirrors the behaviour of
-        ``linumpy.stitching.registration.estimate_mosaic_transform``).
+        ``linumpy.registration.transforms.estimate_mosaic_transform``).
         When ``None`` (default), the prior ``mean(overlap > 0) < 0.1``
         heuristic is used.
     use_gpu : bool, keyword-only
@@ -130,7 +130,7 @@ def compute_registration_refinements(
         'measured_dy', 'measured_dx' — the absolute observed pixel
         displacements used for affine model estimation.
     """
-    from linumpy.registration.transforms import pairWisePhaseCorrelation
+    from linumpy.registration.transforms import pair_wise_phase_correlation
 
     gpu_phase_correlation: Any = None
     if use_gpu:
@@ -150,7 +150,7 @@ def compute_registration_refinements(
         if gpu_phase_correlation is not None:
             translation, _ = gpu_phase_correlation(ov1, ov2, use_gpu=True)
             return float(translation[0]), float(translation[1])
-        axis0, axis1 = pairWisePhaseCorrelation(ov1, ov2)
+        axis0, axis1 = pair_wise_phase_correlation(ov1, ov2)
         return float(axis0), float(axis1)
 
     tile_height, tile_width = tile_shape[1], tile_shape[2]

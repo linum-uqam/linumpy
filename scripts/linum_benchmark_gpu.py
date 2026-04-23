@@ -28,7 +28,7 @@ from linumpy.gpu.cuda_env import ensure_cuda_env, preload_cuda_libraries
 ensure_cuda_env()
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: E402, F401
+import linumpy.config.threads  # noqa: E402, F401
 
 import argparse  # noqa: E402
 import contextlib  # noqa: E402
@@ -174,14 +174,14 @@ def benchmark_fft(size, iterations=3, check_correctness=True):
 def benchmark_phase_correlation(size, iterations=3, check_correctness=True):
     """Benchmark phase correlation."""
     from linumpy.gpu.fft_ops import phase_correlation
-    from linumpy.stitching.registration import pairWisePhaseCorrelation
+    from linumpy.registration.transforms import pair_wise_phase_correlation
 
     # Create two slightly shifted images
     img1 = np.random.rand(size, size).astype(np.float32)
     img2 = np.roll(img1, (5, 10), axis=(0, 1))
 
     def cpu_pc(d):
-        return pairWisePhaseCorrelation(d[0], d[1], returnCC=True)
+        return pair_wise_phase_correlation(d[0], d[1], returnCC=True)
 
     def gpu_pc(d):
         return phase_correlation(d[0], d[1], use_gpu=True)

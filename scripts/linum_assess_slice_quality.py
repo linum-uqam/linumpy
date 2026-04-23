@@ -36,7 +36,7 @@ Example usage:
 """
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import re
@@ -46,6 +46,7 @@ from typing import Any
 import numpy as np
 from tqdm.auto import tqdm
 
+from linumpy.cli.args import add_overwrite_arg, assert_output_exists
 from linumpy.gpu import GPU_AVAILABLE
 from linumpy.gpu.image_quality import (
     assess_slice_quality_gpu,
@@ -53,11 +54,10 @@ from linumpy.gpu.image_quality import (
 )
 from linumpy.io import slice_config as slice_config_io
 from linumpy.io.zarr import read_omezarr
-from linumpy.utils.image_quality import (
+from linumpy.metrics.image_quality import (
     assess_slice_quality,
     detect_calibration_slice,
 )
-from linumpy.utils.io import add_overwrite_arg, assert_output_exists
 
 
 def _build_arg_parser():

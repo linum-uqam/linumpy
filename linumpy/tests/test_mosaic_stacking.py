@@ -1,8 +1,8 @@
-"""Tests for linumpy/stitching/stacking.py"""
+"""Tests for linumpy/mosaic/stacking.py"""
 
 import numpy as np
 
-from linumpy.stitching.stacking import (
+from linumpy.mosaic.stacking import (
     apply_xy_shift,
     blend_overlap_xy,
     blend_overlap_z,

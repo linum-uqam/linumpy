@@ -5,7 +5,8 @@ Print GPU availability and configuration information for linumpy.
 This script checks if GPU acceleration is available and prints
 diagnostic information useful for troubleshooting.
 
-Examples:
+Examples
+--------
     # Show basic GPU info
     linum_gpu_info.py
 
@@ -29,7 +30,7 @@ Examples:
 """
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import sys

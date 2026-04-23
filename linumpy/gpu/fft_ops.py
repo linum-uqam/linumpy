@@ -169,7 +169,6 @@ def _apply_hanning_window_gpu(vol, pad_sizes):
 
 def _compute_correlation_score(vol1, vol2, translation):
     """Compute normalized cross-correlation score for a translation."""
-
     # Compute overlap region
     slices1 = []
     slices2 = []
@@ -207,9 +206,9 @@ def _compute_correlation_score(vol1, vol2, translation):
 
 def _phase_correlation_cpu(vol1, vol2, n_peaks=8):
     """CPU fallback for phase correlation - calls existing implementation."""
-    from linumpy.stitching.registration import pairWisePhaseCorrelation
+    from linumpy.registration.transforms import pair_wise_phase_correlation
 
-    return pairWisePhaseCorrelation(vol1, vol2, nPeaks=n_peaks, returnCC=True)
+    return pair_wise_phase_correlation(vol1, vol2, n_peaks=n_peaks, return_cc=True)
 
 
 def fft2(image, use_gpu=True):

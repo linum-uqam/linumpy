@@ -13,7 +13,7 @@ Useful for troubleshooting 3D reconstruction artifacts like "overhangs" and edge
 mismatches in obliquely-cut samples (e.g., 45° between sagittal/coronal).
 """
 
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import json
@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from linumpy.utils.io import add_overwrite_arg
+from linumpy.cli.args import add_overwrite_arg
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

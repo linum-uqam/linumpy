@@ -21,9 +21,9 @@ import zarr
 from pqdm.processes import pqdm
 from skimage.transform import resize
 
-from linumpy.mosaic import discovery as reconstruction
-from linumpy.microscope.oct import OCT
 from linumpy.cli.args import get_available_cpus
+from linumpy.microscope.oct import OCT
+from linumpy.mosaic import discovery as reconstruction
 
 
 def _build_arg_parser():
@@ -70,7 +70,6 @@ def get_volume(filename: str, config: dict | None = None) -> np.ndarray:
             flip_alines : bool
             flip_bscans : bool
     """
-
     # Get the loading options
     if config is None:
         config = {}

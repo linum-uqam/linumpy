@@ -1,11 +1,11 @@
-"""Tests for linumpy/stitching/motor.py"""
+"""Tests for linumpy/mosaic/motor.py"""
 
 import json
 from pathlib import Path
 
 import numpy as np
 
-from linumpy.stitching.motor import (
+from linumpy.mosaic.motor import (
     apply_blend_shift_refinement,
     compare_motor_vs_registration,
     compute_motor_positions,

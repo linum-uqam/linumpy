@@ -15,7 +15,7 @@ particularly for obliquely-cut samples where physical vs measured positions
 may diverge due to tissue deformation after slicing.
 """
 
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import json
@@ -25,8 +25,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from linumpy.cli.args import add_overwrite_arg
 from linumpy.io.zarr import read_omezarr
-from linumpy.utils.io import add_overwrite_arg
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

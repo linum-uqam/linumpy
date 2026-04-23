@@ -86,7 +86,7 @@ def compute_ssim_2d_gpu(img1: np.ndarray, img2: np.ndarray, win_size: int = 7) -
         SSIM score (0 to 1, higher is better).
     """
     if not GPU_AVAILABLE or cp is None:
-        from linumpy.utils.image_quality import compute_ssim_2d
+        from linumpy.metrics.image_quality import compute_ssim_2d
 
         return compute_ssim_2d(img1, img2, win_size)
 
@@ -130,7 +130,7 @@ def compute_ssim_2d_gpu(img1: np.ndarray, img2: np.ndarray, win_size: int = 7) -
         return float(cp.mean(ssim_map))
     except Exception:
         # Fall back to CPU
-        from linumpy.utils.image_quality import compute_ssim_2d
+        from linumpy.metrics.image_quality import compute_ssim_2d
 
         return compute_ssim_2d(img1, img2, win_size)
 
@@ -154,7 +154,7 @@ def compute_ssim_3d_gpu(vol1: np.ndarray, vol2: np.ndarray, win_size: int = 7, s
         Mean SSIM score (0 to 1, higher is better).
     """
     if not GPU_AVAILABLE:
-        from linumpy.utils.image_quality import compute_ssim_3d
+        from linumpy.metrics.image_quality import compute_ssim_3d
 
         return compute_ssim_3d(vol1, vol2, win_size, sample_depth)
 
@@ -198,7 +198,7 @@ def compute_edge_score_gpu(vol: np.ndarray, reference: np.ndarray, sample_z: int
         Edge preservation score (0 to 1, higher is better).
     """
     if not GPU_AVAILABLE or cp is None:
-        from linumpy.utils.image_quality import compute_edge_score
+        from linumpy.metrics.image_quality import compute_edge_score
 
         return compute_edge_score(vol, reference, sample_z)
 
@@ -248,7 +248,7 @@ def compute_edge_score_gpu(vol: np.ndarray, reference: np.ndarray, sample_z: int
             return max(0.0, corr) if not np.isnan(corr) else 0.0
         return 0.0
     except Exception:
-        from linumpy.utils.image_quality import compute_edge_score
+        from linumpy.metrics.image_quality import compute_edge_score
 
         return compute_edge_score(vol, reference, sample_z)
 
@@ -270,7 +270,7 @@ def compute_variance_score_gpu(vol: np.ndarray, reference: np.ndarray) -> float:
         Variance score (0 to 1).
     """
     if not GPU_AVAILABLE or cp is None:
-        from linumpy.utils.image_quality import compute_variance_score
+        from linumpy.metrics.image_quality import compute_variance_score
 
         return compute_variance_score(vol, reference)
 
@@ -289,7 +289,7 @@ def compute_variance_score_gpu(vol: np.ndarray, reference: np.ndarray) -> float:
 
         return float(min(1.0, max(0.0, score)))
     except Exception:
-        from linumpy.utils.image_quality import compute_variance_score
+        from linumpy.metrics.image_quality import compute_variance_score
 
         return compute_variance_score(vol, reference)
 
@@ -325,7 +325,7 @@ def assess_slice_quality_gpu(
         Individual metric values.
     """
     if not GPU_AVAILABLE:
-        from linumpy.utils.image_quality import assess_slice_quality
+        from linumpy.metrics.image_quality import assess_slice_quality
 
         return assess_slice_quality(vol, vol_before, vol_after, sample_depth, weights)
 

@@ -36,7 +36,7 @@ import SimpleITK as sitk
 from scipy.linalg import fractional_matrix_power
 from scipy.ndimage import distance_transform_edt, gaussian_filter
 
-from linumpy.registration.transforms import apply_transform, register_2d_images_sitk
+from linumpy.registration.sitk import apply_transform, register_2d_images_sitk
 
 logger = logging.getLogger(__name__)
 

@@ -16,7 +16,7 @@ the fully-registered reconstruction, you can identify:
 For troubleshooting 45° oblique-cut samples where edges don't match up.
 """
 
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import logging
@@ -24,11 +24,11 @@ from pathlib import Path
 
 import numpy as np
 
+from linumpy.cli.args import add_overwrite_arg
 from linumpy.io.zarr import OmeZarrWriter, read_omezarr
-from linumpy.stitching.mosaic_grid import addVolumeToMosaic
-from linumpy.stitching.motor import compare_motor_vs_registration, compute_motor_positions
-from linumpy.utils.io import add_overwrite_arg
-from linumpy.utils.metrics import collect_stitch_3d_metrics
+from linumpy.metrics import collect_stitch_3d_metrics
+from linumpy.mosaic.grid import add_volume_to_mosaic
+from linumpy.mosaic.motor import compare_motor_vs_registration, compute_motor_positions
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -146,7 +146,7 @@ def main():
             pos[0] -= posx_min
             pos[1] -= posy_min
 
-            addVolumeToMosaic(tile, pos, writer, blendingMethod=args.blending_method)
+            add_volume_to_mosaic(tile, pos, writer, blendingMethod=args.blending_method)
 
     writer.finalize(resolution)
 

@@ -18,13 +18,13 @@ from pathlib import Path
 import numpy as np
 from tqdm.auto import tqdm
 
-from linumpy.mosaic import discovery as reconstruction
+from linumpy.cli.args import add_processes_arg, parse_processes_arg
 from linumpy.gpu import GPU_AVAILABLE, print_gpu_info
 from linumpy.gpu.interpolation import resize
 from linumpy.io.thorlabs import PreprocessingConfig, ThorOCT
 from linumpy.io.zarr import OmeZarrWriter
 from linumpy.microscope.oct import OCT
-from linumpy.cli.args import add_processes_arg, parse_processes_arg
+from linumpy.mosaic import discovery as reconstruction
 
 # Global flag for GPU usage (set in main, consulted by process functions)
 _USE_GPU = True

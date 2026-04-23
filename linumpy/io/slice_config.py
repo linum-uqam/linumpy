@@ -142,7 +142,8 @@ def _as_cell(value: object) -> str:
 
 def _build_header(rows: Iterable[Mapping[str, object]], extra_columns: Iterable[str]) -> list[str]:
     """Build header: canonical columns (in order) + any other columns seen in
-    rows or in ``extra_columns``, preserving insertion order."""
+    rows or in ``extra_columns``, preserving insertion order.
+    """
     seen: list[str] = []
     seen_set: set[str] = set()
     for col in CANONICAL_COLUMNS:

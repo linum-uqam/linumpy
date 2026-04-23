@@ -20,7 +20,8 @@ class PreprocessingConfig:
     """
     Configuration for preprocessing OCT data.
 
-    Attributes:
+    Attributes
+    ----------
         return_complex (bool):
             If True, return the raw complex data.
             If False, return its magnitude instead.
@@ -49,12 +50,14 @@ class ThorOCT:
     A class for handling OCT data from ThorLabs PSOCT microscopes. It provides methods to load,
     process, and extract metadata and data from compressed files.
 
-    Parameters:
+    Parameters
+    ----------
         path (str): Path to the compressed data file.
         compressed_data (zipfile.ZipFile): ZipFile object containing the data.
         config (PreprocessingConfig): Configuration for preprocessing.
 
-    Attributes:
+    Attributes
+    ----------
         first_polarization (np.ndarray): Data for the first polarization.
         second_polarization (np.ndarray): Data for the second polarization.
         size_x (int): X-dimension size of the data.
@@ -91,7 +94,8 @@ class ThorOCT:
         """
         Load the data from the compressed file and extract the header and the complex data.
 
-        Raises:
+        Raises
+        ------
             ValueError: If no valid data source is provided.
         """
         if not self.compressed_data:
@@ -113,7 +117,8 @@ class ThorOCT:
         """
         Loads and returns the OCT header metadata.
 
-        Raises:
+        Raises
+        ------
             FileNotFoundError: If the header file is not found in the compressed data.
         """
         try:
@@ -129,7 +134,8 @@ class ThorOCT:
         """
         Extract dimensions and resolution values from the OCT header.
 
-        Raises:
+        Raises
+        ------
             ValueError: If the header has not been loaded.
         """
         if not self.header:
@@ -141,7 +147,7 @@ class ThorOCT:
         # Extract its text content and convert to an integer
         ascan_first_child = ascan_element.firstChild
         assert ascan_first_child is not None
-        self.ascan_averaging_value = int(cast(DOMText, ascan_first_child).data.strip())
+        self.ascan_averaging_value = int(cast("DOMText", ascan_first_child).data.strip())
         # Initialize variables to store found data
         complex_data_file = None
         # Loop through each DataFile element and check for the specific values
@@ -149,7 +155,7 @@ class ThorOCT:
             # Extract text content of the DataFile element
             data_first_child = data_file.firstChild
             assert data_first_child is not None
-            file_content = cast(DOMText, data_first_child).data
+            file_content = cast("DOMText", data_first_child).data
             # Check for specific file paths
             if file_content == "data\\Complex.data":
                 complex_data_file = data_file
@@ -172,12 +178,14 @@ class ThorOCT:
         """
         Load the polarization data from the compressed file.
 
-        Parameters:
+        Parameters
+        ----------
             return_complex (bool): Whether to load complex data.
             erase_polarization_2 (bool): Whether to skip loading polarization 2 data.
             erase_polarization_1 (bool): Whether to skip loading polarization 1 data.
 
-        Raises:
+        Raises
+        ------
             FileNotFoundError: If required polarization data files are missing.
         """
         try:
@@ -204,7 +212,8 @@ class ThorOCT:
         Parameters:
             data (np.ndarray): The input 3D array (SizeZ, SizeX, SizeY).
 
-        Returns:
+        Returns
+        -------
             np.ndarray: The 3D array with tiles stacked along the y-axis.
         """
         assert self.ascan_averaging_value is not None
@@ -240,15 +249,18 @@ class ThorOCT:
         """
         Crops the 3D volume along the Z-axis and keeps the data between the specified indices.
 
-        Parameters:
+        Parameters
+        ----------
             data (np.ndarray): The input 3D array (SizeX, SizeY, SizeZ).
             index1 (int): The starting Z index for cropping (inclusive).
             index2 (int): The ending Z index for cropping (exclusive).
 
-        Returns:
+        Returns
+        -------
             np.ndarray: The cropped 3D array.
 
-        Raises:
+        Raises
+        ------
             ValueError: If indices are invalid.
         """
         # Ensure valid indices
@@ -265,10 +277,12 @@ class ThorOCT:
         """
         Load the raw data from the specified file and return it as a NumPy array.
 
-        Parameters:
+        Parameters
+        ----------
             file (str): File path in the compressed data.
 
-        Returns:
+        Returns
+        -------
             np.ndarray: Raw complex data array.
         """
         assert self.compressed_data is not None
@@ -284,10 +298,12 @@ class ThorOCT:
         """
         Preprocess the data, including cropping, stacking, and converting to magnitude.
 
-        Parameters:
+        Parameters
+        ----------
             data (np.ndarray): Input complex data array.
 
-        Returns:
+        Returns
+        -------
             np.ndarray: Preprocessed data array.
         """
         assert self.config is not None
@@ -311,10 +327,12 @@ class ThorOCT:
         """
         Load raw data from the file and preprocess it.
 
-        Parameters:
+        Parameters
+        ----------
             file (str): File path in the compressed data.
 
-        Returns:
+        Returns
+        -------
             np.ndarray: Fully processed data array.
         """
         raw_data = self._load_raw_data(file)
@@ -326,9 +344,12 @@ class ThorOCT:
         """
         Extracts the raw and index x, y positions from the .scan file.
 
-        Parameters:
+        Parameters
+        ----------
         - scan_file_path: Path to the .scan file.
-        Returns:
+
+        Returns
+        -------
         - tuple: A tuple containing two lists - index positions and raw positions.
         """
         raw_positions = []
@@ -373,15 +394,18 @@ class ThorOCT:
         """
         Get the .scan file and all .oct files from the tiles_directory.
 
-        Parameters:
+        Parameters
+        ----------
         - tiles_directory: Path to the directory containing the OCT tiles.
         - number_of_angles: Number of acquisition angles.
 
-        Returns:
+        Returns
+        -------
         - positions: positions of the tiles in 3d
         - grouped_files: list of file paths ordered by angles.
 
-        Raises:
+        Raises
+        ------
         - ValueError: If the directory or required files are missing.
         """
         # Convert the tiles_directory to a Path object

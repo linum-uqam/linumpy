@@ -353,6 +353,7 @@ class OmeZarrWriter:
         :param downscale_factor: Downscale factor between levels in the pyramid.
         :type unit: str
         :param unit: Unit of the spatial dimensions.
+
         Notes
         -----
         * Expected ordering for axes in `shape` and `chunk_shape` is `(c,

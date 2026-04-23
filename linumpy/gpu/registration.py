@@ -218,7 +218,6 @@ def register_2d_gpu(fixed, moving, method="affine", metric="mse", max_iterations
     float
         Final metric value
     """
-
     # For now, use SimpleITK's built-in registration
     # GPU acceleration is applied via pre/post processing
 
@@ -237,7 +236,7 @@ def register_2d_gpu(fixed, moving, method="affine", metric="mse", max_iterations
         moving = to_cpu(moving_norm)
 
     # Use existing CPU registration
-    from linumpy.stitching.registration import register_2d_images_sitk
+    from linumpy.registration.sitk import register_2d_images_sitk
 
     return register_2d_images_sitk(
         fixed,
@@ -266,7 +265,6 @@ def apply_transform_gpu(image, transform, use_gpu=True):
     np.ndarray
         Transformed image
     """
-
     # For complex transforms, use SimpleITK
     # Could potentially extract matrix and use GPU affine_transform
 
@@ -276,7 +274,7 @@ def apply_transform_gpu(image, transform, use_gpu=True):
         return affine_transform(image, matrix, use_gpu=True)
     else:
         # Fall back to SimpleITK
-        from linumpy.stitching.registration import apply_transform
+        from linumpy.registration.sitk import apply_transform
 
         return apply_transform(image, transform)
 

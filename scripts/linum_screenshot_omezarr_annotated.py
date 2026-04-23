@@ -13,8 +13,8 @@ import linumpy.config.threads  # noqa: F401
 import argparse
 from pathlib import Path
 
-from linumpy.io.zarr import read_omezarr
 from linumpy.imaging.visualization import add_z_slice_labels, estimate_n_slices_from_zarr, save_annotated_views  # noqa: F401
+from linumpy.io.zarr import read_omezarr
 
 
 def _build_arg_parser():

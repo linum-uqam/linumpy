@@ -11,7 +11,7 @@ Produces:
 Useful for debugging alignment issues and understanding sample drift during acquisition.
 """
 
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import logging
@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from linumpy.utils.io import add_overwrite_arg, assert_output_exists
+from linumpy.cli.args import add_overwrite_arg, assert_output_exists
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

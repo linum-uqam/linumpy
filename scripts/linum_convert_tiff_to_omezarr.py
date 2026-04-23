@@ -31,8 +31,8 @@ import zarr
 from skimage.transform import resize
 from tifffile import imread
 
-from linumpy.io.zarr import create_tempstore, save_omezarr
 from linumpy.cli.args import add_overwrite_arg, add_verbose_arg
+from linumpy.io.zarr import create_tempstore, save_omezarr
 
 
 def _build_arg_parser():

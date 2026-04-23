@@ -50,9 +50,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from linumpy.cli.args import add_overwrite_arg, assert_output_exists
 from linumpy.io import slice_config as slice_config_io
 from linumpy.stack_alignment.filter import correct_tile_offset_shifts, filter_outlier_shifts
-from linumpy.cli.args import add_overwrite_arg, assert_output_exists
 
 
 def _build_arg_parser():

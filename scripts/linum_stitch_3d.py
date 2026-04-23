@@ -18,8 +18,8 @@ from pathlib import Path
 import numpy as np
 
 from linumpy.io.zarr import OmeZarrWriter, read_omezarr
-from linumpy.mosaic.grid import addVolumeToMosaic
 from linumpy.metrics import collect_stitch_3d_metrics
+from linumpy.mosaic.grid import add_volume_to_mosaic
 
 
 def _build_arg_parser():
@@ -104,7 +104,7 @@ def main():
             pos = positions[i * ny + j]
             pos[0] -= posr_min
             pos[1] -= posc_min
-            addVolumeToMosaic(tile, pos, writer, blendingMethod=blending_method)
+            add_volume_to_mosaic(tile, pos, writer, blendingMethod=blending_method)
 
     writer.finalize(resolution)
 

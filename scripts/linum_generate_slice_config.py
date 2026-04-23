@@ -30,7 +30,7 @@ Example usage:
 """
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import csv
@@ -40,11 +40,11 @@ from pathlib import Path
 import numpy as np
 from tqdm.auto import tqdm
 
+from linumpy.cli.args import add_overwrite_arg, assert_output_exists
+from linumpy.geometry.galvo import detect_galvo_for_slice
 from linumpy.io import slice_config as slice_config_io
 from linumpy.microscope.oct import OCT
-from linumpy.preproc.xyzcorr import detect_galvo_for_slice
-from linumpy.reconstruction import get_tiles_ids
-from linumpy.utils.io import add_overwrite_arg, assert_output_exists
+from linumpy.mosaic.discovery import get_tiles_ids
 
 
 def _build_arg_parser():
@@ -129,7 +129,6 @@ def detect_galvo_for_slices(tiles_dir: Path, slice_ids: list, threshold: float =
     dict
         Mapping from slice_id to {'confidence': float, 'would_fix': bool}
     """
-
     results = {}
 
     for z in tqdm(slice_ids, desc="Detecting galvo shift"):

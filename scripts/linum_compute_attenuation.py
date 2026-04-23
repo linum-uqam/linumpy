@@ -14,8 +14,8 @@ import argparse
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.intensity.attenuation import get_extended_attenuation_vermeer2013
+from linumpy.io.zarr import read_omezarr, save_omezarr
 
 
 def _build_arg_parser():

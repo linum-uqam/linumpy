@@ -8,7 +8,7 @@ issues in the 3D reconstruction pipeline.
 """
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import base64
@@ -29,7 +29,7 @@ except ImportError:
 
 import numpy as np
 
-from linumpy.utils.metrics import aggregate_metrics, compute_summary_statistics
+from linumpy.metrics import aggregate_metrics, compute_summary_statistics
 
 # Logical pipeline step ordering
 STEP_ORDER = [

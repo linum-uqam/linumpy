@@ -62,10 +62,10 @@ from pathlib import Path
 import numpy as np
 from tqdm.auto import tqdm
 
+from linumpy.cli.args import add_overwrite_arg, assert_output_exists
+from linumpy.geometry.interface import detect_galvo_band_in_tile, detect_galvo_shift
 from linumpy.io import slice_config as slice_config_io
 from linumpy.io.zarr import OmeZarrWriter
-from linumpy.geometry.interface import detect_galvo_band_in_tile, detect_galvo_shift
-from linumpy.cli.args import add_overwrite_arg, assert_output_exists
 
 
 def _build_arg_parser():

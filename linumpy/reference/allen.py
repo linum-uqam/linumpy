@@ -48,6 +48,7 @@ def numpy_to_sitk_image(volume: np.ndarray, spacing: tuple, cast_dtype=None) -> 
 
 def download_template(resolution: int, cache: bool = True, cache_dir: str = ".data/") -> sitk.Image:
     """Download a 3D average mouse brain
+
     Parameters
     ----------
     resolution
@@ -56,6 +57,7 @@ def download_template(resolution: int, cache: bool = True, cache_dir: str = ".da
         Keep the downloaded volume in cache
     cache_dir
         Cache directory
+
     Returns
     -------
     Allen average mouse brain.

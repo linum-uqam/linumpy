@@ -13,7 +13,8 @@ def get_available_cpus() -> int:
     1. LINUMPY_MAX_CPUS - maximum CPUs to use (explicit limit)
     2. LINUMPY_RESERVED_CPUS - CPUs to reserve for overhead (default: 0)
 
-    Returns:
+    Returns
+    -------
         int: Number of available CPUs
     """
     total_cpus = multiprocessing.cpu_count()
@@ -51,7 +52,8 @@ def parse_processes_arg(n_processes: int | None) -> int:
         n_processes: Number of processes requested. If None or <= 0,
                      uses the default (get_available_cpus()).
 
-    Returns:
+    Returns
+    -------
         int: Number of processes to use
     """
     available = get_available_cpus()

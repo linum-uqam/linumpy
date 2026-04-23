@@ -1,9 +1,9 @@
-"""Tests for linumpy/stitching/interpolation.py"""
+"""Tests for linumpy/mosaic/interpolation.py"""
 
 import numpy as np
 import pytest
 
-from linumpy.stitching.interpolation import (
+from linumpy.mosaic.interpolation import (
     _fractional_affine_parts,
     _matrix_fractional_power,
     find_best_overlap_planes,

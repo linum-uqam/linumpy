@@ -103,7 +103,7 @@ def estimate_n_slices_from_zarr(zarr_path: str) -> int | None:
         if "multiscales" in store.attrs:
             multiscales = store.attrs["multiscales"]
             if isinstance(multiscales, list) and len(multiscales) > 0:
-                ms: dict[str, Any] = cast(dict[str, Any], multiscales[0])
+                ms: dict[str, Any] = cast("dict[str, Any]", multiscales[0])
                 if "metadata" in ms and "n_input_slices" in ms["metadata"]:
                     return ms["metadata"]["n_input_slices"]
     except Exception:

@@ -47,8 +47,8 @@ import zarr
 from basicpy import BaSiC
 from tqdm.auto import tqdm
 
-from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
 from linumpy.cli.args import add_processes_arg, parse_processes_arg
+from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
 
 # TODO: add option to export the flatfields and darkfields
 

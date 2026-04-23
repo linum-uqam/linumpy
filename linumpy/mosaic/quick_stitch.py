@@ -21,10 +21,12 @@ from linumpy.microscope.oct import OCT
 
 def getLargestCC(segmentation: np.ndarray) -> np.ndarray:
     """Get the largest connected component in a binary image.
+
     Parameters
     ----------
     segmentation : np.ndarray
         The binary image to process.
+
     Returns
     -------
     np.ndarray
@@ -275,6 +277,7 @@ def detect_mosaic(
     stitching_settings: dict | None = None,
 ):
     """Detect the tissue in the mosaic and compute the limits of the tissue.
+
     Parameters
     ----------
     directory : str

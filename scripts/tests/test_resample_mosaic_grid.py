@@ -2,8 +2,8 @@
 import numpy as np
 import pytest
 
-from linumpy.io.test_data import get_data
 from linumpy.geometry.resampling import resolution_is_mm
+from linumpy.io.test_data import get_data
 
 
 def test_help(script_runner):
