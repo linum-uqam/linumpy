@@ -1,18 +1,19 @@
-"""Tests for linumpy/shifts/utils.py"""
+"""Tests for linumpy.stack_alignment."""
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from linumpy.shifts.utils import (
-    build_cumulative_shifts,
-    center_shifts,
-    convert_shifts_to_pixels,
+from linumpy.stack_alignment.filter import (
     correct_tile_offset_shifts,
-    detect_shift_units,
     filter_outlier_shifts,
     filter_step_outliers,
-    load_shifts_csv,
+)
+from linumpy.stack_alignment.io import build_cumulative_shifts, load_shifts_csv
+from linumpy.stack_alignment.units import (
+    center_shifts,
+    convert_shifts_to_pixels,
+    detect_shift_units,
 )
 
 # ---------------------------------------------------------------------------
@@ -181,7 +182,7 @@ def test_load_shifts_csv(tmp_path):
     csv_content = "fixed_id,moving_id,x_shift_mm,y_shift_mm\n0,1,0.01,0.02\n1,2,0.01,0.02\n"
     csv_path = tmp_path / "shifts.csv"
     csv_path.write_text(csv_content)
-    cumsum, all_ids = load_shifts_csv(str(csv_path))
+    cumsum, all_ids = load_shifts_csv(csv_path)
     assert all_ids == [0, 1, 2]
     assert cumsum[0] == (0.0, 0.0)
     assert abs(cumsum[1][0] - 0.01) < 1e-9
