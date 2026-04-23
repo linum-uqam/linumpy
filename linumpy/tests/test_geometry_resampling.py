@@ -1,4 +1,4 @@
-"""Tests for linumpy/preproc/resampling.py"""
+"""Tests for linumpy/geometry/resample.py"""
 
 import numpy as np
 import pytest

@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""
-Generate a slice configuration file for controlling which slices are used
-in the 3D reconstruction pipeline.
+"""Generate a slice configuration file for controlling which slices are used in the 3D reconstruction pipeline.
 
 This script can detect slices from:
 1. A directory containing mosaic grids (*.ome.zarr files with z## in the name)
@@ -47,7 +45,7 @@ from linumpy.microscope.oct import OCT
 from linumpy.mosaic.discovery import get_tiles_ids
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input", help="Input directory (mosaic grids or raw tiles) or shifts CSV file")
     p.add_argument("output_file", help="Output slice configuration CSV file")
@@ -167,7 +165,7 @@ def write_slice_config(
     exclude_ids: list | None = None,
     galvo_results: dict | None = None,
     first_slice_excludes: list | None = None,
-):
+) -> None:
     """Write the slice configuration file.
 
     Parameters
@@ -216,7 +214,8 @@ def write_slice_config(
     slice_config_io.write(output_file, rows)
 
 
-def main():
+def main() -> None:
+    """Run function operation."""
     p = _build_arg_parser()
     args = p.parse_args()
 

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""
-Convert folder of tiff files to omezarr. Expected file structure is:
+"""Convert folder of tiff files to omezarr.
+
+Expected file structure is:
+
     in_folder/
     ├── z0.tif
     ├── z1.tif
@@ -24,6 +26,7 @@ import argparse
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 import dask.array as da
 import numpy as np
@@ -35,7 +38,7 @@ from linumpy.cli.args import add_overwrite_arg, add_verbose_arg
 from linumpy.io.zarr import create_tempstore, save_omezarr
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
 
     p.add_argument(
@@ -61,7 +64,7 @@ def _build_arg_parser():
     return p
 
 
-def check_folders(parser, folder):
+def check_folders(parser: Any, folder: str | Path) -> None:
     """
     Check if the folder contains tiff files or subfolders with tiff files.
 
@@ -100,13 +103,13 @@ def check_folders(parser, folder):
     # check if all subfolders contain the same number of files
     it = iter(tiff_files)
     the_len = len(next(it))
-    if not all(len(l) == the_len for l in it):
+    if not all(len(val) == the_len for val in it):
         parser.error("Not all subfolders contain the same number of files.")
 
     return tiff_files
 
 
-def process_volume(mosaic, vol, index_z, tile_size=None):
+def process_volume(mosaic: Any, vol: Any, index_z: Any, tile_size: int | None = None) -> None:
     """
     Process a volume and add it to the mosaic.
 
@@ -129,21 +132,25 @@ def process_volume(mosaic, vol, index_z, tile_size=None):
         mosaic[index_c, index_z, :, :] = curr_vol[0, 0, :, :]
 
 
-def main():
+def main() -> None:
+    """Run function operation."""
     parser = _build_arg_parser()
     args = parser.parse_args()
     logging.getLogger().setLevel(logging.getLevelName(args.verbose))
 
     tiff_files = check_folders(parser, args.in_folder)
-    logging.info(f"Found {len(tiff_files)} channels and {len(tiff_files[0])} slices in z.")
+    logging.info("Found %s channels and %s slices in z.", len(tiff_files), len(tiff_files[0]))
 
     # Get first image to get the resolution
     volume = imread(tiff_files[0][0])
     volume = np.array(volume)
 
-    logging.info(f"Initial shape: {volume.shape[2:]} ")
+    logging.info("Initial shape: %s ", volume.shape[2:])
     logging.info(
-        f"Initial resolution: {args.in_dimensions[0]} x {args.in_dimensions[1]} x {args.in_dimensions[2]} um (X, Y, Z)"
+        "Initial resolution: %s x %s x %s um (X, Y, Z)",
+        args.in_dimensions[0],
+        args.in_dimensions[1],
+        args.in_dimensions[2],
     )
 
     if args.resolution:  # Resampling
@@ -154,8 +161,8 @@ def main():
             int(volume.shape[3] * resolution[0] * 1000 / args.resolution),
         ]
         mosaic_shape = [len(tiff_files), len(tiff_files[0]), volume_shape[0], volume_shape[1]]
-        logging.info(f"Output shape: {tuple(mosaic_shape[2:])}")
-        logging.info(f"Output resolution: {args.resolution} x {args.resolution} x {args.in_dimensions[2]} um (X, Y, Z)")
+        logging.info("Output shape: %s", tuple(mosaic_shape[2:]))
+        logging.info("Output resolution: %s x %s x %s um (X, Y, Z)", args.resolution, args.resolution, args.in_dimensions[2])
     else:
         logging.info("No resampling.")
         resolution = [args.in_dimensions[2] / 1000, args.in_dimensions[0] / 1000, args.in_dimensions[1] / 1000]

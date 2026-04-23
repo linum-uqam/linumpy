@@ -21,6 +21,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -35,7 +36,8 @@ logger = logging.getLogger(__name__)
 class NumpyEncoder(json.JSONEncoder):
     """JSON encoder that handles numpy types."""
 
-    def default(self, obj):
+    def default(self, obj: Any) -> Any:
+        """Run function."""
         if isinstance(obj, np.integer):
             return int(obj)
         elif isinstance(obj, np.floating):
@@ -47,7 +49,7 @@ class NumpyEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_volume", help="Path to mosaic grid volume (.ome.zarr)")
     p.add_argument("input_transform", help="Path to registration transform (.npy)")
@@ -61,20 +63,17 @@ def _build_arg_parser():
     return p
 
 
-def compute_expected_positions(nx, ny, tile_height, tile_width, overlap_fraction):
+def compute_expected_positions(nx: Any, ny: Any, tile_height: Any, tile_width: Any, overlap_fraction: Any) -> Any:
     """Compute expected tile positions based on motor grid."""
     step_y = tile_height * (1.0 - overlap_fraction)
     step_x = tile_width * (1.0 - overlap_fraction)
 
-    positions = []
-    for i in range(nx):
-        for j in range(ny):
-            positions.append((i * step_y, j * step_x))
+    positions = [(i * step_y, j * step_x) for i in range(nx) for j in range(ny)]
 
     return np.array(positions)
 
 
-def compute_actual_positions(nx, ny, transform):
+def compute_actual_positions(nx: Any, ny: Any, transform: Any) -> Any:
     """Compute actual tile positions from registration transform."""
     positions = []
     for i in range(nx):
@@ -85,10 +84,9 @@ def compute_actual_positions(nx, ny, transform):
     return np.array(positions)
 
 
-def estimate_scale_factors(expected, actual):
+def estimate_scale_factors(expected: Any, actual: Any) -> dict:
     """Estimate scale factors by comparing expected vs actual positions."""
     # Use linear regression to estimate scale factor
-    # actual = scale * expected + offset
 
     from scipy import stats
 
@@ -110,7 +108,7 @@ def estimate_scale_factors(expected, actual):
     }
 
 
-def analyze_residuals(expected, actual, scale_factors):
+def analyze_residuals(expected: Any, actual: Any, scale_factors: Any) -> dict:
     """Analyze residuals after removing estimated scale."""
     # Predicted positions using estimated scale
     predicted_y = scale_factors["scale_y"] * expected[:, 0] + scale_factors["offset_y"]
@@ -131,7 +129,7 @@ def analyze_residuals(expected, actual, scale_factors):
     }
 
 
-def detect_local_distortions(expected, actual, nx, ny):
+def detect_local_distortions(expected: Any, actual: Any, nx: Any, ny: Any) -> dict:
     """Check for local distortions (non-linear deformations)."""
     diff = actual - expected
 
@@ -157,7 +155,14 @@ def detect_local_distortions(expected, actual, nx, ny):
     }
 
 
-def generate_report(analysis, scale_factors, residuals, distortions, output_dir, slice_id=None):
+def generate_report(
+    _analysis: Any,
+    scale_factors: Any,
+    residuals: Any,
+    distortions: Any,
+    output_dir: str | Path,
+    slice_id: int | None = None,
+) -> None:
     """Generate text report."""
     slice_label = f" (Slice {slice_id})" if slice_id else ""
 
@@ -235,11 +240,19 @@ def generate_report(analysis, scale_factors, residuals, distortions, output_dir,
     with Path(report_path).open("w") as f:
         f.write("\n".join(lines))
 
-    logger.info(f"Report saved to {report_path}")
+    logger.info("Report saved to %s", report_path)
     return report_path
 
 
-def generate_plots(expected, actual, residuals, nx, ny, output_dir, slice_id=None):
+def generate_plots(
+    expected: Any,
+    actual: Any,
+    residuals: Any,
+    nx: Any,
+    ny: Any,
+    output_dir: str | Path,
+    slice_id: int | None = None,
+) -> None:
     """Generate visualization plots."""
     fig, axes = plt.subplots(2, 2, figsize=(14, 12))
 
@@ -294,11 +307,12 @@ def generate_plots(expected, actual, residuals, nx, ny, output_dir, slice_id=Non
     plt.savefig(plot_path, dpi=150)
     plt.close()
 
-    logger.info(f"Plots saved to {plot_path}")
+    logger.info("Plots saved to %s", plot_path)
     return plot_path
 
 
-def main():
+def main() -> None:
+    """Run function."""
     p = _build_arg_parser()
     args = p.parse_args()
 
@@ -308,17 +322,17 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load mosaic grid to get tile shape
-    logger.info(f"Loading mosaic grid metadata from {input_file}")
+    logger.info("Loading mosaic grid metadata from %s", input_file)
     volume, _resolution = read_omezarr(str(input_file), level=0)
     tile_shape = volume.chunks
 
     nx = volume.shape[1] // tile_shape[1]
     ny = volume.shape[2] // tile_shape[2]
-    logger.info(f"Grid: {nx} x {ny} tiles, tile shape: {tile_shape}")
+    logger.info("Grid: %s x %s tiles, tile shape: %s", nx, ny, tile_shape)
 
     # Load transform
     transform = np.load(transform_file)
-    logger.info(f"Transform matrix:\n{transform}")
+    logger.info("Transform matrix:\n%s", transform)
 
     # Compute positions
     expected = compute_expected_positions(nx, ny, tile_shape[1], tile_shape[2], args.overlap_fraction)
@@ -345,7 +359,7 @@ def main():
     json_path = output_dir / "dilation_analysis.json"
     with Path(json_path).open("w") as f:
         json.dump(analysis, f, indent=2, cls=NumpyEncoder)
-    logger.info(f"Analysis JSON saved to {json_path}")
+    logger.info("Analysis JSON saved to %s", json_path)
 
     # Generate outputs
     generate_report(analysis, scale_factors, residuals, distortions, output_dir, args.slice_id)

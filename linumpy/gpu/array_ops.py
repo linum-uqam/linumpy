@@ -4,12 +4,14 @@ Provides GPU versions of normalization, clipping, and thresholding.
 Note: Simple reductions (mean, max) should use numpy directly - GPU offers no benefit.
 """
 
+from typing import Any
+
 import numpy as np
 
 from . import GPU_AVAILABLE, to_cpu
 
 
-def normalize_percentile(image, p_low=1, p_high=99, use_gpu=True):
+def normalize_percentile(image: Any, p_low: Any = 1, p_high: Any = 99, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated percentile-based normalization.
 
@@ -51,7 +53,7 @@ def normalize_percentile(image, p_low=1, p_high=99, use_gpu=True):
         return np.clip(normalized, 0, 1).astype(np.float32)
 
 
-def normalize_minmax(image, use_gpu=True):
+def normalize_minmax(image: Any, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated min-max normalization.
 
@@ -87,7 +89,7 @@ def normalize_minmax(image, use_gpu=True):
         return ((image - vmin) / (vmax - vmin)).astype(np.float32)
 
 
-def clip_percentile(image, p_low=0.5, p_high=99.5, use_gpu=True):
+def clip_percentile(image: Any, p_low: Any = 0.5, p_high: Any = 99.5, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated percentile clipping.
 
@@ -226,7 +228,7 @@ def compute_nonzero_percentile_memory_efficient(
     return float(np.percentile(sample, percentile))
 
 
-def apply_flatfield_correction(image, flatfield, darkfield=None, use_gpu=True):
+def apply_flatfield_correction(image: Any, flatfield: Any, darkfield: Any = None, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated flatfield correction.
 
@@ -279,7 +281,7 @@ def apply_flatfield_correction(image, flatfield, darkfield=None, use_gpu=True):
         return numerator / denominator
 
 
-def compute_std_projection(volume, axis=0, use_gpu=True):
+def compute_std_projection(volume: Any, axis: Any = 0, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated standard deviation projection.
 
@@ -307,7 +309,7 @@ def compute_std_projection(volume, axis=0, use_gpu=True):
         return np.std(volume, axis=axis)
 
 
-def threshold_otsu(image, use_gpu=True):
+def threshold_otsu(image: Any, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated Otsu thresholding.
 
@@ -361,7 +363,7 @@ def threshold_otsu(image, use_gpu=True):
         return sk_otsu(image)
 
 
-def apply_xy_shift(image, reference, dy, dx, use_gpu=True):
+def apply_xy_shift(image: Any, _reference: Any, dy: Any, dx: Any, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated XY shift application.
 

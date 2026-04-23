@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""
-Detect and fix the lateral illumination inhomogeneities for each
-3D tiles of a mosaic grid.
+"""Detect and fix the lateral illumination inhomogeneities for each 3D tile of a mosaic grid.
 
 GPU acceleration is used through JAX/BaSiCPy when available (--use_gpu, default on).
 When GPU is not available or --no-use_gpu is passed, BaSiCPy runs on CPU and
@@ -53,7 +51,7 @@ from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
 # TODO: add option to export the flatfields and darkfields
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_zarr", help="Full path to the input zarr file")
     p.add_argument("output_zarr", help="Full path to the output zarr file")
@@ -76,7 +74,7 @@ def _build_arg_parser():
     return p
 
 
-def process_tile(params: dict):
+def process_tile(params: dict) -> None:
     """Process a tile and add it to the output mosaic."""
     from linumpy.config.threads import apply_threadpool_limits
 
@@ -146,7 +144,8 @@ def process_tile(params: dict):
     return z, file_output
 
 
-def main():
+def main() -> None:
+    """Run function operation."""
     p = _build_arg_parser()
     args = p.parse_args()
 
@@ -195,9 +194,7 @@ def main():
         print(f"Note: GPU mode uses sequential processing (ignoring n_processes={n_cpus})")
 
     if args.use_gpu or n_cpus <= 1:
-        corrected_files = []
-        for param in tqdm(params_list, desc="Processing tiles"):
-            corrected_files.append(process_tile(param))
+        corrected_files = [process_tile(param) for param in tqdm(params_list, desc="Processing tiles")]
     else:
         from pqdm.processes import pqdm
 

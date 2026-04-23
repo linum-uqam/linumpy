@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # Configure thread limits before numpy/scipy imports
+"""Script."""
+
 import linumpy.config.threads  # noqa: F401
 
 # -*- coding:utf-8 -*-
@@ -14,6 +16,7 @@ if no GPU is detected.
 """
 
 import argparse
+from typing import Any
 
 import dask.array as da
 import numpy as np
@@ -26,7 +29,7 @@ from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.metrics import collect_normalization_metrics
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("in_image", help="Input image.")
     p.add_argument("out_image", help="Output image.")
@@ -45,7 +48,7 @@ def _build_arg_parser():
     return p
 
 
-def get_agarose_mask(vol, smoothing_sigma, use_gpu=True):
+def get_agarose_mask(vol: Any, smoothing_sigma: float, use_gpu: bool = True) -> Any:
     """Compute agarose mask using GPU-accelerated Gaussian filter and Otsu threshold."""
     reference = np.mean(vol, axis=0)
     reference_smooth = gaussian_filter(reference, sigma=smoothing_sigma, use_gpu=use_gpu)
@@ -54,7 +57,8 @@ def get_agarose_mask(vol, smoothing_sigma, use_gpu=True):
     return agarose_mask, float(threshold)
 
 
-def main():
+def main() -> None:
+    """Run function."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

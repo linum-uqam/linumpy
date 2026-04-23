@@ -18,14 +18,15 @@ import os as _os
 from pathlib import Path as _Path
 
 
-def get_home():
-    """Set a user-writeable file-system location to put files."""
+def get_home() -> str:
+    """Return a user-writeable file-system location to put files."""
     if "LINUMPY_HOME" in _os.environ:
         return _os.environ["LINUMPY_HOME"]
     return str(_Path.home() / ".linumpy")
 
 
-def get_root():
+def get_root() -> str:
+    """Return the absolute path to the repository root."""
     return str(_Path(__file__).resolve().parent.parent)
 
 
@@ -36,6 +37,5 @@ LINUMPY_ROOT = get_root()
 apply_threadpool_limits()
 
 # Note: configure_sitk() must be called after SimpleITK is imported.
-# Scripts that use SimpleITK should call:
-#   from linumpy.config.threads import configure_all_libraries
-#   configure_all_libraries()  # after all imports
+# Scripts that use SimpleITK should call configure_all_libraries()
+# (from linumpy.config.threads) after all imports.

@@ -5,12 +5,14 @@ Provides GPU versions of FFT-based operations including phase correlation
 for image registration and stitching.
 """
 
+from typing import Any
+
 import numpy as np
 
 from . import GPU_AVAILABLE, to_cpu
 
 
-def phase_correlation(vol1, vol2, n_peaks=8, use_gpu=True):
+def phase_correlation(vol1: Any, vol2: Any, n_peaks: Any = 8, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated phase correlation for finding translation between images.
 
@@ -38,7 +40,7 @@ def phase_correlation(vol1, vol2, n_peaks=8, use_gpu=True):
         return _phase_correlation_cpu(vol1, vol2, n_peaks)
 
 
-def _phase_correlation_gpu(vol1, vol2, n_peaks=8):
+def _phase_correlation_gpu(vol1: Any, vol2: Any, n_peaks: Any = 8) -> Any:
     """GPU implementation of phase correlation."""
     import cupy as cp
 
@@ -68,24 +70,24 @@ def _phase_correlation_gpu(vol1, vol2, n_peaks=8):
         fft_func = cp.fft.fftn
         ifft_func = cp.fft.ifftn
 
-    Q_num = fft_func(vol2_p) * cp.conj(fft_func(vol1_p))
-    Q_denum = cp.abs(Q_num)
+    q_num = fft_func(vol2_p) * cp.conj(fft_func(vol1_p))
+    q_denum = cp.abs(q_num)
 
     # Avoid division by zero
-    Q_freq = cp.where(Q_denum > 1e-10, Q_num / Q_denum, 0)
-    Q = ifft_func(Q_freq)
-    Q_abs = cp.abs(Q)
+    q_freq = cp.where(q_denum > 1e-10, q_num / q_denum, 0)
+    q = ifft_func(q_freq)
+    q_abs = cp.abs(q)
 
     # Find peaks
     from cupyx.scipy.ndimage import maximum_filter
 
     # Local maxima detection
-    local_max = maximum_filter(Q_abs, size=3)
-    _peaks_mask = Q_abs == local_max
+    local_max = maximum_filter(q_abs, size=3)
+    _peaks_mask = q_abs == local_max
 
     # Get top n_peaks
-    flat_indices = cp.argsort(Q_abs.ravel())[-n_peaks:]
-    coordinates = cp.unravel_index(flat_indices, Q_abs.shape)
+    flat_indices = cp.argsort(q_abs.ravel())[-n_peaks:]
+    coordinates = cp.unravel_index(flat_indices, q_abs.shape)
     coordinates = cp.stack(coordinates, axis=1)
 
     # Try all translation permutations
@@ -140,7 +142,7 @@ def _phase_correlation_gpu(vol1, vol2, n_peaks=8):
     return best_translation, best_score
 
 
-def _apply_hanning_window_gpu(vol, pad_sizes):
+def _apply_hanning_window_gpu(vol: Any, pad_sizes: Any) -> Any:
     """Apply Hanning window on GPU."""
     import cupy as cp
 
@@ -167,7 +169,7 @@ def _apply_hanning_window_gpu(vol, pad_sizes):
     return result
 
 
-def _compute_correlation_score(vol1, vol2, translation):
+def _compute_correlation_score(vol1: Any, vol2: Any, translation: Any) -> Any:
     """Compute normalized cross-correlation score for a translation."""
     # Compute overlap region
     slices1 = []
@@ -204,14 +206,14 @@ def _compute_correlation_score(vol1, vol2, translation):
         return 0
 
 
-def _phase_correlation_cpu(vol1, vol2, n_peaks=8):
+def _phase_correlation_cpu(vol1: Any, vol2: Any, n_peaks: Any = 8) -> Any:
     """CPU fallback for phase correlation - calls existing implementation."""
     from linumpy.registration.transforms import pair_wise_phase_correlation
 
     return pair_wise_phase_correlation(vol1, vol2, n_peaks=n_peaks, return_cc=True)
 
 
-def fft2(image, use_gpu=True):
+def fft2(image: Any, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated 2D FFT.
 
@@ -237,7 +239,7 @@ def fft2(image, use_gpu=True):
         return np.fft.fft2(image)
 
 
-def ifft2(spectrum, use_gpu=True):
+def ifft2(spectrum: Any, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated 2D inverse FFT.
 

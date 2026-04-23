@@ -39,7 +39,7 @@ def ensure_directory(directory: Path, dry_run: bool = False) -> None:
     """
     if not dry_run and not directory.exists():
         directory.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Created directory: {directory}")
+        logger.info("Created directory: %s", directory)
 
 
 def move_item(source: Path, destination: Path, destination_label: str, dry_run: bool = False) -> bool:
@@ -58,14 +58,14 @@ def move_item(source: Path, destination: Path, destination_label: str, dry_run: 
     """
     # Check if destination already exists
     if destination.exists():
-        logger.warning(f"{source.name} already exists in destination, skipping: {source.name}")
+        logger.warning("%s already exists in destination, skipping: %s", source.name, source.name)
         return False
 
     if dry_run:
-        logger.info(f"[DRY RUN] Would move: {source} -> {destination}")
+        logger.info("[DRY RUN] Would move: %s -> %s", source, destination)
     else:
         shutil.move(str(source), str(destination))
-        logger.info(f"Moved: {source.name} -> {destination_label}")
+        logger.info("Moved: %s -> %s", source.name, destination_label)
 
     return True
 
@@ -84,10 +84,8 @@ def find_quick_stitches(data_dir: Path) -> list[Path]:
         tiles_dir = slice_dir / "tiles"
         if tiles_dir.exists():
             # Find quick stitch images in the tiles directory
-            for qs_file in tiles_dir.glob("quick_stitch_*.jpg"):
-                quick_stitches.append(qs_file)
-            for qs_file in tiles_dir.glob("quick_stitch_*.png"):
-                quick_stitches.append(qs_file)
+            quick_stitches.extend(tiles_dir.glob("quick_stitch_*.jpg"))
+            quick_stitches.extend(tiles_dir.glob("quick_stitch_*.png"))
 
     return quick_stitches
 
@@ -95,6 +93,7 @@ def find_quick_stitches(data_dir: Path) -> list[Path]:
 def move_quick_stitches(data_dir: Path, dry_run: bool = False) -> int:
     """
     Move quick stitch images to the quick_stitches directory.
+
     Note: The original files in the tiles directories will be deleted after moving.
 
     Returns
@@ -171,10 +170,10 @@ def delete_processing_files(data_dir: Path, dry_run: bool = False) -> int:
     deleted_count = 0
     for proc_file in processing_files:
         if dry_run:
-            logger.info(f"[DRY RUN] Would delete processing file: {proc_file}")
+            logger.info("[DRY RUN] Would delete processing file: %s", proc_file)
         else:
             proc_file.unlink()
-            logger.info(f"Deleted processing file: {proc_file}")
+            logger.info("Deleted processing file: %s", proc_file)
 
         deleted_count += 1
 
@@ -198,10 +197,10 @@ def delete_cache_files(data_dir: Path, dry_run: bool = False) -> int:
     deleted_count = 0
     for cache_file in cache_files:
         if dry_run:
-            logger.info(f"[DRY RUN] Would delete cache file: {cache_file}")
+            logger.info("[DRY RUN] Would delete cache file: %s", cache_file)
         else:
             cache_file.unlink()
-            logger.info(f"Deleted cache file: {cache_file}")
+            logger.info("Deleted cache file: %s", cache_file)
 
         deleted_count += 1
 
@@ -230,14 +229,14 @@ def delete_bin_files(data_dir: Path, dry_run: bool = False) -> int:
         total_size += file_size
 
         if dry_run:
-            logger.info(f"[DRY RUN] Would delete: {bin_file} ({file_size / (1024**2):.2f} MB)")
+            logger.info("[DRY RUN] Would delete: %s (%.2f MB)", bin_file, file_size / (1024**2))
         else:
             bin_file.unlink()
-            logger.info(f"Deleted: {bin_file}")
+            logger.info("Deleted: %s", bin_file)
 
         deleted_count += 1
 
-    logger.info(f"Total size of .bin files: {total_size / (1024**3):.2f} GB")
+    logger.info("Total size of .bin files: %.2f GB", total_size / (1024**3))
 
     return deleted_count
 
@@ -278,11 +277,11 @@ def verify_structure(data_dir: Path) -> bool:
         True if structure is valid, False otherwise
     """
     if not data_dir.exists():
-        logger.error(f"Data directory does not exist: {data_dir}")
+        logger.error("Data directory does not exist: %s", data_dir)
         return False
 
     if not data_dir.is_dir():
-        logger.error(f"Path is not a directory: {data_dir}")
+        logger.error("Path is not a directory: %s", data_dir)
         return False
 
     # Check for at least one slice directory
@@ -291,20 +290,19 @@ def verify_structure(data_dir: Path) -> bool:
         logger.error("No slice directories found (expected slice_z*)")
         return False
 
-    logger.info(f"Found {len(slice_dirs)} slice directories")
+    logger.info("Found %s slice directories", len(slice_dirs))
 
     return True
 
 
 def clean_raw_data(data_dir: Path, dry_run: bool = False) -> dict:
-    """
-    Main function to clean raw data.
+    """Clean raw data in the given directory.
 
     Returns
     -------
         Dictionary with statistics about the cleanup
     """
-    logger.info(f"Cleaning raw data in: {data_dir}")
+    logger.info("Cleaning raw data in: %s", data_dir)
 
     if dry_run:
         logger.info("DRY RUN MODE - No files will be modified")
@@ -336,11 +334,11 @@ def clean_raw_data(data_dir: Path, dry_run: bool = False) -> dict:
 
     # Summary
     logger.info("\n=== Cleanup Summary ===")
-    logger.info(f"Quick stitch images moved: {moved_count}")
-    logger.info(f"Binary files deleted: {deleted_count}")
-    logger.info(f"Processing files deleted: {processing_deleted}")
-    logger.info(f"Cache files deleted: {cache_deleted}")
-    logger.info(f"Slice directories moved to metadata: {slices_moved}")
+    logger.info("Quick stitch images moved: %s", moved_count)
+    logger.info("Binary files deleted: %s", deleted_count)
+    logger.info("Processing files deleted: %s", processing_deleted)
+    logger.info("Cache files deleted: %s", cache_deleted)
+    logger.info("Slice directories moved to metadata: %s", slices_moved)
 
     return {
         "success": True,
@@ -352,8 +350,8 @@ def clean_raw_data(data_dir: Path, dry_run: bool = False) -> dict:
     }
 
 
-def main():
-    """Main entry point for the script."""
+def main() -> None:
+    """Run the script."""
     parser = argparse.ArgumentParser(
         description="Clean up raw data acquisitions by removing binary files and organizing quick stitches",
         formatter_class=argparse.RawDescriptionHelpFormatter,

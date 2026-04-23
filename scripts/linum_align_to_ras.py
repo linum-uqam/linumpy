@@ -14,6 +14,7 @@ import linumpy.config.threads  # noqa: F401
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -37,7 +38,7 @@ DEFAULT_MAX_ITERATIONS = 1000
 DEFAULT_METRIC = "MI"
 
 
-def _debug_log(message: str, **fields):
+def _debug_log(message: str, **fields: Any) -> None:
     """Append an NDJSON line describing a slicing/labelling decision.
 
     Active only when ``LINUMPY_DEBUG_LOG`` is set, so production runs pay
@@ -68,7 +69,7 @@ def _debug_log(message: str, **fields):
         pass
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     """Build the command-line argument parser."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_zarr", help="Input OME-Zarr file from 3D reconstruction pipeline")
@@ -149,7 +150,6 @@ def _build_arg_parser():
 
 # =============================================================================
 # Orientation utilities — imported from linumpy.imaging.orientation
-# (parse_orientation_code, apply_orientation_transform, reorder_resolution)
 # =============================================================================
 
 
@@ -159,7 +159,7 @@ def create_registration_progress_callback(
     pbar: tqdm | None = None,
     registration_start_step: int = 0,
     registration_steps: int = 0,
-):
+) -> None:
     """
     Create a progress callback for registration.
 
@@ -187,7 +187,7 @@ def create_registration_progress_callback(
     # Worst-case budget (used only as the denominator for the progress bar).
     estimated_total = float(max_iterations * n_resolution_levels)
 
-    def callback(method):
+    def callback(method: str) -> None:
         """Update progress during registration iterations."""
         iteration = method.GetOptimizerIteration()
         metric = method.GetMetricValue()
@@ -246,7 +246,7 @@ def sitk_transform_to_affine_matrix(transform: sitk.Transform) -> np.ndarray:
         cx, cy, cz = np.cos([rx, ry, rz])
         sx, sy, sz = np.sin([rx, ry, rz])
 
-        R = np.array(
+        r = np.array(
             [
                 [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx],
                 [sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx],
@@ -255,17 +255,17 @@ def sitk_transform_to_affine_matrix(transform: sitk.Transform) -> np.ndarray:
         )
 
         matrix = np.eye(4)
-        matrix[:3, :3] = R
-        matrix[:3, 3] = translation + center - R @ center
+        matrix[:3, :3] = r
+        matrix[:3, 3] = translation + center - r @ center
 
     elif isinstance(transform, sitk.AffineTransform):
-        R = np.array(transform.GetMatrix()).reshape(3, 3)
+        r = np.array(transform.GetMatrix()).reshape(3, 3)
         translation = np.array(transform.GetTranslation())
         center = np.array(transform.GetCenter())
 
         matrix = np.eye(4)
-        matrix[:3, :3] = R
-        matrix[:3, 3] = translation + center - R @ center
+        matrix[:3, :3] = r
+        matrix[:3, 3] = translation + center - r @ center
     else:
         raise ValueError(f"Unsupported transform type: {type(transform)}")
 
@@ -274,7 +274,7 @@ def sitk_transform_to_affine_matrix(transform: sitk.Transform) -> np.ndarray:
     return permute @ matrix @ permute.T
 
 
-def store_transform_in_metadata(zarr_path: str, transform: sitk.Transform):
+def store_transform_in_metadata(zarr_path: str, transform: sitk.Transform) -> None:
     """Store transform in OME-Zarr metadata as affine coordinate transformation."""
     affine_matrix = sitk_transform_to_affine_matrix(transform)
     zattrs_path = Path(zarr_path) / ".zattrs"
@@ -453,7 +453,7 @@ def apply_transform_to_zarr(
     orientation_permutation: tuple | None = None,
     orientation_flips: tuple | None = None,
     pbar: tqdm | None = None,
-):
+) -> None:
     """
     Apply transform to zarr file by resampling into RAS-aligned space.
 
@@ -479,9 +479,13 @@ def apply_transform_to_zarr(
         Axis flips for orientation correction
     pbar : tqdm, optional
         Progress bar
+    pyramid_resolutions : list, optional
+        Explicit list of resolutions for the output pyramid
+    make_isotropic : bool
+        If True, resample output to isotropic resolution
     """
 
-    def update_pbar():
+    def update_pbar() -> None:
         if pbar:
             pbar.update(1)
 
@@ -566,7 +570,7 @@ def apply_transform_to_zarr(
 # =============================================================================
 
 
-def create_input_preview(input_path: str, output_path: str, level: int = 0):
+def create_input_preview(input_path: str, output_path: str, level: int = 0) -> None:
     """Create preview of input volume to help determine orientation."""
     vol_zarr, resolution = read_omezarr(input_path, level=level)
     vol = np.asarray(vol_zarr[:])
@@ -645,7 +649,7 @@ def create_alignment_preview(
     orientation_permutation: tuple | None = None,
     orientation_flips: tuple | None = None,
     pbar: tqdm | None = None,
-):
+) -> None:
     """Create preview comparing original, aligned, and Allen template.
 
     Shows center slices from each volume in their own coordinate frames.
@@ -653,7 +657,7 @@ def create_alignment_preview(
     with the brain volume since we're not placing it in Allen coordinate space.
     """
 
-    def update_pbar():
+    def update_pbar() -> None:
         if pbar:
             pbar.update(1)
 
@@ -704,19 +708,19 @@ def create_alignment_preview(
     update_pbar()
 
     # Helper functions
-    def get_center_slices(vol):
+    def get_center_slices(vol: Any) -> Any:
         """Get center slices in each plane."""
         z, y, x = vol.shape[0] // 2, vol.shape[1] // 2, vol.shape[2] // 2
         return vol[z, :, :], vol[:, y, :], vol[:, :, x]
 
-    def get_display_range(vol):
+    def get_display_range(vol: Any) -> Any:
         """Get display range from non-zero values."""
         nonzero = vol[vol > 0]
         if len(nonzero) > 0:
             return np.percentile(nonzero, [1, 99])
         return 0, 1
 
-    def find_content_center_slices(vol):
+    def find_content_center_slices(vol: Any) -> Any:
         """Find the slice with maximum content independently for each axis.
 
         Using a shared 3D centroid for all three views fails when the brain is
@@ -774,7 +778,6 @@ def create_alignment_preview(
         axes[row, 1].set_title(f"Aligned - {plane_name}")
         axes[row, 1].axis("off")
 
-        # Allen (reference)
         data = allen_slices[row].T if row == 0 else allen_slices[row][::-1, :]
         axes[row, 2].imshow(data, cmap="gray", origin="lower", vmin=allen_vmin, vmax=allen_vmax)
         axes[row, 2].set_title(f"Allen {allen_resolution}µm - {plane_name}")
@@ -808,10 +811,9 @@ def create_orientation_preview(
     orientation_permutation: tuple | None = None,
     orientation_flips: tuple | None = None,
     initial_rotation_deg: tuple = (0.0, 0.0, 0.0),
-):
+) -> None:
     """
-    Save a 3-panel orthogonal preview of the volume after orientation correction
-    and initial rotation are applied.
+    Save a 3-panel orthogonal preview of the volume after orientation correction and initial rotation are applied.
 
     Axes are labelled in RAS space (Z=S, X=R, Y=A) so the result can be
     inspected directly against the Allen atlas orientation.
@@ -921,8 +923,8 @@ def create_orientation_preview(
 # =============================================================================
 
 
-def main():
-    """Main entry point: parse arguments and run alignment workflow."""
+def main() -> None:
+    """Run the script. parse arguments and run alignment workflow."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

@@ -27,9 +27,10 @@ import subprocess
 import sys
 import time
 from datetime import datetime
+from typing import Any
 
 
-def get_terminal_width():
+def get_terminal_width() -> Any:
     """Get terminal width for formatting."""
     try:
         return os.get_terminal_size().columns
@@ -37,7 +38,7 @@ def get_terminal_width():
         return 80
 
 
-def print_header(title: str):
+def print_header(title: str) -> None:
     """Print a section header."""
     width = get_terminal_width()
     print("\n" + "=" * width)
@@ -45,7 +46,7 @@ def print_header(title: str):
     print("=" * width)
 
 
-def print_subheader(title: str):
+def print_subheader(title: str) -> None:
     """Print a subsection header."""
     print(f"\n--- {title} ---")
 
@@ -53,7 +54,7 @@ def print_subheader(title: str):
 class SystemDiagnostics:
     """System diagnostics collector."""
 
-    def __init__(self, verbose=False):
+    def __init__(self, verbose: bool = False) -> None:
         self.verbose = verbose
         self.results = {
             "timestamp": datetime.now().isoformat(),
@@ -67,7 +68,7 @@ class SystemDiagnostics:
             "recommendations": [],
         }
 
-    def check_cpu(self):
+    def check_cpu(self) -> Any:
         """Check CPU configuration."""
         print_header("CPU Configuration")
 
@@ -97,7 +98,7 @@ class SystemDiagnostics:
 
         return total_cpus
 
-    def check_memory(self):
+    def check_memory(self) -> Any:
         """Check memory availability."""
         print_header("Memory Configuration")
 
@@ -128,7 +129,7 @@ class SystemDiagnostics:
             self.results["memory"]["error"] = "psutil not installed"
             return None, None
 
-    def check_gpu(self):
+    def check_gpu(self) -> None:
         """Check GPU configuration and CUDA availability."""
         print_header("GPU Configuration")
 
@@ -216,7 +217,7 @@ class SystemDiagnostics:
         print_subheader("Linumpy GPU Module")
         self._check_linumpy_gpu()
 
-    def _check_jax_gpu(self):
+    def _check_jax_gpu(self) -> None:
         """Check JAX GPU in a subprocess with proper CUDA 12 library paths."""
         try:
             new_ld_path, cuda12_paths = self._get_cuda12_ld_path(debug=False)
@@ -300,7 +301,7 @@ except Exception as e:
             print(f"  ⚠️  JAX check error: {e}")
             self.results["gpu"]["jax_gpu"] = False
 
-    def _handle_jax_error(self, error_msg: str):
+    def _handle_jax_error(self, error_msg: str) -> None:
         """Handle JAX error messages with helpful guidance."""
         if "libcublas" in error_msg.lower() or "cannot open shared object" in error_msg or "cusolver" in error_msg.lower():
             print("     CUDA library issue. JAX 0.4.23 requires specific library versions.")
@@ -332,7 +333,7 @@ except Exception as e:
         else:
             print(f"     Error: {error_msg[:200]}")
 
-    def _check_cupy(self):
+    def _check_cupy(self) -> None:
         """Check CuPy GPU support."""
         try:
             import cupy as cp
@@ -366,7 +367,7 @@ except Exception as e:
             self.results["gpu"]["cupy_version"] = None
             self.results["issues"].append("CuPy not installed - linumpy GPU acceleration disabled")
 
-    def _check_linumpy_gpu(self):
+    def _check_linumpy_gpu(self) -> None:
         """Check linumpy GPU module."""
         try:
             from linumpy.gpu import GPU_AVAILABLE, GPU_DEVICE_NAME, GPU_MEMORY_GB
@@ -383,7 +384,7 @@ except Exception as e:
             print(f"  ⚠️  Error checking linumpy.gpu: {e}")
             self.results["gpu"]["linumpy_gpu_available"] = False
 
-    def check_python_packages(self):
+    def check_python_packages(self) -> None:
         """Check critical Python packages."""
         print_header("Python Environment")
 
@@ -433,7 +434,7 @@ except Exception as e:
         except Exception:
             print("  (Could not check BLAS)")
 
-    def check_nextflow_config(self):
+    def check_nextflow_config(self) -> None:
         """Check Nextflow configuration recommendations."""
         print_header("Nextflow Configuration")
 
@@ -486,7 +487,7 @@ except Exception as e:
         if total_memory:
             print(f"  • With {total_memory:.0f} GB RAM, memory should not be a bottleneck")
 
-    def run_benchmarks(self):
+    def run_benchmarks(self) -> None:
         """Run performance benchmarks."""
         print_header("Performance Benchmarks")
 
@@ -500,7 +501,7 @@ except Exception as e:
             print_subheader("GPU Performance")
             self._run_gpu_benchmark()
 
-    def _get_cuda12_ld_path(self, debug=False):
+    def _get_cuda12_ld_path(self, debug: bool = False) -> None:
         """Build LD_LIBRARY_PATH for CUDA 12 compatible libraries."""
         import contextlib
         import importlib.util
@@ -570,7 +571,7 @@ except Exception as e:
 
         return new_ld_path, cuda_paths
 
-    def _run_basic_benchmark(self):
+    def _run_basic_benchmark(self) -> None:
         """Run BaSiC benchmark in subprocess with proper LD_LIBRARY_PATH for CUDA."""
         try:
             new_ld_path, cuda_paths = self._get_cuda12_ld_path(debug=False)
@@ -738,7 +739,7 @@ except Exception as e:
         except Exception as e:
             print(f"  ⚠️  BaSiC benchmark failed: {e}")
 
-    def _handle_basic_error(self, error_out: str):
+    def _handle_basic_error(self, error_out: str) -> None:
         """Handle BaSiC benchmark errors with specific guidance."""
         error_lower = error_out.lower()
 
@@ -870,13 +871,13 @@ except Exception as e:
                 for line in error_out.split("\n")[-30:]:
                     print(f"       {line}")
 
-    def _run_pqdm_benchmark(self):
+    def _run_pqdm_benchmark(self) -> Any:
         """Run pqdm parallel processing benchmark."""
         try:
             import numpy as np
             from pqdm.processes import pqdm
 
-            def dummy_task(i):
+            def dummy_task(i: Any) -> Any:
                 arr = np.random.rand(500, 500)
                 for _ in range(10):
                     arr = np.fft.fft2(arr)
@@ -892,7 +893,7 @@ except Exception as e:
         except Exception as e:
             print(f"  ⚠️  pqdm benchmark failed: {e}")
 
-    def _run_gpu_benchmark(self):
+    def _run_gpu_benchmark(self) -> None:
         """Run GPU performance benchmark."""
         try:
             import cupy as cp
@@ -925,7 +926,7 @@ except Exception as e:
         except Exception as e:
             print(f"  ⚠️  GPU benchmark failed: {e}")
 
-    def debug_cuda_libraries(self):
+    def debug_cuda_libraries(self) -> None:
         """Show detailed CUDA library debugging information."""
         import site
 
@@ -1195,7 +1196,7 @@ except Exception as e:
                 print("")
                 print("  Your current LD_LIBRARY_PATH looks correct.")
 
-    def generate_report(self):
+    def generate_report(self) -> Any:
         """Generate summary report with recommendations."""
         print_header("Summary")
 
@@ -1220,7 +1221,8 @@ except Exception as e:
         return self.results
 
 
-def main():
+def main() -> None:
+    """Run function."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("--quick", action="store_true", help="Quick system check only (no benchmarks)")
     p.add_argument("--benchmark", action="store_true", help="Include performance benchmarks")

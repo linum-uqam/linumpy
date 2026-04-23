@@ -73,7 +73,7 @@ def normalize_volume(
     return vol, background_thresholds
 
 
-def get_agarose_mask(vol: np.ndarray, smoothing_sigma: float = 1.0):
+def get_agarose_mask(vol: np.ndarray, smoothing_sigma: float = 1.0) -> tuple[np.ndarray, float]:
     """Compute agarose mask using Otsu thresholding on a mean projection.
 
     The agarose is the low-intensity background surrounding the tissue.
@@ -127,7 +127,7 @@ def _smooth_weighted(values: np.ndarray, sigma: float) -> np.ndarray:
     return out
 
 
-def _chunk_boundaries(n_z: int, n_serial_slices):
+def _chunk_boundaries(n_z: int, n_serial_slices: int | None) -> list[tuple[int, int]]:
     """Return list of (start, end) Z-index pairs, one per chunk."""
     if n_serial_slices is not None:
         chunk_size = n_z / n_serial_slices
@@ -140,8 +140,8 @@ def _chunk_boundaries(n_z: int, n_serial_slices):
 
 
 def compute_scale_factors(
-    vol: np.ndarray, n_serial_slices, smooth_sigma: float, percentile: float, min_scale: float, max_scale: float
-):
+    vol: np.ndarray, n_serial_slices: int | None, smooth_sigma: float, percentile: float, min_scale: float, max_scale: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list]:
     """Compute per-Z-plane linear scale factors for percentile-based normalization.
 
     Corrects slow acquisition drift (focus changes, laser power) between
@@ -190,13 +190,15 @@ def compute_scale_factors(
     return scale_factors, raw_metrics, smoothed, boundaries
 
 
-def _build_cdf(values: np.ndarray, n_bins: int):
+def _build_cdf(values: np.ndarray, n_bins: int) -> tuple[np.ndarray, np.ndarray]:
     """Build a cumulative distribution function from an array of values.
 
     Parameters
     ----------
-    values : np.ndarray, 1-D, in [0, 1]
+    values : np.ndarray
+        1-D array in [0, 1].
     n_bins : int
+        Number of histogram bins.
 
     Returns
     -------
@@ -211,7 +213,7 @@ def _build_cdf(values: np.ndarray, n_bins: int):
     return bin_centers, cdf
 
 
-def _build_tissue_cdf(flat_values: np.ndarray, n_bins: int, tissue_threshold: float):
+def _build_tissue_cdf(flat_values: np.ndarray, n_bins: int, tissue_threshold: float) -> tuple[np.ndarray, np.ndarray, int]:
     """Build a CDF of tissue voxels (strictly above tissue_threshold).
 
     Unlike ``_build_cdf``, this avoids materialising a tissue-only copy of the
@@ -221,9 +223,10 @@ def _build_tissue_cdf(flat_values: np.ndarray, n_bins: int, tissue_threshold: fl
 
     Parameters
     ----------
-    flat_values : np.ndarray, 1-D, in [0, 1]
-        Full (tissue + background) flat intensity array.
+    flat_values : np.ndarray
+        1-D array in [0, 1] containing both tissue and background voxels.
     n_bins : int
+        Number of histogram bins.
     tissue_threshold : float
         Voxels strictly greater than this are considered tissue.
 
@@ -274,7 +277,9 @@ def _match_chunk_to_reference(
     return result.reshape(chunk.shape)
 
 
-def apply_histogram_matching(vol: np.ndarray, n_serial_slices, n_bins: int, tissue_threshold: float = 0.0) -> np.ndarray:
+def apply_histogram_matching(
+    vol: np.ndarray, n_serial_slices: int | None, n_bins: int, tissue_threshold: float = 0.0
+) -> np.ndarray:
     """Apply per-section histogram matching to a global reference distribution.
 
     Corrects section-to-section intensity drift while preserving relative contrast

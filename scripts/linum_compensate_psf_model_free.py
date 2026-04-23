@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""
-Axial beam profile correction. The script estimates the beam profile
-from agarose voxels and then applies the inverse profile to each a-line.
+"""Axial beam profile correction.
+
+The script estimates the beam profile from agarose voxels and then applies the inverse profile to each a-line.
 """
 
 # Configure thread limits before numpy/scipy imports
@@ -23,7 +23,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Run function."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_zarr", help="Path to file (.ome.zarr) containing the 3D mosaic grid.")
     p.add_argument("output_zarr", help="Corrected 3D mosaic grid file path (.ome.zarr).")
@@ -40,7 +41,8 @@ def _build_arg_parser():
     return p
 
 
-def main():
+def main() -> None:
+    """Run function operation."""
     # Parse the arguments
     parser = _build_arg_parser()
     args = parser.parse_args()

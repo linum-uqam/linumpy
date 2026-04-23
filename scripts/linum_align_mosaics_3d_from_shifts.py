@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""
-Using xy shifts file, bring all mosaics in `in_mosaics_dir` to a common space. Each
-volume is resampled to a common shape and its content is translated following the
+"""Using xy shifts file, bring all mosaics in `in_mosaics_dir` to a common space.
+
+Each volume is resampled to a common shape and its content is translated following the
 transforms in xy shifts. All transformed mosaics are saved to `out_directory`.
 
 Optionally accepts a slice configuration file to filter which slices to process.
@@ -15,6 +15,7 @@ import argparse
 import re
 from os.path import split as psplit
 from pathlib import Path
+from typing import Any
 
 import dask.array as da
 import numpy as np
@@ -27,7 +28,7 @@ from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.stack_alignment.io import build_cumulative_shifts
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("in_mosaics_dir", help="Directory containing mosaics to bring to common space.")
     p.add_argument("in_shifts", help="Spreadsheet containing xy shifts (.csv).")
@@ -92,12 +93,13 @@ def _build_arg_parser():
     return p
 
 
-def load_slice_config(config_path):
+def load_slice_config(config_path: str | Path) -> dict:
     """Return the integer slice IDs marked ``use=true`` in ``config_path``."""
     return {int(sid) for sid in slice_config_io.filter_slices_to_use(config_path)}
 
 
-def _replace_with_local_median(df, idx, window, skip_mask=None):
+def _replace_with_local_median(df: Any, idx: int, window: Any, skip_mask: Any = None) -> Any:
+    """Run function."""
     pos = df.index.get_loc(idx)
     neighbor_vals_x = []
     neighbor_vals_y = []
@@ -128,7 +130,8 @@ def _replace_with_local_median(df, idx, window, skip_mask=None):
     return result
 
 
-def handle_excluded_slice_shifts(shifts_df, excluded_slice_ids, mode="keep", window=2):
+def handle_excluded_slice_shifts(shifts_df: Any, excluded_slice_ids: Any, mode: str = "keep", window: int = 2) -> Any:
+    """Run function operation."""
     if not excluded_slice_ids or mode == "keep":
         return shifts_df
 
@@ -186,7 +189,7 @@ def handle_excluded_slice_shifts(shifts_df, excluded_slice_ids, mode="keep", win
     return df
 
 
-def compute_common_shape(mosaic_files, slice_ids, cumsum_shifts):
+def compute_common_shape(mosaic_files: Any, slice_ids: Any, cumsum_shifts: Any) -> None:
     """
     Compute the common shape needed to fit all aligned mosaics.
 
@@ -231,7 +234,7 @@ def compute_common_shape(mosaic_files, slice_ids, cumsum_shifts):
     return nx, ny, x0, y0
 
 
-def _estimate_shift_by_registration(fixed_path, moving_path):
+def _estimate_shift_by_registration(fixed_path: str | Path, moving_path: str | Path) -> Any:
     """Estimate the XY shift between two 3D mosaics via 2-D phase cross-correlation.
 
     Computes a max-projection over the central 20 % of Z-slices for each
@@ -259,7 +262,7 @@ def _estimate_shift_by_registration(fixed_path, moving_path):
     fixed_data = np.array(fixed_vol)
     moving_data = np.array(moving_vol)
 
-    def _proj(arr):
+    def _proj(arr: Any) -> Any:
         nz = arr.shape[0]
         z0 = max(0, nz // 2 - max(1, nz // 10))
         z1 = min(nz, nz // 2 + max(1, nz // 10))
@@ -272,7 +275,8 @@ def _estimate_shift_by_registration(fixed_path, moving_path):
     h = max(fixed_proj.shape[0], moving_proj.shape[0])
     w = max(fixed_proj.shape[1], moving_proj.shape[1])
 
-    def _pad(arr, th, tw):
+    def _pad(arr: Any, th: Any, tw: Any) -> Any:
+        """Run function."""
         ph = th - arr.shape[0]
         pw = tw - arr.shape[1]
         return np.pad(arr, ((ph // 2, ph - ph // 2), (pw // 2, pw - pw // 2)))
@@ -310,7 +314,8 @@ def _estimate_shift_by_registration(fixed_path, moving_path):
     return dx_mm, dy_mm, dx_px, dy_px, ncc
 
 
-def main():
+def main() -> None:
+    """Run function operation."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

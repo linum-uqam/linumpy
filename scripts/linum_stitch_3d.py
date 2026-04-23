@@ -22,7 +22,7 @@ from linumpy.metrics import collect_stitch_3d_metrics
 from linumpy.mosaic.grid import add_volume_to_mosaic
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_volume", help="Full path to a 3D mosaic grid volume.")
     p.add_argument(
@@ -41,7 +41,8 @@ def _build_arg_parser():
     return p
 
 
-def main():
+def main() -> None:
+    """Run function."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()

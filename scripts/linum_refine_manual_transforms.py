@@ -160,7 +160,6 @@ def _compose_rigid_2d(
 
     # T_m(c_final):
     p_manual = r_manual @ (c_final - c_manual) + c_manual + t_manual
-    # t_final = R_delta (p_manual - c_final) + t_delta
     t_final = r_delta @ (p_manual - c_final) + t_delta
 
     return float(t_final[0]), float(t_final[1]), float(man_rot_deg + delta_rot_deg)
@@ -178,10 +177,18 @@ def _warp_moving(moving: np.ndarray, tx: float, ty: float, rot_deg: float, cx: f
 
     Parameters
     ----------
-    moving : np.ndarray  Shape (H, W).
-    tx, ty : float  Full-resolution pixel translation in SimpleITK convention.
-    rot_deg : float  Rotation in degrees (CCW positive).
-    cx, cy : float  Rotation centre in (x, y) = (col, row).
+    moving : np.ndarray
+        Input image with shape (H, W).
+    tx : float
+        Full-resolution pixel translation X in SimpleITK convention.
+    ty : float
+        Full-resolution pixel translation Y in SimpleITK convention.
+    rot_deg : float
+        Rotation in degrees (CCW positive).
+    cx : float
+        Rotation centre X coordinate (column).
+    cy : float
+        Rotation centre Y coordinate (row).
     """
     out = moving.astype(np.float32)
     if abs(rot_deg) < 0.01 and abs(tx) < 1e-6 and abs(ty) < 1e-6:
@@ -274,6 +281,7 @@ def _write_metrics(
 
 
 def main() -> None:
+    """Run function."""
     p = _build_arg_parser()
     args = p.parse_args()
 
@@ -302,7 +310,7 @@ def main() -> None:
 
         if not manual_tfm_path.exists():
             # No manual transform — copy automated result unchanged
-            logger.info(f"  z{slice_id:02d}: no manual transform, copying automated")
+            logger.info("  z%d: no manual transform, copying automated", slice_id)
             if pair_out.exists():
                 shutil.rmtree(pair_out)
             shutil.copytree(auto_dir, pair_out)
@@ -312,7 +320,7 @@ def main() -> None:
         # Find fixed slice: the one immediately before in the sorted list
         idx = sorted_slice_ids.index(slice_id) if slice_id in sorted_slice_ids else -1
         if idx <= 0:
-            logger.warning(f"  z{slice_id:02d}: cannot determine fixed slice (id not in zarrs or first slice), copying")
+            logger.warning("  z%d: cannot determine fixed slice (id not in zarrs or first slice), copying", slice_id)
             if pair_out.exists():
                 shutil.rmtree(pair_out)
             shutil.copytree(auto_dir, pair_out)
@@ -321,14 +329,14 @@ def main() -> None:
 
         fixed_id = sorted_slice_ids[idx - 1]
         if fixed_id not in slice_zarrs or slice_id not in slice_zarrs:
-            logger.warning(f"  z{slice_id:02d}: zarr missing for pair ({fixed_id}→{slice_id}), copying")
+            logger.warning("  z%d: zarr missing for pair (%s→%s), copying", slice_id, fixed_id, slice_id)
             if pair_out.exists():
                 shutil.rmtree(pair_out)
             shutil.copytree(auto_dir, pair_out)
             n_copied += 1
             continue
 
-        logger.info(f"  z{slice_id:02d}: refining from manual transform (fixed=z{fixed_id:02d})")
+        logger.info("  z%d: refining from manual transform (fixed=z%d)", slice_id, fixed_id)
 
         # Load Z-indices from automated offsets.txt
         auto_offsets_path = auto_dir / "offsets.txt"
@@ -338,7 +346,7 @@ def main() -> None:
             moving_z = int(offsets_arr[1]) if offsets_arr.size >= 2 else 0
         else:
             fixed_z, moving_z = 0, 0
-            logger.warning(f"  z{slice_id:02d}: offsets.txt missing, using z=0 for both slices")
+            logger.warning("  z%d: offsets.txt missing, using z=0 for both slices", slice_id)
 
         # Load zarr volumes and extract the relevant 2D slices
         fixed_vol, _res = read_omezarr(str(slice_zarrs[fixed_id]))
@@ -352,7 +360,7 @@ def main() -> None:
 
         # Load manual transform parameters (full-resolution pixels)
         man_tx, man_ty, man_rot, man_cx, man_cy = _load_manual_transform(manual_tfm_path)
-        logger.info(f"  z{slice_id:02d}: manual tx={man_tx:.1f} ty={man_ty:.1f} rot={man_rot:.3f}°")
+        logger.info("  z%d: manual tx=%.1f ty=%.1f rot=%.3f°", slice_id, man_tx, man_ty, man_rot)
 
         # Warp moving slice with manual transform so it is approximately aligned
         warped_moving = _warp_moving(moving_slice, man_tx, man_ty, man_rot, man_cx, man_cy)
@@ -365,7 +373,7 @@ def main() -> None:
             max_rotation_deg=args.max_rotation_deg,
             max_translation_px=args.max_translation_px,
         )
-        logger.info(f"  z{slice_id:02d}: refinement delta tx={delta_tx:.2f} ty={delta_ty:.2f} rot={delta_rot:.3f}°")
+        logger.info("  z%d: refinement delta tx=%.2f ty=%.2f rot=%.3f°", slice_id, delta_tx, delta_ty, delta_rot)
 
         # Compose manual ∘ delta about the fixed-slice centre.
         # The refinement runs in the fixed-slice reference frame with rotation
@@ -384,7 +392,7 @@ def main() -> None:
             final_center[0],
             final_center[1],
         )
-        logger.info(f"  z{slice_id:02d}: final    tx={final_tx:.2f} ty={final_ty:.2f} rot={final_rot:.3f}°")
+        logger.info("  z%d: final    tx=%.2f ty=%.2f rot=%.3f°", slice_id, final_tx, final_ty, final_rot)
 
         # Write output. The manual tfm, the refinement delta, and the
         # composed final tfm are all in SimpleITK output->input (point-map)
@@ -416,7 +424,7 @@ def main() -> None:
         )
         n_refined += 1
 
-    logger.info(f"Done: {n_refined} pairs refined from manual transforms, {n_copied} copied unchanged")
+    logger.info("Done: %s pairs refined from manual transforms, %s copied unchanged", n_refined, n_copied)
 
 
 if __name__ == "__main__":

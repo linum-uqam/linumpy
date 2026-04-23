@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Detect extended clusters of consecutive low-quality pairwise registrations
-and stamp the affected slices as auto-excluded in ``slice_config.csv``.
+r"""Detect extended clusters of consecutive low-quality pairwise registrations.
+
+Also stamps the affected slices as auto-excluded in ``slice_config.csv``.
 
 Reads ``pairwise_registration_metrics.json`` files from the registration
 output directory. Any cluster of consecutive slice pairs of length at least
@@ -22,13 +23,15 @@ import logging
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 from linumpy.io import slice_config as slice_config_io
 
 logger = logging.getLogger(__name__)
 
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
+    """Run function."""
     p = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawTextHelpFormatter,
@@ -60,7 +63,7 @@ def build_parser():
     return p
 
 
-def load_registration_metrics(transforms_dir: Path):
+def load_registration_metrics(transforms_dir: Path) -> Any:
     """Load z_correlation from each pairwise_registration_metrics.json.
 
     Returns a sorted list of ``(moving_slice_id: int, z_correlation: float)``.
@@ -89,7 +92,7 @@ def load_registration_metrics(transforms_dir: Path):
     return metrics
 
 
-def find_bad_clusters(metrics, consecutive_threshold, z_corr_threshold):
+def find_bad_clusters(metrics: Any, consecutive_threshold: float, z_corr_threshold: float) -> Any:
     """Find clusters of consecutive slice pairs where z_corr < threshold.
 
     Returns a list of clusters, each being a list of ``(slice_id, z_corr)``.
@@ -112,7 +115,8 @@ def find_bad_clusters(metrics, consecutive_threshold, z_corr_threshold):
     return clusters
 
 
-def main():
+def main() -> None:
+    """Run function."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     args = build_parser().parse_args()
 

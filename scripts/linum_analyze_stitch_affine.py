@@ -32,6 +32,7 @@ import logging
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -46,7 +47,7 @@ _SLICE_RE = re.compile(r"z(\d+)")
 
 
 class _NumpyEncoder(json.JSONEncoder):
-    def default(self, o):
+    def default(self, o: Any) -> Any:
         if isinstance(o, np.integer):
             return int(o)
         if isinstance(o, np.floating):
@@ -219,6 +220,7 @@ def _analyze_slice(
 
 
 def main() -> int:
+    """Run function."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

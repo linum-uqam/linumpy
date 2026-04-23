@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""
-Read a shifts CSV produced by linum_compute_shifts_3d.py and detect/correct
-two classes of spurious inter-slice shifts.
+"""Read a shifts CSV produced by linum_compute_shifts_3d.py and detect/correct two classes of spurious inter-slice shifts.
 
 Background
 ----------
@@ -55,7 +53,7 @@ from linumpy.io import slice_config as slice_config_io
 from linumpy.stack_alignment.filter import correct_tile_offset_shifts, filter_outlier_shifts
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("in_shifts", help="Shifts CSV file (e.g. shifts_xy.csv) produced by linum_compute_shifts_3d.py.")
     p.add_argument("out_shifts", help="Output corrected shifts CSV file.")
@@ -276,7 +274,8 @@ def _stamp_slice_config(
     print(f"Slice-config updates written to {path_out}")
 
 
-def main():
+def main() -> None:
+    """Run function operation."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

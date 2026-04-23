@@ -57,7 +57,7 @@ def test_compute_motor_positions_scale_factor():
 def test_apply_blend_shift_refinement_empty_refinements():
     """No refinements → tile returned unchanged."""
     tile = np.ones((5, 16, 16), dtype=np.float32)
-    result = apply_blend_shift_refinement(tile, [], overlap_fraction=0.1)
+    result = apply_blend_shift_refinement(tile, [])
     np.testing.assert_array_equal(result, tile)
 
 
@@ -65,7 +65,7 @@ def test_apply_blend_shift_refinement_negligible_shift():
     """Sub-threshold shifts (< 0.1 px) → tile returned unchanged."""
     tile = np.ones((5, 16, 16), dtype=np.float32)
     refinements = [{"dx": 0.05, "dy": 0.05}]
-    result = apply_blend_shift_refinement(tile, refinements, overlap_fraction=0.1)
+    result = apply_blend_shift_refinement(tile, refinements)
     np.testing.assert_array_equal(result, tile)
 
 
@@ -74,7 +74,7 @@ def test_apply_blend_shift_refinement_applies_shift():
     rng = np.random.default_rng(7)
     tile = (rng.random((5, 32, 32)) * 100.0).astype(np.float32)
     refinements = [{"dx": 3.0, "dy": 3.0}]
-    result = apply_blend_shift_refinement(tile, refinements, overlap_fraction=0.2)
+    result = apply_blend_shift_refinement(tile, refinements)
     # Shape must be preserved
     assert result.shape == tile.shape
     # Content must have changed
@@ -86,7 +86,7 @@ def test_apply_blend_shift_refinement_averages_multiple():
     tile = (np.ones((5, 32, 32)) * 50.0).astype(np.float32)
     # Two opposite shifts → average ≈ 0 → no change (may not be exact due to shift)
     refinements = [{"dx": 0.0, "dy": 4.0}, {"dx": 0.0, "dy": -4.0}]
-    result = apply_blend_shift_refinement(tile, refinements, overlap_fraction=0.1)
+    result = apply_blend_shift_refinement(tile, refinements)
     # Average dy = 0 / 2 / 2 = 0 → negligible → should be unchanged
     np.testing.assert_array_equal(result, tile)
 

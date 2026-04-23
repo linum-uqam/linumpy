@@ -20,6 +20,7 @@ import argparse
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -44,7 +45,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("in_slices_dir", help="Directory containing slice volumes (.ome.zarr)")
     p.add_argument("in_shifts", help="CSV file with XY shifts (shifts_xy.csv)")
@@ -290,8 +291,13 @@ def _build_arg_parser():
 
 
 def load_registration_transforms(
-    transforms_dir, slice_ids, skip_error_status=False, skip_warning_status=False, load_min_zcorr=0.0, load_max_rotation=0.0
-):
+    transforms_dir: str | Path,
+    slice_ids: Any,
+    skip_error_status: bool = False,
+    skip_warning_status: bool = False,
+    load_min_zcorr: float = 0.0,
+    load_max_rotation: float = 0.0,
+) -> None:
     """
     Load pairwise registration transforms from directory.
 
@@ -342,7 +348,7 @@ def load_registration_transforms(
         matching_dirs = list(transforms_dir.glob(f"*z{slice_id:02d}*")) + list(transforms_dir.glob(f"*z{slice_id}*"))
 
         if not matching_dirs:
-            logger.warning(f"No transform found for slice {slice_id}")
+            logger.warning("No transform found for slice %s", slice_id)
             transforms[slice_id] = None
             continue
 
@@ -353,7 +359,7 @@ def load_registration_transforms(
         offset_files = list(transform_dir.glob("*.txt"))
 
         if not tfm_files:
-            logger.warning(f"No .tfm file in {transform_dir}")
+            logger.warning("No .tfm file in %s", transform_dir)
             transforms[slice_id] = None
             continue
 
@@ -397,21 +403,29 @@ def load_registration_transforms(
                         rot_deg = 999.0
                     if zcorr < load_min_zcorr or abs(rot_deg) > load_max_rotation:
                         logger.warning(
-                            f"Slice {slice_id}: skipping transform "
-                            f"(zcorr={zcorr:.3f} < {load_min_zcorr} or "
-                            f"rot={rot_deg:.2f}° > {load_max_rotation}°)"
+                            "Slice %s: skipping transform (zcorr=%.3f < %s or rot=%.2f° > %s°)",
+                            slice_id,
+                            zcorr,
+                            load_min_zcorr,
+                            rot_deg,
+                            load_max_rotation,
                         )
                         transforms[slice_id] = None
                         continue
                     logger.debug(
-                        f"Slice {slice_id}: accepting transform via metric gating "
-                        f"(zcorr={zcorr:.3f}, rot={rot_deg:.2f}°, status={status})"
+                        "Slice %s: accepting transform via metric gating (zcorr=%.3f, rot=%.2f°, status=%s)",
+                        slice_id,
+                        zcorr,
+                        rot_deg,
+                        status,
                     )
                 else:
                     should_skip = (status == "error" and skip_error_status) or (status == "warning" and skip_warning_status)
                     if should_skip:
                         logger.warning(
-                            f"Slice {slice_id}: skipping transform with overall_status='{status}' (unreliable registration)"
+                            "Slice %s: skipping transform with overall_status='%s' (unreliable registration)",
+                            slice_id,
+                            status,
                         )
                         transforms[slice_id] = None
                         continue
@@ -430,23 +444,23 @@ def load_registration_transforms(
                 if len(offsets) >= 2:
                     fixed_z = int(offsets[0])
                     moving_z = int(offsets[1])
-                    logger.debug(f"Slice {slice_id}: fixed_z={fixed_z}, moving_z={moving_z}")
+                    logger.debug("Slice %s: fixed_z=%s, moving_z=%s", slice_id, fixed_z, moving_z)
 
             transforms[slice_id] = (tfm, fixed_z, moving_z, confidence)
-            logger.debug(f"Loaded transform for slice {slice_id} (confidence={confidence:.2f})")
+            logger.debug("Loaded transform for slice %s (confidence=%.2f)", slice_id, confidence)
 
         except Exception as e:
-            logger.warning(f"Could not load transform for slice {slice_id}: {e}")
+            logger.warning("Could not load transform for slice %s: %s", slice_id, e)
             transforms[slice_id] = None
 
     return transforms, all_pairwise_translations
 
 
-def compute_output_shape(slice_files, cumsum_px, first_vol_shape):
+def compute_output_shape(_slice_files: Any, cumsum_px: Any, first_vol_shape: Any) -> Any:
     """Compute output volume shape to fit all slices."""
     xmin, xmax, ymin, ymax = [0], [first_vol_shape[2]], [0], [first_vol_shape[1]]
 
-    for _slice_id, (dx, dy) in cumsum_px.items():
+    for dx, dy in cumsum_px.values():
         # Assuming all slices have similar XY dimensions
         xmin.append(dx)
         xmax.append(dx + first_vol_shape[2])
@@ -461,7 +475,8 @@ def compute_output_shape(slice_files, cumsum_px, first_vol_shape):
     return ny, nx, x0, y0
 
 
-def main():
+def main() -> None:
+    """Run function."""
     p = _build_arg_parser()
     args = p.parse_args()
 
@@ -492,10 +507,10 @@ def main():
         available_ids = available_ids[: args.max_slices]
         slice_files = {k: slice_files[k] for k in available_ids}
 
-    logger.info(f"Found {len(slice_files)} slices: {available_ids[0]} to {available_ids[-1]}")
+    logger.info("Found %s slices: %s to %s", len(slice_files), available_ids[0], available_ids[-1])
 
     # Load shifts
-    logger.info(f"Loading shifts from {args.in_shifts}")
+    logger.info("Loading shifts from %s", args.in_shifts)
     cumsum_mm, _all_shift_ids = load_shifts_csv(args.in_shifts)
 
     # Get resolution from first slice
@@ -509,7 +524,7 @@ def main():
     res_y_mm = first_res[1] if len(first_res) >= 2 else first_res[0]
     res_x_mm = first_res[2] if len(first_res) >= 3 else first_res[0]
 
-    logger.info(f"Resolution: Z={res_z_mm * 1000:.2f} µm, Y={res_y_mm * 1000:.2f} µm, X={res_x_mm * 1000:.2f} µm")
+    logger.info("Resolution: Z=%.2f µm, Y=%.2f µm, X=%.2f µm", res_z_mm * 1000, res_y_mm * 1000, res_x_mm * 1000)
 
     # Handle XY shifts
     if args.no_xy_shift:
@@ -525,7 +540,7 @@ def main():
             if slice_id in cumsum_mm:
                 dx_mm, dy_mm = cumsum_mm[slice_id]
             else:
-                logger.warning(f"No shift for slice {slice_id}, using (0, 0)")
+                logger.warning("No shift for slice %s, using (0, 0)", slice_id)
                 dx_mm, dy_mm = 0.0, 0.0
             # mm / mm = pixels
             cumsum_px[slice_id] = (dx_mm / res_x_mm, dy_mm / res_y_mm)
@@ -541,7 +556,7 @@ def main():
         # Adjust shifts by origin
         cumsum_px = {k: (dx - x0, dy - y0) for k, (dx, dy) in cumsum_px.items()}
 
-    logger.info(f"Output XY shape: {out_ny} x {out_nx}")
+    logger.info("Output XY shape: %s x %s", out_ny, out_nx)
 
     # Load registration transforms if provided
     registration_transforms = {}
@@ -549,7 +564,7 @@ def main():
     if args.transforms_dir:
         transforms_dir = Path(args.transforms_dir)
         if transforms_dir.exists():
-            logger.info(f"Loading registration transforms from {transforms_dir}")
+            logger.info("Loading registration transforms from %s", transforms_dir)
             registration_transforms, all_pairwise_translations = load_registration_transforms(
                 transforms_dir,
                 available_ids,
@@ -561,9 +576,9 @@ def main():
             n_expected = len(available_ids) - 1  # First slice has no transform
             n_loaded = sum(1 for v in registration_transforms.values() if v is not None)
             n_missing = n_expected - n_loaded
-            logger.info(f"Loaded {n_loaded}/{n_expected} transforms for refinement")
+            logger.info("Loaded %s/%s transforms for refinement", n_loaded, n_expected)
             if n_missing > 0:
-                logger.warning(f"Missing transforms for {n_missing} slices (will use motor-only positioning)")
+                logger.warning("Missing transforms for %s slices (will use motor-only positioning)", n_missing)
 
             if args.slice_config:
                 slice_config_path = Path(args.slice_config)
@@ -577,18 +592,19 @@ def main():
                         all_pairwise_translations.pop(sid, None)
                     if force_skip_ids:
                         logger.info(
-                            f"Force-skipped {n_forced} transforms from slice_config "
-                            f"({len(force_skip_ids)} slice(s) use=false or auto_excluded=true)"
+                            "Force-skipped %s transforms from slice_config (%s slice(s) use=false or auto_excluded=true)",
+                            n_forced,
+                            len(force_skip_ids),
                         )
         else:
-            logger.warning(f"Transforms directory not found: {transforms_dir}")
+            logger.warning("Transforms directory not found: %s", transforms_dir)
 
     # Merge manual transforms (override automated ones for matching slice IDs)
     manual_override_ids: set[int] = set()
     if args.manual_transforms_dir:
         manual_dir = Path(args.manual_transforms_dir)
         if manual_dir.exists():
-            logger.info(f"Loading manual transforms from {manual_dir}")
+            logger.info("Loading manual transforms from %s", manual_dir)
             manual_transforms, manual_pairwise_translations = load_registration_transforms(
                 manual_dir,
                 available_ids,
@@ -603,13 +619,13 @@ def main():
                     registration_transforms[sid] = tfm
                     manual_override_ids.add(sid)
                     n_manual += 1
-                    logger.info(f"  Manual override: slice z{sid:02d}")
+                    logger.info("  Manual override: slice z%d", sid)
             for sid, pairwise in manual_pairwise_translations.items():
                 all_pairwise_translations[sid] = pairwise
             if n_manual > 0:
-                logger.info(f"Applied {n_manual} manual transform overrides")
+                logger.info("Applied %s manual transform overrides", n_manual)
         else:
-            logger.warning(f"Manual transforms directory not found: {manual_dir}")
+            logger.warning("Manual transforms directory not found: %s", manual_dir)
 
     # Accumulate translations cumulatively if requested
     # Translations are moved from the transforms into cumsum_px so that:
@@ -631,7 +647,12 @@ def main():
                 tx, ty, zcorr = all_pairwise_translations[slice_id]
                 # Apply separate zcorr threshold for translations
                 if args.translation_min_zcorr > 0 and zcorr < args.translation_min_zcorr:
-                    logger.debug(f"Slice {slice_id}: skipping translation (zcorr={zcorr:.3f} < {args.translation_min_zcorr})")
+                    logger.debug(
+                        "Slice %s: skipping translation (zcorr=%.3f < %s)",
+                        slice_id,
+                        zcorr,
+                        args.translation_min_zcorr,
+                    )
                     n_zcorr_skipped += 1
                     continue
                 pairwise_translations[slice_id] = (tx, ty)
@@ -639,13 +660,16 @@ def main():
                 if slice_id not in registration_transforms or registration_transforms[slice_id] is None:
                     n_from_metrics += 1
                     logger.debug(
-                        f"Slice {slice_id}: using translation from metrics (transform gated out) "
-                        f"tx={tx:.1f}, ty={ty:.1f}, zcorr={zcorr:.3f}"
+                        "Slice %s: using translation from metrics (transform gated out) tx=%.1f, ty=%.1f, zcorr=%.3f",
+                        slice_id,
+                        tx,
+                        ty,
+                        zcorr,
                     )
         if n_from_metrics > 0:
-            logger.info(f"Recovered {n_from_metrics} translations from gated-out transforms via metrics")
+            logger.info("Recovered %s translations from gated-out transforms via metrics", n_from_metrics)
         if n_zcorr_skipped > 0:
-            logger.info(f"Skipped {n_zcorr_skipped} translations due to low zcorr (< {args.translation_min_zcorr})")
+            logger.info("Skipped %s translations due to low zcorr (< %s)", n_zcorr_skipped, args.translation_min_zcorr)
 
         # Filter unreliable translations before accumulation
         # Translations at the registration boundary are optimizer failures, not real corrections
@@ -657,13 +681,17 @@ def main():
                 mag = np.sqrt(tx**2 + ty**2)
                 if mag >= boundary:
                     logger.warning(
-                        f"Slice {slice_id}: excluding boundary translation "
-                        f"tx={tx:.1f}, ty={ty:.1f} (mag={mag:.1f} >= {boundary:.1f})"
+                        "Slice %s: excluding boundary translation tx=%.1f, ty=%.1f (mag=%.1f >= %.1f)",
+                        slice_id,
+                        tx,
+                        ty,
+                        mag,
+                        boundary,
                     )
                     pairwise_translations[slice_id] = (0.0, 0.0)
                     n_excluded += 1
             n_total = len(pairwise_translations)
-            logger.info(f"Translation filter: excluded {n_excluded}/{n_total} pairs at boundary (>= {boundary:.1f} px)")
+            logger.info("Translation filter: excluded %s/%s pairs at boundary (>= %.1f px)", n_excluded, n_total, boundary)
 
         # Second pass: accumulate filtered translations (NO cap yet — cap applied after smoothing)
         # Optionally weight each translation by its confidence score
@@ -685,13 +713,19 @@ def main():
                 if tx != 0 or ty != 0:
                     n_accumulated += 1
                 logger.debug(
-                    f"Slice {slice_id}: pairwise tx={tx:.2f}, ty={ty:.2f} -> "
-                    f"cumulative tx={cumulative_tx:.2f}, ty={cumulative_ty:.2f}"
+                    "Slice %s: pairwise tx=%.2f, ty=%.2f -> cumulative tx=%.2f, ty=%.2f",
+                    slice_id,
+                    tx,
+                    ty,
+                    cumulative_tx,
+                    cumulative_ty,
                 )
             accumulated_offsets[slice_id] = (cumulative_tx, cumulative_ty)
         logger.info(
-            f"Accumulated translations for {n_accumulated} slices "
-            f"(final cumulative: tx={cumulative_tx:.2f}, ty={cumulative_ty:.2f})"
+            "Accumulated translations for %s slices (final cumulative: tx=%.2f, ty=%.2f)",
+            n_accumulated,
+            cumulative_tx,
+            cumulative_ty,
         )
         if args.confidence_weight_translations:
             logger.info("Confidence-weighted accumulation enabled")
@@ -711,8 +745,9 @@ def main():
 
             max_correction = float(np.max(np.sqrt((acc_x_smooth - acc_x) ** 2 + (acc_y_smooth - acc_y) ** 2)))
             logger.info(
-                f"Gaussian-smoothed accumulated translations (sigma={args.translation_smooth_sigma:.1f}, "
-                f"max correction: {max_correction:.1f} px)"
+                "Gaussian-smoothed accumulated translations (sigma=%.1f, max correction: %.1f px)",
+                args.translation_smooth_sigma,
+                max_correction,
             )
             for j, sid in enumerate(ids_list):
                 accumulated_offsets[sid] = (float(acc_x_smooth[j]), float(acc_y_smooth[j]))
@@ -731,7 +766,7 @@ def main():
                     accumulated_offsets[sid] = (ox * scale, oy * scale)
                     n_clamped += 1
             if n_clamped > 0:
-                logger.warning(f"Drift cap: clamped {n_clamped} slices to {args.max_cumulative_drift_px:.1f} px")
+                logger.warning("Drift cap: clamped %s slices to %.1f px", n_clamped, args.max_cumulative_drift_px)
 
         # Apply accumulated (and optionally smoothed/capped) offsets to cumsum_px.
         # Sign is negated because SimpleITK tx=+N shifts content LEFT but
@@ -747,13 +782,16 @@ def main():
         center_dx, center_dy = cumsum_px[middle_id]
         cumsum_px = {k: (dx - center_dx, dy - center_dy) for k, (dx, dy) in cumsum_px.items()}
         logger.info(
-            f"Centered accumulated translations around slice {middle_id} (offset: dx={center_dx:.1f}, dy={center_dy:.1f})"
+            "Centered accumulated translations around slice %s (offset: dx=%.1f, dy=%.1f)",
+            middle_id,
+            center_dx,
+            center_dy,
         )
 
         # Recompute output XY shape to fit the shifted slices
         out_ny, out_nx, x0, y0 = compute_output_shape(slice_files, cumsum_px, first_vol.shape)
         cumsum_px = {k: (dx - x0, dy - y0) for k, (dx, dy) in cumsum_px.items()}
-        logger.info(f"Adjusted output XY shape for accumulated translations: {out_ny} x {out_nx}")
+        logger.info("Adjusted output XY shape for accumulated translations: %s x %s", out_ny, out_nx)
 
     # Smooth per-slice rotations to reduce jitter from isolated correction outliers.
     # Rotations are applied independently per slice, so alternating ±1-2° corrections
@@ -792,7 +830,7 @@ def main():
                 smooth_angles[:half_w] = raw_angles[:half_w]
                 smooth_angles[-half_w:] = raw_angles[-half_w:]
             max_rot_corr = float(np.max(np.abs(smooth_angles - raw_angles)))
-            logger.info(f"Smoothed rotations with window={w} (max correction: {np.degrees(max_rot_corr):.3f}°)")
+            logger.info("Smoothed rotations with window=%s (max correction: %.3f°)", w, np.degrees(max_rot_corr))
             for j, sid in enumerate(angle_ids):
                 smoothed_rotations[sid] = float(smooth_angles[j])
 
@@ -830,8 +868,12 @@ def main():
             overlap = max(0, overlap)
             corr = 0.0
             logger.debug(
-                f"Slice {slice_id}: expected overlap={overlap} voxels "
-                f"(vol_depth={vol.shape[0]}, moving_z={moving_z} [fixed], interval={interval_voxels})"
+                "Slice %s: expected overlap=%s voxels (vol_depth=%s, moving_z=%s [fixed], interval=%s)",
+                slice_id,
+                overlap,
+                vol.shape[0],
+                moving_z,
+                interval_voxels,
             )
             # Optionally search below expected_overlap for the best-correlated tissue
             # boundary to blend at, while keeping z-spacing fixed at slicing_interval.
@@ -870,13 +912,18 @@ def main():
                         best_ref_corr = c
                         blend_overlap = ov
                 logger.debug(
-                    f"Slice {slice_id}: blend_z_refine: expected_overlap={overlap}, "
-                    f"blend_overlap={blend_overlap} (corr={best_ref_corr:.3f})"
+                    "Slice %s: blend_z_refine: expected_overlap=%s, blend_overlap=%s (corr=%.3f)",
+                    slice_id,
+                    overlap,
+                    blend_overlap,
+                    best_ref_corr,
                 )
             elif not refine_ok:
                 logger.info(
-                    f"Slice {slice_id}: skipping blend_z_refine (confidence "
-                    f"{slice_confidence:.3f} < {args.blend_z_refine_min_confidence})"
+                    "Slice %s: skipping blend_z_refine (confidence %.3f < %s)",
+                    slice_id,
+                    slice_confidence,
+                    args.blend_z_refine_min_confidence,
                 )
         elif fixed_z is not None:
             # We have registration-derived indices
@@ -887,7 +934,7 @@ def main():
             overlap = max(0, prev_nz - fixed_z)
             blend_overlap = overlap
             corr = 1.0  # Assume good correlation since registration found it
-            logger.debug(f"Slice {slice_id}: fixed_z={fixed_z}, moving_z={moving_z}, overlap={overlap} voxels")
+            logger.debug("Slice %s: fixed_z=%s, moving_z=%s, overlap=%s voxels", slice_id, fixed_z, moving_z, overlap)
         else:
             # find_z_overlap expects resolution in µm for its internal calculation
             res_z_um = res_z_mm * 1000
@@ -898,9 +945,13 @@ def main():
                 crop_z = args.moving_z_first_index or 0
                 fallback_overlap = max(0, vol.shape[0] - crop_z - interval_voxels)
                 logger.warning(
-                    f"Slice {slice_id}: Z-overlap correlation {corr:.3f} < "
-                    f"z_overlap_min_corr={args.z_overlap_min_corr:.2f}, "
-                    f"falling back to expected overlap {fallback_overlap} (was: {overlap})"
+                    "Slice %s: Z-overlap correlation %.3f < z_overlap_min_corr=%.2f,"
+                    " falling back to expected overlap %s (was: %s)",
+                    slice_id,
+                    corr,
+                    args.z_overlap_min_corr,
+                    fallback_overlap,
+                    overlap,
                 )
                 overlap = fallback_overlap
                 corr = 0.0
@@ -929,14 +980,16 @@ def main():
     # Save Z-matches if requested
     if args.output_z_matches:
         pd.DataFrame(z_matches).to_csv(args.output_z_matches, index=False)
-        logger.info(f"Z-matches saved to {args.output_z_matches}")
+        logger.info("Z-matches saved to %s", args.output_z_matches)
 
     # Enforce Z-consistency: replace outlier overlaps using neighbor interpolation.
     # High-confidence registrations (confidence >= confidence_high) are protected.
     confidence_per_slice = {sid: tfm_tuple[3] for sid, tfm_tuple in registration_transforms.items() if tfm_tuple is not None}
     overlaps_before = [m["overlap_voxels"] for m in z_matches]
     logger.info(
-        f"Z-overlap consistency check: median={np.median(overlaps_before):.1f}, std={np.std(overlaps_before):.1f} voxels"
+        "Z-overlap consistency check: median=%.1f, std=%.1f voxels",
+        np.median(overlaps_before),
+        np.std(overlaps_before),
     )
     z_matches, z_corrections = enforce_z_consistency(
         z_matches,
@@ -946,7 +999,13 @@ def main():
     )
     if z_corrections:
         for c in z_corrections:
-            logger.warning(f"Slice {c['moving_id']}: corrected outlier {c['field']} {c['old_value']} -> {c['new_value']}")
+            logger.warning(
+                "Slice %s: corrected outlier %s %s -> %s",
+                c["moving_id"],
+                c["field"],
+                c["old_value"],
+                c["new_value"],
+            )
         # Recompute total_z after corrections
         total_z = volume_shapes[first_id][0]
         for match in z_matches:
@@ -955,14 +1014,14 @@ def main():
             ov = match["overlap_voxels"]
             vol_nz = volume_shapes[sid][0]
             total_z += max(0, vol_nz - mz - ov)
-        logger.info(f"Recomputed total Z after consistency enforcement: {total_z}")
+        logger.info("Recomputed total Z after consistency enforcement: %s", total_z)
 
     # Log Z-match summary
     overlaps = [m["overlap_voxels"] for m in z_matches]
-    logger.info(f"Z-overlap: mean={np.mean(overlaps):.1f}, std={np.std(overlaps):.1f} voxels")
+    logger.info("Z-overlap: mean=%.1f, std=%.1f voxels", np.mean(overlaps), np.std(overlaps))
 
     # Second pass: assemble volume
-    logger.info(f"Assembling volume: {total_z} x {out_ny} x {out_nx}")
+    logger.info("Assembling volume: %s x %s x %s", total_z, out_ny, out_nx)
     output_shape = (total_z, out_ny, out_nx)
 
     output = AnalysisOmeZarrWriter(str(output_path), output_shape, chunk_shape=(100, 100, 100), dtype=np.float32)
@@ -975,7 +1034,7 @@ def main():
     if shifted_first is not None:
         y0, y1, x0, x1 = first_coords
         output[: first_vol.shape[0], y0:y1, x0:x1] = shifted_first
-        logger.info(f"  First slice: shift=({first_dx:.1f}, {first_dy:.1f}) px, xy=[{y0}:{y1}, {x0}:{x1}]")
+        logger.info("  First slice: shift=(%.1f, %.1f) px, xy=[%s:%s, %s:%s]", first_dx, first_dy, y0, y1, x0, x1)
 
     z_cursor = first_vol.shape[0]
 
@@ -993,7 +1052,7 @@ def main():
         # Skip initial noisy z-slices in moving volume
         if moving_z_start > 0:
             vol = vol[moving_z_start:]
-            logger.debug(f"Slice {slice_id}: skipped first {moving_z_start} z-slices")
+            logger.debug("Slice %s: skipped first %s z-slices", slice_id, moving_z_start)
 
         # Apply registration transform (rotation/small translation refinement) if available
         if slice_id in registration_transforms and registration_transforms[slice_id] is not None:
@@ -1002,15 +1061,19 @@ def main():
             # based on the per-registration confidence score.
             if args.confidence_low is not None and confidence < args.confidence_low:
                 logger.warning(
-                    f"Slice {slice_id}: skipping transform "
-                    f"(confidence={confidence:.2f} < confidence_low={args.confidence_low:.2f})"
+                    "Slice %s: skipping transform (confidence=%.2f < confidence_low=%.2f)",
+                    slice_id,
+                    confidence,
+                    args.confidence_low,
                 )
             else:
                 if args.confidence_high is not None and confidence < args.confidence_high:
                     use_rotation_only = True
                     logger.debug(
-                        f"Slice {slice_id}: forcing rotation-only "
-                        f"(confidence={confidence:.2f} < confidence_high={args.confidence_high:.2f})"
+                        "Slice %s: forcing rotation-only (confidence=%.2f < confidence_high=%.2f)",
+                        slice_id,
+                        confidence,
+                        args.confidence_high,
                     )
                 else:
                     use_rotation_only = args.rotation_only or args.accumulate_translations
@@ -1023,16 +1086,16 @@ def main():
                     override_rotation=override_rot,
                 )
                 if use_rotation_only:
-                    logger.debug(f"Applied rotation-only transform to slice {slice_id} (max_rot={args.max_rotation_deg}°)")
+                    logger.debug("Applied rotation-only transform to slice %s (max_rot=%s°)", slice_id, args.max_rotation_deg)
                 else:
-                    logger.debug(f"Applied registration transform to slice {slice_id}")
+                    logger.debug("Applied registration transform to slice %s", slice_id)
 
         # Apply XY shift (from motor positions)
         dx, dy = cumsum_px[slice_id]
         shifted, dst_coords = apply_xy_shift(vol, dx, dy, (out_ny, out_nx))
 
         if shifted is None:
-            logger.warning(f"Slice {slice_id} is outside output bounds, skipping")
+            logger.warning("Slice %s is outside output bounds, skipping", slice_id)
             continue
 
         dst_y0, dst_y1, dst_x0, dst_x1 = dst_coords
@@ -1080,13 +1143,13 @@ def main():
                             # Apply scaling to the entire shifted volume, not just overlap
                             shifted = shifted * scale
                             moving_overlap = shifted[s_blend_start : s_blend_start + overlap_depth]
-                            logger.debug(f"Slice {slice_id}: intensity scale={scale:.3f}")
+                            logger.debug("Slice %s: intensity scale=%.3f", slice_id, scale)
 
                 # Z-blend refinement: correct residual XY misalignment in the overlap zone
                 if args.blend_refinement_px > 0:
                     moving_overlap, ref_mag = refine_z_blend_overlap(existing, moving_overlap, args.blend_refinement_px)
                     if ref_mag > 0:
-                        logger.debug(f"Slice {slice_id}: z-blend XY refinement {ref_mag:.2f} px")
+                        logger.debug("Slice %s: z-blend XY refinement %.2f px", slice_id, ref_mag)
 
                 # Blend
                 blended = blend_overlap_z(existing, moving_overlap)
@@ -1101,7 +1164,7 @@ def main():
 
         z_cursor = z_end
 
-        logger.debug(f"  Slice {slice_id}: z=[{z_start}:{z_end}], xy=[{dst_y0}:{dst_y1}, {dst_x0}:{dst_x1}]")
+        logger.debug("  Slice %s: z=[%s:%s], xy=[%s:%s, %s:%s]", slice_id, z_start, z_end, dst_y0, dst_y1, dst_x0, dst_x1)
 
     # Save per-slice stacking decisions
     if args.output_stacking_decisions:
@@ -1131,7 +1194,7 @@ def main():
                 }
             )
         pd.DataFrame(decisions).to_csv(args.output_stacking_decisions, index=False)
-        logger.info(f"Stacking decisions saved to {args.output_stacking_decisions}")
+        logger.info("Stacking decisions saved to %s", args.output_stacking_decisions)
 
     # Finalize with pyramid
     logger.info("Generating pyramid levels...")
@@ -1149,7 +1212,7 @@ def main():
         normalize_enabled=False,
     )
 
-    logger.info(f"Done! Output saved to {output_path}")
+    logger.info("Done! Output saved to %s", output_path)
 
 
 if __name__ == "__main__":

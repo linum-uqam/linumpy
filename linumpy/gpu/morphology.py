@@ -5,12 +5,14 @@ Provides GPU versions of binary morphology, mask creation,
 and connected component operations.
 """
 
+from typing import Any
+
 import numpy as np
 
 from . import GPU_AVAILABLE, to_cpu
 
 
-def binary_closing(mask, iterations=1, structure=None, use_gpu=True):
+def binary_closing(mask: Any, iterations: Any = 1, structure: Any = None, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated binary closing.
 
@@ -56,7 +58,7 @@ def binary_closing(mask, iterations=1, structure=None, use_gpu=True):
         return scipy_closing(mask, structure=structure, iterations=iterations)
 
 
-def binary_opening(mask, iterations=1, structure=None, use_gpu=True):
+def binary_opening(mask: Any, iterations: Any = 1, structure: Any = None, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated binary opening.
 
@@ -102,7 +104,7 @@ def binary_opening(mask, iterations=1, structure=None, use_gpu=True):
         return scipy_opening(mask, structure=structure, iterations=iterations)
 
 
-def binary_dilation(mask, iterations=1, structure=None, use_gpu=True):
+def binary_dilation(mask: Any, iterations: Any = 1, structure: Any = None, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated binary dilation.
 
@@ -148,7 +150,7 @@ def binary_dilation(mask, iterations=1, structure=None, use_gpu=True):
         return scipy_dilation(mask, structure=structure, iterations=iterations)
 
 
-def binary_erosion(mask, iterations=1, structure=None, use_gpu=True):
+def binary_erosion(mask: Any, iterations: Any = 1, structure: Any = None, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated binary erosion.
 
@@ -194,7 +196,7 @@ def binary_erosion(mask, iterations=1, structure=None, use_gpu=True):
         return scipy_erosion(mask, structure=structure, iterations=iterations)
 
 
-def binary_fill_holes(mask, use_gpu=True):
+def binary_fill_holes(mask: Any, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated binary hole filling.
 
@@ -228,7 +230,7 @@ def binary_fill_holes(mask, use_gpu=True):
         return scipy_fill(mask)
 
 
-def gaussian_filter(image, sigma, use_gpu=True):
+def gaussian_filter(image: Any, sigma: Any, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated Gaussian filter.
 
@@ -264,7 +266,7 @@ def gaussian_filter(image, sigma, use_gpu=True):
         return scipy_gaussian(image, sigma=sigma)
 
 
-def median_filter(image, size, use_gpu=True):
+def median_filter(image: Any, size: Any, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated median filter.
 
@@ -300,7 +302,9 @@ def median_filter(image, size, use_gpu=True):
         return scipy_median(image, size=size)
 
 
-def create_tissue_mask(image, sigma=2, threshold=None, fill_holes=True, min_opening=1, use_gpu=True):
+def create_tissue_mask(
+    image: Any, sigma: Any = 2, threshold: Any = None, fill_holes: Any = True, min_opening: Any = 1, use_gpu: Any = True
+) -> Any:
     """
     GPU-accelerated tissue mask creation.
 
@@ -352,7 +356,7 @@ def create_tissue_mask(image, sigma=2, threshold=None, fill_holes=True, min_open
     return mask
 
 
-def label_connected_components(mask, use_gpu=True):
+def label_connected_components(mask: Any, _use_gpu: Any = True) -> Any:
     """
     Label connected components in a binary mask.
 
@@ -379,7 +383,7 @@ def label_connected_components(mask, use_gpu=True):
     return scipy_label(mask)
 
 
-def get_largest_component(mask, use_gpu=True):
+def get_largest_component(mask: Any, use_gpu: Any = True) -> Any:
     """
     Get the largest connected component from a mask.
 
@@ -395,7 +399,7 @@ def get_largest_component(mask, use_gpu=True):
     np.ndarray
         Binary mask of largest component
     """
-    labeled, n_labels = label_connected_components(mask, use_gpu=False)
+    labeled, n_labels = label_connected_components(mask, False)
 
     if n_labels == 0:
         return mask

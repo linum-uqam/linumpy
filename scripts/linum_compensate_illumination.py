@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Uses the BaSiC algorithm to estimate and compensate illumination inhomogeneities in a mosaic grid"""
+"""Uses the BaSiC algorithm to estimate and compensate illumination inhomogeneities in a mosaic grid."""
 
 # Configure thread limits before numpy/scipy imports
 import linumpy.config.threads  # noqa: F401
@@ -20,7 +20,7 @@ from linumpy.mosaic.grid import MosaicGrid
 log_epsilon = 1e-8
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_image", help="Full path to a 2D mosaic grid image.")
     p.add_argument(
@@ -45,7 +45,8 @@ def _build_arg_parser():
     return p
 
 
-def main():
+def main() -> None:
+    """Run function."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -78,26 +79,19 @@ def main():
     darkfield = sitk.GetArrayFromImage(sitk.ReadImage(darkfield_file))
 
     # Prepare the BaSiC object
-    # optimizer = BaSiC(tiles)
-    # optimizer.set_flatfield(flatfield)
-    # optimizer.set_darkfield(darkfield)
 
     # Apply shading correction.
-    # epsilon = 1e-6
     epsilon = 0.0
     for tile, pos in zip(tiles, tile_pos, strict=False):
         if np.all(tile == 0):  # Ignoring empty tiles
             continue
         fixed_tile = (tile.astype(np.float64) - darkfield) / (flatfield + epsilon)
         # if clip and not(tile.dtype in [np.float32, np.float64]):
-        #    fixed_tile[fixed_tile < np.iinfo(tile.dtype).min] = np.iinfo(tile.dtype).min
-        #    fixed_tile[fixed_tile > np.iinfo(tile.dtype).max] = np.iinfo(tile.dtype).max
 
         mosaic.set_tile(x=pos[0], y=pos[1], tile=fixed_tile)
 
     # Preserve initial range
     fixed_image = mosaic.get_image()
-    # fixed_image = fixed_image / fixed_image.mean() * image.mean()
 
     # Save the output
     output_file.parent.mkdir(exist_ok=True, parents=True)

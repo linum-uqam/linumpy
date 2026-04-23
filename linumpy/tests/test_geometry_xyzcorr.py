@@ -1,4 +1,4 @@
-"""Tests for detect_interface_z and crop_below_interface in linumpy/preproc/xyzcorr.py"""
+"""Tests for detect_interface_z and crop_below_interface in linumpy/geometry/."""
 
 import numpy as np
 import pytest

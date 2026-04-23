@@ -20,6 +20,7 @@ import argparse
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -33,7 +34,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("in_slices_dir", help="Directory containing slice volumes (.ome.zarr)")
     p.add_argument("in_shifts", help="CSV file with XY shifts (shifts_xy.csv)")
@@ -80,7 +81,7 @@ def _build_arg_parser():
     return p
 
 
-def compute_output_shape(slice_files, cumsum_px, overlap_slices=0):
+def compute_output_shape(slice_files: Any, cumsum_px: Any, overlap_slices: int = 0) -> Any:
     """Compute the output volume shape to fit all slices."""
     xmin, xmax, ymin, ymax = [], [], [], []
     total_z = 0
@@ -112,7 +113,7 @@ def compute_output_shape(slice_files, cumsum_px, overlap_slices=0):
     return (total_z, ny, nx), (x0, y0)
 
 
-def generate_preview(volume, output_path):
+def generate_preview(volume: Any, output_path: str | Path) -> None:
     """Generate a preview image of the stacked volume."""
     try:
         import matplotlib.pyplot as plt
@@ -144,12 +145,12 @@ def generate_preview(volume, output_path):
         plt.savefig(output_path, dpi=150)
         plt.close()
 
-        logger.info(f"Preview saved to {output_path}")
+        logger.info("Preview saved to %s", output_path)
     except Exception as e:
-        logger.warning(f"Could not generate preview: {e}")
+        logger.warning("Could not generate preview: %s", e)
 
 
-def generate_preview_from_slice(slice_2d, output_path):
+def generate_preview_from_slice(slice_2d: Any, output_path: str | Path) -> None:
     """Generate a preview image from a single 2D slice."""
     try:
         import matplotlib.pyplot as plt
@@ -168,12 +169,12 @@ def generate_preview_from_slice(slice_2d, output_path):
         plt.savefig(output_path, dpi=150, bbox_inches="tight")
         plt.close()
 
-        logger.info(f"Preview saved to {output_path}")
+        logger.info("Preview saved to %s", output_path)
     except Exception as e:
-        logger.warning(f"Could not generate preview: {e}")
+        logger.warning("Could not generate preview: %s", e)
 
 
-def generate_preview_from_zarr(zarr_output, output_path):
+def generate_preview_from_zarr(zarr_output: str | Path, output_path: str | Path) -> Any:
     """Generate a 3-panel preview (XY, XZ, YZ) from a zarr output without loading full volume."""
     try:
         import matplotlib.pyplot as plt
@@ -192,7 +193,7 @@ def generate_preview_from_zarr(zarr_output, output_path):
         _fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
         # Normalize each slice for display
-        def normalize_slice(s):
+        def normalize_slice(s: Any) -> Any:
             valid = s > 0
             if np.any(valid):
                 vmin = np.percentile(s[valid], 1)
@@ -224,12 +225,13 @@ def generate_preview_from_zarr(zarr_output, output_path):
         plt.savefig(output_path, dpi=150, bbox_inches="tight")
         plt.close()
 
-        logger.info(f"3-panel preview saved to {output_path}")
+        logger.info("3-panel preview saved to %s", output_path)
     except Exception as e:
-        logger.warning(f"Could not generate preview: {e}")
+        logger.warning("Could not generate preview: %s", e)
 
 
-def main():
+def main() -> None:
+    """Run function."""
     p = _build_arg_parser()
     args = p.parse_args()
 
@@ -256,16 +258,16 @@ def main():
     if not slice_files:
         p.error(f"No files matched pattern '{args.slice_pattern}' in {slices_dir}")
 
-    logger.info(f"Found {len(slice_files)} slice files")
+    logger.info("Found %s slice files", len(slice_files))
 
     # Limit slices for testing
     if args.max_slices:
         slice_ids = sorted(slice_files.keys())[: args.max_slices]
         slice_files = {k: slice_files[k] for k in slice_ids}
-        logger.info(f"Limited to {len(slice_files)} slices for testing")
+        logger.info("Limited to %s slices for testing", len(slice_files))
 
     # Load shifts
-    logger.info(f"Loading shifts from {shifts_path}")
+    logger.info("Loading shifts from %s", shifts_path)
     cumsum_mm, _all_shift_ids = load_shifts_csv(shifts_path)
 
     # Get resolution from first slice
@@ -286,7 +288,7 @@ def main():
     if args.z_spacing_um:
         res_z_um = args.z_spacing_um
 
-    logger.info(f"Resolution: Z={res_z_um:.2f} µm, Y={res_y_um:.2f} µm, X={res_x_um:.2f} µm")
+    logger.info("Resolution: Z=%.2f µm, Y=%.2f µm, X=%.2f µm", res_z_um, res_y_um, res_x_um)
 
     # Convert shifts to pixels (use X resolution for both X and Y for simplicity)
     cumsum_px = convert_shifts_to_pixels(cumsum_mm, (res_x_um, res_y_um))
@@ -298,7 +300,7 @@ def main():
     # Fill in missing shifts with zero
     for slice_id in available_ids:
         if slice_id not in cumsum_px:
-            logger.warning(f"No shift for slice {slice_id}, using (0, 0)")
+            logger.warning("No shift for slice %s, using (0, 0)", slice_id)
             cumsum_px[slice_id] = (0.0, 0.0)
 
     # Center drift if requested
@@ -309,14 +311,14 @@ def main():
     # Compute output shape
     logger.info("Computing output shape...")
     output_shape, (x0, y0) = compute_output_shape(slice_files, cumsum_px, args.overlap_slices)
-    logger.info(f"Output shape: {output_shape} (Z, Y, X)")
-    logger.info(f"Origin offset: ({x0:.1f}, {y0:.1f}) px")
+    logger.info("Output shape: %s (Z, Y, X)", output_shape)
+    logger.info("Origin offset: (%.1f, %.1f) px", x0, y0)
 
     # Adjust shifts by origin
     cumsum_px = {slice_id: (dx - x0, dy - y0) for slice_id, (dx, dy) in cumsum_px.items()}
 
     # Stack slices
-    logger.info(f"Stacking {len(slice_files)} slices (blending: {args.blending})...")
+    logger.info("Stacking %s slices (blending: %s)...", len(slice_files), args.blending)
 
     # Use chunked writer to avoid memory issues
     output = AnalysisOmeZarrWriter(
@@ -338,7 +340,7 @@ def main():
         shifted, dst_coords = apply_xy_shift(vol_data, dx, dy, (output_shape[1], output_shape[2]))
 
         if shifted is None:
-            logger.warning(f"Slice {slice_id} is entirely outside output bounds, skipping")
+            logger.warning("Slice %s is entirely outside output bounds, skipping", slice_id)
             continue
 
         dst_y_start, dst_y_end, dst_x_start, dst_x_end = dst_coords
@@ -370,8 +372,16 @@ def main():
         z_cursor = z_end
 
         logger.info(
-            f"  Slice {slice_id:02d}: shift=({dx:.1f}, {dy:.1f}) px, z=[{z_start}:{z_end}], "
-            f"xy=[{dst_y_start}:{dst_y_end}, {dst_x_start}:{dst_x_end}]"
+            "  Slice %02d: shift=(%.1f, %.1f) px, z=[%s:%s], xy=[%s:%s, %s:%s]",
+            slice_id,
+            dx,
+            dy,
+            z_start,
+            z_end,
+            dst_y_start,
+            dst_y_end,
+            dst_x_start,
+            dst_x_end,
         )
 
     # Finalize with pyramid

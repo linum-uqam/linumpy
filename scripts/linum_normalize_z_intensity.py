@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 # Configure thread limits before numpy/scipy imports
+"""Script."""
+
 import linumpy.config.threads  # noqa: F401
+
+from pathlib import Path
 
 # -*- coding: utf-8 -*-
 """
@@ -56,6 +60,7 @@ linum_normalize_z_intensity.py input.ome.zarr output.ome.zarr --no-use_gpu
 """
 
 import argparse
+from typing import Any
 
 import numpy as np
 
@@ -67,7 +72,7 @@ from linumpy.gpu.normalization import (
 from linumpy.io.zarr import AnalysisOmeZarrWriter, read_omezarr
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("in_zarr", help="Input stacked 3D OME-Zarr volume.")
     p.add_argument("out_zarr", help="Output intensity-normalised OME-Zarr volume.")
@@ -170,7 +175,8 @@ def _build_arg_parser():
 # ---------------------------------------------------------------------------
 
 
-def save_plot(raw_metrics, smoothed, scale_factors, n_serial_slices, plot_path):
+def save_plot(raw_metrics: Any, smoothed: Any, scale_factors: Any, n_serial_slices: Any, plot_path: str | Path) -> None:
+    """Run function."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -210,7 +216,8 @@ def save_plot(raw_metrics, smoothed, scale_factors, n_serial_slices, plot_path):
 # ---------------------------------------------------------------------------
 
 
-def main():
+def main() -> None:
+    """Run function."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

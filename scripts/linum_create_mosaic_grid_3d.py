@@ -30,7 +30,7 @@ from linumpy.mosaic import discovery as reconstruction
 _USE_GPU = True
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("output_zarr", help="Full path to the output zarr file")
     p.add_argument(
@@ -160,7 +160,7 @@ def _load_shard_data(proc_params: dict) -> list:
     return [load_single_tile(tiles_params[0])]
 
 
-def _resize_and_write_shard(proc_params: dict, loaded_tiles: list):
+def _resize_and_write_shard(proc_params: dict, loaded_tiles: list) -> None:
     """Resize pre-loaded tiles and write the shard to zarr (compute/write stage).
 
     Separated from disk I/O so that _run_pipelined can overlap loading the
@@ -205,7 +205,7 @@ def _resize_and_write_shard(proc_params: dict, loaded_tiles: list):
     ]
 
 
-def _run_pipelined(params: list):
+def _run_pipelined(params: list) -> None:
     """Process shards with a prefetch pipeline.
 
     A single background thread fetches the next shard's tiles from disk
@@ -234,7 +234,7 @@ def _run_pipelined(params: list):
             _resize_and_write_shard(p, loaded_tiles)
 
 
-def process_tile(proc_params: dict):
+def process_tile(proc_params: dict) -> None:
     """Process a shard: load tiles from disk, resize, write to zarr.
 
     Used by the CPU multiprocessing pool. For GPU mode the pipelined
@@ -244,7 +244,8 @@ def process_tile(proc_params: dict):
     _resize_and_write_shard(proc_params, loaded_tiles)
 
 
-def main():
+def main() -> None:
+    """Run function."""
     global _USE_GPU
 
     parser = _build_arg_parser()

@@ -14,6 +14,7 @@ import linumpy.config.threads  # noqa: F401
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from skimage.io import imsave
@@ -22,7 +23,7 @@ from linumpy.gpu import GPU_AVAILABLE, print_gpu_info, to_cpu
 from linumpy.io.zarr import read_omezarr
 
 
-def compute_aip(vol, use_gpu: bool = True) -> np.ndarray:
+def compute_aip(vol: Any, use_gpu: bool = True) -> np.ndarray:
     """Compute the AIP of a mosaic grid volume tile-by-tile.
 
     Parameters
@@ -92,7 +93,7 @@ def save_aip_png(aip: np.ndarray, output_path: Path) -> None:
     imsave(output_path, (aip_norm * 65535).astype(np.uint16))
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_zarr", help="Full path to the input mosaic grid OME-Zarr volume.")
     p.add_argument("output_png", help="Full path to the output PNG file.")
@@ -106,7 +107,8 @@ def _build_arg_parser():
     return p
 
 
-def main():
+def main() -> None:
+    """Run function."""
     p = _build_arg_parser()
     args = p.parse_args()
 

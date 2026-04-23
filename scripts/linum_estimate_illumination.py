@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Uses the BaSiC algorithm to estimate the illumination inhomogeneities in a mosaic grid"""
+"""Uses the BaSiC algorithm to estimate the illumination inhomogeneities in a mosaic grid."""
 
 # Configure thread limits before numpy/scipy imports
 import linumpy.config.threads  # noqa: F401
@@ -19,7 +19,7 @@ from linumpy.mosaic.grid import MosaicGrid
 log_epsilon = 1e-8
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_images", nargs="+", help="Full path to a 2D mosaic grid image.")
     p.add_argument("output_flatfield", help="Flatfield filename (must be a .nii or .nii.gz file).")
@@ -47,7 +47,8 @@ def _build_arg_parser():
     return p
 
 
-def main():
+def main() -> None:
+    """Run function."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()

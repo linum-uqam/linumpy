@@ -1,10 +1,4 @@
-"""
-ThorOCT Module
-
-This module provides the ThorOCT class for handling OCT data from ThorLabs PSOCT microscopes.
-It includes methods to load, process, and extract metadata and polarization data from compressed
-files, as well as utility functions for preprocessing and tile extraction.
-"""
+"""ThorOCT module for handling OCT data from ThorLabs PSOCT microscopes."""
 
 import gc
 import zipfile
@@ -46,9 +40,9 @@ class PreprocessingConfig:
 
 
 class ThorOCT:
-    """
-    A class for handling OCT data from ThorLabs PSOCT microscopes. It provides methods to load,
-    process, and extract metadata and data from compressed files.
+    """Handle OCT data from ThorLabs PSOCT microscopes.
+
+    Provides methods to load, process, and extract metadata and data from compressed files.
 
     Parameters
     ----------
@@ -73,11 +67,8 @@ class ThorOCT:
         path: str | None = None,
         compressed_data: zipfile.ZipFile | None = None,
         config: PreprocessingConfig | None = None,
-    ):
-        """
-        Initialize the ThorOCT object.
-
-        """
+    ) -> None:
+        """Initialize the ThorOCT object."""
         self.path = path
         self.compressed_data = compressed_data or (zipfile.ZipFile(path) if path else None)
         self.first_polarization = None
@@ -114,8 +105,7 @@ class ThorOCT:
             gc.collect()  # Force garbage collection
 
     def _extract_oct_header(self) -> None:
-        """
-        Loads and returns the OCT header metadata.
+        """Load the OCT header metadata from the compressed file.
 
         Raises
         ------
@@ -174,15 +164,15 @@ class ThorOCT:
                 range_z / self.size_z,
             ]
 
-    def _load_polarized_data(self, erase_polarization_2, erase_polarization_1) -> None:
-        """
-        Load the polarization data from the compressed file.
+    def _load_polarized_data(self, erase_polarization_2: bool, erase_polarization_1: bool) -> None:
+        """Load the polarization data from the compressed file.
 
         Parameters
         ----------
-            return_complex (bool): Whether to load complex data.
-            erase_polarization_2 (bool): Whether to skip loading polarization 2 data.
-            erase_polarization_1 (bool): Whether to skip loading polarization 1 data.
+        erase_polarization_1 : bool
+            Whether to skip loading polarization 1 data.
+        erase_polarization_2 : bool
+            Whether to skip loading polarization 2 data.
 
         Raises
         ------
@@ -246,22 +236,26 @@ class ThorOCT:
         return stacked_data
 
     def _crop_z(self, data: np.ndarray, index1: int = 320, index2: int = 750) -> np.ndarray:
-        """
-        Crops the 3D volume along the Z-axis and keeps the data between the specified indices.
+        """Crop the 3D volume along the Z-axis between the specified indices.
 
         Parameters
         ----------
-            data (np.ndarray): The input 3D array (SizeX, SizeY, SizeZ).
-            index1 (int): The starting Z index for cropping (inclusive).
-            index2 (int): The ending Z index for cropping (exclusive).
+        data : np.ndarray
+            The input 3D array (SizeX, SizeY, SizeZ).
+        index1 : int
+            The starting Z index for cropping (inclusive).
+        index2 : int
+            The ending Z index for cropping (exclusive).
 
         Returns
         -------
-            np.ndarray: The cropped 3D array.
+        np.ndarray
+            The cropped 3D array.
 
         Raises
         ------
-            ValueError: If indices are invalid.
+        ValueError
+            If indices are invalid.
         """
         # Ensure valid indices
         if index1 < 0 or index2 > data.shape[2] or index1 >= index2:
@@ -273,17 +267,18 @@ class ThorOCT:
 
         return cropped_data
 
-    def _load_raw_data(self, file) -> np.ndarray:
-        """
-        Load the raw data from the specified file and return it as a NumPy array.
+    def _load_raw_data(self, file: str) -> np.ndarray:
+        """Load the raw data from the specified file as a NumPy array.
 
         Parameters
         ----------
-            file (str): File path in the compressed data.
+        file : str
+            File path in the compressed data.
 
         Returns
         -------
-            np.ndarray: Raw complex data array.
+        np.ndarray
+            Raw complex data array.
         """
         assert self.compressed_data is not None
         assert self.size_x is not None and self.size_y is not None and self.size_z is not None
@@ -295,16 +290,17 @@ class ThorOCT:
         self,
         data: np.ndarray,
     ) -> np.ndarray:
-        """
-        Preprocess the data, including cropping, stacking, and converting to magnitude.
+        """Preprocess the data: crop, stack, and convert to magnitude.
 
         Parameters
         ----------
-            data (np.ndarray): Input complex data array.
+        data : np.ndarray
+            Input complex data array.
 
         Returns
         -------
-            np.ndarray: Preprocessed data array.
+        np.ndarray
+            Preprocessed data array.
         """
         assert self.config is not None
         # Perform cropping
@@ -324,29 +320,30 @@ class ThorOCT:
         return data if self.config.return_complex else np.abs(data).astype(np.float64)
 
     def load_and_process(self, file: str) -> np.ndarray:
-        """
-        Load raw data from the file and preprocess it.
+        """Load raw data from the file and preprocess it.
 
         Parameters
         ----------
-            file (str): File path in the compressed data.
+        file : str
+            File path in the compressed data.
 
         Returns
         -------
-            np.ndarray: Fully processed data array.
+        np.ndarray
+            Fully processed data array.
         """
         raw_data = self._load_raw_data(file)
         processed_data = self._preprocess_data(raw_data)
         return processed_data
 
     @staticmethod
-    def extract_positions_from_scan(scan_file_path: str | None = None):
-        """
-        Extracts the raw and index x, y positions from the .scan file.
+    def extract_positions_from_scan(scan_file_path: str | None = None) -> tuple:
+        """Extract the raw and index x, y positions from the .scan file.
 
         Parameters
         ----------
-        - scan_file_path: Path to the .scan file.
+        scan_file_path : str or None
+            Path to the .scan file.
 
         Returns
         -------
@@ -390,14 +387,16 @@ class ThorOCT:
         return new_data, raw_positions
 
     @staticmethod
-    def get_psoct_tiles_ids(tiles_directory: str, number_of_angles: int = 2):
+    def get_psoct_tiles_ids(tiles_directory: str, number_of_angles: int = 2) -> tuple:
         """
         Get the .scan file and all .oct files from the tiles_directory.
 
         Parameters
         ----------
-        - tiles_directory: Path to the directory containing the OCT tiles.
-        - number_of_angles: Number of acquisition angles.
+        tiles_directory : str
+            Path to the directory containing the OCT tiles.
+        number_of_angles : int
+            Number of acquisition angles.
 
         Returns
         -------
@@ -445,6 +444,6 @@ class ThorOCT:
 
     @staticmethod
     def orient_volume_psoct(vol: np.ndarray) -> np.ndarray:
-        """Transforms the volume to RAS orientation"""
+        """Transform the volume to RAS orientation."""
         vol = vol.transpose(2, 0, 1)
         return vol

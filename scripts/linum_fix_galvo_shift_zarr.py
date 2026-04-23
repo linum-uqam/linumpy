@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 Fix galvo shift artefacts in assembled mosaic OME-Zarr files.
 
 When the raw ``.bin`` files are no longer available, this script provides a
@@ -58,6 +58,7 @@ import linumpy.config.threads  # noqa: F401
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from tqdm.auto import tqdm
@@ -68,7 +69,7 @@ from linumpy.io import slice_config as slice_config_io
 from linumpy.io.zarr import OmeZarrWriter
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_zarr", help="Input mosaic grid OME-Zarr file (*.ome.zarr).")
     p.add_argument("output_zarr", help="Output corrected OME-Zarr file path.")
@@ -202,13 +203,19 @@ def _generate_comparison_preview(
         to the number of available levels.
     cmap : str
         Matplotlib colourmap.
+    band_start : int or None
+        Start column of the galvo band in level-0 pixels (optional overlay).
+    band_width : int or None
+        Width of the galvo band in level-0 pixels (optional overlay).
+    chunk_x : int or None
+        Tile chunk width in level-0 pixels (optional overlay).
     """
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    def _read_panels(zarr_path: Path, level: int):
+    def _read_panels(zarr_path: Path, level: int) -> Any:
         arr, _, _actual, _ = _open_level(zarr_path, level)
         vol = np.asarray(arr, dtype=np.float32)
         # Pick the Z slice with the highest mean signal so tissue is always visible.
@@ -306,7 +313,7 @@ def _generate_comparison_preview(
 # ---------------------------------------------------------------------------
 
 
-def _open_level(zarr_root: Path, level: int):
+def _open_level(zarr_root: Path, level: int) -> Any:
     """Open a specific pyramid level from an OME-Zarr, returning (zarr_array, res)."""
     import zarr
     from ome_zarr.io import parse_url
@@ -334,7 +341,7 @@ def _open_level(zarr_root: Path, level: int):
     return arr, res, actual_level, multiscale
 
 
-def _auto_detect(zarr_root: Path, detection_level: int, n_extra: int | None = None, verbose: bool = False):
+def _auto_detect(zarr_root: Path, detection_level: int, n_extra: int | None = None, verbose: bool = False) -> None:
     """Sample representative chunks and return (band_start, band_width, confidence).
 
     band_start and band_width are expressed in level-0 (full-resolution) pixels.
@@ -346,9 +353,15 @@ def _auto_detect(zarr_root: Path, detection_level: int, n_extra: int | None = No
 
     Parameters
     ----------
+    zarr_root : Path
+        Path to the OME-Zarr root directory.
+    detection_level : int
+        Pyramid level to use for detection (higher = faster, lower res).
     n_extra : int or None
         Number of galvo-return pixels from acquisition metadata (the ``n_extra``
         field in info.txt / Nextflow config).  Strongly recommended.
+    verbose : bool
+        If True, print per-chunk detection details.
     """
     det_arr, _, actual_level, _ = _open_level(zarr_root, detection_level)
     scale_factor = 2**actual_level  # ratio between detection level and level 0
@@ -387,7 +400,6 @@ def _auto_detect(zarr_root: Path, detection_level: int, n_extra: int | None = No
         if n_extra_ds:
             # Use the proven gradient-pair detector from the pipeline.
             # detect_galvo_shift returns (shift, confidence) where
-            #   shift = chunk_x - band_start - n_extra
             # so band_start = chunk_x - shift - n_extra
             shift_ds, conf = detect_galvo_shift(tile_aip, n_pixel_return=n_extra_ds)
             bs_ds = chunk_x - shift_ds - n_extra_ds
@@ -466,6 +478,8 @@ def _scan_band_start(
 
     Parameters
     ----------
+    zarr_root : Path
+        Path to the OME-Zarr root directory to scan.
     band_width : int
         Width of the dark band in level-0 pixels (typically ``n_extra``).
     scan_start, scan_stop, scan_step : int
@@ -474,6 +488,8 @@ def _scan_band_start(
         Output contact-sheet PNG.
     level : int
         Pyramid level to use for speed (images are downsampled).
+    cmap : str
+        Matplotlib colourmap name.
     """
     import matplotlib
 
@@ -564,8 +580,8 @@ def _scan_band_start(
 
 
 def _apply_fix(
-    zarr_root: Path, output_path: Path, band_start: int, band_width: int, mode: str, undo_shift: int, verbose: bool = False
-):
+    zarr_root: Path, output_path: Path, band_start: int, band_width: int, mode: str, undo_shift: int, _verbose: bool = False
+) -> None:
     """Write a corrected OME-Zarr, processing each level-0 chunk individually.
 
     **fix mode**: The galvo desynchronisation means A-lines are out of order within
@@ -579,7 +595,9 @@ def _apply_fix(
     Parameters
     ----------
     zarr_root : Path
+        Path to the input OME-Zarr root directory.
     output_path : Path
+        Path for the corrected output OME-Zarr.
     band_start : int
         Start column of the dark band within a tile chunk (fix mode).
     band_width : int
@@ -646,7 +664,7 @@ def _apply_fix(
 # ---------------------------------------------------------------------------
 
 
-def _update_slice_config(config_path: Path, slice_id: int, confidence: float, fix_applied: bool, mode: str):
+def _update_slice_config(config_path: Path, slice_id: int, confidence: float, fix_applied: bool, mode: str) -> None:
     """Stamp ``galvo_confidence`` / ``galvo_fix`` / ``notes`` for one slice."""
     rows = slice_config_io.read(config_path)
     sid = slice_config_io.normalize_slice_id(slice_id)
@@ -673,7 +691,8 @@ def _update_slice_config(config_path: Path, slice_id: int, confidence: float, fi
 # ---------------------------------------------------------------------------
 
 
-def main():
+def main() -> None:
+    """Run function."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

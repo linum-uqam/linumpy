@@ -37,8 +37,11 @@ from __future__ import annotations
 
 import csv
 from collections import OrderedDict
-from collections.abc import Iterable, Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
 
 CANONICAL_COLUMNS: list[str] = [
     "slice_id",
@@ -141,8 +144,9 @@ def _as_cell(value: object) -> str:
 
 
 def _build_header(rows: Iterable[Mapping[str, object]], extra_columns: Iterable[str]) -> list[str]:
-    """Build header: canonical columns (in order) + any other columns seen in
-    rows or in ``extra_columns``, preserving insertion order.
+    """Build header: canonical columns (in order) + any other columns seen in rows or in ``extra_columns``.
+
+    Preserves insertion order.
     """
     seen: list[str] = []
     seen_set: set[str] = set()
@@ -198,8 +202,7 @@ def stamp(
     slice_id: object,
     **flags: object,
 ) -> None:
-    """Stamp a single slice: read ``path_in``, update ``slice_id`` with
-    ``flags``, write to ``path_out``.
+    """Stamp a single slice: read ``path_in``, update ``slice_id`` with ``flags``, write to ``path_out``.
 
     New slice rows are appended with ``use=false`` when the row is absent.
     """
@@ -291,7 +294,7 @@ def get_flag(row: Mapping[str, object], column: str, default: bool = False) -> b
 
 
 def is_interpolated(path: str | Path, slice_id: object) -> bool:
-    """Convenience: is ``slice_id`` flagged as interpolated in ``path``?"""
+    """Return True if ``slice_id`` is flagged as interpolated in ``path``."""
     sid = normalize_slice_id(slice_id)
     rows = read(path)
     row = rows.get(sid)
@@ -301,8 +304,7 @@ def is_interpolated(path: str | Path, slice_id: object) -> bool:
 
 
 def force_skip_slices(path: str | Path) -> set[str]:
-    """Return slice IDs that stacking should treat as motor-only (force-skip
-    their pairwise transforms).
+    """Return slice IDs that stacking should treat as motor-only (force-skip their pairwise transforms).
 
     A slice is force-skipped when it is explicitly excluded (``use=false``)
     or was flagged by auto-exclude (``auto_excluded=true``).

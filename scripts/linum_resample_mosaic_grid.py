@@ -13,6 +13,7 @@ import argparse
 import itertools
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 import numpy as np
 from tqdm import tqdm
@@ -23,7 +24,7 @@ from linumpy.gpu.interpolation import resize
 from linumpy.io import OmeZarrWriter, read_omezarr
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("in_mosaic", help="Input mosaic grid in .ome.zarr.")
     p.add_argument("out_mosaic", help="Output resampled mosaic .ome.zarr.")
@@ -39,7 +40,7 @@ def _build_arg_parser():
     return p
 
 
-def rescale(image, scale, order=1, use_gpu=True):
+def rescale(image: Any, scale: float, order: int = 1, use_gpu: bool = True) -> Any:
     """Rescale an image by a scale factor.
 
     Parameters
@@ -63,12 +64,20 @@ def rescale(image, scale, order=1, use_gpu=True):
     return resize(image, output_shape, order=order, anti_aliasing=True, use_gpu=use_gpu)
 
 
-def _read_tile(vol, i, j, tile_shape):
+def _read_tile(vol: Any, i: Any, j: Any, tile_shape: Any) -> Any:
     """Read one tile from the input zarr array (I/O stage of the pipeline)."""
     return np.asarray(vol[:, i * tile_shape[1] : (i + 1) * tile_shape[1], j * tile_shape[2] : (j + 1) * tile_shape[2]])
 
 
-def _run_pipelined(vol, out_zarr, tile_iter, tile_shape, out_tile_shape, scaling_factor, use_gpu):
+def _run_pipelined(
+    vol: Any,
+    out_zarr: Any,
+    tile_iter: Any,
+    tile_shape: Any,
+    out_tile_shape: Any,
+    scaling_factor: float,
+    use_gpu: bool,
+) -> None:
     """Process tiles with a prefetch pipeline.
 
     A background thread reads the next tile from the input zarr while the
@@ -109,7 +118,8 @@ def _run_pipelined(vol, out_zarr, tile_iter, tile_shape, out_tile_shape, scaling
                 cp.get_default_memory_pool().free_all_blocks()
 
 
-def main():
+def main() -> None:
+    """Run function."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

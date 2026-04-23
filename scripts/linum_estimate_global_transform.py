@@ -155,6 +155,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Run function."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

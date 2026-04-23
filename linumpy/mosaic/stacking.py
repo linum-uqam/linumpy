@@ -5,6 +5,7 @@ Consolidated from linum_stack_slices_motor.py and linum_stack_motor_only.py.
 """
 
 import logging
+from typing import Any
 
 import numpy as np
 
@@ -156,7 +157,11 @@ def find_z_overlap(
 
 
 def apply_2d_transform(
-    image_2d: np.ndarray, transform, rotation_only: bool = False, max_rotation_deg: float = 1.0, override_rotation=None
+    image_2d: np.ndarray,
+    transform: Any,
+    rotation_only: bool = False,
+    max_rotation_deg: float = 1.0,
+    override_rotation: Any = None,
 ) -> np.ndarray:
     """Apply a SimpleITK 2D/3D transform to a single 2D image (Z-slice).
 
@@ -235,7 +240,11 @@ def apply_2d_transform(
 
 
 def apply_transform_to_volume(
-    vol: np.ndarray, transform, rotation_only: bool = False, max_rotation_deg: float = 1.0, override_rotation=None
+    vol: np.ndarray,
+    transform: Any,
+    rotation_only: bool = False,
+    max_rotation_deg: float = 1.0,
+    override_rotation: Any = None,
 ) -> np.ndarray:
     """Apply a 2D transform to each Z-slice of a volume.
 
@@ -263,7 +272,7 @@ def apply_transform_to_volume(
     return result
 
 
-def apply_xy_shift(vol: np.ndarray, dx_px: float, dy_px: float, output_shape: tuple[int, int]):
+def apply_xy_shift(vol: np.ndarray, dx_px: float, dy_px: float, output_shape: tuple[int, int]) -> tuple:
     """Compute destination region for placing a shifted volume.
 
     Returns the (possibly cropped) volume data and destination coordinates
@@ -429,7 +438,7 @@ def refine_z_blend_overlap(
         shift = pair_wise_phase_correlation(fixed_2d, moving_2d)
         dy, dx = float(shift[0]), float(shift[1])
     except Exception as e:
-        logger.debug(f"Z-blend phase correlation failed: {e}")
+        logger.debug("Z-blend phase correlation failed: %s", e)
         return moving_overlap, 0.0
 
     magnitude = np.sqrt(dy**2 + dx**2)
@@ -438,7 +447,7 @@ def refine_z_blend_overlap(
         return moving_overlap, 0.0
 
     if magnitude > max_refinement_px:
-        logger.debug(f"Z-blend refinement rejected: {magnitude:.2f} px > max {max_refinement_px} px")
+        logger.debug("Z-blend refinement rejected: %.2f px > max %s px", magnitude, max_refinement_px)
         return moving_overlap, 0.0
 
     refined = ndi_shift(moving_overlap.astype(np.float32), [0, dy, dx], order=0, mode="nearest")

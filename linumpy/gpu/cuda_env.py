@@ -1,27 +1,13 @@
 """
-CUDA environment setup for JAX GPU support.
+CUDA environment setup for GPU support.
 
 This module provides functions to automatically configure LD_LIBRARY_PATH
-for JAX CUDA 12 plugin compatibility.
-
-JAX 0.4.23 was compiled with CUDA 12 driver API and requires specific library versions:
-  - libcusolver.so.11 (from nvidia-cusolver-cu12==11.5.4.101)
-  - libcusparse.so.12 (from nvidia-cusparse-cu12==12.2.0.103)
-  - libcufft.so.11 (from nvidia-cufft-cu12==11.0.12.1)
-  - libcublas.so.12 (from nvidia-cublas-cu12==12.3.4.1)
-  - libcudnn.so.8 (from nvidia-cudnn-cu12==8.9.7.29)
-
-These exact versions must be installed - newer versions have different .so versions
-that are INCOMPATIBLE with JAX 0.4.23.
+for CUDA 12 library compatibility (used by torch, cupy, etc.).
 
 Usage:
-    # Before importing JAX (e.g., in scripts that use BaSiCPy):
+    # Before importing GPU-aware libraries:
     from linumpy.gpu.cuda_env import setup_jax_cuda_env
     setup_jax_cuda_env()
-
-    # Then import JAX/BaSiCPy
-    import jax
-    from basicpy import BaSiC
 """
 
 import contextlib
@@ -42,7 +28,6 @@ __all__ = [
     "get_nvidia_lib_paths",
     "preload_cuda_libraries",
     "setup_jax_cuda_env",
-    "verify_jax_cuda",
 ]
 
 # --- Sentinel used by ensure_cuda_env ---
@@ -277,22 +262,6 @@ def apply_patchelf_fix(verbose: bool = False) -> bool:
     sp = get_site_packages()
     patched_count = 0
 
-    # Patch jaxlib
-    jaxlib = None
-    try:
-        import jaxlib
-
-        jaxlib_path = jaxlib.__path__[0]
-        for so_file in Path(jaxlib_path).rglob("*.so"):
-            try:
-                subprocess.run(["patchelf", "--clear-execstack", str(so_file)], capture_output=True, check=True)
-                patched_count += 1
-            except subprocess.CalledProcessError:
-                pass
-    except ImportError:
-        # jaxlib not installed
-        jaxlib = None
-
     # Patch jax_plugins
     jax_plugins_path = Path(sp) / "jax_plugins"
     if jax_plugins_path.is_dir():
@@ -338,18 +307,7 @@ def setup_jax_cuda_env(
     -------
     >>> from linumpy.gpu.cuda_env import setup_jax_cuda_env
     >>> setup_jax_cuda_env()
-    >>> import jax  # Now JAX should find CUDA libraries
-    >>> print(jax.devices())
     """
-    # Check if JAX is already imported - warn that it may be too late
-    if "jax" in sys.modules and warn_on_failure:
-        warnings.warn(
-            "JAX is already imported. setup_jax_cuda_env() should be called "
-            "BEFORE importing JAX for LD_LIBRARY_PATH changes to take effect. "
-            "You may need to restart the Python process.",
-            stacklevel=2,
-        )
-
     # Ensure LD_LIBRARY_PATH is correct; re-exec if needed so the linker
     # search-path cache is built with the pip nvidia paths from the start.
     ensure_cuda_env()
@@ -393,53 +351,3 @@ def setup_jax_cuda_env(
                 )
 
     return True
-
-
-def verify_jax_cuda(verbose: bool = True) -> bool:
-    """
-    Verify that JAX CUDA is working correctly.
-
-    This imports JAX and tests basic GPU operations including SVD
-    which is used by BaSiCPy.
-
-    Parameters
-    ----------
-    verbose : bool
-        Print diagnostic information. Default True.
-
-    Returns
-    -------
-    working : bool
-        True if JAX CUDA is working.
-    """
-    try:
-        import jax
-
-        devices = jax.devices()
-
-        has_gpu = any("cuda" in str(d).lower() for d in devices)
-
-        if verbose:
-            print(f"JAX devices: {devices}")
-
-        if not has_gpu:
-            if verbose:
-                print("⚠️  JAX is using CPU only")
-            return False
-
-        # Test SVD (used by BaSiCPy)
-        import jax.numpy as jnp
-
-        a = jnp.array([[1.0, 2.0], [3.0, 4.0]])
-        result = jnp.linalg.svd(a)
-
-        if verbose:
-            print("✅ JAX GPU working - SVD test passed")
-            print(f"   Singular values: {result[1]}")
-
-        return True
-
-    except Exception as e:
-        if verbose:
-            print(f"❌ JAX CUDA verification failed: {e}")
-        return False

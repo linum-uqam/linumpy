@@ -28,6 +28,7 @@ Configuration:
 
 import os
 import warnings
+from typing import Any
 
 # Check for GPU availability
 GPU_AVAILABLE = False
@@ -94,7 +95,7 @@ else:
     warnings.warn("GPU disabled via LINUMPY_USE_GPU environment variable", stacklevel=2)
 
 
-def get_array_module(use_gpu: bool = True):
+def get_array_module(use_gpu: bool = True) -> Any:
     """
     Get the appropriate array module (cupy or numpy).
 
@@ -118,7 +119,7 @@ def get_array_module(use_gpu: bool = True):
         return np
 
 
-def to_gpu(array):
+def to_gpu(array: Any) -> Any:
     """
     Transfer array to GPU if available.
 
@@ -141,7 +142,7 @@ def to_gpu(array):
     return array
 
 
-def to_cpu(array):
+def to_cpu(array: Any) -> Any:
     """
     Transfer array to CPU (numpy).
 
@@ -163,7 +164,7 @@ def to_cpu(array):
     return array
 
 
-def gpu_info():
+def gpu_info() -> Any:
     """
     Get information about GPU availability and configuration.
 
@@ -181,7 +182,7 @@ def gpu_info():
     }
 
 
-def print_gpu_info():
+def print_gpu_info() -> None:
     """Print GPU availability information."""
     info = gpu_info()
     print("=" * 50)
@@ -196,7 +197,7 @@ def print_gpu_info():
     print("=" * 50)
 
 
-def list_gpus():
+def list_gpus() -> Any:
     """
     List all available GPUs with memory information.
 
@@ -239,7 +240,7 @@ def list_gpus():
     return gpus
 
 
-def select_best_gpu(verbose: bool = True):
+def select_best_gpu(verbose: bool = True) -> Any:
     """
     Select the GPU with the most free memory.
 
@@ -304,7 +305,7 @@ def select_best_gpu(verbose: bool = True):
     return best_id
 
 
-def select_gpu(device_id: int, verbose: bool = True):
+def select_gpu(device_id: int, verbose: bool = True) -> Any:
     """
     Select a specific GPU by device ID.
 
@@ -362,7 +363,7 @@ def select_gpu(device_id: int, verbose: bool = True):
     return device_id
 
 
-def print_gpu_status():
+def print_gpu_status() -> None:
     """
     Print detailed status of all available GPUs.
 
@@ -401,7 +402,6 @@ from linumpy.gpu.cuda_env import (  # noqa: E402
     check_patchelf_needed,
     get_cuda12_ld_path,
     setup_jax_cuda_env,
-    verify_jax_cuda,
 )
 
 # Expose key components
@@ -420,9 +420,8 @@ __all__ = [
     "print_gpu_status",
     "select_best_gpu",
     "select_gpu",
-    # CUDA environment setup for JAX
+    # CUDA environment setup
     "setup_jax_cuda_env",
     "to_cpu",
     "to_gpu",
-    "verify_jax_cuda",
 ]

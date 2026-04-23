@@ -4,10 +4,12 @@ Mosaic grid resampling utilities.
 Consolidated from linum_resample_mosaic_grid.py.
 """
 
+from typing import Any
+
 import numpy as np
 
 
-def resolution_is_mm(source_res) -> bool:
+def resolution_is_mm(source_res: tuple | list) -> bool:
     """Heuristic: source resolution in mm if all components < 1, otherwise µm.
 
     Used across the pipeline to accept either unit in OME-Zarr metadata or
@@ -18,7 +20,13 @@ def resolution_is_mm(source_res) -> bool:
     return float(source_res[0]) < 1.0
 
 
-def resample_mosaic_grid(vol, source_res, target_res_um, n_levels=5, out_path=None):
+def resample_mosaic_grid(
+    vol: Any,
+    source_res: tuple | list,
+    target_res_um: float,
+    n_levels: int = 5,
+    out_path: str | None = None,
+) -> np.ndarray | None:
     """Resample a mosaic grid volume to a target isotropic resolution.
 
     Processes tiles individually to avoid loading the entire mosaic into memory.

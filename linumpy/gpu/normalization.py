@@ -13,6 +13,8 @@ bounded by the largest serial-section chunk regardless of total volume size.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 from linumpy.intensity.normalization import (
@@ -25,7 +27,7 @@ from linumpy.intensity.normalization import (
 from . import GPU_AVAILABLE
 
 
-def _robust_percentile_gpu(chunk, percentile: float) -> float:
+def _robust_percentile_gpu(chunk: Any, percentile: float) -> float:
     """GPU version of ``_robust_percentile``: Nth percentile of non-zero voxels."""
     import cupy as cp
 
@@ -38,13 +40,13 @@ def _robust_percentile_gpu(chunk, percentile: float) -> float:
 
 def compute_scale_factors_gpu(
     vol: np.ndarray,
-    n_serial_slices,
+    n_serial_slices: Any,
     smooth_sigma: float,
     percentile: float,
     min_scale: float,
     max_scale: float,
     use_gpu: bool = True,
-):
+) -> Any:
     """GPU-accelerated per-Z-plane linear scale factors for percentile normalization.
 
     Mirrors :func:`linumpy.intensity.normalization.compute_scale_factors` but runs
@@ -93,7 +95,7 @@ def compute_scale_factors_gpu(
     return scale_factors, raw_metrics, smoothed, boundaries
 
 
-def _histogram_edges_gpu(n_bins: int, tissue_threshold: float):
+def _histogram_edges_gpu(n_bins: int, tissue_threshold: float) -> Any:
     """Reproducible bin edges shared across all chunks (matches CPU CDF range)."""
     import cupy as cp
 
@@ -104,7 +106,7 @@ def _histogram_edges_gpu(n_bins: int, tissue_threshold: float):
 
 def apply_histogram_matching_gpu(
     vol: np.ndarray,
-    n_serial_slices,
+    n_serial_slices: Any,
     n_bins: int,
     tissue_threshold: float = 0.0,
     use_gpu: bool = True,

@@ -39,7 +39,7 @@ def _to_gpu(arr: np.ndarray) -> "cp.ndarray":
     return cp.asarray(arr, dtype=cp.float32)
 
 
-def _to_cpu(arr) -> np.ndarray:
+def _to_cpu(arr: Any) -> np.ndarray:
     """Transfer GPU array to CPU."""
     if hasattr(arr, "get"):
         return arr.get()
@@ -106,8 +106,8 @@ def compute_ssim_2d_gpu(img1: np.ndarray, img2: np.ndarray, win_size: int = 7) -
         i2 = normalize_image_gpu(i2)
 
         # SSIM constants
-        C1 = 0.01**2
-        C2 = 0.03**2
+        c1 = 0.01**2
+        c2 = 0.03**2
 
         # Compute local means using uniform filter
         mu1 = cupy_uniform_filter(i1, size=win_size)
@@ -122,8 +122,8 @@ def compute_ssim_2d_gpu(img1: np.ndarray, img2: np.ndarray, win_size: int = 7) -
         sigma12 = cupy_uniform_filter(i1 * i2, size=win_size) - mu1_mu2
 
         # SSIM formula
-        numerator = (2 * mu1_mu2 + C1) * (2 * sigma12 + C2)
-        denominator = (mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2)
+        numerator = (2 * mu1_mu2 + c1) * (2 * sigma12 + c2)
+        denominator = (mu1_sq + mu2_sq + c1) * (sigma1_sq + sigma2_sq + c2)
 
         ssim_map = numerator / denominator
 
@@ -409,7 +409,7 @@ def assess_slice_quality_gpu(
     return float(overall), metrics
 
 
-def clear_gpu_memory():
+def clear_gpu_memory() -> None:
     """Clear GPU memory pools."""
     if GPU_AVAILABLE and cp is not None:
         with contextlib.suppress(Exception):

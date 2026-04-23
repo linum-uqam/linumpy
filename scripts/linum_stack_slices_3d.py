@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""
-Stack 3D mosaics on top of each other in a single 3D volume using pairwise
-registration transforms. Expects all 3D mosaics to be in the same space
+"""Stack 3D mosaics on top of each other in a single 3D volume using pairwise registration transforms.
+
+Expects all 3D mosaics to be in the same space
 (same dimensions for last two axes).
 
 DEPRECATED: This script is superseded by linum_stack_slices_motor.py, which
@@ -21,6 +21,7 @@ import argparse
 import re
 import warnings
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import SimpleITK as sitk
@@ -36,7 +37,8 @@ from linumpy.registration.sitk import apply_transform
 configure_all_libraries()
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Run function."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("in_mosaics_dir", help="Input mosaics directory in .ome.zarr format.")
     p.add_argument(
@@ -92,7 +94,8 @@ def _build_arg_parser():
     return p
 
 
-def get_input(mosaics_dir, transforms_dir, parser):
+def get_input(mosaics_dir: str | Path, transforms_dir: str | Path, parser: Any) -> Any:
+    """Run function."""
     # get all .ome.zarr files in in_mosaics_dir
     in_mosaics_dir = Path(mosaics_dir)
     in_transforms_dir = Path(transforms_dir)
@@ -133,7 +136,8 @@ def get_input(mosaics_dir, transforms_dir, parser):
     return first_mosaic, mosaics_sorted, transforms, np.array(offsets, dtype=int)
 
 
-def get_agarose_mask(vol):
+def get_agarose_mask(vol: Any) -> Any:
+    """Run function."""
     reference = np.mean(vol, axis=0)
     reference_smooth = gaussian_filter(reference, sigma=1.0)
     threshold = threshold_otsu(reference_smooth[reference > 0])
@@ -143,7 +147,8 @@ def get_agarose_mask(vol):
     return agarose_mask
 
 
-def normalize(vol, percentile_max=99.9):
+def normalize(vol: Any, percentile_max: float = 99.9) -> Any:
+    """Run function."""
     # voxels in mask are expected to be agarose voxels
     agarose_mask = get_agarose_mask(vol)
 
@@ -166,14 +171,16 @@ def normalize(vol, percentile_max=99.9):
     return vol
 
 
-def get_tissue_mask(vol):
+def get_tissue_mask(vol: Any) -> Any:
+    """Run function."""
     vol_smooth = gaussian_filter(vol, sigma=(0.0, 1.0, 1.0))
     mask = vol_smooth > np.percentile(vol_smooth, 10)
 
     return mask
 
 
-def main():
+def main() -> None:
+    """Run function operation."""
     warnings.warn(
         "linum_stack_slices_3d.py is deprecated. Use linum_stack_slices_motor.py with --no_xy_shift instead.",
         DeprecationWarning,

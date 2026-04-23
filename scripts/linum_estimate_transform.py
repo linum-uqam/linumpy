@@ -44,7 +44,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_images", nargs="+", help="Full path to a 2D mosaic grid image.")
     p.add_argument("output_transform", help="Output affine transform filename (must be a npy)")
@@ -95,7 +95,8 @@ def _build_arg_parser():
     return p
 
 
-def main():
+def main() -> None:
+    """Run function."""
     p = _build_arg_parser()
     args = p.parse_args()
 
@@ -134,23 +135,23 @@ def main():
     n_tiles_y = None
 
     if args.use_motor_positions:
-        logger.info(f"Using motor positions with {args.initial_overlap * 100:.1f}% overlap")
-        logger.info(f"Tile shape: {tile_shape}")
+        logger.info("Using motor positions with %.1f%% overlap", args.initial_overlap * 100)
+        logger.info("Tile shape: %s", tile_shape)
 
         transform = compute_motor_transform(tile_shape, args.initial_overlap)
         residuals = np.array([0.0])
         tile_count = 0
 
         logger.info("Motor-based transform:")
-        logger.info(f"  Step Y: {transform[0, 0]:.1f} px")
-        logger.info(f"  Step X: {transform[1, 1]:.1f} px")
+        logger.info("  Step Y: %.1f px", transform[0, 0])
+        logger.info("  Step X: %.1f px", transform[1, 1])
 
         if img is not None:
             n_tiles_y = img.shape[-2] // tile_shape[0]
             n_tiles_x = img.shape[-1] // tile_shape[1]
 
     else:
-        logger.info(f"Using image-based registration (phase correlation, GPU={use_gpu})")
+        logger.info("Using image-based registration (phase correlation, GPU=%s)", use_gpu)
 
         mosaics = []
         thresholds = []
@@ -229,9 +230,9 @@ def main():
         transform = result[0].reshape((2, 2))
         residuals = result[1] if len(result[1]) > 0 else np.array([0.0])
 
-        logger.info(f"Registration-based transform (from {tile_count} tile pairs):")
-        logger.info(f"  Step Y: {transform[0, 0]:.1f} px (expected: {tile_shape[0] * (1 - args.initial_overlap):.1f})")
-        logger.info(f"  Step X: {transform[1, 1]:.1f} px (expected: {tile_shape[1] * (1 - args.initial_overlap):.1f})")
+        logger.info("Registration-based transform (from %s tile pairs):", tile_count)
+        logger.info("  Step Y: %.1f px (expected: %.1f)", transform[0, 0], tile_shape[0] * (1 - args.initial_overlap))
+        logger.info("  Step X: %.1f px (expected: %.1f)", transform[1, 1], tile_shape[1] * (1 - args.initial_overlap))
 
         expected_step_y = tile_shape[0] * (1 - args.initial_overlap)
         expected_step_x = tile_shape[1] * (1 - args.initial_overlap)
@@ -239,7 +240,7 @@ def main():
         diff_x = (transform[1, 1] - expected_step_x) / expected_step_x * 100
 
         if abs(diff_y) > 1 or abs(diff_x) > 1:
-            logger.warning(f"Registration differs from motor positions by Y={diff_y:.1f}%, X={diff_x:.1f}%")
+            logger.warning("Registration differs from motor positions by Y=%.1f%%, X=%.1f%%", diff_y, diff_x)
             logger.warning("Consider using --use_motor_positions if motor positions are reliable")
 
         if mosaics:
@@ -248,7 +249,7 @@ def main():
 
     output_transform.parent.mkdir(exist_ok=True, parents=True)
     np.save(str(output_transform), transform)
-    logger.info(f"Transform saved to {output_transform}")
+    logger.info("Transform saved to %s", output_transform)
 
     collect_xy_transform_metrics(
         transform=transform,

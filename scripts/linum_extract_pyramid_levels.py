@@ -68,7 +68,7 @@ def _resolution_tag(scale_mm: list[float]) -> str:
     return "x".join(str(round(v, 1)) for v in spatial) + "um"
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input", help="Path to an OME-Zarr pyramid directory (.ome.zarr)")
     p.add_argument(
@@ -81,7 +81,8 @@ def _build_arg_parser():
     return p
 
 
-def main():
+def main() -> None:
+    """Run function."""
     p = _build_arg_parser()
     args = p.parse_args()
 

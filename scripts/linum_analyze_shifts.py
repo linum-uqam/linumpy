@@ -16,6 +16,7 @@ import linumpy.config.threads  # noqa: F401
 import argparse
 import logging
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -27,7 +28,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("in_shifts", help="Input shifts CSV file (shifts_xy.csv)")
     p.add_argument("out_directory", help="Output directory for analysis results")
@@ -42,7 +43,7 @@ def _build_arg_parser():
     return p
 
 
-def load_shifts(shifts_path):
+def load_shifts(shifts_path: str | Path) -> Any:
     """Load shifts CSV file.
 
     Rows are sorted by ``moving_id`` so that every ``cumsum`` downstream
@@ -56,7 +57,7 @@ def load_shifts(shifts_path):
     return df.sort_values("moving_id").reset_index(drop=True)
 
 
-def detect_outliers(df, iqr_multiplier=1.5):
+def detect_outliers(df: Any, iqr_multiplier: float = 1.5) -> Any:
     """Detect outliers using IQR method on shift magnitude."""
     shift_mag = np.sqrt(df["x_shift_mm"] ** 2 + df["y_shift_mm"] ** 2)
     q1 = shift_mag.quantile(0.25)
@@ -67,7 +68,7 @@ def detect_outliers(df, iqr_multiplier=1.5):
     return outlier_mask, upper_bound, q1, q3, iqr
 
 
-def filter_with_local_median(df, outlier_mask):
+def filter_with_local_median(df: Any, outlier_mask: Any) -> Any:
     """Replace outliers with local median of neighbors."""
     df_filtered = df.copy()
     for idx in df[outlier_mask].index:
@@ -86,7 +87,7 @@ def filter_with_local_median(df, outlier_mask):
     return df_filtered
 
 
-def generate_report(df, df_filtered, outlier_mask, stats, resolution, output_dir):
+def generate_report(df: Any, df_filtered: Any, outlier_mask: Any, stats: Any, resolution: Any, output_dir: str | Path) -> None:
     """Generate text report."""
     px_per_mm = 1000 / resolution
 
@@ -171,7 +172,7 @@ def generate_report(df, df_filtered, outlier_mask, stats, resolution, output_dir
     return report_text
 
 
-def generate_plots(df, df_filtered, outlier_mask, stats, resolution, output_dir):
+def generate_plots(df: Any, df_filtered: Any, _outlier_mask: Any, stats: Any, resolution: Any, output_dir: str | Path) -> None:
     """Generate visualization plots."""
     px_per_mm = 1000 / resolution
     upper_bound = stats["upper_bound"]
@@ -250,11 +251,12 @@ def generate_plots(df, df_filtered, outlier_mask, stats, resolution, output_dir)
     fig.savefig(plot_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
-    logger.info(f"Saved plot: {plot_path}")
+    logger.info("Saved plot: %s", plot_path)
     return plot_path
 
 
-def main():
+def main() -> None:
+    """Run function."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 
@@ -263,13 +265,13 @@ def main():
     Path(args.out_directory).mkdir(parents=True)
 
     # Load shifts
-    logger.info(f"Loading shifts from {args.in_shifts}")
+    logger.info("Loading shifts from %s", args.in_shifts)
     df = load_shifts(args.in_shifts)
-    logger.info(f"Loaded {len(df)} shift pairs")
+    logger.info("Loaded %s shift pairs", len(df))
 
     # Detect outliers
     outlier_mask, upper_bound, q1, q3, iqr = detect_outliers(df, args.iqr_multiplier)
-    logger.info(f"Detected {outlier_mask.sum()} outliers (IQR bound: {upper_bound:.3f} mm)")
+    logger.info("Detected %s outliers (IQR bound: %.3f mm)", outlier_mask.sum(), upper_bound)
 
     # Filter outliers
     df_filtered = filter_with_local_median(df, outlier_mask)
@@ -287,9 +289,9 @@ def main():
     # Save filtered shifts (useful for debugging)
     filtered_path = Path(args.out_directory) / "shifts_filtered.csv"
     df_filtered.to_csv(filtered_path, index=False)
-    logger.info(f"Saved filtered shifts: {filtered_path}")
+    logger.info("Saved filtered shifts: %s", filtered_path)
 
-    logger.info(f"Analysis complete. Results saved to {args.out_directory}")
+    logger.info("Analysis complete. Results saved to %s", args.out_directory)
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ from linumpy.imaging.visualization import save_orthogonal_views
 from linumpy.io.zarr import read_omezarr
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("in_zarr", help="Full path to a zarr file.")
     p.add_argument("out_figure", help="Full path to the output figure")
@@ -27,7 +27,8 @@ def _build_arg_parser():
     return p
 
 
-def main():
+def main() -> None:
+    """Run function."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

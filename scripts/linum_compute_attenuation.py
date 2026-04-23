@@ -1,6 +1,7 @@
 #! /usr/bin/env python
 
-"""Computes the tissue apparent attenuation coefficient map
+"""Computes the tissue apparent attenuation coefficient map.
+
 and then use the average attenuation to compensate its effect in
 the OCT reflectivity data.
 """
@@ -18,7 +19,8 @@ from linumpy.intensity.attenuation import get_extended_attenuation_vermeer2013
 from linumpy.io.zarr import read_omezarr, save_omezarr
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Run function."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
 
     # Mandatory parameters
@@ -33,7 +35,8 @@ def _build_arg_parser():
     return p
 
 
-def main():
+def main() -> None:
+    """Run function operation."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()

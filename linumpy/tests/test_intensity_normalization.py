@@ -1,4 +1,4 @@
-"""Tests for linumpy/preproc/normalization.py"""
+"""Tests for linumpy/intensity/normalization.py"""
 
 import numpy as np
 import pytest

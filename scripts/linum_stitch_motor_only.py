@@ -21,6 +21,7 @@ import linumpy.config.threads  # noqa: F401
 import argparse
 import logging
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -34,7 +35,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_volume", help="Full path to a 3D mosaic grid volume (.ome.zarr)")
     p.add_argument("output_volume", help="Output stitched mosaic filename (.ome.zarr)")
@@ -65,7 +66,7 @@ def _build_arg_parser():
     return p
 
 
-def compute_registration_positions(nx, ny, transform):
+def compute_registration_positions(nx: Any, ny: Any, transform: Any) -> Any:
     """Compute tile positions using registration transform."""
     positions = []
     for i in range(nx):
@@ -75,7 +76,8 @@ def compute_registration_positions(nx, ny, transform):
     return positions
 
 
-def main():
+def main() -> None:
+    """Run function."""
     p = _build_arg_parser()
     args = p.parse_args()
 
@@ -88,18 +90,18 @@ def main():
         raise FileExistsError(f"Output file exists: {output_file}. Use --overwrite to replace.")
 
     # Load the mosaic grid volume
-    logger.info(f"Loading mosaic grid from {input_file}")
+    logger.info("Loading mosaic grid from %s", input_file)
     volume, resolution = read_omezarr(str(input_file), level=0)
     tile_shape = volume.chunks
 
-    logger.info(f"Volume shape: {volume.shape}")
-    logger.info(f"Tile shape: {tile_shape}")
-    logger.info(f"Resolution: {resolution}")
+    logger.info("Volume shape: %s", volume.shape)
+    logger.info("Tile shape: %s", tile_shape)
+    logger.info("Resolution: %s", resolution)
 
     # Compute grid dimensions
     nx = volume.shape[1] // tile_shape[1]
     ny = volume.shape[2] // tile_shape[2]
-    logger.info(f"Grid: {nx} x {ny} tiles")
+    logger.info("Grid: %s x %s tiles", nx, ny)
 
     # Compute motor-based positions
     motor_positions = compute_motor_positions(nx, ny, tile_shape, args.overlap_fraction, args.scale_factor, args.rotation_deg)
@@ -111,8 +113,8 @@ def main():
         comparison = compare_motor_vs_registration(motor_positions, reg_positions, args.output_comparison)
 
         logger.info("Position comparison summary:")
-        logger.info(f"  Mean offset: ({comparison['mean_diff_y']:.1f}, {comparison['mean_diff_x']:.1f}) px")
-        logger.info(f"  Max offset: {comparison['max_magnitude']:.1f} px")
+        logger.info("  Mean offset: (%.1f, %.1f) px", comparison["mean_diff_y"], comparison["mean_diff_x"])
+        logger.info("  Max offset: %.1f px", comparison["max_magnitude"])
         if comparison.get("dilation_indicator"):
             logger.warning(comparison["dilation_warning"])
 
@@ -123,7 +125,7 @@ def main():
     posy_max = max([pos[1] + tile_shape[2] for pos in motor_positions])
     mosaic_shape = (volume.shape[0], int(posx_max - posx_min), int(posy_max - posy_min))
 
-    logger.info(f"Output mosaic shape: {mosaic_shape}")
+    logger.info("Output mosaic shape: %s", mosaic_shape)
 
     # Stitch the mosaic using motor positions only
     logger.info("Stitching mosaic using motor positions...")
@@ -161,7 +163,7 @@ def main():
         blending_method=args.blending_method,
     )
 
-    logger.info(f"Motor-only stitched mosaic saved to {output_file}")
+    logger.info("Motor-only stitched mosaic saved to %s", output_file)
 
 
 if __name__ == "__main__":

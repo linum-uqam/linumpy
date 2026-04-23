@@ -24,7 +24,7 @@ from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
 from linumpy.metrics import collect_interface_crop_metrics
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_zarr", help="Path to the input 3D OME-Zarr OCT volume")
     p.add_argument(
@@ -58,7 +58,8 @@ def _build_arg_parser():
     return p
 
 
-def main():
+def main() -> None:
+    """Run function."""
     args = _build_arg_parser().parse_args()
     input_path = Path(args.input_zarr)
     output_path = Path(args.output_zarr)

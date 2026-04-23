@@ -21,6 +21,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,7 +33,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("pipeline_output", help="Path to pipeline output directory (containing register_pairwise, etc.)")
     p.add_argument("out_directory", help="Output directory for diagnostic results")
@@ -53,7 +54,7 @@ def _build_arg_parser():
     return p
 
 
-def parse_slice_range(range_str):
+def parse_slice_range(range_str: str) -> Any:
     """Parse slice range like "10-20" or "5,10,15" into list of IDs."""
     if not range_str:
         return None
@@ -69,11 +70,16 @@ def parse_slice_range(range_str):
     return sorted(slice_ids)
 
 
-def analyze_rotation_drift(pipeline_dir, output_dir, threshold=2.0, slice_ids=None):
+def analyze_rotation_drift(
+    pipeline_dir: str | Path,
+    output_dir: str | Path,
+    threshold: float = 2.0,
+    slice_ids: Any = None,
+) -> None:
     """Analyze rotation patterns from pairwise registration."""
     reg_dir = Path(pipeline_dir) / "register_pairwise"
     if not reg_dir.exists():
-        logger.warning(f"No register_pairwise directory found at {reg_dir}")
+        logger.warning("No register_pairwise directory found at %s", reg_dir)
         return None
 
     records = []
@@ -168,7 +174,7 @@ def analyze_rotation_drift(pipeline_dir, output_dir, threshold=2.0, slice_ids=No
     return result
 
 
-def analyze_shifts(pipeline_dir, output_dir, resolution=10.0, slice_ids=None):
+def analyze_shifts(pipeline_dir: str | Path, output_dir: str | Path, resolution: float = 10.0, slice_ids: Any = None) -> None:
     """Analyze XY shifts from shifts_xy.csv."""
     shifts_path = Path(pipeline_dir) / "shifts_xy.csv"
     if not shifts_path.exists():
@@ -263,7 +269,7 @@ def analyze_shifts(pipeline_dir, output_dir, resolution=10.0, slice_ids=None):
     return result
 
 
-def generate_summary_report(results, output_dir):
+def generate_summary_report(results: Any, output_dir: str | Path) -> None:
     """Generate comprehensive summary report."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -292,8 +298,7 @@ def generate_summary_report(results, output_dir):
         )
         if rot["issues"]:
             lines.append("Issues:")
-            for issue in rot["issues"]:
-                lines.append(f"  ⚠ {issue}")
+            lines.extend(f"  ⚠ {issue}" for issue in rot["issues"])
             lines.append("")
 
     # Shifts Analysis
@@ -314,8 +319,7 @@ def generate_summary_report(results, output_dir):
         )
         if sh["issues"]:
             lines.append("Issues:")
-            for issue in sh["issues"]:
-                lines.append(f"  ⚠ {issue}")
+            lines.extend(f"  ⚠ {issue}" for issue in sh["issues"])
             lines.append("")
 
     # Overall Assessment
@@ -336,8 +340,7 @@ def generate_summary_report(results, output_dir):
         lines.append("✓ No significant issues detected in analyzed data")
     else:
         lines.append(f"Found {len(all_issues)} potential issues:")
-        for issue in all_issues:
-            lines.append(f"  • {issue}")
+        lines.extend(f"  • {issue}" for issue in all_issues)
 
     lines.extend(
         [
@@ -368,8 +371,7 @@ def generate_summary_report(results, output_dir):
     if not recommendations:
         recommendations.append("Current parameters appear appropriate for this dataset")
 
-    for rec in recommendations:
-        lines.append(f"  → {rec}")
+    lines.extend(f"  → {rec}" for rec in recommendations)
 
     lines.extend(["", "=" * 70])
 
@@ -392,11 +394,12 @@ def generate_summary_report(results, output_dir):
             default=str,
         )
 
-    logger.info(f"Summary report saved to {report_path}")
+    logger.info("Summary report saved to %s", report_path)
     return report_path
 
 
-def main():
+def main() -> None:
+    """Run function."""
     p = _build_arg_parser()
     args = p.parse_args()
 
@@ -406,7 +409,7 @@ def main():
 
     slice_ids = parse_slice_range(args.slice_range)
     if slice_ids:
-        logger.info(f"Analyzing slices: {slice_ids}")
+        logger.info("Analyzing slices: %s", slice_ids)
 
     results = {}
 
@@ -429,7 +432,7 @@ def main():
     print(f"Results saved to: {output_dir}")
 
     all_issues = []
-    for _key, val in results.items():
+    for val in results.values():
         if val and "issues" in val:
             all_issues.extend(val["issues"])
 

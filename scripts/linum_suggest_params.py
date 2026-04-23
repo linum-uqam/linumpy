@@ -60,6 +60,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -74,7 +75,7 @@ OCT_AXIAL_RES_UM = 3.5
 # =============================================================================
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("shifts_file", help="Motor-positions CSV file (shifts_xy.csv)")
     p.add_argument("output_dir", help="Directory for the report and suggested config snippet")
@@ -118,6 +119,7 @@ def _build_arg_parser():
 
 
 def load_shifts(path: str) -> pd.DataFrame:
+    """Run function."""
     df = pd.read_csv(path)
     required = ["fixed_id", "moving_id", "x_shift_mm", "y_shift_mm"]
     missing = [c for c in required if c not in df.columns]
@@ -266,7 +268,11 @@ def analyze_metadata(data_dir: str, axial_res_um: float, n_calibration_slices: i
 
     Parameters
     ----------
-    n_calibration_slices
+    data_dir : str
+        Path to the raw data directory containing slice subdirectories.
+    axial_res_um : float
+        Axial resolution in micrometers, used to compute depth parameters.
+    n_calibration_slices : int
         Number of leading slice directories to skip (default: 1 to skip
         slice_z00, which is always a calibration slice).
 
@@ -331,7 +337,7 @@ def analyze_metadata(data_dir: str, axial_res_um: float, n_calibration_slices: i
                 break
 
     # ── Extract parameters (metadata.json takes priority over state.json) ────
-    def get(key, *sources):
+    def get(key: str, *sources: Any) -> Any:
         for src in sources:
             if key in src:
                 return src[key]
@@ -401,6 +407,7 @@ def analyze_metadata(data_dir: str, axial_res_um: float, n_calibration_slices: i
 
 
 def ceil_to(value: float, step: float) -> float:
+    """Run function."""
     return float(np.ceil(value / step) * step)
 
 
@@ -418,6 +425,7 @@ def suggest_target_resolution(native_xy_um: float) -> int:
 
 
 def build_report(shift_stats: dict, acq: dict, shifts_path: str) -> str:
+    """Run function."""
     df = shift_stats["df"]
     s = shift_stats["normal_mag_stats"]
     normal = shift_stats["normal_rows"]
@@ -524,7 +532,7 @@ def build_report(shift_stats: dict, acq: dict, shifts_path: str) -> str:
 # =============================================================================
 
 
-def build_config_snippet(shift_stats: dict, acq: dict, args) -> str:
+def build_config_snippet(shift_stats: dict, acq: dict, args: argparse.Namespace) -> str:
     """Return a nextflow.config parameter block with estimated values."""
     # ── Resolution ───────────────────────────────────────────────────────────
     if args.resolution_um:
@@ -644,7 +652,8 @@ def build_config_snippet(shift_stats: dict, acq: dict, args) -> str:
 # =============================================================================
 
 
-def main():
+def main() -> None:
+    """Run function."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

@@ -1,3 +1,5 @@
+"""Helpers for creating and retrieving test data fixtures."""
+
 from pathlib import Path
 
 import dask.array as da
@@ -9,7 +11,12 @@ from linumpy import LINUMPY_HOME
 from linumpy.io.zarr import save_omezarr
 
 
-def get_data(name):
+def get_data(name: str) -> object:
+    """Return a test fixture identified by *name*.
+
+    Valid keys: ``'mosaic_3d_omezarr'``, ``'mosaic_3d_nifti'``,
+    ``'raw_tiles'``, ``'aip'``.
+    """
     data = {
         "mosaic_3d_omezarr": _get_mosaic_3d_omezarr,
         "mosaic_3d_nifti": _get_mosaic_3d_nifti,
@@ -21,11 +28,11 @@ def get_data(name):
     return data[name]()
 
 
-def _create_linumpy_home_if_not_exists():
+def _create_linumpy_home_if_not_exists() -> None:
     Path(LINUMPY_HOME).mkdir(exist_ok=True)
 
 
-def _get_mosaic_3d_nifti():
+def _get_mosaic_3d_nifti() -> Path:
     _create_linumpy_home_if_not_exists()
     filename = Path(LINUMPY_HOME) / "mosaic_3d.nii.gz"
     if not filename.exists():
@@ -38,7 +45,7 @@ def _get_mosaic_3d_nifti():
     return filename
 
 
-def _get_mosaic_3d_omezarr():
+def _get_mosaic_3d_omezarr() -> Path:
     _create_linumpy_home_if_not_exists()
     filename = Path(LINUMPY_HOME) / "mosaic_3d.ome.zarr"
     if not filename.exists():
@@ -51,7 +58,7 @@ def _get_mosaic_3d_omezarr():
     return filename
 
 
-def _get_aip():
+def _get_aip() -> Path:
     _create_linumpy_home_if_not_exists()
     filename = Path(LINUMPY_HOME) / "aip.ome.zarr"
     if not filename.exists():
@@ -70,7 +77,17 @@ def _get_aip():
     return filename
 
 
-def _get_scan_info(nx, ny, top_z, bottom_z, width_mm, height_mm, x_pos_mm, y_pos_mm, z_pos_mm):
+def _get_scan_info(
+    nx: int,
+    ny: int,
+    top_z: int,
+    bottom_z: int,
+    width_mm: float,
+    height_mm: float,
+    x_pos_mm: float,
+    y_pos_mm: float,
+    z_pos_mm: float,
+) -> str:
     focus_z = int((top_z + bottom_z) / 2)
     scan_info = "Scan info\n"
     scan_info += f"nx: {nx}\n"
@@ -91,7 +108,7 @@ def _get_scan_info(nx, ny, top_z, bottom_z, width_mm, height_mm, x_pos_mm, y_pos
     return scan_info
 
 
-def _get_raw_tiles():
+def _get_raw_tiles() -> Path:
     _create_linumpy_home_if_not_exists()
     folder = Path(LINUMPY_HOME) / "raw_tiles"
     bounds_xy = [(0, 140), ((256 - 140), 256)]

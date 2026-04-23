@@ -5,6 +5,8 @@ Provides a hybrid approach where metric computation is done on GPU
 while the optimizer runs on CPU (SimpleITK).
 """
 
+from typing import Any
+
 import numpy as np
 
 from . import GPU_AVAILABLE, to_cpu
@@ -31,7 +33,7 @@ class GPUAcceleratedRegistration:
         Registration metric: 'mse', 'ncc', 'mi'
     """
 
-    def __init__(self, use_gpu=True, metric="mse"):
+    def __init__(self, use_gpu: Any = True, metric: Any = "mse") -> None:
         self.use_gpu = use_gpu and GPU_AVAILABLE
         self.metric = metric.lower()
 
@@ -40,7 +42,7 @@ class GPUAcceleratedRegistration:
 
             self._cp = cp
 
-    def compute_metric(self, fixed, moving):
+    def compute_metric(self, fixed: Any, moving: Any) -> Any:
         """
         Compute registration metric between two images.
 
@@ -61,7 +63,7 @@ class GPUAcceleratedRegistration:
         else:
             return self._compute_metric_cpu(fixed, moving)
 
-    def _compute_metric_gpu(self, fixed, moving):
+    def _compute_metric_gpu(self, fixed: Any, moving: Any) -> Any:
         """GPU implementation of metric computation."""
         cp = self._cp
 
@@ -100,7 +102,7 @@ class GPUAcceleratedRegistration:
         else:
             raise ValueError(f"Unknown metric: {self.metric}")
 
-    def _compute_mi_gpu(self, fixed, moving, mask, bins=32):
+    def _compute_mi_gpu(self, fixed: Any, moving: Any, mask: Any, bins: Any = 32) -> Any:
         """Compute mutual information on GPU."""
         cp = self._cp
 
@@ -141,7 +143,7 @@ class GPUAcceleratedRegistration:
 
         return float(mi.get())
 
-    def _compute_metric_cpu(self, fixed, moving):
+    def _compute_metric_cpu(self, fixed: Any, moving: Any) -> Any:
         """CPU fallback for metric computation."""
         mask = (fixed > 0) & (moving > 0)
 
@@ -167,7 +169,7 @@ class GPUAcceleratedRegistration:
         else:
             raise ValueError(f"Unknown metric: {self.metric}")
 
-    def transform_image(self, image, transform_matrix, output_shape=None):
+    def transform_image(self, image: Any, transform_matrix: Any, output_shape: Any = None) -> Any:
         """
         Apply transformation to image using GPU.
 
@@ -188,7 +190,9 @@ class GPUAcceleratedRegistration:
         return affine_transform(image, transform_matrix, output_shape, order=1, use_gpu=self.use_gpu)
 
 
-def register_2d_gpu(fixed, moving, method="affine", metric="mse", max_iterations=1000, use_gpu=True):
+def register_2d_gpu(
+    fixed: Any, moving: Any, method: Any = "affine", metric: Any = "mse", max_iterations: Any = 1000, use_gpu: Any = True
+) -> Any:
     """
     GPU-accelerated 2D image registration.
 
@@ -247,7 +251,7 @@ def register_2d_gpu(fixed, moving, method="affine", metric="mse", max_iterations
     )
 
 
-def apply_transform_gpu(image, transform, use_gpu=True):
+def apply_transform_gpu(image: Any, transform: Any, use_gpu: Any = True) -> Any:
     """
     Apply SimpleITK transform to image using GPU resampling.
 
@@ -279,7 +283,7 @@ def apply_transform_gpu(image, transform, use_gpu=True):
         return apply_transform(image, transform)
 
 
-def _is_affine_transform(transform):
+def _is_affine_transform(transform: Any) -> Any:
     """Check if transform can be represented as affine matrix."""
     import SimpleITK as sitk
 
@@ -288,7 +292,7 @@ def _is_affine_transform(transform):
     )
 
 
-def _sitk_transform_to_matrix(transform, image_shape):
+def _sitk_transform_to_matrix(transform: Any, image_shape: Any) -> Any:
     """Convert SimpleITK transform to affine matrix."""
     import SimpleITK as sitk
 

@@ -36,7 +36,7 @@ import argparse
 import sys
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("--json", action="store_true", help="Output as JSON")
     p.add_argument("--test", action="store_true", help="Run a quick GPU test")
@@ -47,7 +47,7 @@ def _build_arg_parser():
     return p
 
 
-def run_gpu_test():
+def run_gpu_test() -> None:
     """Run a quick GPU performance test."""
     import time
 
@@ -93,7 +93,8 @@ def run_gpu_test():
     print("=" * 50)
 
 
-def main():
+def main() -> None:
+    """Run function."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

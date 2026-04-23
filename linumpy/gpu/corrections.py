@@ -1,11 +1,13 @@
 """GPU-accelerated correction operations for linumpy."""
 
+from typing import Any
+
 import numpy as np
 
 from . import GPU_AVAILABLE, to_cpu
 
 
-def fix_galvo_shift(volume, shift, axis=1, use_gpu=True):
+def fix_galvo_shift(volume: Any, shift: Any, axis: Any = 1, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated galvo shift correction.
 
@@ -38,7 +40,9 @@ def fix_galvo_shift(volume, shift, axis=1, use_gpu=True):
         return np.roll(volume, shift, axis=axis)
 
 
-def detect_and_fix_galvo_shift(volume, n_pixel_return=40, threshold=0.5, axis=1, use_gpu=True):
+def detect_and_fix_galvo_shift(
+    volume: Any, n_pixel_return: Any = 40, threshold: Any = 0.5, axis: Any = 1, use_gpu: Any = True
+) -> Any:
     """
     Detect and conditionally fix galvo shift.
 

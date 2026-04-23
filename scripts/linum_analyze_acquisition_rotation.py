@@ -23,6 +23,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -34,7 +35,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("in_shifts", help="Input shifts CSV file (shifts_xy.csv)")
     p.add_argument("out_directory", help="Output directory for analysis results")
@@ -50,7 +51,7 @@ def _build_arg_parser():
     return p
 
 
-def load_shifts(shifts_path):
+def load_shifts(shifts_path: str | Path) -> Any:
     """Load shifts CSV file."""
     df = pd.read_csv(shifts_path)
     required_cols = ["fixed_id", "moving_id", "x_shift_mm", "y_shift_mm"]
@@ -60,7 +61,7 @@ def load_shifts(shifts_path):
     return df
 
 
-def compute_shift_angles(df):
+def compute_shift_angles(df: Any) -> Any:
     """
     Compute the angle of each shift vector.
 
@@ -71,7 +72,7 @@ def compute_shift_angles(df):
     return angles
 
 
-def compute_angular_velocity(angles, window_size=5):
+def compute_angular_velocity(angles: Any, window_size: int = 5) -> Any:
     """
     Compute the rate of change of shift angle (angular velocity).
 
@@ -94,7 +95,7 @@ def compute_angular_velocity(angles, window_size=5):
     return angular_velocity, angular_velocity_smooth
 
 
-def compute_cumulative_rotation(angles):
+def compute_cumulative_rotation(angles: Any) -> Any:
     """
     Compute cumulative rotation from shift angle changes.
 
@@ -113,10 +114,8 @@ def compute_cumulative_rotation(angles):
     return pd.Series(cumulative)
 
 
-def detect_rotation_patterns(angles, angular_velocity):
-    """
-    Detect different rotation patterns in the data.
-    """
+def detect_rotation_patterns(_angles: Any, angular_velocity: Any) -> Any:
+    """Detect different rotation patterns in the data."""
     patterns = {
         "systematic_drift": False,
         "oscillation": False,
@@ -145,25 +144,21 @@ def detect_rotation_patterns(angles, angular_velocity):
     return patterns
 
 
-def load_registration_rotations(reg_dir):
+def load_registration_rotations(reg_dir: str | Path) -> None:
     """Load rotation values from pairwise registration metrics."""
     import re
 
     reg_path = Path(reg_dir)
 
     if not reg_path.exists():
-        logger.warning(f"Registration directory does not exist: {reg_dir}")
+        logger.warning("Registration directory does not exist: %s", reg_dir)
         return None
 
     records = []
 
     # Try to find slice directories - either directly or in subdirectories
-    slice_dirs = []
-
     # Check if there are slice_z directories directly
-    for item in sorted(reg_path.iterdir()):
-        if item.is_dir() and "slice_z" in item.name:
-            slice_dirs.append(item)
+    slice_dirs = [item for item in sorted(reg_path.iterdir()) if item.is_dir() and "slice_z" in item.name]
 
     # If no direct slice dirs, search recursively for JSON files
     if not slice_dirs:
@@ -171,7 +166,7 @@ def load_registration_rotations(reg_dir):
         slice_dirs = sorted({f.parent for f in json_files})
 
     if not slice_dirs:
-        logger.warning(f"No slice directories found in {reg_dir}")
+        logger.warning("No slice directories found in %s", reg_dir)
         return None
 
     for slice_dir in slice_dirs:
@@ -194,9 +189,8 @@ def load_registration_rotations(reg_dir):
     return None
 
 
-def analyze_acquisition_rotation(df, expected_angle=None):
-    """
-    Main analysis of rotation from acquisition shifts.
+def analyze_acquisition_rotation(df: Any, expected_angle: Any = None) -> None:
+    """Analyze rotation from acquisition shifts.
 
     Note: The shift vectors represent relative displacement between slices,
     which can vary in direction due to drift. We analyze:
@@ -272,7 +266,7 @@ def analyze_acquisition_rotation(df, expected_angle=None):
     return analysis, angles, angular_velocity_smooth, cumulative_rotation
 
 
-def generate_report(analysis, reg_comparison, output_dir):
+def generate_report(analysis: Any, reg_comparison: Any, output_dir: str | Path) -> None:
     """Generate text report."""
     lines = [
         "=" * 70,
@@ -378,11 +372,13 @@ def generate_report(analysis, reg_comparison, output_dir):
     with Path(report_path).open("w") as f:
         f.write("\n".join(lines))
 
-    logger.info(f"Report saved to {report_path}")
+    logger.info("Report saved to %s", report_path)
     return report_path
 
 
-def generate_plots(df, angles, angular_velocity, cumulative_rotation, reg_df, output_dir):
+def generate_plots(
+    df: Any, angles: Any, angular_velocity: Any, cumulative_rotation: Any, reg_df: Any, output_dir: str | Path
+) -> None:
     """Generate visualization plots."""
     _fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
@@ -465,11 +461,11 @@ def generate_plots(df, angles, angular_velocity, cumulative_rotation, reg_df, ou
     plt.savefig(plot_path, dpi=150)
     plt.close()
 
-    logger.info(f"Plots saved to {plot_path}")
+    logger.info("Plots saved to %s", plot_path)
     return plot_path
 
 
-def compare_with_registration(cumulative_rotation, reg_df, slice_ids):
+def compare_with_registration(cumulative_rotation: Any, reg_df: Any, slice_ids: Any) -> dict:
     """Compare acquisition rotation with registration rotation."""
     if reg_df is None or len(reg_df) == 0:
         return None
@@ -507,7 +503,8 @@ def compare_with_registration(cumulative_rotation, reg_df, slice_ids):
     }
 
 
-def main():
+def main() -> None:
+    """Run function."""
     p = _build_arg_parser()
     args = p.parse_args()
 
@@ -515,9 +512,9 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load shifts
-    logger.info(f"Loading shifts from {args.in_shifts}")
+    logger.info("Loading shifts from %s", args.in_shifts)
     df = load_shifts(args.in_shifts)
-    logger.info(f"Loaded {len(df)} shift pairs")
+    logger.info("Loaded %s shift pairs", len(df))
 
     # Main analysis
     analysis, angles, angular_velocity, cumulative_rotation = analyze_acquisition_rotation(
@@ -527,10 +524,10 @@ def main():
     # Load registration data if available
     reg_df = None
     if args.registration_dir:
-        logger.info(f"Loading registration data from {args.registration_dir}")
+        logger.info("Loading registration data from %s", args.registration_dir)
         reg_df = load_registration_rotations(args.registration_dir)
         if reg_df is not None:
-            logger.info(f"Loaded registration data for {len(reg_df)} slices")
+            logger.info("Loaded registration data for %s slices", len(reg_df))
 
     # Compare with registration
     reg_comparison = compare_with_registration(cumulative_rotation, reg_df, df["moving_id"].values)
@@ -542,7 +539,7 @@ def main():
     output_df["cumulative_rotation"] = cumulative_rotation
     csv_path = output_dir / "acquisition_rotation_data.csv"
     output_df.to_csv(csv_path, index=False)
-    logger.info(f"Data saved to {csv_path}")
+    logger.info("Data saved to %s", csv_path)
 
     # Save analysis JSON
     json_path = output_dir / "acquisition_rotation_analysis.json"

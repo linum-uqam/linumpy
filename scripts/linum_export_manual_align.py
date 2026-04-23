@@ -262,7 +262,7 @@ def _save_axis_views_for_pair(
         _save_aip_npz(arr[:, :, cx_i][::-1, :], sc_yz, aips_yz_dir / f"{pair_stem}_{role}.npz", center_pos=cx_i)
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument(
         "slices_dir",
@@ -413,7 +413,8 @@ def _pair_task(args: tuple) -> tuple[int, int]:
     return fid, mid
 
 
-def main(argv=None):
+def main(argv: Any = None) -> None:
+    """Run function."""
     p = _build_arg_parser()
     args = p.parse_args(argv)
 
@@ -426,30 +427,30 @@ def main(argv=None):
     slices_remote_dir = str(Path(args.slices_remote_dir)) if args.slices_remote_dir else str(slices_dir)
     workers = args.workers or max(1, (os.cpu_count() or 4) - 2)
     overlap_px = args.xy_overlap_px
-    logger.info(f"XY overlap slab: {overlap_px} voxels at pyramid level {args.level}")
+    logger.info("XY overlap slab: %s voxels at pyramid level %s", overlap_px, args.level)
 
     if not slices_dir.exists():
-        logger.error(f"Slices directory not found: {slices_dir}")
+        logger.error("Slices directory not found: %s", slices_dir)
         return
 
     if not transforms_dir.exists():
-        logger.error(f"Transforms directory not found: {transforms_dir}")
+        logger.error("Transforms directory not found: %s", transforms_dir)
         return
 
     slice_paths = _discover_slices(slices_dir)
     transform_paths = _discover_transforms(transforms_dir)
 
     if not slice_paths:
-        logger.error(f"No slice_z##.ome.zarr files found in {slices_dir}")
+        logger.error("No slice_z##.ome.zarr files found in %s", slices_dir)
         return
 
-    logger.info(f"Found {len(slice_paths)} slices, {len(transform_paths)} transform dirs")
+    logger.info("Found %s slices, %s transform dirs", len(slice_paths), len(transform_paths))
 
     # Filter slices if requested
     if args.slices:
         requested = set(args.slices)
         slice_paths = {k: v for k, v in slice_paths.items() if k in requested}
-        logger.info(f"Filtered to {len(slice_paths)} requested slices")
+        logger.info("Filtered to %s requested slices", len(slice_paths))
 
     aips_dir = output_dir / "aips"
     aips_xz_dir = output_dir / "aips_xz"
@@ -462,7 +463,7 @@ def main(argv=None):
     # Pass 1: XY AIPs (per slice) + per-slice XZ/YZ fallback files.
     # Each slice is independent — process in parallel.
     # ------------------------------------------------------------------
-    logger.info(f"Computing XY AIPs and per-slice XZ/YZ fallbacks at pyramid level {level} using {workers} workers...")
+    logger.info("Computing XY AIPs and per-slice XZ/YZ fallbacks at pyramid level %s using %s workers...", level, workers)
     slice_tasks = [
         (sid, str(spath), level, str(aips_dir), str(aips_xz_dir), str(aips_yz_dir)) for sid, spath in slice_paths.items()
     ]
@@ -474,7 +475,7 @@ def main(argv=None):
                 try:
                     fut.result()
                 except Exception as exc:
-                    logger.error(f"z{sid:02d} failed: {exc}")
+                    logger.error("z%d failed: %s", sid, exc)
                 bar.update(1)
 
     # ------------------------------------------------------------------
@@ -486,7 +487,7 @@ def main(argv=None):
     pairs = [(sorted_ids[i - 1], sorted_ids[i]) for i in range(1, len(sorted_ids)) if sorted_ids[i] in transform_paths]
 
     if pairs:
-        logger.info(f"Generating paired XZ/YZ cross-sections for {len(pairs)} pairs using {workers} workers...")
+        logger.info("Generating paired XZ/YZ cross-sections for %s pairs using %s workers...", len(pairs), workers)
         pair_tasks = []
         for fid, mid in pairs:
             tpath = transform_paths[mid]
@@ -515,12 +516,12 @@ def main(argv=None):
                     try:
                         fut.result()
                     except Exception as exc:
-                        logger.error(f"pair z{fid:02d}/z{mid:02d} failed: {exc}")
+                        logger.error("pair z%d/z%d failed: %s", fid, mid, exc)
                     bar.update(1)
 
     # Export transforms
     logger.info("Copying pairwise transforms...")
-    for _sid, tpath in transform_paths.items():
+    for tpath in transform_paths.values():
         out_tdir = tfm_dir / tpath.name
         out_tdir.mkdir(parents=True, exist_ok=True)
         # Copy .tfm files
@@ -558,10 +559,13 @@ def main(argv=None):
     metadata_path.write_text(json.dumps(metadata, indent=2))
 
     logger.info(
-        f"Exported {len(slice_paths)} AIPs, {len(pairs)} paired XZ/YZ sets, "
-        f"and {len(transform_paths)} transforms to {output_dir}"
+        "Exported %s AIPs, %s paired XZ/YZ sets, and %s transforms to %s",
+        len(slice_paths),
+        len(pairs),
+        len(transform_paths),
+        output_dir,
     )
-    logger.info(f"Metadata: {metadata_path}")
+    logger.info("Metadata: %s", metadata_path)
 
 
 if __name__ == "__main__":

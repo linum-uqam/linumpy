@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def compute_motor_positions(
     nx: int, ny: int, tile_shape: tuple, overlap_fraction: float, scale_factor: float = 1.0, rotation_deg: float = 0.0
-):
+) -> tuple:
     """Compute tile positions based on motor grid (ideal positions).
 
     Assumes a regular grid where tiles are spaced by (1 - overlap) * tile_size.
@@ -236,7 +236,7 @@ def compute_registration_refinements(
                 refinements["stats"]["valid_pairs"] += 1
                 all_shifts.append(magnitude)
             except Exception as e:
-                logger.debug(f"Registration failed for h-pair ({i},{j})-({i},{j + 1}): {e}")
+                logger.debug("Registration failed for h-pair (%d,%d)-(%d,%d): %s", i, j, i, j + 1, e)
 
     # Vertical refinements (between rows: tile (i,j) → (i+1,j))
     # The expected displacement is (step_y, 0); registration measures residual
@@ -282,7 +282,7 @@ def compute_registration_refinements(
                 refinements["stats"]["valid_pairs"] += 1
                 all_shifts.append(magnitude)
             except Exception as e:
-                logger.debug(f"Registration failed for v-pair ({i},{j})-({i + 1},{j}): {e}")
+                logger.debug("Registration failed for v-pair (%d,%d)-(%d,%d): %s", i, j, i + 1, j, e)
 
     if all_shifts:
         refinements["stats"]["mean_refinement"] = float(np.mean(all_shifts))
@@ -331,14 +331,8 @@ def estimate_affine_from_pairs(pairs: list, tile_shape: tuple, overlap_fraction:
         return transform, {"fallback": True, "reason": "no pairs"}
 
     n = len(pairs)
-    # System:  A_mat @ x = b_vec
-    # For each pair, row_delta and col_delta give the tile index offset,
-    # measured_dy and measured_dx give the observed pixel displacement.
-    # We solve for the 4 elements of the 2x2 transform:
-    #   [row_delta, col_delta, 0,         0        ] [a]   [measured_dy]
-    #   [0,         0,         row_delta, col_delta ] [b] = [measured_dx]
-    #                                                  [c]
-    #                                                  [d]
+    # System: A_mat @ x = b_vec, where A_mat has rows [r, c, 0, 0] (for dy) and [0, 0, r, c] (for dx),
+    # and x = [a, b, c, d]^T are the four elements of the 2x2 transform matrix.
     a_mat = np.zeros((2 * n, 4))
     b_vec = np.zeros((2 * n, 1))
     for idx, p in enumerate(pairs):
@@ -564,17 +558,17 @@ def _extract_displacement_params(transform: np.ndarray, tile_shape: tuple, overl
 
     # Ox: overlap along the horizontal motor axis (Eq. 5).
     horizontal_step = np.sqrt(b**2 + d**2)
-    Ox_fraction = 1.0 - horizontal_step / tile_w
+    ox_fraction = 1.0 - horizontal_step / tile_w
 
     # Oy: overlap along the vertical motor axis (Eq. 6).
     vertical_step = np.sqrt(a**2 + c**2)
-    Oy_fraction = 1.0 - vertical_step / tile_h
+    oy_fraction = 1.0 - vertical_step / tile_h
 
     return {
         "theta_deg": float(np.degrees(theta_rad)),
         "phi_deg": float(np.degrees(phi_rad)),
-        "Ox_fraction": float(Ox_fraction),
-        "Oy_fraction": float(Oy_fraction),
+        "Ox_fraction": float(ox_fraction),
+        "Oy_fraction": float(oy_fraction),
         "expected_overlap": float(overlap_fraction),
         "off_diagonal_px": [float(b), float(c)],
         "transform": transform.tolist(),
@@ -648,7 +642,7 @@ def compute_affine_output_shape(nx: int, ny: int, tile_shape: tuple, transform: 
     return (nz, output_height, output_width)
 
 
-def apply_blend_shift_refinement(tile: np.ndarray, refinements_for_tile: list, overlap_fraction: float) -> np.ndarray:
+def apply_blend_shift_refinement(tile: np.ndarray, refinements_for_tile: list) -> np.ndarray:
     """Apply registration refinement by shifting tile data in overlap regions.
 
     Applies a small sub-pixel shift (averaged from all neighbors) to improve
@@ -660,8 +654,6 @@ def apply_blend_shift_refinement(tile: np.ndarray, refinements_for_tile: list, o
         3D tile data (Z, Y, X).
     refinements_for_tile : list
         List of dicts with 'dx', 'dy' refinements from neighbors.
-    overlap_fraction : float
-        Tile overlap fraction (used for context; shift applies to whole tile).
 
     Returns
     -------

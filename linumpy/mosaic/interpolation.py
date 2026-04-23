@@ -90,7 +90,7 @@ def _foreground_fraction(plane: np.ndarray, threshold: float | None = None) -> f
 # ---------------------------------------------------------------------------
 
 
-def _matrix_fractional_power(matrix: np.ndarray, alpha: float, imag_tol: float = 1e-4) -> tuple[np.ndarray, float]:
+def _matrix_fractional_power(matrix: np.ndarray, alpha: float, _imag_tol: float = 1e-4) -> tuple[np.ndarray, float]:
     """Return ``matrix ** alpha`` as a real matrix, plus the max imaginary magnitude.
 
     Uses :func:`scipy.linalg.fractional_matrix_power` which internally
@@ -172,7 +172,7 @@ def _fractional_affine_parts(
 
 
 def interpolate_average(vol_before: np.ndarray, vol_after: np.ndarray) -> np.ndarray:
-    """Simple 50/50 average of two adjacent volumes."""
+    """Return a 50/50 average of two adjacent volumes."""
     return 0.5 * vol_before.astype(np.float32) + 0.5 * vol_after.astype(np.float32)
 
 

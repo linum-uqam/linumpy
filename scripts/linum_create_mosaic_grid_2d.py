@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Convert 3D OCT tiles to a 2D mosaic grid
+"""Convert 3D OCT tiles to a 2D mosaic grid.
 
 Notes
 -----
@@ -26,7 +26,7 @@ from linumpy.microscope.oct import OCT
 from linumpy.mosaic import discovery as reconstruction
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("tiles_directory", help="Full path to a directory containing the tiles to process")
     p.add_argument("output_file", help="Full path to the output file (jpg, tiff, or zarr)")
@@ -55,7 +55,7 @@ def _build_arg_parser():
 
 
 def get_volume(filename: str, config: dict | None = None) -> np.ndarray:
-    """Load and preprocess an OCT volume
+    """Load and preprocess an OCT volume.
 
     Parameters
     ----------
@@ -98,8 +98,8 @@ def get_volume(filename: str, config: dict | None = None) -> np.ndarray:
     return img
 
 
-def process_tile(params: dict):
-    """Process a tile and add it to the mosaic"""
+def process_tile(params: dict) -> None:
+    """Process a tile and add it to the mosaic."""
     f = params["file"]
     rmin, rmax, cmin, cmax = params["tile_pos_px"]
     tile_size = params["tile_size"]
@@ -117,7 +117,8 @@ def process_tile(params: dict):
     mosaic[rmin:rmax, cmin:cmax] = img
 
 
-def main():
+def main() -> None:
+    """Run function."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -182,17 +183,16 @@ def main():
     mosaic = zarr.open(zarr_file, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=tile_size)
 
     # Create a params dictionary for every tile
-    params = []
-    for i in range(len(tiles)):
-        params.append(
-            {
-                "file": tiles[i],
-                "tile_pos_px": tile_pos_px[i],
-                "tile_size": tile_size,
-                "mosaic": mosaic,
-                "config": mosaic_config,
-            }
-        )
+    params = [
+        {
+            "file": tiles[i],
+            "tile_pos_px": tile_pos_px[i],
+            "tile_size": tile_size,
+            "mosaic": mosaic,
+            "config": mosaic_config,
+        }
+        for i in range(len(tiles))
+    ]
 
     # Process the tiles in parallel
     pqdm(params, process_tile, n_jobs=n_cpus, desc="Processing tiles")

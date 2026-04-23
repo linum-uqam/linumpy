@@ -12,7 +12,7 @@ import numpy as np
 
 
 def save_orthogonal_views(
-    image,
+    image: np.ndarray,
     out_path: str,
     z_slice: int | None = None,
     x_slice: int | None = None,
@@ -125,7 +125,7 @@ def estimate_n_slices_from_zarr(zarr_path: str) -> int | None:
 
 
 def add_z_slice_labels(
-    ax,
+    ax: Any,
     n_input_slices: int,
     img_height: int,
     font_size: int = 7,
@@ -188,7 +188,7 @@ def add_z_slice_labels(
 # ---------------------------------------------------------------------------
 
 
-def _debug_log_panels(message: str, **fields):
+def _debug_log_panels(message: str, **fields: Any) -> None:
     """NDJSON instrumentation gated on ``LINUMPY_DEBUG_LOG``.
 
     Captures actual runtime panel-label assignments for orthogonal-view
@@ -230,7 +230,7 @@ _GROUP_PLANE = {
 }
 
 
-def _panel_labels_from_orientation(orientation: str):
+def _panel_labels_from_orientation(orientation: str) -> tuple | None:
     """Derive anatomical panel labels from a 3-letter orientation code.
 
     Validates the code using :func:`linumpy.imaging.orientation.parse_orientation_code`
@@ -340,7 +340,7 @@ def _crop_to_tissue_bbox(
 
 
 def save_annotated_views(
-    image,
+    image: np.ndarray,
     out_path: str,
     n_input_slices: int | None = None,
     x_slice: int | None = None,

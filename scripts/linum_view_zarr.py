@@ -11,7 +11,7 @@ import napari
 import zarr
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_zarr", help="Full path to the Zarr file.")
     p.add_argument(
@@ -28,7 +28,8 @@ def _build_arg_parser():
     return p
 
 
-def main():
+def main() -> None:
+    """Run function."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()

@@ -41,13 +41,15 @@ from pathlib import Path  # noqa: E402
 # Ctypes RTLD_GLOBAL preload as secondary defence (see linumpy.gpu.cuda_env)
 preload_cuda_libraries()
 
+from typing import Any  # noqa: E402
+
 import numpy as np  # noqa: E402
 
 # Import GPU module
 from linumpy.gpu import GPU_AVAILABLE, gpu_info, print_gpu_info  # noqa: E402
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("--input", type=str, help="Path to OME-Zarr file for real-data benchmark")
     p.add_argument("--output", "-o", type=str, help="Save results to JSON file")
@@ -63,18 +65,27 @@ def _build_arg_parser():
 class BenchmarkTimer:
     """Context manager for timing operations."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.elapsed = 0
 
-    def __enter__(self):
+    def __enter__(self) -> "BenchmarkTimer":
+        """Magic method function."""
         self.start = time.perf_counter()
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: Any) -> None:
+        """Magic method function."""
         self.elapsed = time.perf_counter() - self.start
 
 
-def benchmark_operation(func_cpu, func_gpu, data, name, iterations=3, check_correctness=True):
+def benchmark_operation(
+    func_cpu: Any,
+    func_gpu: Any,
+    data: Any,
+    name: str,
+    iterations: int = 3,
+    check_correctness: bool = True,
+) -> None:
     """
     Benchmark a single operation comparing CPU and GPU.
 
@@ -156,22 +167,22 @@ def benchmark_operation(func_cpu, func_gpu, data, name, iterations=3, check_corr
     return results
 
 
-def benchmark_fft(size, iterations=3, check_correctness=True):
+def benchmark_fft(size: int, iterations: int = 3, check_correctness: bool = True) -> Any:
     """Benchmark FFT operations."""
     from linumpy.gpu.fft_ops import fft2
 
     data = np.random.rand(size, size).astype(np.float32)
 
-    def cpu_fft(d):
+    def cpu_fft(d: Any) -> Any:
         return np.fft.fft2(d)
 
-    def gpu_fft(d):
+    def gpu_fft(d: Any) -> Any:
         return fft2(d, use_gpu=True)
 
     return benchmark_operation(cpu_fft, gpu_fft, data, f"FFT2 ({size}x{size})", iterations, check_correctness)
 
 
-def benchmark_phase_correlation(size, iterations=3, check_correctness=True):
+def benchmark_phase_correlation(size: int, iterations: int = 3, _check_correctness: bool = True) -> Any:
     """Benchmark phase correlation."""
     from linumpy.gpu.fft_ops import phase_correlation
     from linumpy.registration.transforms import pair_wise_phase_correlation
@@ -180,10 +191,10 @@ def benchmark_phase_correlation(size, iterations=3, check_correctness=True):
     img1 = np.random.rand(size, size).astype(np.float32)
     img2 = np.roll(img1, (5, 10), axis=(0, 1))
 
-    def cpu_pc(d):
+    def cpu_pc(d: Any) -> Any:
         return pair_wise_phase_correlation(d[0], d[1], returnCC=True)
 
-    def gpu_pc(d):
+    def gpu_pc(d: Any) -> Any:
         return phase_correlation(d[0], d[1], use_gpu=True)
 
     data = (img1, img2)
@@ -193,7 +204,7 @@ def benchmark_phase_correlation(size, iterations=3, check_correctness=True):
     )  # Results may differ slightly
 
 
-def benchmark_gaussian_filter(size, iterations=3, check_correctness=True):
+def benchmark_gaussian_filter(size: int, iterations: int = 3, check_correctness: bool = True) -> Any:
     """Benchmark Gaussian filtering."""
     from scipy.ndimage import gaussian_filter as scipy_gaussian
 
@@ -202,16 +213,16 @@ def benchmark_gaussian_filter(size, iterations=3, check_correctness=True):
     data = np.random.rand(size, size).astype(np.float32)
     sigma = 2.0
 
-    def cpu_gauss(d):
+    def cpu_gauss(d: Any) -> Any:
         return scipy_gaussian(d, sigma=sigma)
 
-    def gpu_gauss(d):
+    def gpu_gauss(d: Any) -> Any:
         return gaussian_filter(d, sigma=sigma, use_gpu=True)
 
     return benchmark_operation(cpu_gauss, gpu_gauss, data, f"Gaussian Filter ({size}x{size})", iterations, check_correctness)
 
 
-def benchmark_binary_closing(size, iterations=3, check_correctness=True):
+def benchmark_binary_closing(size: int, iterations: int = 3, check_correctness: bool = True) -> Any:
     """Benchmark binary morphology."""
     from scipy.ndimage import binary_closing as scipy_closing
 
@@ -220,33 +231,33 @@ def benchmark_binary_closing(size, iterations=3, check_correctness=True):
     # Create random binary mask
     data = (np.random.rand(size, size) > 0.5).astype(np.bool_)
 
-    def cpu_close(d):
+    def cpu_close(d: Any) -> Any:
         return scipy_closing(d, iterations=2)
 
-    def gpu_close(d):
+    def gpu_close(d: Any) -> Any:
         return binary_closing(d, iterations=2, use_gpu=True)
 
     return benchmark_operation(cpu_close, gpu_close, data, f"Binary Closing ({size}x{size})", iterations, check_correctness)
 
 
-def benchmark_resize(size, iterations=3, check_correctness=True):
+def benchmark_resize(size: int, iterations: int = 3, check_correctness: bool = True) -> Any:
     """Benchmark image resize."""
     from linumpy.gpu.interpolation import resize
 
     data = np.random.rand(size, size).astype(np.float32)
     output_size = (size // 2, size // 2)
 
-    def cpu_resize(d):
+    def cpu_resize(d: Any) -> Any:
         # Use the same function with use_gpu=False for fair comparison
         return resize(d, output_size, order=1, anti_aliasing=False, use_gpu=False)
 
-    def gpu_resize(d):
+    def gpu_resize(d: Any) -> Any:
         return resize(d, output_size, order=1, anti_aliasing=False, use_gpu=True)
 
     return benchmark_operation(cpu_resize, gpu_resize, data, f"Resize ({size}→{size // 2})", iterations, check_correctness)
 
 
-def benchmark_rescale_3d(size, iterations=3, check_correctness=True):
+def benchmark_rescale_3d(size: int, iterations: int = 3, check_correctness: bool = True) -> Any:
     """Benchmark 3D volume rescaling (like linum_resample_mosaic_grid)."""
     from linumpy.gpu.interpolation import resize
 
@@ -258,10 +269,10 @@ def benchmark_rescale_3d(size, iterations=3, check_correctness=True):
     scale_factor = 0.5
     output_size = (int(depth * scale_factor), int(size * scale_factor), int(size * scale_factor))
 
-    def cpu_rescale(d):
+    def cpu_rescale(d: Any) -> Any:
         return resize(d, output_size, order=1, anti_aliasing=True, use_gpu=False)
 
-    def gpu_rescale(d):
+    def gpu_rescale(d: Any) -> Any:
         return resize(d, output_size, order=1, anti_aliasing=True, use_gpu=True)
 
     return benchmark_operation(
@@ -274,30 +285,30 @@ def benchmark_rescale_3d(size, iterations=3, check_correctness=True):
     )
 
 
-def benchmark_normalize(size, iterations=3, check_correctness=True):
+def benchmark_normalize(size: int, iterations: int = 3, check_correctness: bool = True) -> Any:
     """Benchmark percentile normalization."""
     from linumpy.gpu.array_ops import normalize_percentile
 
     data = np.random.rand(size, size).astype(np.float32) * 1000
 
-    def cpu_norm(d):
+    def cpu_norm(d: Any) -> Any:
         low, high = np.percentile(d, [1, 99])
         return np.clip((d - low) / (high - low), 0, 1)
 
-    def gpu_norm(d):
+    def gpu_norm(d: Any) -> Any:
         return normalize_percentile(d, p_low=1, p_high=99, use_gpu=True)
 
     return benchmark_operation(cpu_norm, gpu_norm, data, f"Normalize ({size}x{size})", iterations, check_correctness)
 
 
-def benchmark_intensity_normalization(size, iterations=3, check_correctness=True):
+def benchmark_intensity_normalization(size: int, iterations: int = 3, check_correctness: bool = True) -> Any:
     """Benchmark intensity normalization operations."""
     from linumpy.gpu.array_ops import normalize_percentile, threshold_otsu
     from linumpy.gpu.morphology import gaussian_filter
 
     data = np.random.rand(size, size).astype(np.float32) * 1000
 
-    def cpu_norm(d):
+    def cpu_norm(d: Any) -> Any:
         # Simulate intensity normalization operations
         from scipy.ndimage import gaussian_filter as scipy_gaussian
 
@@ -310,7 +321,7 @@ def benchmark_intensity_normalization(size, iterations=3, check_correctness=True
         normalized = np.clip((smoothed - low) / (high - low), 0, 1)
         return normalized
 
-    def gpu_norm(d):
+    def gpu_norm(d: Any) -> Any:
         # Simulate intensity normalization operations
         smoothed = gaussian_filter(d, sigma=1.0, use_gpu=True)
         threshold = threshold_otsu(smoothed, use_gpu=True)
@@ -323,7 +334,7 @@ def benchmark_intensity_normalization(size, iterations=3, check_correctness=True
     )
 
 
-def benchmark_real_data(input_path, iterations=3):
+def benchmark_real_data(input_path: str | Path, iterations: int = 3) -> Any:
     """Benchmark with real OME-Zarr data."""
     from linumpy.gpu.morphology import gaussian_filter
     from linumpy.io.zarr import read_omezarr
@@ -342,10 +353,10 @@ def benchmark_real_data(input_path, iterations=3):
     aip = np.mean(data, axis=0).astype(np.float32)
     from scipy.ndimage import gaussian_filter as scipy_gaussian
 
-    def cpu_gauss(d):
+    def cpu_gauss(d: Any) -> Any:
         return scipy_gaussian(d, sigma=2.0)
 
-    def gpu_gauss(d):
+    def gpu_gauss(d: Any) -> Any:
         return gaussian_filter(d, sigma=2.0, use_gpu=True)
 
     results.append(benchmark_operation(cpu_gauss, gpu_gauss, aip, f"Real Data Gaussian {aip.shape}", iterations))
@@ -353,7 +364,7 @@ def benchmark_real_data(input_path, iterations=3):
     return results
 
 
-def print_results(all_results, gpu_info_dict):
+def print_results(all_results: Any, gpu_info_dict: Any) -> None:
     """Print formatted benchmark results."""
     print("\n" + "=" * 90)
     print("BENCHMARK RESULTS")
@@ -392,7 +403,8 @@ def print_results(all_results, gpu_info_dict):
         print(f"Min speedup: {np.min(valid_speedups):.1f}x")
 
 
-def main():
+def main() -> None:
+    """Run function."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

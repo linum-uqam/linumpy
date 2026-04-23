@@ -1,3 +1,5 @@
+"""Spectral-domain OCT data loader for ThorLabs microscopes."""
+
 import warnings
 from pathlib import Path
 
@@ -21,7 +23,7 @@ class OCT:
         Axial resolution of the data in microns.
     """
 
-    def __init__(self, directory: str | Path, axial_res=3.5):
+    def __init__(self, directory: str | Path, axial_res: float = 3.5) -> None:
         self.directory = Path(directory)
         self.info_filename = self.directory / "info.txt"
         self.info = {}
@@ -30,8 +32,8 @@ class OCT:
         # Read the scan info
         self.read_scan_info(self.info_filename)
 
-    def read_scan_info(self, filename: str | Path):
-        """Read the scan information file
+    def read_scan_info(self, filename: str | Path) -> None:
+        """Read the scan information file.
 
         Parameters
         ----------
@@ -55,7 +57,7 @@ class OCT:
     def load_image(
         self, crop: bool = True, fix_galvo_shift: bool | int | None = True, fix_camera_shift: bool = False
     ) -> np.ndarray:
-        """Load an image dataset
+        """Load an image dataset.
 
         Parameters
         ----------
@@ -74,7 +76,7 @@ class OCT:
         * This method doesn't consider repeated a-lines or b-scans yet.
         """
         # Create numpy array
-        # n_avg = self.info['n_repeat']  # TODO: use the number of averages when loading the data
+        # n_avg is not used yet (n_repeat from info)  # TODO: use the number of averages when loading the data
         n_alines = self.info["nx"]
         n_bscans = self.info["ny"]
         n_extra = self.info["n_extra"]
@@ -130,12 +132,12 @@ class OCT:
 
     @property
     def position_available(self) -> bool:
-        """True if the position is available in the info.txt file"""
+        """Return True if the position is available in the info.txt file."""
         return "stage_x_pos_mm" in self.info
 
     @property
     def dimension(self) -> tuple[float, float, float]:
-        """OCT physical dimension in mm from the info.txt file. Will be (1, 1, 1) if not found"""
+        """Return the OCT physical dimension in mm. Will be (1, 1, 1) if not found."""
         try:
             nz = self.shape[2]
             rz = self.resolution[2]
@@ -145,7 +147,7 @@ class OCT:
 
     @property
     def position(self) -> tuple[float, float, float]:
-        """OCT physical position in mm from the info.txt file. Will be (0, 0, 0) if not found"""
+        """Return the OCT physical position in mm. Will be (0, 0, 0) if not found."""
         try:
             x = float(self.info["stage_x_pos_mm"])
             y = float(self.info["stage_y_pos_mm"])
@@ -156,8 +158,8 @@ class OCT:
 
     @property
     def resolution(self) -> tuple[float, float, float]:
-        """
-        OCT physical resolution in mm from the info.txt file.
+        """Return the OCT physical resolution in mm.
+
         Will be (1, 1, 1) if not found.
         """
         try:
@@ -170,7 +172,7 @@ class OCT:
 
     @property
     def shape(self) -> tuple[float, float, float]:
-        """OCT shape in pixel from the info.txt file. Returns (nx, ny, nz)"""
+        """Return the OCT shape in pixels from the info.txt file. Returns (nx, ny, nz)."""
         nx = self.info["nx"]
         ny = self.info["ny"]
         if "bottom_z" in self.info and "top_z" in self.info:

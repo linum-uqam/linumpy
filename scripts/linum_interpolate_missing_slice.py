@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 Interpolate a missing slice using information from adjacent slices.
 
 Uses z-aware morphing (``zmorph``): an affine transform ``T`` between the
@@ -39,6 +39,7 @@ from linumpy.config.threads import configure_all_libraries
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 import dask.array as da
 import matplotlib.pyplot as plt
@@ -56,7 +57,7 @@ from linumpy.mosaic.interpolation import (
 configure_all_libraries()
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("slice_before", nargs="?", help="Path to the slice BEFORE the missing slice (*.ome.zarr)")
     p.add_argument("slice_after", nargs="?", help="Path to the slice AFTER the missing slice (*.ome.zarr)")
@@ -205,14 +206,14 @@ def _build_arg_parser():
 
 
 def generate_preview(
-    vol_before,
-    vol_after,
-    interpolated,
-    output_path,
-    preview_slice=None,
-    dpi=150,
+    vol_before: Any,
+    vol_after: Any,
+    interpolated: Any,
+    output_path: str | Path,
+    preview_slice: Any = None,
+    dpi: int = 150,
     failure_reason: str | None = None,
-):
+) -> Any:
     """
     Generate a preview image showing the interpolation results.
 
@@ -239,7 +240,7 @@ def generate_preview(
         preview_slice = vol_before.shape[0] // 2
     preview_slice = max(0, min(preview_slice, vol_before.shape[0] - 1))
 
-    def normalize_for_display(img):
+    def normalize_for_display(img: Any) -> Any:
         img = img.astype(np.float32)
         p1, p99 = np.percentile(img[img > 0], [1, 99]) if np.any(img > 0) else (0, 1)
         if p99 > p1:
@@ -335,7 +336,7 @@ _FRAGMENT_COLUMN_MAP = {
 }
 
 
-def _finalise(args) -> None:
+def _finalise(args: argparse.Namespace) -> None:
     """Merge per-slice manifest fragments into a single slice_config.csv.
 
     Each fragment represents one attempt, successful or not:
@@ -397,7 +398,8 @@ def _finalise(args) -> None:
     )
 
 
-def main():
+def main() -> None:
+    """Run the interpolate missing slice script."""
     p = _build_arg_parser()
     args = p.parse_args()
 
@@ -565,7 +567,7 @@ def main():
     print("Done!")
 
 
-def _json_default(obj):
+def _json_default(obj: Any) -> Any:
     if isinstance(obj, (np.floating,)):
         return float(obj)
     if isinstance(obj, (np.integer,)):
@@ -575,7 +577,7 @@ def _json_default(obj):
     return str(obj)
 
 
-def _csv_escape(value) -> str:
+def _csv_escape(value: float) -> str:
     s = "" if value is None else str(value)
     if "," in s or '"' in s or "\n" in s:
         s = '"' + s.replace('"', '""') + '"'

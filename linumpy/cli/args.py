@@ -1,3 +1,5 @@
+"""Common argument-parsing helpers for linumpy CLI scripts."""
+
 import argparse
 import multiprocessing
 import os
@@ -63,6 +65,7 @@ def parse_processes_arg(n_processes: int | None) -> int:
 
 
 def add_processes_arg(parser: argparse.ArgumentParser) -> argparse.Action:
+    """Add the ``--n_processes`` argument to *parser*."""
     a = parser.add_argument(
         "--n_processes", type=int, default=1, help="Number of processes to use. -1 to use all cores [%(default)s]."
     )
@@ -70,10 +73,12 @@ def add_processes_arg(parser: argparse.ArgumentParser) -> argparse.Action:
 
 
 def add_overwrite_arg(parser: argparse.ArgumentParser) -> None:
+    """Add the ``-f`` / ``--overwrite`` flag to *parser*."""
     parser.add_argument("-f", dest="overwrite", action="store_true", help="Force overwriting of the output files.")
 
 
 def assert_output_exists(output: str | Path, parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Error out if *output* already exists and overwrite flag is not set."""
     output_path = Path(output)
     if output_path.exists():
         if not args.overwrite:
@@ -83,6 +88,7 @@ def assert_output_exists(output: str | Path, parser: argparse.ArgumentParser, ar
 
 
 def add_verbose_arg(parser: argparse.ArgumentParser) -> None:
+    """Add the ``-v`` / ``--verbose`` argument to *parser*."""
     parser.add_argument(
         "-v",
         default="WARNING",

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-""" "Quick reconstruction and processing methods for the S-OCT data."""
+"""Quick reconstruction and processing methods for the S-OCT data."""
 
 import re
 from pathlib import Path
@@ -19,7 +19,7 @@ from tqdm.auto import tqdm
 from linumpy.microscope.oct import OCT
 
 
-def getLargestCC(segmentation: np.ndarray) -> np.ndarray:
+def get_largest_cc(segmentation: np.ndarray) -> np.ndarray:
     """Get the largest connected component in a binary image.
 
     Parameters
@@ -34,15 +34,15 @@ def getLargestCC(segmentation: np.ndarray) -> np.ndarray:
     """
     labels = label(segmentation)
     assert labels.max() != 0  # assume at least 1 CC
-    largestCC = labels == np.argmax(np.bincount(labels.flat)[1:]) + 1
-    return largestCC
+    largest_cc = labels == np.argmax(np.bincount(labels.flat)[1:]) + 1
+    return largest_cc
 
 
 DEFAULT_TILE_FILE_PATTERN = r"tile_x(?P<x>\d+)_y(?P<y>\d+)_z(?P<z>\d+)"
 
 
-def get_tiles_ids(directory, z: int | None = None):
-    """Analyzes a directory and detects all the tiles in contains"""
+def get_tiles_ids(directory: str | Path, z: int | None = None) -> tuple:
+    """Analyze a directory and detect all the tiles it contains."""
     input_directory = Path(directory)
 
     # Get a list of the input tiles
@@ -53,7 +53,8 @@ def get_tiles_ids(directory, z: int | None = None):
     return tiles, tile_ids
 
 
-def get_tiles_ids_from_list(tiles_list, file_pattern=DEFAULT_TILE_FILE_PATTERN):
+def get_tiles_ids_from_list(tiles_list: list, file_pattern: str = DEFAULT_TILE_FILE_PATTERN) -> list:
+    """Return tile (x, y, z) IDs parsed from a list of tile paths."""
     tiles_list.sort()
 
     # Get the tile positions
@@ -71,7 +72,8 @@ def get_tiles_ids_from_list(tiles_list, file_pattern=DEFAULT_TILE_FILE_PATTERN):
     return tile_ids
 
 
-def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_positions: bool = False):
+def get_mosaic_info(directory: str | Path, z: int, overlap_fraction: float = 0.2, use_stage_positions: bool = False) -> dict:
+    """Return mosaic geometry and tile metadata for a given z-slice."""
     # Get a list of the input tiles
     tiles, _tile_ids = get_tiles_ids(directory, z)
 
@@ -155,7 +157,7 @@ def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_
 
 
 def quick_stitch(
-    directory,
+    directory: str | Path,
     z: int,
     overlap_fraction: float = 0.2,
     n_rot: int = 3,
@@ -166,8 +168,9 @@ def quick_stitch(
     flip_ud: bool = True,
     flip_lr: bool = False,
     galvo_shift: int | None = None,
-    galvo_shift_first_tile=(0, 0),
-):
+    galvo_shift_first_tile: tuple = (0, 0),
+) -> np.ndarray:
+    """Stitch all tiles in a directory for a given z-slice into a mosaic."""
     # TODO: accelerate the stitching by preprocessing the tiles in parallel
     input_directory = Path(directory)
 
@@ -275,7 +278,7 @@ def detect_mosaic(
     roi_file: str | None = None,
     keep_largest_island: bool = False,
     stitching_settings: dict | None = None,
-):
+) -> tuple:
     """Detect the tissue in the mosaic and compute the limits of the tissue.
 
     Parameters
@@ -284,6 +287,10 @@ def detect_mosaic(
         The directory containing the tiles.
     z : int
         The z slices to process
+    img : np.ndarray or None
+        Optional pre-computed mosaic image.
+    stitching_settings : dict or None
+        Optional stitching settings override.
     margin : float
         The margin to add to the tissue limits (in mm).
     display : bool
@@ -338,7 +345,7 @@ def detect_mosaic(
 
     # Keep the largest connected component
     if keep_largest_island:
-        mask = getLargestCC(mask)
+        mask = get_largest_cc(mask)
 
     # Compute the mosaic limits
     n_rows, n_cols = img.shape
@@ -408,7 +415,8 @@ def detect_mosaic(
     return roi_x_min_margin, roi_x_max_margin, roi_y_min_margin, roi_y_max_margin
 
 
-def save_quickstitch(img, quickstitch_file):
+def save_quickstitch(img: np.ndarray, quickstitch_file: str | Path) -> None:
+    """Save the quickstitch mosaic to a file, normalizing intensity."""
     filename = Path(quickstitch_file)
     # Normalize the intensity
     mask = img > 0

@@ -20,6 +20,7 @@ import json
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,7 +32,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("in_directory", help="Path to register_pairwise output directory or pipeline output directory")
     p.add_argument("out_directory", help="Output directory for analysis results")
@@ -52,7 +53,7 @@ def _build_arg_parser():
     return p
 
 
-def find_registration_dirs(base_path):
+def find_registration_dirs(base_path: str | Path) -> Any:
     """Find all pairwise registration directories."""
     base = Path(base_path)
 
@@ -75,7 +76,7 @@ def find_registration_dirs(base_path):
             # This happens when Nextflow stages files with path("register_pairwise/*")
             slice_dirs = sorted([d for d in base.iterdir() if d.is_dir() and "slice_z" in d.name])
             if slice_dirs:
-                logger.info(f"Found {len(slice_dirs)} slice directories directly in {base_path}")
+                logger.info("Found %s slice directories directly in %s", len(slice_dirs), base_path)
                 return slice_dirs
 
             # Also check if there are JSON files directly here (flat structure)
@@ -83,7 +84,7 @@ def find_registration_dirs(base_path):
             if json_files:
                 # Return the parent directories of the JSON files
                 slice_dirs = sorted({f.parent for f in json_files})
-                logger.info(f"Found {len(slice_dirs)} directories with registration metrics")
+                logger.info("Found %s directories with registration metrics", len(slice_dirs))
                 return slice_dirs
 
             raise FileNotFoundError(f"No register_pairwise directory or slice_z* directories found in {base_path}")
@@ -98,13 +99,13 @@ def find_registration_dirs(base_path):
     return slice_dirs
 
 
-def parse_slice_id(dirname):
+def parse_slice_id(dirname: Any) -> Any:
     """Extract slice ID from directory name like 'slice_z05_normalize'."""
     match = re.search(r"slice_z(\d+)", dirname)
     return int(match.group(1)) if match else None
 
 
-def load_metrics_from_json(json_path):
+def load_metrics_from_json(json_path: str | Path) -> dict:
     """Load registration metrics from JSON file."""
     with Path(json_path).open() as f:
         data = json.load(f)
@@ -122,7 +123,7 @@ def load_metrics_from_json(json_path):
     }
 
 
-def load_rotation_from_tfm(tfm_path):
+def load_rotation_from_tfm(tfm_path: str | Path) -> Any:
     """Extract rotation angle from SimpleITK transform file."""
     import SimpleITK as sitk
 
@@ -146,11 +147,11 @@ def load_rotation_from_tfm(tfm_path):
 
         return None
     except Exception as e:
-        logger.warning(f"Could not parse transform file {tfm_path}: {e}")
+        logger.warning("Could not parse transform file %s: %s", tfm_path, e)
         return None
 
 
-def collect_registration_data(slice_dirs, include_tfm=False):
+def collect_registration_data(slice_dirs: Any, include_tfm: bool = False) -> Any:
     """Collect registration data from all slice directories."""
     records = []
 
@@ -186,7 +187,7 @@ def collect_registration_data(slice_dirs, include_tfm=False):
     return df
 
 
-def analyze_rotation_drift(df, rotation_threshold=2.0, cumulative_threshold=5.0):
+def analyze_rotation_drift(df: Any, rotation_threshold: float = 2.0, cumulative_threshold: float = 5.0) -> Any:
     """Analyze rotation patterns and detect issues."""
     analysis = {
         "n_slices": len(df),
@@ -234,7 +235,7 @@ def analyze_rotation_drift(df, rotation_threshold=2.0, cumulative_threshold=5.0)
     return analysis
 
 
-def analyze_translation_rotation_correlation(df):
+def analyze_translation_rotation_correlation(df: Any) -> dict:
     """Check if translation and rotation are correlated (dilation indicator)."""
     if "rotation" not in df.columns or "translation_magnitude" not in df.columns:
         return {}
@@ -251,7 +252,7 @@ def analyze_translation_rotation_correlation(df):
     }
 
 
-def generate_report(df, analysis, correlation, output_dir):
+def generate_report(df: Any, analysis: Any, correlation: Any, output_dir: str | Path) -> None:
     """Generate text report."""
     lines = [
         "=" * 70,
@@ -313,8 +314,7 @@ def generate_report(df, analysis, correlation, output_dir):
         ]
     )
     if analysis["issues"]:
-        for issue in analysis["issues"]:
-            lines.append(f"  ⚠ {issue}")
+        lines.extend(f"  ⚠ {issue}" for issue in analysis["issues"])
     else:
         lines.append("  ✓ No significant issues detected")
     lines.append("")
@@ -338,11 +338,11 @@ def generate_report(df, analysis, correlation, output_dir):
     with Path(report_path).open("w") as f:
         f.write("\n".join(lines))
 
-    logger.info(f"Report saved to {report_path}")
+    logger.info("Report saved to %s", report_path)
     return report_path
 
 
-def generate_plots(df, output_dir):
+def generate_plots(df: Any, output_dir: str | Path) -> None:
     """Generate visualization plots."""
     _fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
@@ -399,11 +399,12 @@ def generate_plots(df, output_dir):
     plt.savefig(plot_path, dpi=150)
     plt.close()
 
-    logger.info(f"Plots saved to {plot_path}")
+    logger.info("Plots saved to %s", plot_path)
     return plot_path
 
 
-def main():
+def main() -> None:
+    """Run function."""
     p = _build_arg_parser()
     args = p.parse_args()
 
@@ -411,17 +412,17 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Find and collect registration data
-    logger.info(f"Searching for registration data in {args.in_directory}")
+    logger.info("Searching for registration data in %s", args.in_directory)
     slice_dirs = find_registration_dirs(args.in_directory)
-    logger.info(f"Found {len(slice_dirs)} registration directories")
+    logger.info("Found %s registration directories", len(slice_dirs))
 
     df = collect_registration_data(slice_dirs, include_tfm=args.include_tfm)
-    logger.info(f"Collected data for {len(df)} slices")
+    logger.info("Collected data for %s slices", len(df))
 
     # Save raw data
     csv_path = output_dir / "registration_transforms.csv"
     df.to_csv(csv_path, index=False)
-    logger.info(f"Raw data saved to {csv_path}")
+    logger.info("Raw data saved to %s", csv_path)
 
     # Analyze rotation
     analysis = analyze_rotation_drift(df, args.rotation_threshold, args.cumulative_threshold)

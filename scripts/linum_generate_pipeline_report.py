@@ -27,6 +27,8 @@ try:
 except ImportError:
     _PIL_AVAILABLE = False
 
+from typing import Any
+
 import numpy as np
 
 from linumpy.metrics import aggregate_metrics, compute_summary_statistics
@@ -71,7 +73,7 @@ STEP_PREVIEW_CATEGORY = {
 }
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_dir", help="Input directory containing pipeline output with metrics files.")
     p.add_argument("output_report", help="Output report file path (.html, .zip, or .txt)")
@@ -117,7 +119,7 @@ def get_status_emoji(status: str) -> str:
     return emojis.get(status, "?")
 
 
-def format_value(value, precision: int = 4) -> str:
+def format_value(value: float, precision: int = 4) -> str:
     """Format a value for display."""
     if isinstance(value, float):
         if abs(value) < 0.0001 or abs(value) > 10000:
@@ -131,7 +133,7 @@ def format_value(value, precision: int = 4) -> str:
 def sort_steps(aggregated: dict) -> dict:
     """Sort pipeline steps in logical execution order."""
 
-    def step_key(step_name):
+    def step_key(step_name: str) -> Any:
         try:
             return (0, STEP_ORDER.index(step_name))
         except ValueError:
@@ -232,7 +234,7 @@ def separate_metrics_by_type(metrics_list: list[dict]) -> tuple[dict, dict]:
                 quality_metrics[name]["entries"].append({"value": value, "status": status})
 
     # Determine if each info field is constant across all files
-    for _name, info in info_fields.items():
+    for info in info_fields.values():
         vals = info["values"]
         try:
             numeric = [v for v in vals if isinstance(v, (int, float))]
@@ -283,7 +285,7 @@ def generate_sparkline_svg(values: list, statuses: list[str] | None = None, widt
 
 def generate_trend_line_svg(
     values: list,
-    labels: list[str] | None = None,
+    _labels: list[str] | None = None,
     width: int = 420,
     height: int = 90,
     show_trend: bool = True,
@@ -300,10 +302,10 @@ def generate_trend_line_svg(
     y_range = max_y - min_y or 1.0
     pad_x, pad_y = 30, 10
 
-    def to_svg_x(i):
+    def to_svg_x(i: Any) -> Any:
         return pad_x + (i / (len(values) - 1)) * (width - 2 * pad_x)
 
-    def to_svg_y(v):
+    def to_svg_y(v: Any) -> Any:
         return height - pad_y - ((v - min_y) / y_range) * (height - 2 * pad_y)
 
     # Build polyline points
@@ -354,7 +356,7 @@ def compute_cross_slice_trends(aggregated: dict[str, list[dict]]) -> dict:
     """
     trends = {}
 
-    def _extract(metrics_list, key):
+    def _extract(metrics_list: Any, key: str) -> list:
         """Extract sorted numerical values for a given metric key."""
         pairs = []
         for m in metrics_list:
@@ -540,7 +542,7 @@ def discover_interpolation_data(input_dir: Path) -> dict | None:
     post_nccs: list[float] = []
     improvements: list[float] = []
 
-    def _to_float(value) -> float | None:
+    def _to_float(value: float) -> float | None:
         try:
             return float(value)
         except (TypeError, ValueError):
@@ -648,8 +650,7 @@ def discover_diagnostic_data(input_dir: Path) -> dict[str, dict]:
                 pass
 
         # Collect PNG images
-        for png_file in sorted(subdir.rglob("*.png")):
-            images.append(png_file)
+        images.extend(sorted(subdir.rglob("*.png")))
 
         if json_data or images:
             diagnostics[subdir_name] = {
@@ -736,15 +737,21 @@ def image_to_data_uri(path: Path, max_width: int | None = None) -> str:
 
 
 def render_image_gallery_html(
-    images: list[Path], mode: str = "embed", category: str = "images", label: str = "Preview Images", max_width: int = 380
+    images: list[Path], mode: str = "embed", category: str = "images", _label: str = "Preview Images", max_width: int = 380
 ) -> str:
     """
     Render a collapsible image gallery section.
 
     Parameters
     ----------
-    mode : 'embed' (base64 in HTML) or 'link' (relative path for zip mode)
-    category : image category name, used as subfolder in zip mode
+    images : list of Path
+        Image file paths to include in the gallery.
+    mode : str
+        Embedding mode: 'embed' (base64 in HTML) or 'link' (relative path for zip mode).
+    category : str
+        Image category name, used as subfolder in zip mode.
+    max_width : int
+        Maximum image width in pixels for embedded previews.
     """
     if not images:
         return ""
@@ -790,10 +797,7 @@ def compute_overall_status(aggregated: dict[str, list[dict]]) -> tuple:
     tuple
         (all_statuses, error_count, warning_count, ok_count)
     """
-    all_statuses = []
-    for step_metrics in aggregated.values():
-        for m in step_metrics:
-            all_statuses.append(m.get("overall_status", "unknown"))
+    all_statuses = [m.get("overall_status", "unknown") for step_metrics in aggregated.values() for m in step_metrics]
 
     error_count = all_statuses.count("error")
     warning_count = all_statuses.count("warning")
@@ -825,10 +829,8 @@ def collect_issues(metrics_list: list[dict]) -> tuple:
     all_errors = []
     for m in metrics_list:
         source = Path(m.get("source_file", "unknown")).stem
-        for w in m.get("warnings", []):
-            all_warnings.append(f"{source}: {w}")
-        for e in m.get("errors", []):
-            all_errors.append(f"{source}: {e}")
+        all_warnings.extend(f"{source}: {w}" for w in m.get("warnings", []))
+        all_errors.extend(f"{source}: {e}" for e in m.get("errors", []))
     return all_warnings, all_errors
 
 
@@ -1530,7 +1532,7 @@ def generate_html_report(
             "Red dashed lines show the linear trend.</p>\n"
         )
         html += '        <div class="trends-grid">\n'
-        for _trend_key, trend in trends.items():
+        for trend in trends.values():
             html += '            <div class="trend-card">\n'
             html += f'                <div class="trend-card-header">{trend["label"]}</div>\n'
             html += f'                <div class="trend-card-desc">{trend["description"]}</div>\n'
@@ -1904,7 +1906,8 @@ def generate_text_report(
     return "\n".join(lines)
 
 
-def main():
+def main() -> None:
+    """Run function."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

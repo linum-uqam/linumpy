@@ -1,8 +1,8 @@
-"""
-Methods to download data from the Allen Institute
-"""
+"""Methods to download data from the Allen Institute."""
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import requests
@@ -12,7 +12,7 @@ from tqdm import tqdm
 AVAILABLE_RESOLUTIONS = [10, 25, 50, 100]
 
 
-def numpy_to_sitk_image(volume: np.ndarray, spacing: tuple, cast_dtype=None) -> sitk.Image:
+def numpy_to_sitk_image(volume: np.ndarray, spacing: tuple, cast_dtype: type | None = None) -> sitk.Image:
     """Convert numpy array (Z, Y, X) to SimpleITK image format.
 
     Parameters
@@ -47,7 +47,7 @@ def numpy_to_sitk_image(volume: np.ndarray, spacing: tuple, cast_dtype=None) -> 
 
 
 def download_template(resolution: int, cache: bool = True, cache_dir: str = ".data/") -> sitk.Image:
-    """Download a 3D average mouse brain
+    """Download a 3D average mouse brain.
 
     Parameters
     ----------
@@ -143,9 +143,9 @@ def register_3d_rigid_to_allen(
     metric: str = "MI",
     max_iterations: int = 1000,
     verbose: bool = False,
-    progress_callback=None,
+    progress_callback: Callable[[Any], None] | None = None,
     initial_rotation_deg: tuple = (0.0, 0.0, 0.0),
-):
+) -> tuple:
     """Perform 3D rigid registration of a brain volume to the Allen atlas.
 
     Parameters
@@ -166,6 +166,8 @@ def register_3d_rigid_to_allen(
     progress_callback : callable, optional
         Callback function called on each iteration with the registration method.
         Function signature: callback(registration_method)
+    initial_rotation_deg : tuple, optional
+        Initial rotation in degrees (rx, ry, rz) applied before optimization.
 
     Returns
     -------
@@ -432,7 +434,7 @@ def register_3d_rigid_to_allen(
     # Set up iteration callback
     if verbose or progress_callback is not None:
 
-        def command_iteration(method):
+        def command_iteration(method: Any) -> None:
             if verbose:
                 if method.GetOptimizerIteration() == 0:
                     print(f"Estimated scales: {method.GetOptimizerScales()}")

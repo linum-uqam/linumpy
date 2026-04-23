@@ -5,12 +5,14 @@ Provides GPU versions of image resampling, affine transforms, and
 coordinate mapping operations.
 """
 
+from typing import Any
+
 import numpy as np
 
 from . import GPU_AVAILABLE, to_cpu
 
 
-def affine_transform(image, matrix, output_shape=None, order=1, use_gpu=True):
+def affine_transform(image: Any, matrix: Any, output_shape: Any = None, order: Any = 1, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated affine transformation.
 
@@ -41,7 +43,7 @@ def affine_transform(image, matrix, output_shape=None, order=1, use_gpu=True):
         return _affine_transform_cpu(image, matrix, output_shape, order)
 
 
-def _affine_transform_gpu(image, matrix, output_shape, order):
+def _affine_transform_gpu(image: Any, matrix: Any, output_shape: Any, order: Any) -> Any:
     """GPU implementation of affine transform."""
     import cupy as cp
     from cupyx.scipy.ndimage import affine_transform as cp_affine
@@ -54,14 +56,14 @@ def _affine_transform_gpu(image, matrix, output_shape, order):
     return to_cpu(result)
 
 
-def _affine_transform_cpu(image, matrix, output_shape, order):
+def _affine_transform_cpu(image: Any, matrix: Any, output_shape: Any, order: Any) -> Any:
     """CPU fallback for affine transform."""
     from scipy.ndimage import affine_transform as scipy_affine
 
     return scipy_affine(image, matrix, output_shape=output_shape, order=order)
 
 
-def map_coordinates(image, coordinates, order=1, use_gpu=True):
+def map_coordinates(image: Any, coordinates: Any, order: Any = 1, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated coordinate mapping (general interpolation).
 
@@ -87,7 +89,7 @@ def map_coordinates(image, coordinates, order=1, use_gpu=True):
         return _map_coordinates_cpu(image, coordinates, order)
 
 
-def _map_coordinates_gpu(image, coordinates, order):
+def _map_coordinates_gpu(image: Any, coordinates: Any, order: Any) -> Any:
     """GPU implementation of map_coordinates."""
     import cupy as cp
     from cupyx.scipy.ndimage import map_coordinates as cp_map
@@ -100,14 +102,14 @@ def _map_coordinates_gpu(image, coordinates, order):
     return to_cpu(result)
 
 
-def _map_coordinates_cpu(image, coordinates, order):
+def _map_coordinates_cpu(image: Any, coordinates: Any, order: Any) -> Any:
     """CPU fallback for map_coordinates."""
     from scipy.ndimage import map_coordinates as scipy_map
 
     return scipy_map(image, coordinates, order=order)
 
 
-def resize(image, output_shape, order=1, anti_aliasing=True, use_gpu=True):
+def resize(image: Any, output_shape: Any, order: Any = 1, anti_aliasing: Any = True, use_gpu: Any = True) -> Any:
     """
     GPU-accelerated image resize.
 
@@ -135,7 +137,7 @@ def resize(image, output_shape, order=1, anti_aliasing=True, use_gpu=True):
         return _resize_cpu(image, output_shape, order, anti_aliasing)
 
 
-def _resize_gpu(image, output_shape, order, anti_aliasing):
+def _resize_gpu(image: Any, output_shape: Any, order: Any, anti_aliasing: Any) -> Any:
     """GPU implementation of resize using zoom."""
     import cupy as cp
     from cupyx.scipy.ndimage import gaussian_filter as cp_gaussian
@@ -159,7 +161,7 @@ def _resize_gpu(image, output_shape, order, anti_aliasing):
     return to_cpu(result)
 
 
-def _resize_cpu(image, output_shape, order, anti_aliasing):
+def _resize_cpu(image: Any, output_shape: Any, order: Any, anti_aliasing: Any) -> Any:
     """CPU fallback for resize using zoom."""
     from scipy.ndimage import gaussian_filter as scipy_gaussian
     from scipy.ndimage import zoom as scipy_zoom
@@ -177,7 +179,7 @@ def _resize_cpu(image, output_shape, order, anti_aliasing):
     return scipy_zoom(img, zoom_factors, order=order)
 
 
-def apply_displacement_field(image, displacement_field, use_gpu=True):
+def apply_displacement_field(image: Any, displacement_field: Any, use_gpu: Any = True) -> Any:
     """
     Apply a displacement field to warp an image.
 
@@ -207,7 +209,7 @@ def apply_displacement_field(image, displacement_field, use_gpu=True):
     return map_coordinates(image, new_coords, order=1, use_gpu=use_gpu)
 
 
-def resample_volume(volume, current_spacing, target_spacing, order=1, use_gpu=True):
+def resample_volume(volume: Any, current_spacing: Any, target_spacing: Any, order: Any = 1, use_gpu: Any = True) -> Any:
     """
     Resample a volume to a new spacing.
 

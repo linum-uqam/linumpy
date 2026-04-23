@@ -25,6 +25,7 @@ class MetricsEncoder(json.JSONEncoder):
     """Custom JSON encoder to handle numpy types."""
 
     def default(self, o: Any) -> Any:
+        """Serialize numpy integer and float types to Python builtins."""
         if isinstance(o, np.integer):
             return int(o)
         elif isinstance(o, np.floating):
@@ -239,9 +240,9 @@ class PipelineMetrics:
     def log_issues(self) -> None:
         """Log any warnings or errors to the logger."""
         for w in self.warnings:
-            logger.warning(f"Metric warning: {w}")
+            logger.warning("Metric warning: %s", w)
         for e in self.errors:
-            logger.error(f"Metric error: {e}")
+            logger.error("Metric error: %s", e)
 
 
 # =============================================================================
@@ -880,7 +881,7 @@ def aggregate_metrics(metrics_dir: str | Path, pattern: str = "*_metrics.json") 
             metrics["source_file"] = str(metrics_file)
             aggregated[step_name].append(metrics)
         except Exception as e:
-            logger.warning(f"Could not load {metrics_file}: {e}")
+            logger.warning("Could not load %s: %s", metrics_file, e)
 
     return aggregated
 

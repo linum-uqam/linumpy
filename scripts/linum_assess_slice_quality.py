@@ -35,16 +35,20 @@ Example usage:
     linum_assess_slice_quality.py /path/to/mosaics slice_config.csv --no-use_gpu
 """
 
+from __future__ import annotations
+
 # Configure thread limits before numpy/scipy imports
 import linumpy.config.threads  # noqa: F401
 
 import argparse
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import numpy as np
 from tqdm.auto import tqdm
+
+if TYPE_CHECKING:
+    import numpy as np
 
 from linumpy.cli.args import add_overwrite_arg, assert_output_exists
 from linumpy.gpu import GPU_AVAILABLE
@@ -60,7 +64,7 @@ from linumpy.metrics.image_quality import (
 )
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input", help="Input directory containing mosaic grids (*.ome.zarr)")
     p.add_argument("output_file", help="Output slice configuration CSV file")
@@ -170,8 +174,9 @@ def write_slice_config_with_quality(
     quality_results: dict[int, dict[str, Any]],
     exclude_ids: list[int],
     existing_config: dict[int, dict[str, Any]] | None = None,
-):
-    """Write ``slice_config.csv`` with the decision columns set from the quality
+) -> None:
+    """Write ``slice_config.csv`` with the decision columns set from the quality.
+
     assessment. Raw per-metric scores (ssim_mean / edge_score / variance_score /
     depth) intentionally stay out of the CSV — they live in the pipeline report
     and per-stage diagnostics JSON, not in the per-slice decision trace.
@@ -217,7 +222,8 @@ def write_slice_config_with_quality(
     slice_config_io.write(output_file, out_rows)
 
 
-def main():
+def main() -> None:
+    """Run function operation."""
     p = _build_arg_parser()
     args = p.parse_args()
 
@@ -314,7 +320,7 @@ def main():
     else:
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        def _assess_one(idx_and_id):
+        def _assess_one(idx_and_id: int) -> Any:
             i, slice_id = idx_and_id
             vol = volumes.get(slice_id)
             if vol is None:

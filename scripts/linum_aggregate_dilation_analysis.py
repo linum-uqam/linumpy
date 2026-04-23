@@ -19,6 +19,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -30,7 +31,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument(
         "input_directory",
@@ -53,7 +54,7 @@ def _build_arg_parser():
     return p
 
 
-def load_dilation_results(input_dir, pattern):
+def load_dilation_results(input_dir: str | Path, pattern: str) -> Any:
     """Load all dilation analysis JSON files from directory."""
     input_path = Path(input_dir)
     json_files = sorted(input_path.glob(pattern))
@@ -75,11 +76,11 @@ def load_dilation_results(input_dir, pattern):
                         break
             results.append(data)
 
-    logger.info(f"Loaded {len(results)} dilation analysis results")
+    logger.info("Loaded %s dilation analysis results", len(results))
     return results
 
 
-def compute_aggregate_statistics(results):
+def compute_aggregate_statistics(results: Any) -> None:
     """Compute aggregate statistics across all slices."""
     scale_y = [r["scale_factors"]["scale_y"] for r in results]
     scale_x = [r["scale_factors"]["scale_x"] for r in results]
@@ -144,7 +145,7 @@ def compute_aggregate_statistics(results):
     return stats
 
 
-def compute_correction_factors(stats, target_scale=1.0):
+def compute_correction_factors(stats: Any, target_scale: float = 1.0) -> dict:
     """Compute recommended correction factors."""
     # Use median for robustness against outliers
     correction_y = target_scale / stats["scale_y"]["median"]
@@ -173,7 +174,7 @@ def compute_correction_factors(stats, target_scale=1.0):
     }
 
 
-def compute_per_slice_factors(results, target_scale=1.0):
+def compute_per_slice_factors(results: Any, target_scale: float = 1.0) -> Any:
     """Compute per-slice correction factors for advanced use."""
     per_slice = []
     for r in results:
@@ -196,7 +197,7 @@ def compute_per_slice_factors(results, target_scale=1.0):
     return per_slice
 
 
-def generate_report(stats, corrections, per_slice, output_dir):
+def generate_report(stats: Any, corrections: Any, _per_slice: Any, output_dir: str | Path) -> None:
     """Generate text report."""
     lines = [
         "=" * 70,
@@ -298,11 +299,11 @@ def generate_report(stats, corrections, per_slice, output_dir):
     with Path(report_path).open("w") as f:
         f.write("\n".join(lines))
 
-    logger.info(f"Report saved to {report_path}")
+    logger.info("Report saved to %s", report_path)
     return report_path
 
 
-def generate_plots(results, output_dir):
+def generate_plots(results: Any, output_dir: str | Path) -> None:
     """Generate visualization plots."""
     slice_ids = [str(r.get("slice_id", i)) for i, r in enumerate(results)]
     scale_y = [r["scale_factors"]["scale_y"] for r in results]
@@ -373,11 +374,12 @@ def generate_plots(results, output_dir):
     plt.savefig(plot_path, dpi=150)
     plt.close()
 
-    logger.info(f"Plots saved to {plot_path}")
+    logger.info("Plots saved to %s", plot_path)
     return plot_path
 
 
-def main():
+def main() -> None:
+    """Run function."""
     p = _build_arg_parser()
     args = p.parse_args()
 
@@ -403,13 +405,13 @@ def main():
     json_path = output_dir / "aggregated_dilation_analysis.json"
     with Path(json_path).open("w") as f:
         json.dump(output_data, f, indent=2)
-    logger.info(f"JSON saved to {json_path}")
+    logger.info("JSON saved to %s", json_path)
 
     # Save per-slice CSV for easy import
     df = pd.DataFrame(per_slice)
     csv_path = output_dir / "per_slice_correction_factors.csv"
     df.to_csv(csv_path, index=False)
-    logger.info(f"CSV saved to {csv_path}")
+    logger.info("CSV saved to %s", csv_path)
 
     # Generate report and plots
     generate_report(stats, corrections, per_slice, output_dir)

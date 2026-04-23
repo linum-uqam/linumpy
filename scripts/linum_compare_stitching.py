@@ -6,6 +6,7 @@ import linumpy.config.threads  # noqa: F401
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,7 +15,7 @@ from scipy.ndimage import sobel
 from linumpy.io.zarr import read_omezarr
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("volume1", help="First stitched volume (.ome.zarr)")
     p.add_argument("volume2", help="Second stitched volume (.ome.zarr)")
@@ -26,7 +27,7 @@ def _build_arg_parser():
     return p
 
 
-def compute_seam_sharpness(slice_data, seam_positions, width=50, direction="vertical"):
+def compute_seam_sharpness(slice_data: Any, seam_positions: Any, width: int = 50, direction: str = "vertical") -> Any:
     """Compute edge sharpness at seams (lower = smoother blending)."""
     grad = sobel(slice_data, axis=1 if direction == "vertical" else 0)
     values = []
@@ -44,7 +45,8 @@ def compute_seam_sharpness(slice_data, seam_positions, width=50, direction="vert
     return np.mean(values) if values else 0, np.std(values) if values else 0
 
 
-def main():
+def main() -> None:
+    """Run function."""
     p = _build_arg_parser()
     args = p.parse_args()
 
