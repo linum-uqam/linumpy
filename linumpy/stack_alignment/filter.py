@@ -1,134 +1,15 @@
-"""
-XY shift utilities for serial-section alignment.
-
-Consolidated from linum_stack_motor_only.py, linum_stack_slices_motor.py,
-and linum_align_mosaics_3d_from_shifts.py.
-"""
+"""Outlier filtering for inter-slice shift fields."""
 
 import numpy as np
 import pandas as pd
 
 
-def load_shifts_csv(shifts_path) -> tuple[dict, list]:
-    """Load shifts CSV and build cumulative shift lookup.
+def _get_loc_int(index: pd.Index, key: int) -> int:
+    """Return integer position for a unique-index key."""
+    loc = index.get_loc(key)
+    assert isinstance(loc, int)
+    return loc
 
-    The shifts file contains pairwise shifts: fixed_id -> moving_id in mm.
-    Accumulates these to get absolute positions from the first slice.
-
-    Parameters
-    ----------
-    shifts_path : str or Path
-        Path to CSV file with columns: fixed_id, moving_id, x_shift_mm, y_shift_mm
-
-    Returns
-    -------
-    cumsum : dict
-        Mapping from slice_id to (cumulative_dx_mm, cumulative_dy_mm)
-    all_ids : list
-        Sorted list of all slice IDs
-    """
-    df = pd.read_csv(shifts_path)
-
-    all_ids = sorted(set(df["fixed_id"].tolist() + df["moving_id"].tolist()))
-
-    shift_lookup = {}
-    for _, row in df.iterrows():
-        fixed_id = int(row["fixed_id"])
-        moving_id = int(row["moving_id"])
-        shift_lookup[(fixed_id, moving_id)] = (row["x_shift_mm"], row["y_shift_mm"])
-
-    cumsum = {all_ids[0]: (0.0, 0.0)}
-    for i in range(len(all_ids) - 1):
-        fixed_id = all_ids[i]
-        moving_id = all_ids[i + 1]
-
-        if (fixed_id, moving_id) in shift_lookup:
-            dx_mm, dy_mm = shift_lookup[(fixed_id, moving_id)]
-        else:
-            dx_mm, dy_mm = 0.0, 0.0
-
-        prev_dx, prev_dy = cumsum[fixed_id]
-        cumsum[moving_id] = (prev_dx + dx_mm, prev_dy + dy_mm)
-
-    return cumsum, all_ids
-
-
-def detect_shift_units(resolution) -> tuple[float, float]:
-    """Detect whether resolution is in mm or µm and return (res_x_um, res_y_um).
-
-    OME-Zarr resolution can be reported in either mm (OME-NGFF standard)
-    or µm depending on the writer. Detects by magnitude:
-    - Values < 1.0 assumed to be mm (e.g. 0.01 mm = 10 µm)
-    - Values >= 1.0 assumed to be µm (e.g. 10 µm)
-
-    Parameters
-    ----------
-    resolution : sequence
-        Resolution tuple/list (res_z, res_y, res_x) from read_omezarr.
-
-    Returns
-    -------
-    res_x_um, res_y_um : float
-        X and Y resolution in microns.
-    """
-    res_x_raw = resolution[-1]
-    res_y_raw = resolution[-2] if len(resolution) >= 2 else res_x_raw
-
-    if res_x_raw < 1.0:
-        res_x_um = res_x_raw * 1000.0
-        res_y_um = res_y_raw * 1000.0
-    else:
-        res_x_um = float(res_x_raw)
-        res_y_um = float(res_y_raw)
-
-    return res_x_um, res_y_um
-
-
-def convert_shifts_to_pixels(cumsum_mm: dict, resolution_um: float) -> dict:
-    """Convert mm cumulative shifts to pixel shifts.
-
-    Parameters
-    ----------
-    cumsum_mm : dict
-        Mapping from slice_id to (dx_mm, dy_mm).
-    resolution_um : float
-        Resolution in microns per pixel (isotropic XY assumed).
-
-    Returns
-    -------
-    dict
-        Mapping from slice_id to (dx_px, dy_px).
-    """
-    mm_to_px = 1000.0 / resolution_um
-    return {slice_id: (dx_mm * mm_to_px, dy_mm * mm_to_px) for slice_id, (dx_mm, dy_mm) in cumsum_mm.items()}
-
-
-def center_shifts(cumsum_px: dict, slice_ids: list) -> dict:
-    """Center shifts around the middle slice.
-
-    Subtracts the middle slice's cumulative shift from all slices,
-    preventing drift from pushing slices out of the output canvas.
-
-    Parameters
-    ----------
-    cumsum_px : dict
-        Mapping from slice_id to (dx_px, dy_px).
-    slice_ids : list
-        Sorted list of slice IDs.
-
-    Returns
-    -------
-    dict
-        Centered cumulative shifts.
-    """
-    if not slice_ids:
-        return cumsum_px
-
-    middle_idx = len(slice_ids) // 2
-    middle_id = slice_ids[middle_idx]
-    center_dx, center_dy = cumsum_px.get(middle_id, (0, 0))
-
-    return {slice_id: (dx - center_dx, dy - center_dy) for slice_id, (dx, dy) in cumsum_px.items()}
 
 
 def filter_outlier_shifts(
@@ -173,7 +54,8 @@ def filter_outlier_shifts(
         Filtered DataFrame with outlier shifts corrected.
     """
     df = shifts_df.copy()
-    shift_mag = np.sqrt(df["x_shift_mm"] ** 2 + df["y_shift_mm"] ** 2)
+    _sm = np.sqrt(df["x_shift_mm"].to_numpy() ** 2 + df["y_shift_mm"].to_numpy() ** 2)
+    shift_mag = pd.Series(_sm, index=df.index)
 
     if method == "iqr":
         q1 = shift_mag.quantile(0.25)
@@ -216,7 +98,7 @@ def filter_outlier_shifts(
 
     elif method in ["local", "iqr"]:
         for idx in df[outlier_mask].index:
-            pos = df.index.get_loc(idx)
+            pos = _get_loc_int(df.index, idx)
             neighbor_vals_x, neighbor_vals_y = [], []
             for offset in [-2, -1, 1, 2]:
                 neighbor_pos = pos + offset
@@ -238,7 +120,7 @@ def filter_outlier_shifts(
         # Only correct steps that are large AND self-cancelling with a neighbour.
         # A step that stays (re-homing event) has a large neighbour sum; a step
         # that returns (encoder glitch) has a near-zero neighbour sum.
-        def _is_spike(pos, step_x, step_y, step_mag):
+        def _is_spike(pos: int, step_x: float, step_y: float, step_mag: float) -> bool:
             for offset in [-1, 1]:
                 nb_pos = pos + offset
                 if 0 <= nb_pos < len(df):
@@ -251,7 +133,7 @@ def filter_outlier_shifts(
             return False
 
         for idx in df[outlier_mask].index:
-            pos = df.index.get_loc(idx)
+            pos = _get_loc_int(df.index, idx)
             step_x = df.loc[idx, "x_shift_mm"]
             step_y = df.loc[idx, "y_shift_mm"]
             step_mag = shift_mag[idx]
@@ -293,10 +175,11 @@ def filter_outlier_shifts(
     return df
 
 
+
 def correct_tile_offset_shifts(
     shifts_df: pd.DataFrame,
     tile_fov_x_mm: float,
-    tile_fov_y_mm: float = None,
+    tile_fov_y_mm: float | None = None,
     tolerance: float = 0.05,
     min_step_mm: float = 0.0,
 ) -> tuple[pd.DataFrame, list[int]]:
@@ -372,7 +255,7 @@ def correct_tile_offset_shifts(
 
         # Check X component
         if tile_fov_x_mm > 0:
-            nx = int(round(dx / tile_fov_x_mm))
+            nx = round(dx / tile_fov_x_mm)
             if nx != 0 and abs(dx - nx * tile_fov_x_mm) / tile_fov_x_mm < tolerance:
                 offset_x_mm = nx * tile_fov_x_mm
                 if "x_shift" in df.columns and abs(dx) > 1e-9:
@@ -383,7 +266,7 @@ def correct_tile_offset_shifts(
         # Check Y component
         if tile_fov_y_mm > 0:
             dy_cur = df.loc[idx, "y_shift_mm"]  # may differ from dy if X was corrected
-            ny = int(round(dy_cur / tile_fov_y_mm))
+            ny = round(dy_cur / tile_fov_y_mm)
             if ny != 0 and abs(dy_cur - ny * tile_fov_y_mm) / tile_fov_y_mm < tolerance:
                 offset_y_mm = ny * tile_fov_y_mm
                 if "y_shift" in df.columns and abs(dy) > 1e-9:
@@ -395,6 +278,7 @@ def correct_tile_offset_shifts(
             corrected_indices.append(idx)
 
     return df, corrected_indices
+
 
 
 def filter_step_outliers(
@@ -431,14 +315,18 @@ def filter_step_outliers(
         Filtered DataFrame.
     """
     df = shifts_df.copy()
-    shift_mag = np.sqrt(df["x_shift_mm"] ** 2 + df["y_shift_mm"] ** 2)
+    _sm2 = np.sqrt(df["x_shift_mm"].to_numpy() ** 2 + df["y_shift_mm"].to_numpy() ** 2)
+    shift_mag = pd.Series(_sm2, index=df.index)
 
     if method == "local_mad":
         outlier_mask = pd.Series(False, index=df.index)
         for i in range(len(df)):
             lo = max(0, i - window)
             hi = min(len(df), i + window + 1)
-            neighbour_mags = np.concatenate([shift_mag.iloc[lo:i].values, shift_mag.iloc[i + 1 : hi].values])
+            neighbour_mags = np.concatenate([
+                np.asarray(shift_mag.iloc[lo:i]),
+                np.asarray(shift_mag.iloc[i + 1 : hi]),
+            ])
             if len(neighbour_mags) == 0:
                 continue
             local_med = float(np.median(neighbour_mags))
@@ -458,11 +346,11 @@ def filter_step_outliers(
             return df
 
     for idx in df[outlier_mask].index:
-        row = df.loc[idx]
-        pos = df.index.get_loc(idx)
+        df.loc[idx]
+        pos = _get_loc_int(df.index, idx)
         step_x = df.loc[idx, "x_shift_mm"]
         step_y = df.loc[idx, "y_shift_mm"]
-        step_mag = shift_mag.iloc[pos] if hasattr(shift_mag, "iloc") else float(np.sqrt(step_x**2 + step_y**2))
+        step_mag = float(shift_mag.iloc[pos])
 
         # Re-homing guard: skip correction if the step is NOT self-cancelling.
         # A re-homing event has a large neighbour sum (position stays); a glitch
@@ -490,7 +378,7 @@ def filter_step_outliers(
                 df.loc[idx, "x_shift"] *= scale
                 df.loc[idx, "y_shift"] *= scale
         else:
-            pos = df.index.get_loc(idx)
+            pos = _get_loc_int(df.index, idx)
             neighbor_vals_x, neighbor_vals_y = [], []
             for offset in range(-window, window + 1):
                 if offset == 0:
@@ -504,83 +392,19 @@ def filter_step_outliers(
                 df.loc[idx, "x_shift_mm"] = float(np.median(neighbor_vals_x))
                 df.loc[idx, "y_shift_mm"] = float(np.median(neighbor_vals_y))
                 if "x_shift" in df.columns:
+                    idx_loc = _get_loc_int(df.index, idx)
                     neighbor_px_x = [
-                        df.loc[df.index[df.index.get_loc(idx) + o], "x_shift"]
+                        df.loc[df.index[idx_loc + o], "x_shift"]
                         for o in range(-window, window + 1)
-                        if o != 0 and 0 <= df.index.get_loc(idx) + o < len(df) and "x_shift" in df.columns
+                        if o != 0 and 0 <= idx_loc + o < len(df) and "x_shift" in df.columns
                     ]
                     neighbor_px_y = [
-                        df.loc[df.index[df.index.get_loc(idx) + o], "y_shift"]
+                        df.loc[df.index[idx_loc + o], "y_shift"]
                         for o in range(-window, window + 1)
-                        if o != 0 and 0 <= df.index.get_loc(idx) + o < len(df) and "x_shift" in df.columns
+                        if o != 0 and 0 <= idx_loc + o < len(df) and "x_shift" in df.columns
                     ]
                     if neighbor_px_x:
                         df.loc[idx, "x_shift"] = float(np.median(neighbor_px_x))
                         df.loc[idx, "y_shift"] = float(np.median(neighbor_px_y))
 
     return df
-
-
-def build_cumulative_shifts(shifts_df: pd.DataFrame, selected_slice_ids: list, resolution, center_drift: bool = True) -> dict:
-    """Build cumulative pixel shifts for selected slices.
-
-    Handles skipped slices by accumulating intermediate steps.
-    Converts mm shifts to pixels using the provided resolution.
-
-    Parameters
-    ----------
-    shifts_df : pd.DataFrame
-        DataFrame with columns: fixed_id, moving_id, x_shift_mm, y_shift_mm
-    selected_slice_ids : list
-        Sorted list of slice IDs to process.
-    resolution : tuple
-        Resolution (res_z, res_y, res_x) from read_omezarr; auto-detects mm vs µm.
-    center_drift : bool
-        If True, center cumulative drift around the middle slice.
-
-    Returns
-    -------
-    dict
-        Mapping from slice_id to (cumulative_dx_px, cumulative_dy_px).
-    """
-    shift_lookup = {}
-    for _, row in shifts_df.iterrows():
-        fixed_id = int(row["fixed_id"])
-        moving_id = int(row["moving_id"])
-        shift_lookup[(fixed_id, moving_id)] = (row["x_shift_mm"], row["y_shift_mm"])
-
-    all_slice_ids = set()
-    for _, row in shifts_df.iterrows():
-        all_slice_ids.add(int(row["fixed_id"]))
-        all_slice_ids.add(int(row["moving_id"]))
-    all_slice_ids = sorted(all_slice_ids)
-
-    cumsum_all = {all_slice_ids[0]: (0.0, 0.0)}
-    for i in range(len(all_slice_ids) - 1):
-        fixed_id = all_slice_ids[i]
-        moving_id = all_slice_ids[i + 1]
-        dx_mm, dy_mm = shift_lookup.get((fixed_id, moving_id), (0.0, 0.0))
-        prev_dx, prev_dy = cumsum_all[fixed_id]
-        cumsum_all[moving_id] = (prev_dx + dx_mm, prev_dy + dy_mm)
-
-    res_x_um, res_y_um = detect_shift_units(resolution)
-    mm_to_px_x = 1000.0 / res_x_um
-    mm_to_px_y = 1000.0 / res_y_um
-
-    cumsum_selected = {}
-    for slice_id in selected_slice_ids:
-        if slice_id in cumsum_all:
-            dx_mm, dy_mm = cumsum_all[slice_id]
-            cumsum_selected[slice_id] = (dx_mm * mm_to_px_x, dy_mm * mm_to_px_y)
-        else:
-            cumsum_selected[slice_id] = (0.0, 0.0)
-
-    if center_drift and len(cumsum_selected) > 0:
-        middle_idx = len(selected_slice_ids) // 2
-        middle_id = selected_slice_ids[middle_idx]
-        center_dx, center_dy = cumsum_selected[middle_id]
-        for slice_id in cumsum_selected:
-            dx, dy = cumsum_selected[slice_id]
-            cumsum_selected[slice_id] = (dx - center_dx, dy - center_dy)
-
-    return cumsum_selected
