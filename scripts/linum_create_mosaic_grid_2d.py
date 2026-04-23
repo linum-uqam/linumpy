@@ -199,21 +199,21 @@ def main() -> None:
 
     # Normalize the mosaic
     if args.normalize:
-        imin = np.min(mosaic)
-        imax = np.percentile(mosaic, args.saturation)
+        imin = np.min(mosaic)  # ty: ignore[no-matching-overload]
+        imax = np.percentile(mosaic, args.saturation)  # ty: ignore[no-matching-overload]
         mosaic = (mosaic - imin) / (imax - imin)
         mosaic[mosaic < 0] = 0
         mosaic[mosaic > 1] = 1
 
     # Convert the mosaic to a tiff file
     if output_file.suffix == ".tiff":
-        img = mosaic[:]
-        io.imsave(output_file, img)
+        img = mosaic[:]  # ty: ignore[invalid-argument-type]
+        io.imsave(output_file, img)  # ty: ignore[no-matching-overload]
         shutil.rmtree(zarr_file)
 
     if output_file.suffix == ".jpg":
-        imin = np.min(mosaic)
-        imax = np.percentile(mosaic, args.saturation)
+        imin = np.min(mosaic)  # ty: ignore[no-matching-overload]
+        imax = np.percentile(mosaic, args.saturation)  # ty: ignore[no-matching-overload]
         mosaic = (mosaic - imin) / (imax - imin)
         mosaic[mosaic < 0] = 0
         mosaic[mosaic > 1] = 1

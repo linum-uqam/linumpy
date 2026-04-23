@@ -55,7 +55,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def process_tile(params: dict) -> None:
+def process_tile(params: dict) -> tuple:
     """Process a tile and add it to the output mosaic."""
     from linumpy.config.threads import apply_threadpool_limits
 
@@ -138,7 +138,7 @@ def main() -> None:
         os.environ["JAX_PLATFORMS"] = "cpu"
 
     try:
-        import jax
+        import jax  # ty: ignore[unresolved-import]
 
         devices = jax.devices()
         has_gpu = any("cuda" in str(d).lower() for d in devices)

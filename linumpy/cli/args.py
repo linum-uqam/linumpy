@@ -64,7 +64,7 @@ def parse_processes_arg(n_processes: int | None) -> int:
     return n_processes
 
 
-def add_processes_arg(parser: argparse.ArgumentParser) -> argparse.Action:
+def add_processes_arg(parser: argparse.ArgumentParser | argparse._ActionsContainer) -> argparse.Action:
     """Add the ``--n_processes`` argument to *parser*."""
     a = parser.add_argument(
         "--n_processes", type=int, default=1, help="Number of processes to use. -1 to use all cores [%(default)s]."

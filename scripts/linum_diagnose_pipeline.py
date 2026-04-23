@@ -56,7 +56,7 @@ class SystemDiagnostics:
 
     def __init__(self, verbose: bool = False) -> None:
         self.verbose = verbose
-        self.results = {
+        self.results: dict[str, Any] = {
             "timestamp": datetime.now().isoformat(),
             "cpu": {},
             "memory": {},
@@ -501,7 +501,7 @@ except Exception as e:
             print_subheader("GPU Performance")
             self._run_gpu_benchmark()
 
-    def _get_cuda12_ld_path(self, debug: bool = False) -> None:
+    def _get_cuda12_ld_path(self, debug: bool = False) -> tuple[str, list[str]]:
         """Build LD_LIBRARY_PATH for CUDA 12 compatible libraries."""
         import contextlib
         import importlib.util

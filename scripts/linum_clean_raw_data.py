@@ -350,7 +350,7 @@ def clean_raw_data(data_dir: Path, dry_run: bool = False) -> dict:
     }
 
 
-def main() -> None:
+def main() -> int:
     """Run the script."""
     parser = argparse.ArgumentParser(
         description="Clean up raw data acquisitions by removing binary files and organizing quick stitches",

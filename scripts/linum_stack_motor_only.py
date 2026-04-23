@@ -174,7 +174,7 @@ def generate_preview_from_slice(slice_2d: Any, output_path: str | Path) -> None:
         logger.warning("Could not generate preview: %s", e)
 
 
-def generate_preview_from_zarr(zarr_output: str | Path, output_path: str | Path) -> Any:
+def generate_preview_from_zarr(zarr_output: Any, output_path: str | Path) -> Any:
     """Generate a 3-panel preview (XY, XZ, YZ) from a zarr output without loading full volume."""
     try:
         import matplotlib.pyplot as plt

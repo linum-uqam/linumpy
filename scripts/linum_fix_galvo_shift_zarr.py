@@ -64,7 +64,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from linumpy.cli.args import add_overwrite_arg, assert_output_exists
-from linumpy.geometry.interface import detect_galvo_band_in_tile, detect_galvo_shift
+from linumpy.geometry.interface import detect_galvo_band_in_tile, detect_galvo_shift  # ty: ignore[unresolved-import]
 from linumpy.io import slice_config as slice_config_io
 from linumpy.io.zarr import OmeZarrWriter
 
@@ -341,7 +341,7 @@ def _open_level(zarr_root: Path, level: int) -> Any:
     return arr, res, actual_level, multiscale
 
 
-def _auto_detect(zarr_root: Path, detection_level: int, n_extra: int | None = None, verbose: bool = False) -> None:
+def _auto_detect(zarr_root: Path, detection_level: int, n_extra: int | None = None, verbose: bool = False) -> tuple:
     """Sample representative chunks and return (band_start, band_width, confidence).
 
     band_start and band_width are expressed in level-0 (full-resolution) pixels.
@@ -617,6 +617,7 @@ def _apply_fix(
     n_cx = shape[1] // chunk_x
     n_cy = shape[2] // chunk_y
 
+    roll_amount = 0
     if mode == "fix":
         band_end = band_start + band_width
         roll_amount = chunk_x - band_start - band_width
@@ -811,7 +812,7 @@ def main() -> None:
         band_width=band_width,
         mode=args.mode,
         undo_shift=undo_shift,
-        verbose=args.verbose,
+        _verbose=args.verbose,
     )
     print(f"Corrected zarr written: {output_path}")
 

@@ -21,6 +21,7 @@ SCRIPT_PATH = Path(__file__).resolve().parents[1] / "linum_align_to_ras.py"
 def align_module():
     """Load ``linum_align_to_ras.py`` as a module."""
     spec = importlib.util.spec_from_file_location("linum_align_to_ras", SCRIPT_PATH)
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

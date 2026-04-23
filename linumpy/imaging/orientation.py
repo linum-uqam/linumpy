@@ -96,7 +96,9 @@ def parse_orientation_code(orientation: str) -> tuple[tuple[int, ...], tuple[int
     return axis_permutation, axis_flips
 
 
-def apply_orientation_transform(volume: np.ndarray, permutation: tuple[int, ...], flips: tuple[int, ...]) -> np.ndarray:
+def apply_orientation_transform(
+    volume: np.ndarray, permutation: tuple[int, ...], flips: tuple[int, ...] | None = None
+) -> np.ndarray:
     """
     Reorient a 3D volume by applying an axis permutation followed by axis flips.
 
@@ -119,9 +121,10 @@ def apply_orientation_transform(volume: np.ndarray, permutation: tuple[int, ...]
         callers should copy if in-place modification is needed.
     """
     result = np.transpose(volume, permutation)
-    for axis, flip in enumerate(flips):
-        if flip < 0:
-            result = np.flip(result, axis=axis)
+    if flips is not None:
+        for axis, flip in enumerate(flips):
+            if flip < 0:
+                result = np.flip(result, axis=axis)
     return result
 
 

@@ -74,19 +74,22 @@ def benchmark_operation(
     name: str,
     iterations: int = 3,
     check_correctness: bool = True,
-) -> None:
+) -> dict[str, Any]:
     """
     Benchmark a single operation comparing CPU and GPU.
 
     Returns dict with timing results.
     """
-    results = {
+    results: dict[str, Any] = {
         "name": name,
         "cpu_times": [],
         "gpu_times": [],
         "correct": None,
         "max_diff": None,
     }
+
+    result_cpu: Any = None
+    result_gpu: Any = None
 
     # Warmup GPU
     if GPU_AVAILABLE:
@@ -181,7 +184,7 @@ def benchmark_phase_correlation(size: int, iterations: int = 3, _check_correctne
     img2 = np.roll(img1, (5, 10), axis=(0, 1))
 
     def cpu_pc(d: Any) -> Any:
-        return pair_wise_phase_correlation(d[0], d[1], returnCC=True)
+        return pair_wise_phase_correlation(d[0], d[1], return_cc=True)
 
     def gpu_pc(d: Any) -> Any:
         return phase_correlation(d[0], d[1], use_gpu=True)

@@ -87,7 +87,7 @@ def filter_with_local_median(df: Any, outlier_mask: Any) -> Any:
     return df_filtered
 
 
-def generate_report(df: Any, df_filtered: Any, outlier_mask: Any, stats: Any, resolution: Any, output_dir: str | Path) -> None:
+def generate_report(df: Any, df_filtered: Any, outlier_mask: Any, stats: Any, resolution: Any, output_dir: str | Path) -> str:
     """Generate text report."""
     px_per_mm = 1000 / resolution
 
@@ -172,7 +172,7 @@ def generate_report(df: Any, df_filtered: Any, outlier_mask: Any, stats: Any, re
     return report_text
 
 
-def generate_plots(df: Any, df_filtered: Any, _outlier_mask: Any, stats: Any, resolution: Any, output_dir: str | Path) -> None:
+def generate_plots(df: Any, df_filtered: Any, _outlier_mask: Any, stats: Any, resolution: Any, output_dir: str | Path) -> Path:
     """Generate visualization plots."""
     px_per_mm = 1000 / resolution
     upper_bound = stats["upper_bound"]

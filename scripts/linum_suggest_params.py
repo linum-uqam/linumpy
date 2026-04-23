@@ -178,7 +178,7 @@ def detect_slice_gaps(df: pd.DataFrame) -> list[dict]:
 
 def analyze_shifts(df: pd.DataFrame) -> dict:
     """Compute all shift-derived parameter estimates."""
-    mag = np.sqrt(df["x_shift_mm"] ** 2 + df["y_shift_mm"] ** 2).values
+    mag = np.sqrt((df["x_shift_mm"] ** 2 + df["y_shift_mm"] ** 2).to_numpy())
     df = df.copy()
     df["magnitude_mm"] = mag
 
@@ -257,7 +257,7 @@ def _parse_info_txt(path: Path) -> dict:
     return info
 
 
-def analyze_metadata(data_dir: str, axial_res_um: float, n_calibration_slices: int = 1) -> dict:
+def analyze_metadata(data_dir: str | Path, axial_res_um: float, n_calibration_slices: int = 1) -> dict:
     """
     Extract acquisition parameters from the raw data directory.
 

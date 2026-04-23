@@ -5,6 +5,7 @@ from linumpy.config.threads import configure_dask
 
 import shutil
 import tempfile
+from collections.abc import Sequence
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
@@ -114,7 +115,7 @@ class CustomScaler(Scaler):
         raise NotImplementedError("_by_plane method not implemented for CustomScaler")
 
 
-def create_transformation_dict(nlevels: int, voxel_size: tuple | list, ndims: int = 3) -> list:
+def create_transformation_dict(nlevels: int, voxel_size: Sequence, ndims: int = 3) -> list:
     """Create a list of coordinate transformation dicts for OME-Zarr pyramid levels.
 
     Supports images up to 4 dimensions.
@@ -183,7 +184,7 @@ def create_directory(store_path: str | Path, overwrite: bool = False) -> Path:
     return directory
 
 
-def validate_n_levels(n_levels: int, shape: tuple, downscale_factor: int = 2) -> int:
+def validate_n_levels(n_levels: int, shape: Sequence, downscale_factor: int = 2) -> int:
     """
     Validate n_levels such that it does not go beyond the volume shape.
 
@@ -198,7 +199,7 @@ def validate_n_levels(n_levels: int, shape: tuple, downscale_factor: int = 2) ->
     :return adjusted_n_levels: Adjusted n_levels such that we don't exceed volume shape.
     """
 
-    def logn(arr: np.ndarray | tuple, n: int) -> np.ndarray:
+    def logn(arr: np.ndarray | Sequence, n: int) -> np.ndarray:
         return np.log2(arr) / np.log2(n)
 
     adjusted_n_levels = min(*logn(shape, downscale_factor).astype(int), n_levels)
@@ -212,8 +213,8 @@ def validate_n_levels(n_levels: int, shape: tuple, downscale_factor: int = 2) ->
 def save_omezarr(
     data: np.ndarray | da.Array,
     store_path: str | Path,
-    voxel_size: tuple = (1e-3, 1e-3, 1e-3),
-    chunks: tuple = (128, 128, 128),
+    voxel_size: tuple | Sequence = (1e-3, 1e-3, 1e-3),
+    chunks: tuple | Sequence = (128, 128, 128),
     n_levels: int = 5,
     overwrite: bool = True,
 ) -> zarr.Group:
@@ -320,7 +321,7 @@ class OmeZarrWriter:
     """Write OME-Zarr files to disk in a pyramidal format, chunk by chunk."""
 
     fmt: CurrentFormat
-    shape: tuple
+    shape: Sequence
     downscale_factor: int
     root: zarr.Group
     axes: list
@@ -329,8 +330,8 @@ class OmeZarrWriter:
     def __init__(
         self,
         store_path: str | Path,
-        shape: tuple,
-        chunk_shape: tuple,
+        shape: tuple | Sequence,
+        chunk_shape: tuple | Sequence,
         shards: tuple | None = None,
         dtype: type | np.dtype = np.float32,
         overwrite: bool = True,
@@ -532,7 +533,7 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
         res: list | tuple,
         n_levels: int | None = None,
         *,
-        target_resolutions_um: tuple = (10, 25, 50, 100),
+        target_resolutions_um: tuple | Sequence = (10, 25, 50, 100),
         make_isotropic: bool = True,
     ) -> None:
         """

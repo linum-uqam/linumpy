@@ -54,7 +54,7 @@ def main() -> None:
     resolution = resolution[::-1]
 
     # Save the zarr
-    save_omezarr(vol, args.zarr_directory, voxel_size=resolution, chunks=chunks, n_levels=args.n_levels)
+    save_omezarr(vol, args.zarr_directory, voxel_size=tuple(resolution.tolist()), chunks=chunks, n_levels=args.n_levels)
 
 
 if __name__ == "__main__":

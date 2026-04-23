@@ -304,7 +304,7 @@ def main() -> None:
                 row_b = shifts_before.loc[idx]
                 row_a = shifts_after.loc[idx]
                 print(
-                    f"  step {int(row_b['fixed_id'])}→{int(row_b['moving_id'])}: "
+                    f"  step {int(row_b['fixed_id'])}→{int(row_b['moving_id'])}: "  # ty: ignore[invalid-argument-type]
                     f"({row_b['x_shift_mm']:.4f}, {row_b['y_shift_mm']:.4f}) mm "
                     f"→ ({row_a['x_shift_mm']:.4f}, {row_a['y_shift_mm']:.4f}) mm"
                 )

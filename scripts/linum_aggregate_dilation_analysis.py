@@ -80,7 +80,7 @@ def load_dilation_results(input_dir: str | Path, pattern: str) -> Any:
     return results
 
 
-def compute_aggregate_statistics(results: Any) -> None:
+def compute_aggregate_statistics(results: Any) -> dict:
     """Compute aggregate statistics across all slices."""
     scale_y = [r["scale_factors"]["scale_y"] for r in results]
     scale_x = [r["scale_factors"]["scale_x"] for r in results]
@@ -197,7 +197,7 @@ def compute_per_slice_factors(results: Any, target_scale: float = 1.0) -> Any:
     return per_slice
 
 
-def generate_report(stats: Any, corrections: Any, _per_slice: Any, output_dir: str | Path) -> None:
+def generate_report(stats: Any, corrections: Any, _per_slice: Any, output_dir: str | Path) -> Path:
     """Generate text report."""
     lines = [
         "=" * 70,
@@ -295,7 +295,7 @@ def generate_report(stats: Any, corrections: Any, _per_slice: Any, output_dir: s
         ]
     )
 
-    report_path = output_dir / "aggregated_dilation_report.txt"
+    report_path = Path(output_dir) / "aggregated_dilation_report.txt"
     with Path(report_path).open("w") as f:
         f.write("\n".join(lines))
 
@@ -303,7 +303,7 @@ def generate_report(stats: Any, corrections: Any, _per_slice: Any, output_dir: s
     return report_path
 
 
-def generate_plots(results: Any, output_dir: str | Path) -> None:
+def generate_plots(results: Any, output_dir: str | Path) -> Path:
     """Generate visualization plots."""
     slice_ids = [str(r.get("slice_id", i)) for i, r in enumerate(results)]
     scale_y = [r["scale_factors"]["scale_y"] for r in results]
@@ -370,7 +370,7 @@ def generate_plots(results: Any, output_dir: str | Path) -> None:
     fig.suptitle("Aggregated Dilation Analysis", fontsize=14)
     plt.tight_layout()
 
-    plot_path = output_dir / "aggregated_dilation_analysis.png"
+    plot_path = Path(output_dir) / "aggregated_dilation_analysis.png"
     plt.savefig(plot_path, dpi=150)
     plt.close()
 

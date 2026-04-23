@@ -105,7 +105,7 @@ def main() -> None:
             pos = positions[i * ny + j]
             pos[0] -= posr_min
             pos[1] -= posc_min
-            add_volume_to_mosaic(tile, pos, writer, blendingMethod=blending_method)
+            add_volume_to_mosaic(tile, pos, writer, blending_method=blending_method)
 
     writer.finalize(resolution)
 

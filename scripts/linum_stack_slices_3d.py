@@ -104,6 +104,8 @@ def get_input(mosaics_dir: str | Path, transforms_dir: str | Path, parser: Any) 
     slice_ids = []
     for f in mosaics_files:
         foo = re.match(pattern, f.name)
+        if foo is None:
+            continue
         slice_id = int(foo.groups()[0])
         slice_ids.append(slice_id)
 

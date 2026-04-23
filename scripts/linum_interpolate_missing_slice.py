@@ -522,7 +522,7 @@ def main() -> None:
         final_result = interpolated
         original_dtype = vol_before.dtype
         if np.issubdtype(original_dtype, np.integer):
-            final_result = np.clip(final_result, 0, np.iinfo(original_dtype).max)
+            final_result = np.clip(final_result, 0, int(np.iinfo(original_dtype).max))  # ty: ignore[no-matching-overload]
             final_result = final_result.astype(original_dtype)
 
         print(f"Saving interpolated slice to: {output_path}")
@@ -577,7 +577,7 @@ def _json_default(obj: Any) -> Any:
     return str(obj)
 
 
-def _csv_escape(value: float) -> str:
+def _csv_escape(value: Any) -> str:
     s = "" if value is None else str(value)
     if "," in s or '"' in s or "\n" in s:
         s = '"' + s.replace('"', '""') + '"'

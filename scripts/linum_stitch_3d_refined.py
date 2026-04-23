@@ -176,7 +176,7 @@ def stitch_with_refinements(
                     pos[1] += avg_dx
 
             # Add tile to mosaic
-            add_volume_to_mosaic(tile, pos, output, blendingMethod=blending_method)
+            add_volume_to_mosaic(tile, pos, output, blending_method=blending_method)
 
     return output
 

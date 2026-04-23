@@ -75,7 +75,7 @@ def analyze_rotation_drift(
     output_dir: str | Path,
     threshold: float = 2.0,
     slice_ids: Any = None,
-) -> None:
+) -> dict | None:
     """Analyze rotation patterns from pairwise registration."""
     reg_dir = Path(pipeline_dir) / "register_pairwise"
     if not reg_dir.exists():
@@ -142,7 +142,7 @@ def analyze_rotation_drift(
     }
 
     # Save CSV
-    csv_path = output_dir / "rotation_data.csv"
+    csv_path = Path(output_dir) / "rotation_data.csv"
     df.to_csv(csv_path, index=False)
 
     # Generate plot
@@ -168,13 +168,15 @@ def analyze_rotation_drift(
     ax2.set_title("Cumulative Rotation Drift")
 
     plt.tight_layout()
-    plt.savefig(output_dir / "rotation_analysis.png", dpi=150)
+    plt.savefig(Path(output_dir) / "rotation_analysis.png", dpi=150)
     plt.close()
 
     return result
 
 
-def analyze_shifts(pipeline_dir: str | Path, output_dir: str | Path, resolution: float = 10.0, slice_ids: Any = None) -> None:
+def analyze_shifts(
+    pipeline_dir: str | Path, output_dir: str | Path, resolution: float = 10.0, slice_ids: Any = None
+) -> dict | None:
     """Analyze XY shifts from shifts_xy.csv."""
     shifts_path = Path(pipeline_dir) / "shifts_xy.csv"
     if not shifts_path.exists():
@@ -263,13 +265,13 @@ def analyze_shifts(pipeline_dir: str | Path, output_dir: str | Path, resolution:
     ax4.set_aspect("equal")
 
     plt.tight_layout()
-    plt.savefig(output_dir / "shifts_analysis.png", dpi=150)
+    plt.savefig(Path(output_dir) / "shifts_analysis.png", dpi=150)
     plt.close()
 
     return result
 
 
-def generate_summary_report(results: Any, output_dir: str | Path) -> None:
+def generate_summary_report(results: Any, output_dir: str | Path) -> Path:
     """Generate comprehensive summary report."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -375,12 +377,12 @@ def generate_summary_report(results: Any, output_dir: str | Path) -> None:
 
     lines.extend(["", "=" * 70])
 
-    report_path = output_dir / "diagnostic_report.txt"
+    report_path = Path(output_dir) / "diagnostic_report.txt"
     with Path(report_path).open("w") as f:
         f.write("\n".join(lines))
 
     # Also save JSON
-    json_path = output_dir / "diagnostic_results.json"
+    json_path = Path(output_dir) / "diagnostic_results.json"
     with Path(json_path).open("w") as f:
         json.dump(
             {

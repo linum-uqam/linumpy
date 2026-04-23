@@ -31,7 +31,7 @@ class MosaicGrid:
 
     """
 
-    def __init__(self, image: np.ndarray, tile_shape: tuple = (512, 512), overlap_fraction: float = 0.2) -> None:
+    def __init__(self, image: np.ndarray, tile_shape: tuple | Sequence = (512, 512), overlap_fraction: float = 0.2) -> None:
         """Initialize the MosaicGrid instance."""
         self.tile_shape = tile_shape
         self.tile_size_x = self.tile_shape[0]
@@ -577,7 +577,7 @@ class MosaicGrid:
 
 def add_volume_to_mosaic(
     volume: np.ndarray,
-    pos: tuple,
+    pos: tuple | list,
     mosaic: Any,
     blending_method: str | None = "diffusion",
     factor: int = 3,
@@ -796,4 +796,3 @@ def get_diffusion_blending_weights(
         alpha = resample_itk(alpha, old_shape, interpolator="linear")
 
     return alpha
-

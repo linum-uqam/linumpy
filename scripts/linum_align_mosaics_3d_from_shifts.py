@@ -93,7 +93,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def load_slice_config(config_path: str | Path) -> dict:
+def load_slice_config(config_path: str | Path) -> set[int]:
     """Return the integer slice IDs marked ``use=true`` in ``config_path``."""
     return {int(sid) for sid in slice_config_io.filter_slices_to_use(config_path)}
 
@@ -189,7 +189,7 @@ def handle_excluded_slice_shifts(shifts_df: Any, excluded_slice_ids: Any, mode: 
     return df
 
 
-def compute_common_shape(mosaic_files: Any, slice_ids: Any, cumsum_shifts: Any) -> None:
+def compute_common_shape(mosaic_files: Any, slice_ids: Any, cumsum_shifts: Any) -> tuple[int, int, float, float]:
     """
     Compute the common shape needed to fit all aligned mosaics.
 

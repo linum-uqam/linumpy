@@ -542,9 +542,9 @@ def discover_interpolation_data(input_dir: Path) -> dict | None:
     post_nccs: list[float] = []
     improvements: list[float] = []
 
-    def _to_float(value: float) -> float | None:
+    def _to_float(value: float | None) -> float | None:
         try:
-            return float(value)
+            return float(value)  # ty: ignore[invalid-argument-type]
         except (TypeError, ValueError):
             return None
 
@@ -726,7 +726,7 @@ def image_to_data_uri(path: Path, max_width: int | None = None) -> str:
             if img.width > max_width:
                 ratio = max_width / img.width
                 new_size = (max_width, int(img.height * ratio))
-                img = img.resize(new_size, _PILImage.LANCZOS)
+                img = img.resize(new_size, _PILImage.Resampling.LANCZOS)
             buf = _io.BytesIO()
             img.save(buf, format="PNG", optimize=True)
             data_bytes = buf.getvalue()
@@ -999,7 +999,7 @@ def _render_interpolation_section_html(
             images,
             mode=image_mode,
             category="diag_interpolate_missing_slice",
-            label="Interpolation Previews",
+            _label="Interpolation Previews",
             max_width=max_thumb_width,
         )
         html += gallery
@@ -1784,7 +1784,7 @@ def generate_html_report(
                 # In zip mode images are referenced via relative paths; in embed mode as data URIs
                 cat_key = f"diag_{diag_key}"
                 gallery = render_image_gallery_html(
-                    diag_images, mode=image_mode, category=cat_key, label=f"{label} Images", max_width=max_thumb_width
+                    diag_images, mode=image_mode, category=cat_key, _label=f"{label} Images", max_width=max_thumb_width
                 )
                 html += gallery
 

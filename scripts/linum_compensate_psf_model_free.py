@@ -69,6 +69,7 @@ def main() -> None:
     profile = np.mean(profile, axis=-1)
 
     # TODO: Prevent this from happening (happens when the profile is all 0s).
+    background = 0.0
     try:
         profile = np.clip(profile, np.min(profile[profile > 0.0]), None)
 

@@ -116,7 +116,7 @@ def compute_cumulative_rotation(angles: Any) -> Any:
 
 def detect_rotation_patterns(_angles: Any, angular_velocity: Any) -> Any:
     """Detect different rotation patterns in the data."""
-    patterns = {
+    patterns: dict[str, Any] = {
         "systematic_drift": False,
         "oscillation": False,
         "sudden_jumps": [],
@@ -144,7 +144,7 @@ def detect_rotation_patterns(_angles: Any, angular_velocity: Any) -> Any:
     return patterns
 
 
-def load_registration_rotations(reg_dir: str | Path) -> None:
+def load_registration_rotations(reg_dir: str | Path) -> pd.DataFrame | None:
     """Load rotation values from pairwise registration metrics."""
     import re
 
@@ -189,7 +189,7 @@ def load_registration_rotations(reg_dir: str | Path) -> None:
     return None
 
 
-def analyze_acquisition_rotation(df: Any, expected_angle: Any = None) -> None:
+def analyze_acquisition_rotation(df: Any, expected_angle: Any = None) -> tuple[Any, Any, Any, Any]:
     """Analyze rotation from acquisition shifts.
 
     Note: The shift vectors represent relative displacement between slices,
@@ -266,8 +266,9 @@ def analyze_acquisition_rotation(df: Any, expected_angle: Any = None) -> None:
     return analysis, angles, angular_velocity_smooth, cumulative_rotation
 
 
-def generate_report(analysis: Any, reg_comparison: Any, output_dir: str | Path) -> None:
+def generate_report(analysis: Any, reg_comparison: Any, output_dir: str | Path) -> Path:
     """Generate text report."""
+    output_dir = Path(output_dir)
     lines = [
         "=" * 70,
         "ACQUISITION ROTATION ANALYSIS",
@@ -378,8 +379,9 @@ def generate_report(analysis: Any, reg_comparison: Any, output_dir: str | Path) 
 
 def generate_plots(
     df: Any, angles: Any, angular_velocity: Any, cumulative_rotation: Any, reg_df: Any, output_dir: str | Path
-) -> None:
+) -> Path:
     """Generate visualization plots."""
+    output_dir = Path(output_dir)
     _fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
     slice_ids = df["moving_id"].values
@@ -391,7 +393,7 @@ def generate_plots(
     norm_x = df["x_shift_mm"] / magnitudes.max()
     norm_y = df["y_shift_mm"] / magnitudes.max()
 
-    colors = plt.cm.viridis(np.linspace(0, 1, len(df)))
+    colors = plt.colormaps["viridis"](np.linspace(0, 1, len(df)))
     for i in range(len(df)):
         ax1.arrow(
             0, 0, norm_x.iloc[i], norm_y.iloc[i], head_width=0.02, head_length=0.01, fc=colors[i], ec=colors[i], alpha=0.7
@@ -465,7 +467,7 @@ def generate_plots(
     return plot_path
 
 
-def compare_with_registration(cumulative_rotation: Any, reg_df: Any, slice_ids: Any) -> dict:
+def compare_with_registration(cumulative_rotation: Any, reg_df: Any, slice_ids: Any) -> dict | None:
     """Compare acquisition rotation with registration rotation."""
     if reg_df is None or len(reg_df) == 0:
         return None

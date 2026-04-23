@@ -13,6 +13,7 @@ import linumpy.config.threads  # noqa: F401
 
 import argparse
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -159,7 +160,7 @@ def create_registration_progress_callback(
     pbar: tqdm | None = None,
     registration_start_step: int = 0,
     registration_steps: int = 0,
-) -> None:
+) -> Callable:
     """
     Create a progress callback for registration.
 
@@ -187,7 +188,7 @@ def create_registration_progress_callback(
     # Worst-case budget (used only as the denominator for the progress bar).
     estimated_total = float(max_iterations * n_resolution_levels)
 
-    def callback(method: str) -> None:
+    def callback(method: Any) -> None:
         """Update progress during registration iterations."""
         iteration = method.GetOptimizerIteration()
         metric = method.GetMetricValue()
@@ -495,6 +496,8 @@ def apply_transform_to_zarr(
     vol_zarr, level0_resolution = read_omezarr(input_path, level=0)
     if chunks is None:
         chunks = getattr(vol_zarr, "chunks", None)
+    if chunks is None:
+        chunks = (128,) * len(vol_zarr.shape)  # ty: ignore[unresolved-attribute]
 
     vol = np.asarray(vol_zarr[:])
     original_dtype = vol.dtype
@@ -546,7 +549,11 @@ def apply_transform_to_zarr(
 
     # Write output
     writer = AnalysisOmeZarrWriter(
-        output_path, shape=transformed.shape, chunk_shape=chunks, dtype=transformed.dtype, overwrite=True
+        output_path,
+        shape=transformed.shape,
+        chunk_shape=chunks,
+        dtype=transformed.dtype,
+        overwrite=True,
     )
     writer[:] = transformed
 

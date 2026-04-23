@@ -64,7 +64,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def check_folders(parser: Any, folder: str | Path) -> None:
+def check_folders(parser: Any, folder: str | Path) -> list:
     """
     Check if the folder contains tiff files or subfolders with tiff files.
 
@@ -109,7 +109,7 @@ def check_folders(parser: Any, folder: str | Path) -> None:
     return tiff_files
 
 
-def process_volume(mosaic: Any, vol: Any, index_z: Any, tile_size: int | None = None) -> None:
+def process_volume(mosaic: Any, vol: Any, index_z: Any, tile_size: list | None = None) -> None:
     """
     Process a volume and add it to the mosaic.
 

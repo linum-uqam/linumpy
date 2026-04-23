@@ -272,7 +272,7 @@ def main() -> None:
         print(f"Excluding first {args.exclude_first} slice(s) as calibration: {first_slices}")
 
     print(f"\nLoading slices (pyramid_level={args.pyramid_level})...")
-    volumes: dict[int, np.ndarray] = {}
+    volumes: dict[int, np.ndarray | None] = {}
     for slice_id in tqdm(slice_ids, desc="Loading slices"):
         try:
             vol, _ = read_omezarr(mosaic_files[slice_id], level=args.pyramid_level)
@@ -320,7 +320,7 @@ def main() -> None:
     else:
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        def _assess_one(idx_and_id: int) -> Any:
+        def _assess_one(idx_and_id: tuple) -> Any:
             i, slice_id = idx_and_id
             vol = volumes.get(slice_id)
             if vol is None:

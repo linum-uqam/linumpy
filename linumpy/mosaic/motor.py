@@ -681,7 +681,9 @@ def apply_blend_shift_refinement(tile: np.ndarray, refinements_for_tile: list) -
     return shifted
 
 
-def compare_motor_vs_registration(motor_positions: list, reg_positions: list, output_path: str | None = None) -> dict:
+def compare_motor_vs_registration(
+    motor_positions: list | tuple, reg_positions: list | tuple, output_path: str | None = None
+) -> dict:
     """Compare motor-based positions with registration-based positions.
 
     Used diagnostically to identify stage calibration issues (systematic offset,

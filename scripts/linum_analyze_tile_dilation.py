@@ -36,17 +36,17 @@ logger = logging.getLogger(__name__)
 class NumpyEncoder(json.JSONEncoder):
     """JSON encoder that handles numpy types."""
 
-    def default(self, obj: Any) -> Any:
+    def default(self, o: Any) -> Any:
         """Run function."""
-        if isinstance(obj, np.integer):
-            return int(obj)
-        elif isinstance(obj, np.floating):
-            return float(obj)
-        elif isinstance(obj, np.bool_):
-            return bool(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        return super().default(obj)
+        if isinstance(o, np.integer):
+            return int(o)
+        elif isinstance(o, np.floating):
+            return float(o)
+        elif isinstance(o, np.bool_):
+            return bool(o)
+        elif isinstance(o, np.ndarray):
+            return o.tolist()
+        return super().default(o)
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -162,7 +162,7 @@ def generate_report(
     distortions: Any,
     output_dir: str | Path,
     slice_id: int | None = None,
-) -> None:
+) -> Path:
     """Generate text report."""
     slice_label = f" (Slice {slice_id})" if slice_id else ""
 
@@ -236,7 +236,7 @@ def generate_report(
         ]
     )
 
-    report_path = output_dir / "dilation_analysis.txt"
+    report_path = Path(output_dir) / "dilation_analysis.txt"
     with Path(report_path).open("w") as f:
         f.write("\n".join(lines))
 
@@ -252,7 +252,7 @@ def generate_plots(
     ny: Any,
     output_dir: str | Path,
     slice_id: int | None = None,
-) -> None:
+) -> Path:
     """Generate visualization plots."""
     fig, axes = plt.subplots(2, 2, figsize=(14, 12))
 
@@ -303,7 +303,7 @@ def generate_plots(
     fig.suptitle(f"Tile Dilation Analysis{slice_label}", fontsize=14)
     plt.tight_layout()
 
-    plot_path = output_dir / "dilation_analysis.png"
+    plot_path = Path(output_dir) / "dilation_analysis.png"
     plt.savefig(plot_path, dpi=150)
     plt.close()
 

@@ -252,8 +252,9 @@ def analyze_translation_rotation_correlation(df: Any) -> dict:
     }
 
 
-def generate_report(df: Any, analysis: Any, correlation: Any, output_dir: str | Path) -> None:
+def generate_report(df: Any, analysis: Any, correlation: Any, output_dir: str | Path) -> Path:
     """Generate text report."""
+    output_dir = Path(output_dir)
     lines = [
         "=" * 70,
         "REGISTRATION TRANSFORM ANALYSIS",
@@ -342,8 +343,9 @@ def generate_report(df: Any, analysis: Any, correlation: Any, output_dir: str | 
     return report_path
 
 
-def generate_plots(df: Any, output_dir: str | Path) -> None:
+def generate_plots(df: Any, output_dir: str | Path) -> Path:
     """Generate visualization plots."""
+    output_dir = Path(output_dir)
     _fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
     # 1. Per-slice rotation

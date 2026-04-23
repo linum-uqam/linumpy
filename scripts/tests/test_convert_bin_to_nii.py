@@ -11,5 +11,5 @@ def test_help(script_runner):
 
 def test_execution(script_runner):
     input = get_data("raw_tiles")
-    ret = script_runner.run(["linum_convert_bin_to_nii.py", str(Path(input) / "tile_x00_y00_z00"), "output.nii.gz"])
+    ret = script_runner.run(["linum_convert_bin_to_nii.py", str(Path(input) / "tile_x00_y00_z00"), "output.nii.gz"])  # ty: ignore[invalid-argument-type]
     assert ret.success

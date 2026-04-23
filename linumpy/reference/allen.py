@@ -1,6 +1,6 @@
 """Methods to download data from the Allen Institute."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +12,7 @@ from tqdm import tqdm
 AVAILABLE_RESOLUTIONS = [10, 25, 50, 100]
 
 
-def numpy_to_sitk_image(volume: np.ndarray, spacing: tuple, cast_dtype: type | None = None) -> sitk.Image:
+def numpy_to_sitk_image(volume: np.ndarray, spacing: tuple | Sequence, cast_dtype: type | None = None) -> sitk.Image:
     """Convert numpy array (Z, Y, X) to SimpleITK image format.
 
     Parameters

@@ -31,7 +31,9 @@ from linumpy.io.zarr import read_omezarr
 
 def _get_pyramid_info(zarr_path: Path) -> list[dict]:
     """Return metadata for every pyramid level without loading data."""
-    reader = Reader(parse_url(str(zarr_path)))
+    parsed = parse_url(str(zarr_path))
+    assert parsed is not None
+    reader = Reader(parsed)
     nodes = list(reader())
     image_node = nodes[0]
 
@@ -45,6 +47,7 @@ def _get_pyramid_info(zarr_path: Path) -> list[dict]:
     n_levels = len(coord_transforms_list)
 
     levels = []
+    assert multiscale is not None
     for i in range(n_levels):
         scale = None
         for tr in coord_transforms_list[i]:

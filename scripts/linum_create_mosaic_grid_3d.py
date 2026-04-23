@@ -136,6 +136,7 @@ def load_single_tile(params: dict) -> tuple:
         else:
             oct.load()
             vol = oct.second_polarization
+        assert vol is not None
         vol = ThorOCT.orient_volume_psoct(vol)
     else:
         raise ValueError(f"Unknown data type: {data_type}")
@@ -177,6 +178,7 @@ def _resize_and_write_shard(proc_params: dict, loaded_tiles: list) -> None:
     my_min = min(p["tile_pos"][1] for p in tiles_params)
 
     vol = None
+    tile_size: list | tuple = []
     for params, vol in loaded_tiles:
         mx, my = params["tile_pos"]
         tile_size = params["tile_size"]
@@ -196,6 +198,7 @@ def _resize_and_write_shard(proc_params: dict, loaded_tiles: list) -> None:
 
         shard[0 : tile_size[0], rmin:rmax, cmin:cmax] = vol
 
+    assert vol is not None
     mx_min *= vol.shape[1]
     my_min *= vol.shape[2]
     output_extent_x = min(shard_shape[1], mosaic.shape[1] - mx_min)
@@ -276,6 +279,13 @@ def main() -> None:
     psoct_config.erase_polarization_2 = not psoct_config.erase_polarization_1
     psoct_config.return_complex = args.return_complex
 
+    tiles: list = []
+    tiles_pos: list = []
+    tiles_directory: Path | None = None
+    resolution: list = []
+    n_extra: int = 0
+    vol: np.ndarray | None = None
+
     if data_type == "OCT":
         if args.from_root_directory:
             z = args.slice
@@ -287,6 +297,7 @@ def main() -> None:
             tiles = [Path(d) for d in args.from_tiles_list]
             tiles_pos = reconstruction.get_tiles_ids_from_list(tiles)
     elif data_type == "PSOCT":
+        assert tiles_directory is not None
         tiles, tiles_pos = ThorOCT.get_psoct_tiles_ids(tiles_directory, number_of_angles=args.number_of_angles)
         tiles = tiles[angle_index]
 
@@ -304,6 +315,7 @@ def main() -> None:
         else:
             oct.load()
             vol = oct.second_polarization
+        assert vol is not None
         vol = ThorOCT.orient_volume_psoct(vol)
         resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
         n_extra = 0
@@ -311,7 +323,7 @@ def main() -> None:
 
     galvo_shift = 0
     if fix_galvo_shift and data_type == "OCT" and n_extra > 0:
-        from linumpy.geometry.interface import detect_galvo_for_slice
+        from linumpy.geometry.interface import detect_galvo_for_slice  # ty: ignore[unresolved-import]
 
         print(f"Running galvo detection on {len(tiles)} tiles with threshold={galvo_threshold}")
         galvo_shift, confidence = detect_galvo_for_slice(
@@ -326,6 +338,7 @@ def main() -> None:
     pos_xy = pos_xy - np.min(pos_xy, axis=0)
     nb_tiles_xy = np.max(pos_xy, axis=0) + 1
 
+    assert vol is not None
     if output_resolution == -1:
         tile_size = vol.shape
         output_resolution = resolution

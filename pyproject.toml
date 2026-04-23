@@ -183,6 +183,7 @@ include = ["linumpy*", "scripts*"]
 target-version = "py312"
 line-length = 127
 fix = true
+include = ["linumpy*", "scripts*"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "RUF", "SIM", "C4", "PIE", "PTH", 
@@ -208,6 +209,8 @@ convention = "numpy"
 "scripts/linum_normalize_z_intensity.py" = ["E402"]
 # Star imports are intentional re-exports in __init__.py
 "linumpy/io/__init__.py" = ["F403"]
+# py.typed is a PEP 561 marker file — not a module requiring a docstring
+"linumpy/py.typed" = ["D100"]
 # Scientific code uses uppercase variable names (I, N, C, A, T, Q, etc.)
 # by mathematical convention; renaming them would reduce legibility.
 "linumpy/intensity/*.py" = ["N803", "N806", "N802", "E741", "E501"]

@@ -29,11 +29,11 @@ from linumpy.cli.args import add_overwrite_arg
 from linumpy.io.zarr import read_omezarr
 from linumpy.metrics import collect_pairwise_registration_metrics
 from linumpy.registration.transforms import (
-    centre_of_mass_offset,
+    centre_of_mass_offset,  # ty: ignore[unresolved-import]
     create_transform,
-    find_best_z,
-    gradient_magnitude_alignment,
-    register_refinement,
+    find_best_z,  # ty: ignore[unresolved-import]
+    gradient_magnitude_alignment,  # ty: ignore[unresolved-import]
+    register_refinement,  # ty: ignore[unresolved-import]
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")

@@ -148,7 +148,7 @@ def main() -> None:
             pos[0] -= posx_min
             pos[1] -= posy_min
 
-            add_volume_to_mosaic(tile, pos, writer, blendingMethod=args.blending_method)
+            add_volume_to_mosaic(tile, pos, writer, blending_method=args.blending_method)
 
     writer.finalize(resolution)
 

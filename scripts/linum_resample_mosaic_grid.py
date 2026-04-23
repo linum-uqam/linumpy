@@ -59,8 +59,8 @@ def rescale(image: Any, scale: float, order: int = 1, use_gpu: bool = True) -> A
     np.ndarray
         Rescaled image.
     """
-    scale = tuple([scale] * image.ndim) if np.isscalar(scale) else tuple(scale)
-    output_shape = tuple(round(s * sc) for s, sc in zip(image.shape, scale, strict=False))
+    scale_tuple = tuple([scale] * image.ndim) if np.isscalar(scale) else tuple(scale)  # ty: ignore[invalid-argument-type]
+    output_shape = tuple(round(s * sc) for s, sc in zip(image.shape, scale_tuple, strict=False))
     return resize(image, output_shape, order=order, anti_aliasing=True, use_gpu=use_gpu)
 
 
@@ -115,7 +115,7 @@ def _run_pipelined(
             ] = resampled
 
             if cupy_available and k % 10 == 9:
-                cp.get_default_memory_pool().free_all_blocks()
+                cp.get_default_memory_pool().free_all_blocks()  # ty: ignore[possibly-unresolved-reference]
 
 
 def main() -> None:

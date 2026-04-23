@@ -276,6 +276,7 @@ def main() -> None:
     galvo_results = None
     if args.detect_galvo:
         print(f"\nRunning galvo shift detection (threshold={args.galvo_threshold})...")
+        assert tiles_dir is not None
         galvo_results = detect_galvo_for_slices(tiles_dir, slice_ids, args.galvo_threshold)
 
         # Print summary

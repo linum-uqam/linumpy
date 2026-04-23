@@ -127,7 +127,7 @@ def main() -> None:
         tile_shape = list(img.chunks[-2:])
     elif input_images[0].rstrip("/").endswith(".zarr"):
         img = zarr.open(input_images[0], mode="r")
-        tile_shape = list(img.chunks[-2:])
+        tile_shape = list(img.chunks[-2:])  # ty: ignore[unresolved-attribute]
 
     assert output_transform.name.endswith(".npy"), "output_transform must be a .npy file"
 
@@ -147,8 +147,8 @@ def main() -> None:
         logger.info("  Step X: %.1f px", transform[1, 1])
 
         if img is not None:
-            n_tiles_y = img.shape[-2] // tile_shape[0]
-            n_tiles_x = img.shape[-1] // tile_shape[1]
+            n_tiles_y = img.shape[-2] // tile_shape[0]  # ty: ignore[unresolved-attribute]
+            n_tiles_x = img.shape[-1] // tile_shape[1]  # ty: ignore[unresolved-attribute]
 
     else:
         logger.info("Using image-based registration (phase correlation, GPU=%s)", use_gpu)
@@ -161,10 +161,10 @@ def main() -> None:
                 image = img[:]
             elif file.rstrip("/").endswith(".zarr"):
                 img = zarr.open(str(file), mode="r")
-                image = img[:]
+                image = img[:]  # ty: ignore[invalid-argument-type]
             else:
                 image = sitk.GetArrayFromImage(sitk.ReadImage(str(file)))
-            mosaic = mosaic_grid.MosaicGrid(image, tile_shape=tile_shape, overlap_fraction=args.initial_overlap)
+            mosaic = mosaic_grid.MosaicGrid(image, tile_shape=tile_shape, overlap_fraction=args.initial_overlap)  # ty: ignore[invalid-argument-type]
             mosaics.append(mosaic)
             thresholds.append(threshold_otsu(mosaic.image))
 

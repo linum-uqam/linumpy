@@ -59,7 +59,8 @@ def main() -> None:
     slice_ids = []
     for f in files:
         foo = re.match(pattern, f.name)
-        slice_ids.append(int(foo.groups()[0]))
+        if foo is not None:
+            slice_ids.append(int(foo.groups()[0]))
     n_slices = np.max(slice_ids) - np.min(slice_ids) + 1
 
     if args.xy_shifts is None:
@@ -80,7 +81,7 @@ def main() -> None:
     for i, f in enumerate(files):
         # Get this volume shape
         img = nib.load(f)
-        shape = img.shape
+        shape = img.shape  # ty: ignore[unresolved-attribute]
 
         # Get the cumulative shift
         if i == 0:
@@ -107,7 +108,7 @@ def main() -> None:
 
     # Create the zarr persistent array
     process_sync_file = str(zarr_file).replace(".zarr", ".sync")
-    synchronizer = zarr.ProcessSynchronizer(process_sync_file)
+    synchronizer = zarr.ProcessSynchronizer(process_sync_file)  # ty: ignore[unresolved-attribute]
     mosaic = zarr.open(
         zarr_file, mode="w", shape=volume_shape, dtype=np.float32, chunks=(1, 256, 256), synchronizer=synchronizer
     )
@@ -117,7 +118,7 @@ def main() -> None:
         # Load the slice
         f = files[i]
         z = slice_ids[i]
-        img = nib.load(f).get_fdata()
+        img = nib.load(f).get_fdata()  # ty: ignore[unresolved-attribute]
 
         # Get the shift values for the slice
         if i == 0:
@@ -128,10 +129,10 @@ def main() -> None:
             dy = np.cumsum(dy_list)[i - 1] + y0
 
         # Apply the shift
-        img = apply_xy_shift(img, mosaic[0, :, :], dx, dy)
+        img = apply_xy_shift(img, mosaic[0, :, :], dx, dy)  # ty: ignore[invalid-argument-type]
 
         # Add the slice to the volume
-        mosaic[z, :, :] = img
+        mosaic[z, :, :] = img  # ty: ignore[invalid-assignment]
 
         del img
 

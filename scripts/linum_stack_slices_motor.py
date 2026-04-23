@@ -297,7 +297,7 @@ def load_registration_transforms(
     skip_warning_status: bool = False,
     load_min_zcorr: float = 0.0,
     load_max_rotation: float = 0.0,
-) -> None:
+) -> tuple[dict, dict]:
     """
     Load pairwise registration transforms from directory.
 
