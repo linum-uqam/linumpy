@@ -24,8 +24,8 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "numpy<2.3",
-    "scipy<1.13",
+    "numpy",
+    "scipy",
     "scikit-image",
     "scikit-learn",
     "matplotlib",
@@ -36,14 +36,14 @@ dependencies = [
     "SimpleITK",
     "tqdm",
     "pqdm",
-    "hyperactive<=4.8.0",
+    "hyperactive",
     "basicpy",
     "zarr>=3.0.10",
     "ome-zarr>=0.9.0",
     "napari",
     "napari-ome-zarr",
-    "pynrrd==1.1.3",
-    "numcodecs<0.16",
+    "pynrrd",
+    "numcodecs",
     "threadpoolctl",
     "pandas-stubs~=2.3.3",
 ]
@@ -152,6 +152,15 @@ dev = [
     "pytest-cov>=4.0.0",
     "pytest-console-scripts",
     "pre-commit>=4.5.1",
+]
+
+[tool.uv]
+# basicpy 2.0.0 (latest) pins scipy<1.13, which transitively forces numpy<2.
+# Override that ceiling so we can use modern numpy/scipy. basicpy still works
+# at runtime against newer scipy in our usage.
+override-dependencies = [
+    "scipy",
+    "numpy",
 ]
 
 [tool.pytest.ini_options]
