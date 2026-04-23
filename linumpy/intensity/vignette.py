@@ -9,13 +9,11 @@ def vignette_gauss(pos: list, x0: float, y0: float, sx: float, sy: float, a: flo
     return np.exp(-((pos[0] - x0) ** 2) / (2.0 * sx**2.0) - (pos[1] - y0) ** 2 / (2.0 * sy**2.0)) * a + b
 
 
-
 def vignette_gauss_lin(pos: list, x0: float, y0: float, s: float, a: float, b: float, c: float) -> np.ndarray:
     """Evaluate a Gaussian-linear mixed vignette model."""
     gauss_surf = np.exp(-((pos[0] - x0) ** 2) / (2.0 * s**2.0) - (pos[1] - y0) ** 2 / (2.0 * s**2.0))
     lin_surf = pos[0] * a + pos[1] * b + c
     return gauss_surf * lin_surf
-
 
 
 def vignette_quad(pos: list, a: float, b: float, c: float, d: float, e: float, f: float) -> np.ndarray:
@@ -25,8 +23,9 @@ def vignette_quad(pos: list, a: float, b: float, c: float, d: float, e: float, f
     return a * x + b * y + c * x * y + d * x**2 + e * y**2 + f
 
 
-
-def get_vignette(vol: np.ndarray, return_params: bool = False, mask_z: np.ndarray | None = None, method: str = "gauss") -> dict | np.ndarray:
+def get_vignette(
+    vol: np.ndarray, return_params: bool = False, mask_z: np.ndarray | None = None, method: str = "gauss"
+) -> dict | np.ndarray:
     """Estimate the vignette correction field from a volume."""
     if method == "gauss":
 

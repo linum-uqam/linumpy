@@ -20,7 +20,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_volume", type=Path, help="Full path to the input volume (.nii or .nii.gz)")
     p.add_argument("output_mask", type=Path, help="Full path to the output mask (.nii or .nii.gz)")
-    p.add_argument("--median-size", type=int, default=5, help="Size of the median filter (default=%(default)s)")
+    p.add_argument("--median-size", type=int, default=5, help="Size of the median filter [%(default)s]")
 
     return p
 

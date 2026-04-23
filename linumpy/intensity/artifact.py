@@ -39,7 +39,6 @@ def remove_hf_intensity_artifact(vol: np.ndarray, sigma: int = 5, mask: np.ndarr
     return vol_p.astype(vol.dtype)
 
 
-
 def remove_reflection(vol: np.ndarray, z0: int, radius: int = 3) -> np.ndarray:
     """Remove a specular reflection at a given depth using 3D interpolation."""
     vol_p = np.copy(vol)

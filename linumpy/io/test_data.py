@@ -1,7 +1,6 @@
-"""Utilities for loading test data."""
+"""Helpers for creating and retrieving test data fixtures."""
 
 from pathlib import Path
-from typing import Any
 
 import dask.array as da
 import nibabel as nib
@@ -12,8 +11,12 @@ from linumpy import LINUMPY_HOME
 from linumpy.io.zarr import save_omezarr
 
 
-def get_data(name: str) -> Any:
-    """Return test data for the given key name."""
+def get_data(name: str) -> Path:
+    """Return a test fixture identified by *name*.
+
+    Valid keys: ``'mosaic_3d_omezarr'``, ``'mosaic_3d_nifti'``,
+    ``'raw_tiles'``, ``'aip'``.
+    """
     data = {
         "mosaic_3d_omezarr": _get_mosaic_3d_omezarr,
         "mosaic_3d_nifti": _get_mosaic_3d_nifti,
@@ -26,7 +29,7 @@ def get_data(name: str) -> Any:
 
 
 def _create_linumpy_home_if_not_exists() -> None:
-    Path(LINUMPY_HOME).mkdir(parents=True, exist_ok=True)
+    Path(LINUMPY_HOME).mkdir(exist_ok=True)
 
 
 def _get_mosaic_3d_nifti() -> Path:
@@ -111,7 +114,7 @@ def _get_raw_tiles() -> Path:
     bounds_xy = [(0, 140), ((256 - 140), 256)]
     bounds_z = [(0, 35), ((60 - 35), 60)]
     if not folder.exists():
-        folder.mkdir(parents=True)
+        folder.mkdir()
         data = np.mean(cells3d(), axis=1)  # (order z, y, x)
         for zi, (zmin, zmax) in enumerate(bounds_z):
             for yi, (ymin, ymax) in enumerate(bounds_xy):
@@ -140,6 +143,5 @@ def _get_raw_tiles() -> Path:
                         stage_y_pos,
                         stage_z_pos,
                     )
-                    with (tile_folder / "info.txt").open("w") as f:
-                        f.writelines(info)
+                    (tile_folder / "info.txt").write_text(info)
     return folder

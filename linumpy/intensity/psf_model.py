@@ -53,7 +53,6 @@ def get_average_volume(data: Any, z: int, mask: np.ndarray | None = None, s: int
     return average_vol
 
 
-
 def find_focal_depth(vol: np.ndarray) -> int:
     """Detect the focal plane depth in a volume.
 
@@ -77,8 +76,9 @@ def find_focal_depth(vol: np.ndarray) -> int:
     return int(fz)
 
 
-
-def i_profile_piece_wise_model(z: np.ndarray, I0: float, Imax: float, z0: float, zf: float, s: float, mu: float, k: float) -> np.ndarray:
+def i_profile_piece_wise_model(
+    z: np.ndarray, I0: float, Imax: float, z0: float, zf: float, s: float, mu: float, k: float
+) -> np.ndarray:
     """Evaluate the piece-wise OCT intensity profile model."""
     i_profile = np.zeros(z.shape)
     z1 = z <= z0
@@ -95,7 +95,6 @@ def i_profile_piece_wise_model(z: np.ndarray, I0: float, Imax: float, z0: float,
     i_profile[z3] = Imax * np.exp(-mu * (z[z3] - zf))
 
     return i_profile
-
 
 
 def glm_volume_normalization(vol: np.ndarray, average_vol: np.ndarray) -> np.ndarray:
@@ -135,7 +134,6 @@ def glm_volume_normalization(vol: np.ndarray, average_vol: np.ndarray) -> np.nda
     return vol_p
 
 
-
 def volume_normalization(vol: np.ndarray, average_vol: np.ndarray, epsilon: float = 0.05) -> np.ndarray:
     """Volume intensity normalization.
 
@@ -167,6 +165,7 @@ def volume_normalization(vol: np.ndarray, average_vol: np.ndarray, epsilon: floa
 
 # Defining the radiometric transformation function
 
+
 def T_r(p: np.ndarray, x: int | np.ndarray, y: int | np.ndarray) -> np.ndarray:
     """Radiometric transformation function.
 
@@ -191,6 +190,7 @@ def T_r(p: np.ndarray, x: int | np.ndarray, y: int | np.ndarray) -> np.ndarray:
 
 
 # Defining objective function f_r
+
 
 def f_r(x: np.ndarray, data: Any, z: int, pos: np.ndarray, i_mean: float) -> float:
     """Global radiometric objective function.
@@ -279,8 +279,14 @@ def confocal_psf(z: np.ndarray, zf: float, zR: float, A: float | None = None) ->
     return psf
 
 
-
-def get_slice_resolutions_from_psf(zf: float, zr: float, nz: int = 120, spacing: tuple[float, float, float] = (6.5, 6.5, 6.5), N: int = 512, lam: float = 1.030) -> np.ndarray:
+def get_slice_resolutions_from_psf(
+    zf: float,
+    zr: float,
+    nz: int = 120,
+    spacing: tuple[float, float, float] = (6.5, 6.5, 6.5),
+    N: int = 512,
+    lam: float = 1.030,
+) -> np.ndarray:
     """Compute the lateral resolution at each depth using the confocal PSF model."""
     res = np.zeros((nz,))
     z = np.linspace(0, nz * spacing[2], nz)
@@ -303,7 +309,6 @@ def get_slice_resolutions_from_psf(zf: float, zr: float, nz: int = 120, spacing:
         res[ii] = this_res
 
     return res
-
 
 
 def estimate_psf(
@@ -470,8 +475,14 @@ def estimate_psf(
         return zf, popt_2.x[0], popt_2.x[1]
 
 
-
-def get_3d_psf(vol: np.ndarray, interface: np.ndarray, res: float = 6.5, use_average_rayleigh: bool = False, remove_interface: bool = True, zf: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def get_3d_psf(
+    vol: np.ndarray,
+    interface: np.ndarray,
+    res: float = 6.5,
+    use_average_rayleigh: bool = False,
+    remove_interface: bool = True,
+    zf: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute a 3D PSF from a given uniform volume (e.g. agarose).
 
     Parameters
@@ -562,7 +573,6 @@ def get_3d_psf(vol: np.ndarray, interface: np.ndarray, res: float = 6.5, use_ave
                 psf[ix, iy, :] = confocal_psf(z, zf_map[ix, iy], zr_map[ix, iy], 1.0)
 
     return psf, zf_map, zr_map
-
 
 
 def fit_tissue_confocal_model(

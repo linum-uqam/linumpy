@@ -34,7 +34,6 @@ def eqhist(image: np.ndarray, nbins: int = 32) -> np.ndarray:
     return im_eq
 
 
-
 def normalize(image: np.ndarray, low_thresh: float = 0.0, high_thresh: float = 99.5) -> np.ndarray:
     """Normalize an image using low and high intensity thresholds.
 
@@ -65,6 +64,7 @@ def normalize(image: np.ndarray, low_thresh: float = 0.0, high_thresh: float = 9
 def match_histogram(im1: np.ndarray, im2: np.ndarray, return_transforms: Literal[False] = ...) -> np.ndarray: ...
 @overload
 def match_histogram(im1: np.ndarray, im2: np.ndarray, return_transforms: Literal[True]) -> tuple[Any, Any]: ...
+
 
 def match_histogram(im1: np.ndarray, im2: np.ndarray, return_transforms: bool = False) -> np.ndarray | tuple[Any, Any]:
     """Match im2 and im1 histograms.
@@ -119,7 +119,6 @@ def match_histogram(im1: np.ndarray, im2: np.ndarray, return_transforms: bool = 
         return im2p
 
 
-
 def match_histogram_sequentially(data: Any, preproc_data: Any, abspos: np.ndarray, z: int, overwrite: bool = False) -> None:
     """Match neighbor tiles histograms sequentially.
 
@@ -149,7 +148,6 @@ def match_histogram_sequentially(data: Any, preproc_data: Any, abspos: np.ndarra
             first_vol = False
 
         preproc_data.saveVolume(vol2p, pos2, overwrite)
-
 
 
 def get_smooth_intensity_transition(vol: np.ndarray, slices_start: list[int]) -> np.ndarray:

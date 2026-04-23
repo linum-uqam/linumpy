@@ -17,8 +17,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_image", type=Path, help="Full path to the input nifti volume.")
     p.add_argument("output_image", type=Path, help="Full path to the output volume")
-    p.add_argument("--resolution_xy", type=float, default=3.0, help="Lateral (xy) resolution in micron. (default=%(default)s)")
-    p.add_argument("--resolution_z", type=float, default=3.5, help="Axial (z) resolution in micron. (default=%(default)s)")
+    p.add_argument("--resolution_xy", type=float, default=3.0, help="Lateral (xy) resolution in micron. [%(default)s]")
+    p.add_argument("--resolution_z", type=float, default=3.5, help="Axial (z) resolution in micron. [%(default)s]")
     return p
 
 

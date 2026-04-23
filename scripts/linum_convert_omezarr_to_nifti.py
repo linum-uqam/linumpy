@@ -18,7 +18,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input", type=Path, help="Full path to an OME-ZARR directory")
     p.add_argument("output", type=Path, help="Full path to the output nifti file")
-    p.add_argument("-r", "--resolution", type=float, default=10.0, help="Output resolution in micron (default=%(default)s)")
+    p.add_argument("-r", "--resolution", type=float, default=10.0, help="Output resolution in micron [%(default)s]")
     p.add_argument("-i", "--isotropic", action="store_true", help="Interpolate the volume to isotropic resolution")
     p.add_argument("--save_mm", action="store_true", help="Save nifti header in mm.")
     return p

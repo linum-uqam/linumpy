@@ -20,7 +20,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--normalize",
         action="store_true",
-        help="Normalize the data (default=%(default)s)",
+        help="Normalize the data [%(default)s]",
     )
     return p
 
@@ -46,7 +46,7 @@ def main() -> None:
     # Invert the x and z axis
     vol = np.moveaxis(vol, (0, 1, 2), (2, 1, 0))
 
-    nrrd.write(args.output, vol)
+    nrrd.write(str(args.output), vol)
 
 
 if __name__ == "__main__":

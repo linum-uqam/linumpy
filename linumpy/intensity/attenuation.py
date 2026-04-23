@@ -1,5 +1,7 @@
 """Attenuation estimation and profile recovery models for OCT volumes."""
 
+from linumpy.config.threads import worker_initializer
+
 import itertools
 import multiprocessing
 from typing import Literal, overload
@@ -17,12 +19,15 @@ from scipy.ndimage import (
 from scipy.optimize import minimize
 from skimage.filters import threshold_li
 
+from linumpy.cli.args import get_available_cpus
 from linumpy.geometry.crop import mask_under_interface
 from linumpy.geometry.interface import find_tissue_interface, get_interface_depth_from_mask
 from linumpy.intensity.normalize import eqhist, normalize
 
 
-def get_attenuation_vermeer2013(vol: np.ndarray, dz: float = 6.5e-6, mask: np.ndarray | None = None, C: np.ndarray | int | float | None = None) -> np.ndarray:
+def get_attenuation_vermeer2013(
+    vol: np.ndarray, dz: float = 6.5e-6, mask: np.ndarray | None = None, C: np.ndarray | int | float | None = None
+) -> np.ndarray:
     """Estimates the attenuation coefficient using the Vermeer2013 model.
 
     Parameters
@@ -96,9 +101,16 @@ def get_attenuation_vermeer2013(vol: np.ndarray, dz: float = 6.5e-6, mask: np.nd
     return mu
 
 
-
 def get_extended_attenuation_vermeer2013(
-    vol: np.ndarray, mask: np.ndarray | None = None, k: int = 10, sigma: int = 5, sigma_bottom: int = 3, dz: int = 1, res: float = 6.5, zshift: int = 3, fill_holes: bool = False
+    vol: np.ndarray,
+    mask: np.ndarray | None = None,
+    k: int = 10,
+    sigma: int = 5,
+    sigma_bottom: int = 3,
+    dz: int = 1,
+    res: float = 6.5,
+    zshift: int = 3,
+    fill_holes: bool = False,
 ) -> np.ndarray:
     """Compute the local effective tissue attenuation using the extended Vermeer model.
 
@@ -180,8 +192,9 @@ def get_extended_attenuation_vermeer2013(
     return attn_cropped
 
 
-
-def get_attenuation_faber2004(vol: np.ndarray, mask: np.ndarray | None = None, dz: float = 6.5e-6, N: int = 4) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def get_attenuation_faber2004(
+    vol: np.ndarray, mask: np.ndarray | None = None, dz: float = 6.5e-6, N: int = 4
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Estimates the attenuation coefficient using the Faber2004 model.
 
     Parameters
@@ -257,6 +270,7 @@ def get_attenuation_faber2004(vol: np.ndarray, mask: np.ndarray | None = None, d
 
 # Modele du signal utilisant la PSF confocale et single-scattering photons
 
+
 def oct_signal_faber2004_model(z: np.ndarray, mu_t: float = 1.0, zR: float = 200.0, z0: float = 100.0) -> np.ndarray:
     """Model the oct signal using a single-scattered photons and the confocal PSF.
 
@@ -290,7 +304,6 @@ def oct_signal_faber2004_model(z: np.ndarray, mu_t: float = 1.0, zR: float = 200
     return iz
 
 
-
 def _aline_fit(data: np.ndarray) -> float:
     """Aline fit to extract the attenuation coefficient."""
 
@@ -303,7 +316,6 @@ def _aline_fit(data: np.ndarray) -> float:
     p0 = [1.0, 0.001]  # Initial condition
     popt = minimize(f_attn, p0, args=(aline, z), bounds=((0, None), (0, None)))
     return popt.x[1]
-
 
 
 def split_aline(data: np.ndarray, mask: np.ndarray) -> tuple[list, list]:
@@ -329,10 +341,8 @@ def split_aline(data: np.ndarray, mask: np.ndarray) -> tuple[list, list]:
     return data_list, z_list
 
 
-
 def _split_alines_worker(param: tuple) -> tuple[list, list]:
     return split_aline(param[0], param[1])
-
 
 
 def get_aline_attenuation(vol: np.ndarray, k: int = 1, mask: np.ndarray | None = None) -> np.ndarray:
@@ -374,8 +384,8 @@ def get_aline_attenuation(vol: np.ndarray, k: int = 1, mask: np.ndarray | None =
                 a_lines[ii] = A[M]
 
         # Process each Alines in parallel
-        nproc = multiprocessing.cpu_count()
-        p = multiprocessing.Pool(nproc)
+        nproc = get_available_cpus()
+        p = multiprocessing.Pool(nproc, initializer=worker_initializer)
         result = p.map(_aline_fit, a_lines)
         p.close()
         p.join()
@@ -386,7 +396,6 @@ def get_aline_attenuation(vol: np.ndarray, k: int = 1, mask: np.ndarray | None =
     attn_vol[vol.mean(axis=2) == 0] = 0
 
     return np.squeeze(attn_vol)
-
 
 
 def get_gradient_attenuation(
@@ -434,8 +443,9 @@ def get_gradient_attenuation(
         return attn
 
 
-
-def get_interface_mask(vol: np.ndarray, s: int = 0, mask_tissue: bool = True, mask_water_tissue_interface: bool = True) -> np.ndarray:
+def get_interface_mask(
+    vol: np.ndarray, s: int = 0, mask_tissue: bool = True, mask_water_tissue_interface: bool = True
+) -> np.ndarray:
     """Compute a mask excluding tissue interfaces and boundaries."""
     nx, ny, nz = vol.shape
     mask = np.ones_like(vol).astype(bool)
@@ -481,7 +491,6 @@ def get_interface_mask(vol: np.ndarray, s: int = 0, mask_tissue: bool = True, ma
     return mask
 
 
-
 def find_interface_from_gradient(vol: np.ndarray, f: float = 0.005, remove_smooth: bool = False) -> np.ndarray:
     """Find the tissue-water interface depth map using gradient magnitude."""
     nx, ny = vol.shape[0:2]
@@ -507,11 +516,12 @@ def find_interface_from_gradient(vol: np.ndarray, f: float = 0.005, remove_smoot
     return depths
 
 
-
-def get_heterogeneous_attenuation(vol: np.ndarray, mask: np.ndarray | None = None, fill_holes: bool = False) -> np.ndarray:  # TODO: adapt multiproc to available proc given by mpi4py
+def get_heterogeneous_attenuation(
+    vol: np.ndarray, mask: np.ndarray | None = None, fill_holes: bool = False
+) -> np.ndarray:  # TODO: adapt multiproc to available proc given by mpi4py
     """Compute heterogeneous attenuation coefficients for each A-line segment."""
     nx, ny, nz = vol.shape
-    nproc = multiprocessing.cpu_count()
+    nproc = get_available_cpus()
     if mask is None:  # Compute the mask
         mask = get_interface_mask(vol)
 
@@ -523,7 +533,7 @@ def get_heterogeneous_attenuation(vol: np.ndarray, mask: np.ndarray | None = Non
     n_alines = len(a_lines)
 
     # Process each Alines in parallel
-    p = multiprocessing.Pool(nproc)
+    p = multiprocessing.Pool(nproc, initializer=worker_initializer)
     result = p.map(_split_alines_worker, a_lines_to_split)
     p.close()
     p.join()
@@ -545,12 +555,12 @@ def get_heterogeneous_attenuation(vol: np.ndarray, mask: np.ndarray | None = Non
         z_portions.extend(foo[1])
         portion_idx.extend([idx] * len(foo[0]))
 
-    p = multiprocessing.Pool(nproc)
+    p = multiprocessing.Pool(nproc, initializer=worker_initializer)
     result = p.map(_aline_fit, aline_portions)
     p.close()
     p.join()
 
-    # Reshape attenuation as an Aline list # TODO : Paralléliser cette boucle.
+    # Reshape attenuation as an Aline list  # TODO: Parallelize this loop.
     print("Reshape attenuation as an Aline list")
     aline_attn = [np.zeros((nz,)) for i in range(n_alines)]
     for idx, z, mu in zip(portion_idx, z_portions, result, strict=False):
@@ -585,9 +595,14 @@ def get_heterogeneous_attenuation(vol: np.ndarray, mask: np.ndarray | None = Non
 @overload
 def get_flat_agarose_profile(vol: np.ndarray, return_mask_and_profile: Literal[False] = ...) -> np.ndarray: ...
 @overload
-def get_flat_agarose_profile(vol: np.ndarray, return_mask_and_profile: Literal[True]) -> tuple[np.ndarray, np.ndarray, np.ndarray]: ...
+def get_flat_agarose_profile(
+    vol: np.ndarray, return_mask_and_profile: Literal[True]
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]: ...
 
-def get_flat_agarose_profile(vol: np.ndarray, return_mask_and_profile: bool = False) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray]:
+
+def get_flat_agarose_profile(
+    vol: np.ndarray, return_mask_and_profile: bool = False
+) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Estimate and remove the flat agarose intensity profile from a volume."""
     nx, ny, nz = vol.shape
 
@@ -616,8 +631,9 @@ def get_flat_agarose_profile(vol: np.ndarray, return_mask_and_profile: bool = Fa
         return vol_p
 
 
-
-def get_signal_from_attenuation(attn: np.ndarray, i0: np.ndarray | None = None, nz: int = 120, mask: np.ndarray | None = None, res: float = 1.0) -> np.ndarray:
+def get_signal_from_attenuation(
+    attn: np.ndarray, i0: np.ndarray | None = None, nz: int = 120, mask: np.ndarray | None = None, res: float = 1.0
+) -> np.ndarray:
     """Estimate the signal from the 2D A-Line attenuation map.
 
     Parameters

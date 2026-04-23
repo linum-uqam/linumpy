@@ -60,7 +60,9 @@ def compute_motor_transform(tile_shape: Sequence[int], overlap_fraction: float) 
     return np.array([[step_y, 0.0], [0.0, step_x]])
 
 
-def estimate_mosaic_transform(mosaics: list[Any], max_empty_fraction: float = 0.9, n_samples: int = 512, seed: int | None = None) -> tuple[np.ndarray, np.ndarray, int]:
+def estimate_mosaic_transform(
+    mosaics: list[Any], max_empty_fraction: float = 0.9, n_samples: int = 512, seed: int | None = None
+) -> tuple[np.ndarray, np.ndarray, int]:
     """Estimate the 2x2 mosaic transform from pairwise phase-correlation registration.
 
     For each mosaic, neighbouring tile pairs are registered with
