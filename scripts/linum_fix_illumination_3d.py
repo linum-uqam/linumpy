@@ -1,39 +1,20 @@
 #!/usr/bin/env python3
 """Detect and fix the lateral illumination inhomogeneities for each 3D tile of a mosaic grid.
 
-GPU acceleration is used through JAX/BaSiCPy when available (--use_gpu, default on).
+GPU acceleration is used through BaSiCPy (PyTorch backend) when available (--use_gpu, default on).
 When GPU is not available or --no-use_gpu is passed, BaSiCPy runs on CPU and
 multiple processes (--n_processes) can be used to parallelize over Z-planes.
 """
 
-# linumpy.gpu.cuda_env must be imported before any GPU-aware library
-# (basicpy / torch / jax). ensure_cuda_env() will re-exec the process with
-# the correct LD_LIBRARY_PATH if the pip nvidia paths are not yet set.
+import linumpy.config.threads  # noqa: F401
+
 import os
 from pathlib import Path
-
-from linumpy.gpu.cuda_env import ensure_cuda_env, preload_cuda_libraries
-
-ensure_cuda_env()
-
-# Configure thread limits before numpy/scipy imports
-import linumpy.config.threads  # noqa: F401
 
 # When using multiprocessing with pqdm, we need to limit threads per worker
 # to prevent thread oversubscription.
 if "OMP_NUM_THREADS" not in os.environ:
     os.environ["OMP_NUM_THREADS"] = "1"
-
-# Configure JAX/XLA thread limits for BaSiCPy
-# Must be set BEFORE importing jax/basicpy
-if "XLA_FLAGS" not in os.environ:
-    omp_threads = os.environ.get("OMP_NUM_THREADS", "1")
-    os.environ["XLA_FLAGS"] = f"--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads={omp_threads}"
-
-# Ctypes RTLD_GLOBAL preload as secondary defence (see linumpy.gpu.cuda_env)
-_cuda_available = preload_cuda_libraries()
-if not _cuda_available:
-    print("Warning: CUDA libraries not found, JAX will use CPU fallback")
 
 import argparse
 import tempfile
@@ -65,7 +46,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--use_gpu",
         default=True,
         action=argparse.BooleanOptionalAction,
-        help="Enable JAX GPU acceleration via BaSiCPy.\n"
+        help="Enable GPU acceleration via BaSiCPy (PyTorch backend).\n"
         "When enabled, tiles are processed sequentially (CUDA cannot be\n"
         "forked across processes). When disabled, --n_processes is honoured.\n"
         "[%(default)s]",

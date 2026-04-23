@@ -396,32 +396,19 @@ def print_gpu_status() -> None:
     print("  * = currently selected")
 
 
-# Import CUDA environment setup functions
-from linumpy.gpu.cuda_env import (  # noqa: E402
-    apply_patchelf_fix,
-    check_patchelf_needed,
-    get_cuda12_ld_path,
-    setup_jax_cuda_env,
-)
-
 # Expose key components
 __all__ = [
     "CUPY_AVAILABLE",
     "GPU_AVAILABLE",
     "GPU_DEVICE_NAME",
     "GPU_MEMORY_GB",
-    "apply_patchelf_fix",
-    "check_patchelf_needed",
     "get_array_module",
-    "get_cuda12_ld_path",
     "gpu_info",
     "list_gpus",
     "print_gpu_info",
     "print_gpu_status",
     "select_best_gpu",
     "select_gpu",
-    # CUDA environment setup
-    "setup_jax_cuda_env",
     "to_cpu",
     "to_gpu",
 ]

@@ -20,33 +20,22 @@ Usage:
     linum_benchmark_gpu.py --output benchmark_results.json
 """
 
-# linumpy.gpu.cuda_env must be imported before any GPU-aware library
-# (cupy / torch / jax). ensure_cuda_env() will re-exec the process with
-# the correct LD_LIBRARY_PATH if the pip nvidia paths are not yet set.
-from linumpy.gpu.cuda_env import ensure_cuda_env, preload_cuda_libraries
-
-ensure_cuda_env()
-
 # Configure thread limits before numpy/scipy imports
-import linumpy.config.threads  # noqa: E402, F401
+import linumpy.config.threads  # noqa: F401
 
-import argparse  # noqa: E402
-import contextlib  # noqa: E402
-import json  # noqa: E402
-import sys  # noqa: E402
-import time  # noqa: E402
-from datetime import datetime  # noqa: E402
-from pathlib import Path  # noqa: E402
+import argparse
+import contextlib
+import json
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 
-# Ctypes RTLD_GLOBAL preload as secondary defence (see linumpy.gpu.cuda_env)
-preload_cuda_libraries()
-
-from typing import Any  # noqa: E402
-
-import numpy as np  # noqa: E402
+import numpy as np
 
 # Import GPU module
-from linumpy.gpu import GPU_AVAILABLE, gpu_info, print_gpu_info  # noqa: E402
+from linumpy.gpu import GPU_AVAILABLE, gpu_info, print_gpu_info
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
