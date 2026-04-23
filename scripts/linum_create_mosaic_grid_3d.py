@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Convert 3D OCT tiles to a 3D mosaic grid"""
+"""Convert 3D OCT tiles to a 3D mosaic grid."""
 
 import argparse
 import multiprocessing
@@ -10,16 +10,16 @@ import numpy as np
 from skimage.transform import resize
 from tqdm.auto import tqdm
 
-from linumpy import reconstruction
+from linumpy.cli.args import add_processes_arg, parse_processes_arg
 from linumpy.io.thorlabs import PreprocessingConfig, ThorOCT
 from linumpy.io.zarr import OmeZarrWriter
 from linumpy.microscope.oct import OCT
-from linumpy.utils.io import add_processes_arg, parse_processes_arg
+from linumpy.mosaic import discovery as reconstruction
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("output_zarr", help="Full path to the output zarr file")
+    p.add_argument("output_zarr", type=Path, help="Full path to the output zarr file")
     p.add_argument(
         "--data_type",
         type=str,
@@ -29,8 +29,14 @@ def _build_arg_parser():
     )
     input_g = p.add_argument_group("input")
     input_mutex_g = input_g.add_mutually_exclusive_group(required=True)
-    input_mutex_g.add_argument("--from_root_directory", help="Full path to a directory containing the tiles to process.")
-    input_mutex_g.add_argument("--from_tiles_list", nargs="+", help="List of tiles to assemble (argument --slice is ignored).")
+    input_mutex_g.add_argument(
+        "--from_root_directory", type=Path,
+        help="Full path to a directory containing the tiles to process."
+    )
+    input_mutex_g.add_argument(
+        "--from_tiles_list", type=Path, nargs="+",
+        help="List of tiles to assemble (argument --slice is ignored)."
+    )
     options_g = p.add_argument_group("other options")
     options_g.add_argument(
         "-r", "--resolution", type=float, default=10.0, help="Output isotropic resolution in micron per pixel. [%(default)s]"
@@ -78,8 +84,8 @@ def preprocess_volume(vol: np.ndarray) -> np.ndarray:
     return vol
 
 
-def process_tile(proc_params: dict):
-    """Process a tile and add it to the mosaic"""
+def process_tile(proc_params: dict) -> None:
+    """Process a tile and add it to the mosaic."""
     mosaic = proc_params["mosaic"]
     shard_shape = proc_params["shard_shape"]
     tiles_params = proc_params["params"]
@@ -87,6 +93,9 @@ def process_tile(proc_params: dict):
 
     mx_min = min([p["tile_pos"][0] for p in tiles_params])
     my_min = min([p["tile_pos"][1] for p in tiles_params])
+
+    vol: np.ndarray = np.empty(0)
+    tile_size: list = []
 
     for params in tiles_params:
         f = params["file"]
@@ -107,9 +116,11 @@ def process_tile(proc_params: dict):
             oct = ThorOCT(f, config=psoct_config)
             if psoct_config.erase_polarization_2:
                 oct.load()
+                assert oct.first_polarization is not None
                 vol = oct.first_polarization
             else:
                 oct.load()
+                assert oct.second_polarization is not None
                 vol = oct.second_polarization
             vol = ThorOCT.orient_volume_psoct(vol)
         # Rescale the volume
@@ -139,7 +150,8 @@ def process_tile(proc_params: dict):
     ]
 
 
-def main():
+def main() -> None:
+    """Run the 3D mosaic grid creation script."""
     # Parse arguments
     parser = _build_arg_parser()
     args = parser.parse_args()
@@ -156,11 +168,14 @@ def main():
     psoct_config = PreprocessingConfig()
     psoct_config.crop_first_index = args.crop_first_index
     psoct_config.crop_second_index = args.crop_second_index
-    psoct_config.erase_polarization_1 = not args.polarization == 1
+    psoct_config.erase_polarization_1 = args.polarization != 1
     psoct_config.erase_polarization_2 = not psoct_config.erase_polarization_1
     psoct_config.return_complex = args.return_complex
 
     # Analyze the tiles
+    tiles_directory = args.from_root_directory
+    tiles: list = []
+    tiles_pos: list = []
     if data_type == "OCT":
         if args.from_root_directory:
             z = args.slice
@@ -176,6 +191,8 @@ def main():
         tiles = tiles[angle_index]
 
     # Prepare the mosaic_grid
+    vol: np.ndarray = np.empty(0)
+    resolution: list = []
     if data_type == "OCT":
         oct = OCT(tiles[0], args.axial_resolution)
         vol = oct.load_image(crop=crop)
@@ -185,9 +202,11 @@ def main():
         oct = ThorOCT(tiles[0], config=psoct_config)
         if psoct_config.erase_polarization_2:
             oct.load()
+            assert oct.first_polarization is not None
             vol = oct.first_polarization
         else:
             oct.load()
+            assert oct.second_polarization is not None
             vol = oct.second_polarization
         vol = ThorOCT.orient_volume_psoct(vol)
         resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
@@ -216,9 +235,9 @@ def main():
     # Create the zarr writer
     writer = OmeZarrWriter(
         args.output_zarr,
-        shape=mosaic_shape,
+        shape=tuple(mosaic_shape),
         dtype=np.complex64 if args.return_complex else np.float32,
-        chunk_shape=tile_size,
+        chunk_shape=tuple(tile_size),
         shards=shards,
         overwrite=True,
     )

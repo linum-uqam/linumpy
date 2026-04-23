@@ -3,17 +3,18 @@
 """View a Zarr file with napari."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
+from pathlib import Path
 
 import napari
 import zarr
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_zarr", help="Full path to the Zarr file.")
+    p.add_argument("input_zarr", type=Path, help="Full path to the Zarr file.")
     p.add_argument(
         "-r",
         "--resolution",
@@ -21,13 +22,15 @@ def _build_arg_parser():
         type=float,
         default=[1.0] * 3,
         metavar=("z", "x", "y"),
-        help="Resolution in micrometer in the Z, X, Y order. For an isotropic resolution, provide a single value. (default=%(default)s)",
+        help="Resolution in micrometer in the Z, X, Y order. For an isotropic resolution, provide a single value."
+        " (default=%(default)s)",
     )
 
     return p
 
 
-def main():
+def main() -> None:
+    """Run the zarr viewer script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -40,10 +43,7 @@ def main():
     # Load the volume
     vol = zarr.open(zarr_location, mode="r")
     scales = []
-    if len(resolution) == 1:
-        scales = [resolution[0] * 1e-3] * 3
-    else:
-        scales = [r * 1e-3 for r in resolution]
+    scales = [resolution[0] * 0.001] * 3 if len(resolution) == 1 else [r * 0.001 for r in resolution]
 
     # Prepare the viewer
     viewer = napari.Viewer()

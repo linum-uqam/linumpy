@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-Convert folder of tiff files to omezarr. Expected file structure is:
+Convert folder of tiff files to omezarr.
+
+Expected file structure is:
+
     in_folder/
     ├── z0.tif
     ├── z1.tif
@@ -18,12 +21,11 @@ If there are more than one channel, file structure should be
 """
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import logging
-import os
-from glob import glob
+from pathlib import Path
 
 import dask.array as da
 import numpy as np
@@ -31,16 +33,15 @@ import zarr
 from skimage.transform import resize
 from tifffile import imread
 
+from linumpy.cli.args import add_overwrite_arg, add_verbose_arg
 from linumpy.io.zarr import create_tempstore, save_omezarr
-from linumpy.utils.io import add_overwrite_arg, add_verbose_arg
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
 
     p.add_argument(
-        "in_folder",
-        help="Folder with tiff files."
+        "in_folder", type=Path, help="Folder with tiff files."
         "If you have multiple channels, images have to "
         "be split into different subfolders within in_folder.",
     )
@@ -50,10 +51,9 @@ def _build_arg_parser():
     )
     p.add_argument("--chunks", nargs=3, type=int, help="Chunks of the output zarr file.")
     p.add_argument("--n_levels", type=int, default=5, help="Number of levels in the pyramid. (default=%(default)s)")
-    p.add_argument("out_zarr", help="Output zarr file.")
+    p.add_argument("out_zarr", type=Path, help="Output zarr file.")
     p.add_argument(
-        "--zarr_root",
-        default="/tmp/",
+        "--zarr_root", type=Path, default="/tmp/",
         help="Path to parent directory under which the zarr temporary directory will be created [/tmp/].",
     )
     add_overwrite_arg(p)
@@ -61,7 +61,7 @@ def _build_arg_parser():
     return p
 
 
-def check_folders(parser, folder):
+def check_folders(parser: argparse.ArgumentParser, folder: str) -> list[list[str]] | list[str]:
     """
     Check if the folder contains tiff files or subfolders with tiff files.
 
@@ -79,34 +79,34 @@ def check_folders(parser, folder):
     """
     tiff_files = []
     # check if there are tiff files in the folder
-    if glob(os.path.join(folder, "*.tif")) == []:
+    if list(Path(folder).glob("*.tif")) == []:
         # list subfolders
-        subfolders = [f.path for f in os.scandir(folder) if f.is_dir()]
+        subfolders = [f for f in Path(folder).iterdir() if f.is_dir()]
         if subfolders == []:
             parser.error("No tiff files or subfolder found in the folder.")
         else:
             logging.info("Found subfolders in the folder.")
-            for index, subfolder in enumerate(subfolders):
-                if glob(os.path.join(subfolder, "*.tif")) == []:
+            for _index, subfolder in enumerate(subfolders):
+                if list(subfolder.glob("*.tif")) == []:
                     parser.error("No tiff files found in the subfolder.")
                 else:
-                    tiff_files.append(sorted(glob(os.path.join(subfolder, "*.tif"))))
-    elif len([f.path for f in os.scandir(folder) if f.is_dir()]) != 0:
+                    tiff_files.append(sorted([str(p) for p in subfolder.glob("*.tif")]))
+    elif len([f for f in Path(folder).iterdir() if f.is_dir()]) != 0:
         parser.error("Both tiff files and subfolders found in the folder.")
     else:
-        tiff_files = sorted(glob(os.path.join(folder, "*.tif")))
+        tiff_files = sorted([str(p) for p in Path(folder).glob("*.tif")])
         logging.info("Found tiff files in the folder.")
 
     # check if all subfolders contain the same number of files
     it = iter(tiff_files)
     the_len = len(next(it))
-    if not all(len(l) == the_len for l in it):
+    if not all(len(sublist) == the_len for sublist in it):
         parser.error("Not all subfolders contain the same number of files.")
 
     return tiff_files
 
 
-def process_volume(mosaic, vol, index_z, tile_size=None):
+def process_volume(mosaic: zarr.Array, vol: list[str], index_z: int, tile_size: tuple[int, ...] | None = None) -> None:
     """
     Process a volume and add it to the mosaic.
 
@@ -129,21 +129,25 @@ def process_volume(mosaic, vol, index_z, tile_size=None):
         mosaic[index_c, index_z, :, :] = curr_vol[0, 0, :, :]
 
 
-def main():
+def main() -> None:
+    """Run the TIFF-to-OME-Zarr conversion script."""
     parser = _build_arg_parser()
     args = parser.parse_args()
     logging.getLogger().setLevel(logging.getLevelName(args.verbose))
 
     tiff_files = check_folders(parser, args.in_folder)
-    logging.info(f"Found {len(tiff_files)} channels and {len(tiff_files[0])} slices in z.")
+    logging.info("Found %d channels and %d slices in z.", len(tiff_files), len(tiff_files[0]))
 
     # Get first image to get the resolution
     volume = imread(tiff_files[0][0])
     volume = np.array(volume)
 
-    logging.info(f"Initial shape: {volume.shape[2:]} ")
+    logging.info("Initial shape: %s", volume.shape[2:])
     logging.info(
-        f"Initial resolution: {args.in_dimensions[0]} x {args.in_dimensions[1]} x {args.in_dimensions[2]} um (X, Y, Z)"
+        "Initial resolution: %g x %g x %g um (X, Y, Z)",
+        args.in_dimensions[0],
+        args.in_dimensions[1],
+        args.in_dimensions[2],
     )
 
     if args.resolution:  # Resampling
@@ -154,8 +158,13 @@ def main():
             int(volume.shape[3] * resolution[0] * 1000 / args.resolution),
         ]
         mosaic_shape = [len(tiff_files), len(tiff_files[0]), volume_shape[0], volume_shape[1]]
-        logging.info(f"Output shape: {tuple(mosaic_shape[2:])}")
-        logging.info(f"Output resolution: {args.resolution} x {args.resolution} x {args.in_dimensions[2]} um (X, Y, Z)")
+        logging.info("Output shape: %s", tuple(mosaic_shape[2:]))
+        logging.info(
+            "Output resolution: %g x %g x %g um (X, Y, Z)",
+            args.resolution,
+            args.resolution,
+            args.in_dimensions[2],
+        )
     else:
         logging.info("No resampling.")
         resolution = [args.in_dimensions[2] / 1000, args.in_dimensions[0] / 1000, args.in_dimensions[1] / 1000]
@@ -164,9 +173,10 @@ def main():
 
     zarr_store = create_tempstore(dir=args.zarr_root, suffix=".zarr")
     mosaic = zarr.open(zarr_store, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=[1, 1, 128, 128])
+    assert isinstance(mosaic, zarr.Array)
 
     for index_z in range(len(tiff_files[0])):
-        process_volume(mosaic, [item[index_z] for item in tiff_files], index_z, [1, 1] + mosaic_shape[2:])
+        process_volume(mosaic, [item[index_z] for item in tiff_files], index_z, (1, 1, *mosaic_shape[2:]))
 
     mosaic_dask = da.from_zarr(mosaic)
     save_omezarr(mosaic_dask, args.out_zarr, voxel_size=resolution, chunks=args.chunks, n_levels=args.n_levels)

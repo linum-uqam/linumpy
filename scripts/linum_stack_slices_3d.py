@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Stack 3D mosaics on top of each other in a single 3D volume using the
+Stack 3D mosaics on top of each other in a single 3D volume using the.
+
 transforms from `linum_estimate_transform_pairwise.py`. Expects all 3D
 mosaics to be in the same space (same dimensions for last two axes).
 """
 
 import argparse
-import os
 import re
 from pathlib import Path
 
@@ -17,20 +17,19 @@ from skimage.filters import threshold_otsu
 from tqdm import tqdm
 
 from linumpy.io.zarr import OmeZarrWriter, read_omezarr
-from linumpy.stitching.mosaic_grid import getDiffusionBlendingWeights
-from linumpy.stitching.registration import apply_transform
+from linumpy.mosaic.grid import get_diffusion_blending_weights
+from linumpy.registration.sitk import apply_transform
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("in_mosaics_dir", help="Input mosaics directory in .ome.zarr format.")
+    p.add_argument("in_mosaics_dir", type=Path, help="Input mosaics directory in .ome.zarr format.")
     p.add_argument(
-        "in_transforms_dir",
-        help="Input transforms directory. Each subdirectory should have the\n"
+        "in_transforms_dir", type=Path, help="Input transforms directory. Each subdirectory should have the\n"
         "same name as the corresponding mosaic file (without the .ome.zarr\n"
         "extension) and contain a .mat transform file and .txt offsets file.",
     )
-    p.add_argument("out_stack", help="Output stack in .ome.zarr format.")
+    p.add_argument("out_stack", type=Path, help="Output stack in .ome.zarr format.")
     p.add_argument("--normalize", action="store_true", help="Normalize slices during reconstruction.")
     p.add_argument("--blend", action="store_true", help="Use diffusion method for blending consecutive slices.")
     p.add_argument(
@@ -41,15 +40,17 @@ def _build_arg_parser():
     return p
 
 
-def get_input(mosaics_dir, transforms_dir, parser):
+def get_input(mosaics_dir: Path, transforms_dir: Path, parser: argparse.ArgumentParser) -> tuple:
+    """Load and sort mosaic files and their associated transforms."""
     # get all .ome.zarr files in in_mosaics_dir
     in_mosaics_dir = Path(mosaics_dir)
     in_transforms_dir = Path(transforms_dir)
-    mosaics_files = [p for p in in_mosaics_dir.glob("*.ome.zarr")]
+    mosaics_files = list(in_mosaics_dir.glob("*.ome.zarr"))
     pattern = r".*z(\d+)_.*"
     slice_ids = []
     for f in mosaics_files:
         foo = re.match(pattern, f.name)
+        assert foo is not None
         slice_id = int(foo.groups()[0])
         slice_ids.append(slice_id)
 
@@ -60,12 +61,12 @@ def get_input(mosaics_dir, transforms_dir, parser):
     first_mosaic = mosaics_files[slice_ids_argsort[0]]
     for arg_idx in slice_ids_argsort[1:]:
         f = mosaics_files[arg_idx]
-        current_transform_dirname, ext = os.path.splitext(f.name)
-        while not ext == "":  # remove all trailing extensions
-            current_transform_dirname, ext = os.path.splitext(current_transform_dirname)
+        current_transform_dirname = Path(f.name).stem
+        while Path(current_transform_dirname).suffix != "":  # remove all trailing extensions
+            current_transform_dirname = Path(current_transform_dirname).stem
         current_transform_dir = in_transforms_dir / current_transform_dirname
 
-        if not os.path.exists(current_transform_dir):
+        if not current_transform_dir.exists():
             parser.error(f"Transform {current_transform_dir} not found.")
 
         current_mat_file = list(current_transform_dir.glob("*.mat"))
@@ -82,7 +83,8 @@ def get_input(mosaics_dir, transforms_dir, parser):
     return first_mosaic, mosaics_sorted, transforms, np.array(offsets, dtype=int)
 
 
-def get_agarose_mask(vol):
+def get_agarose_mask(vol: np.ndarray) -> np.ndarray:
+    """Compute a mask identifying agarose voxels from a volume."""
     reference = np.mean(vol, axis=0)
     reference_smooth = gaussian_filter(reference, sigma=1.0)
     threshold = threshold_otsu(reference_smooth[reference > 0])
@@ -92,7 +94,8 @@ def get_agarose_mask(vol):
     return agarose_mask
 
 
-def normalize(vol, percentile_max=99.9):
+def normalize(vol: np.ndarray, percentile_max: float = 99.9) -> np.ndarray:
+    """Normalize volume intensities per slice against agarose background."""
     # voxels in mask are expected to be agarose voxels
     agarose_mask = get_agarose_mask(vol)
 
@@ -115,14 +118,16 @@ def normalize(vol, percentile_max=99.9):
     return vol
 
 
-def get_tissue_mask(vol):
+def get_tissue_mask(vol: np.ndarray) -> np.ndarray:
+    """Compute a tissue mask from a volume using intensity thresholding."""
     vol_smooth = gaussian_filter(vol, sigma=(0.0, 1.0, 1.0))
     mask = vol_smooth > np.percentile(vol_smooth, 10)
 
     return mask
 
 
-def main():
+def main() -> None:
+    """Run the 3D slice stacking script."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 
@@ -139,11 +144,12 @@ def main():
 
     output_vol = OmeZarrWriter(args.out_stack, output_shape, vol.chunks, dtype=vol.dtype)
 
+    vol_np: np.ndarray = np.asarray(vol)
     if args.normalize:
-        vol = normalize(vol)
+        vol_np = normalize(vol_np)
         if args.overlap is not None:
-            vol = vol[: fixed_offsets[0] + args.overlap]
-    output_vol[: vol.shape[0]] = vol[:]
+            vol_np = vol_np[: fixed_offsets[0] + args.overlap]
+    output_vol[: vol_np.shape[0]] = vol_np
 
     # fixed_offsets[0] is where the next moving slice will start
     stack_offset = fixed_offsets[0]
@@ -152,7 +158,7 @@ def main():
     for i in tqdm(range(len(mosaics_sorted)), desc="Apply transforms to volume"):
         vol, res = read_omezarr(mosaics_sorted[i])
         composite_transform = sitk.CompositeTransform(transforms[i::-1])
-        register_vol = apply_transform(vol, composite_transform)
+        register_vol = apply_transform(np.asarray(vol), composite_transform)
 
         # cropping the registered volume to make sure it fits in output_vol
         register_vol = register_vol[: min(register_vol.shape[0], output_shape[0] - stack_offset)]
@@ -172,7 +178,7 @@ def main():
             blending_mask_fixed = get_tissue_mask(output_vol[stack_offset : stack_offset + register_vol.shape[0]])
             blending_mask_moving = get_tissue_mask(register_vol)
 
-            alphas = getDiffusionBlendingWeights(blending_mask_fixed, blending_mask_moving, factor=2)
+            alphas = get_diffusion_blending_weights(blending_mask_fixed, blending_mask_moving, factor=2)
         else:
             alphas = 1
 

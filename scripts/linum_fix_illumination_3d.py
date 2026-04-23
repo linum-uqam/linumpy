@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
 """
-Detect and fix the lateral illumination inhomogeneities for each
+Detect and fix the lateral illumination inhomogeneities for each.
+
 3D tiles of a mosaic grid.
 """
 
@@ -21,16 +22,16 @@ from basicpy import BaSiC
 from pqdm.processes import pqdm
 from tqdm.auto import tqdm
 
+from linumpy.cli.args import add_processes_arg, parse_processes_arg
 from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
-from linumpy.utils.io import add_processes_arg, parse_processes_arg
 
 # TODO: add option to export the flatfields and darkfields
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_zarr", help="Full path to the input zarr file")
-    p.add_argument("output_zarr", help="Full path to the output zarr file")
+    p.add_argument("input_zarr", type=Path, help="Full path to the input zarr file")
+    p.add_argument("output_zarr", type=Path, help="Full path to the output zarr file")
     p.add_argument("--max_iterations", type=int, default=500, help="Maximum number of iterations for BaSiC. [%(default)s]")
     p.add_argument(
         "--percentile_max",
@@ -41,8 +42,8 @@ def _build_arg_parser():
     return p
 
 
-def process_tile(params: dict):
-    """Process a tile and add it to the output mosaic"""
+def process_tile(params: dict) -> tuple[int, Path]:
+    """Process a tile and add it to the output mosaic."""
     file = params["slice_file"]
     z = params["z"]
     tile_shape = params["tile_shape"]
@@ -94,7 +95,7 @@ def process_tile(params: dict):
             # Apply correction and reconstruct complex result with original signs
             tiles_corrected = [
                 (t_real * s_real) + 1j * (t_imag * s_imag)
-                for t_real, t_imag, s_real, s_imag in zip(tiles_real_corr, tiles_imag_corr, sign_real, sign_imag)
+                for t_real, t_imag, s_real, s_imag in zip(tiles_real_corr, tiles_imag_corr, sign_real, sign_imag, strict=False)
             ]
         else:
             # Process normally if tiles are real
@@ -123,7 +124,8 @@ def process_tile(params: dict):
     return z, file_output
 
 
-def main():
+def main() -> None:
+    """Run the 3D illumination correction script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -137,7 +139,7 @@ def main():
     vol, resolution = read_omezarr(input_zarr, level=0)
     p_upper = None
     if args.percentile_max is not None:
-        p_upper = np.percentile(vol[:], args.percentile_max)
+        p_upper = float(da.percentile(da.from_zarr(vol).ravel(), args.percentile_max).compute()[0])
     n_slices = vol.shape[0]
 
     tmp_dir = tempfile.TemporaryDirectory(suffix="_linum_fix_illumination_3d_slices", dir=output_zarr.parent)
