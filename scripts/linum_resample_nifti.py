@@ -16,8 +16,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_volume", type=Path, help="Full path to a nifti volume.")
     p.add_argument(
-        "output_volume", type=Path, default=None,
-        help="Full path to the output nifti volume (must be .nii or .nii.gz)"
+        "output_volume", type=Path, default=None, help="Full path to the output nifti volume (must be .nii or .nii.gz)"
     )
     p.add_argument("resolution", type=float, default=25.0, help="Output resolution in micron (default=%(default)s)")
 

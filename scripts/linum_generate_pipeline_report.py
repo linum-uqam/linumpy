@@ -542,9 +542,11 @@ def discover_interpolation_data(input_dir: Path) -> dict | None:
     post_nccs: list[float] = []
     improvements: list[float] = []
 
-    def _to_float(value: float | None) -> float | None:
+    def _to_float(value: object) -> float | None:
+        if not isinstance(value, (int, float, str, bytes, bytearray)):
+            return None
         try:
-            return float(value)  # ty: ignore[invalid-argument-type]
+            return float(value)
         except (TypeError, ValueError):
             return None
 

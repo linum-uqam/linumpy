@@ -12,6 +12,7 @@ import linumpy.config.threads  # noqa: F401
 import argparse
 import itertools
 import time
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -40,7 +41,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def rescale(image: Any, scale: float, order: int = 1, use_gpu: bool = True) -> Any:
+def rescale(image: Any, scale: float | Sequence[float], order: int = 1, use_gpu: bool = True) -> Any:
     """Rescale an image by a scale factor.
 
     Parameters
@@ -59,7 +60,7 @@ def rescale(image: Any, scale: float, order: int = 1, use_gpu: bool = True) -> A
     np.ndarray
         Rescaled image.
     """
-    scale_tuple = tuple([scale] * image.ndim) if np.isscalar(scale) else tuple(scale)  # ty: ignore[invalid-argument-type]
+    scale_tuple = tuple([float(scale)] * image.ndim) if isinstance(scale, (int, float)) else tuple(scale)
     output_shape = tuple(round(s * sc) for s, sc in zip(image.shape, scale_tuple, strict=False))
     return resize(image, output_shape, order=order, anti_aliasing=True, use_gpu=use_gpu)
 
@@ -89,6 +90,7 @@ def _run_pipelined(
     if not tile_iter:
         return
 
+    cp: Any = None
     cupy_available = False
     if use_gpu:
         try:
@@ -114,8 +116,8 @@ def _run_pipelined(
                 :, i * out_tile_shape[1] : (i + 1) * out_tile_shape[1], j * out_tile_shape[2] : (j + 1) * out_tile_shape[2]
             ] = resampled
 
-            if cupy_available and k % 10 == 9:
-                cp.get_default_memory_pool().free_all_blocks()  # ty: ignore[possibly-unresolved-reference]
+            if cupy_available and cp is not None and k % 10 == 9:
+                cp.get_default_memory_pool().free_all_blocks()
 
 
 def main() -> None:

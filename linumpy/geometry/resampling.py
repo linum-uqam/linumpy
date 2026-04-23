@@ -4,6 +4,7 @@ Mosaic grid resampling utilities.
 Consolidated from linum_resample_mosaic_grid.py.
 """
 
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -25,7 +26,7 @@ def resample_mosaic_grid(
     source_res: tuple | list,
     target_res_um: float,
     n_levels: int = 5,
-    out_path: str | None = None,
+    out_path: Path | None = None,
 ) -> np.ndarray | None:
     """Resample a mosaic grid volume to a target isotropic resolution.
 

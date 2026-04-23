@@ -205,10 +205,6 @@ class SystemDiagnostics:
             print(f"  ⚠️  nvidia-smi error: {e}")
             self.results["gpu"]["available"] = False
 
-        # Check JAX (used by BaSiCPy for fix_illumination)
-        print_subheader("JAX (BaSiCPy backend)")
-        self._check_jax_gpu()
-
         # Check CuPy
         print_subheader("CuPy (GPU Python)")
         self._check_cupy()
@@ -216,122 +212,6 @@ class SystemDiagnostics:
         # Check linumpy GPU module
         print_subheader("Linumpy GPU Module")
         self._check_linumpy_gpu()
-
-    def _check_jax_gpu(self) -> None:
-        """Check JAX GPU in a subprocess with proper CUDA 12 library paths."""
-        try:
-            new_ld_path, cuda12_paths = self._get_cuda12_ld_path(debug=False)
-
-            if cuda12_paths:
-                print(f"  Found {len(cuda12_paths)} CUDA 12 library paths")
-
-            jax_check_code = """
-import sys
-import os
-import ctypes
-
-# Preload CUDA libraries before importing JAX
-ld_path = os.environ.get('LD_LIBRARY_PATH', '')
-paths = [p for p in ld_path.split(':') if p]
-for lib in ['libcudart.so.12', 'libcublas.so.12', 'libcusolver.so.12', 'libnccl.so.2', 'libnvJitLink.so.12']:
-    for path in paths:
-        lib_path = os.path.join(path, lib)
-        if os.path.exists(lib_path):
-            try:
-                ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
-            except:
-                pass
-            break
-
-try:
-    import jax
-    print(f"VERSION:{jax.__version__}")
-    devices = jax.devices()
-    device_strs = [str(d) for d in devices]
-    platforms = [str(d.platform) for d in devices]
-    print(f"DEVICES:{','.join(device_strs)}")
-    print(f"PLATFORMS:{','.join(platforms)}")
-    has_gpu = 'gpu' in platforms or 'cuda' in platforms or any('cuda' in d.lower() for d in device_strs)
-    print(f"HAS_GPU:{has_gpu}")
-except Exception as e:
-    print(f"ERROR:{e}")
-    sys.exit(1)
-"""
-            env = os.environ.copy()
-            env["LD_LIBRARY_PATH"] = new_ld_path
-
-            result = subprocess.run(
-                [sys.executable, "-c", jax_check_code], capture_output=True, text=True, timeout=60, env=env
-            )
-
-            if result.returncode == 0:
-                jax_version = None
-                jax_devices = []
-                jax_has_gpu = False
-
-                for line in result.stdout.strip().split("\n"):
-                    if line.startswith("VERSION:"):
-                        jax_version = line.split(":", 1)[1]
-                    elif line.startswith("DEVICES:"):
-                        jax_devices = line.split(":", 1)[1].split(",") if line.split(":", 1)[1] else []
-                    elif line.startswith("HAS_GPU:"):
-                        jax_has_gpu = line.split(":", 1)[1] == "True"
-
-                print(f"  JAX version: {jax_version}")
-                self.results["gpu"]["jax_version"] = jax_version
-                print(f"  JAX devices: {jax_devices}")
-
-                if jax_has_gpu:
-                    print("  ✅ JAX GPU support is enabled")
-                    self.results["gpu"]["jax_gpu"] = True
-                else:
-                    print("  ⚠️  JAX is using CPU only")
-                    print("     To enable GPU: pip install 'jax[cuda12]<=0.4.23'")
-                    self.results["gpu"]["jax_gpu"] = False
-            else:
-                error_msg = result.stderr or result.stdout or "Unknown error"
-                print("  ⚠️  JAX GPU check failed")
-                self.results["gpu"]["jax_gpu"] = False
-                self._handle_jax_error(error_msg)
-
-        except subprocess.TimeoutExpired:
-            print("  ⚠️  JAX check timed out")
-            self.results["gpu"]["jax_gpu"] = False
-        except Exception as e:
-            print(f"  ⚠️  JAX check error: {e}")
-            self.results["gpu"]["jax_gpu"] = False
-
-    def _handle_jax_error(self, error_msg: str) -> None:
-        """Handle JAX error messages with helpful guidance."""
-        if "libcublas" in error_msg.lower() or "cannot open shared object" in error_msg or "cusolver" in error_msg.lower():
-            print("     CUDA library issue. JAX 0.4.23 requires specific library versions.")
-            print("")
-            print("     Run the fix script:")
-            print("       source scripts/fix_jax_cuda_plugin.sh")
-            print("")
-            print("     This installs pinned nvidia package versions:")
-            print("       nvidia-cusolver-cu12==11.5.4.101  (libcusolver.so.11)")
-            print("       nvidia-cublas-cu12==12.3.4.1     (libcublas.so.12)")
-            print("       nvidia-cudnn-cu12==8.9.7.29      (libcudnn.so.8)")
-            print("       etc.")
-            print("")
-            print("     Then set LD_LIBRARY_PATH - see docs/GPU_ACCELERATION.md")
-            self.results["issues"].append("CUDA library issue - run: source scripts/fix_jax_cuda_plugin.sh")
-        elif "cannot enable executable stack" in error_msg:
-            print("     JAX CUDA plugin blocked by kernel security.")
-            print("     Fix with: sudo apt install patchelf")
-            print("     Then: source scripts/fix_jax_cuda_plugin.sh")
-            self.results["issues"].append("JAX CUDA plugin needs patchelf fix")
-        elif "PJRT_Api not found" in error_msg or "pjrt_plugin" in error_msg.lower():
-            print("     JAX CUDA plugin conflict.")
-            print("     Run: source scripts/fix_jax_cuda_plugin.sh")
-            self.results["issues"].append("JAX CUDA plugin conflict")
-        elif "triton" in error_msg.lower():
-            print("     jax-cuda13-plugin requires newer JAX. Uninstall it:")
-            print("       pip uninstall jax-cuda13-plugin -y")
-            self.results["issues"].append("jax-cuda13-plugin incompatible")
-        else:
-            print(f"     Error: {error_msg[:200]}")
 
     def _check_cupy(self) -> None:
         """Check CuPy GPU support."""
@@ -397,8 +277,6 @@ except Exception as e:
             ("numpy", "numpy"),
             ("scipy", "scipy"),
             ("basicpy", "basicpy"),
-            ("jax", "jax"),
-            ("jaxlib", "jaxlib"),
             ("pqdm", "pqdm"),
             ("dask", "dask"),
             ("zarr", "zarr"),
@@ -481,8 +359,7 @@ except Exception as e:
 
         print_subheader("Notes")
         print(f"  • With {total_cpus} CPU cores, you can run up to {suggested_processes} parallel processes")
-        jax_status = "GPU-enabled" if self.results["gpu"].get("jax_gpu") else "CPU-only"
-        print(f"  • fix_illumination step uses BaSiC algorithm (JAX-based, {jax_status})")
+        print("  • fix_illumination step uses BaSiC algorithm")
         print("  • Each BaSiC process typically uses ~3 CPU threads")
         if total_memory:
             print(f"  • With {total_memory:.0f} GB RAM, memory should not be a bottleneck")
@@ -1209,13 +1086,11 @@ except Exception as e:
         total_cpus = self.results["cpu"]["total_cores"]
         total_memory = self.results["memory"].get("total_gb", 0)
         gpu_available = self.results["gpu"].get("available", False)
-        jax_gpu = self.results["gpu"].get("jax_gpu", False)
         cupy_working = self.results["gpu"].get("cupy_working", False)
 
         print(f"  CPU cores: {total_cpus}")
         print(f"  Total RAM: {total_memory:.1f} GB")
         print(f"  NVIDIA GPU: {'Available' if gpu_available else 'Not available'}")
-        print(f"  JAX GPU (BaSiCPy): {'Enabled' if jax_gpu else 'CPU-only'}")
         print(f"  CuPy GPU (linumpy): {'Working' if cupy_working else 'Not available'}")
 
         return self.results

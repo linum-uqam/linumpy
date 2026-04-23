@@ -134,21 +134,6 @@ def main() -> None:
     output_zarr = Path(args.output_zarr)
     n_cpus = parse_processes_arg(args.n_processes)
 
-    if not args.use_gpu:
-        os.environ["JAX_PLATFORMS"] = "cpu"
-
-    try:
-        import jax  # ty: ignore[unresolved-import]
-
-        devices = jax.devices()
-        has_gpu = any("cuda" in str(d).lower() for d in devices)
-        if has_gpu:
-            print(f"JAX GPU acceleration enabled: {devices}")
-        else:
-            print(f"JAX running on CPU: {devices}")
-    except Exception as e:
-        print(f"JAX device check failed: {e}")
-
     vol, resolution = read_omezarr(input_zarr, level=0)
     p_upper = None
     if args.percentile_max is not None:

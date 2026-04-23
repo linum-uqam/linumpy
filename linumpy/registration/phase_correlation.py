@@ -9,10 +9,16 @@ from linumpy.mosaic.overlap import get_overlap
 
 
 @overload
-def pair_wise_phase_correlation(vol1: np.ndarray, vol2: np.ndarray, n_peaks: int = ..., return_cc: Literal[False] = ...) -> list[int]: ...
+def pair_wise_phase_correlation(
+    vol1: np.ndarray, vol2: np.ndarray, n_peaks: int = ..., return_cc: Literal[False] = ...
+) -> list[int]: ...
 @overload
-def pair_wise_phase_correlation(vol1: np.ndarray, vol2: np.ndarray, n_peaks: int = ..., return_cc: Literal[True] = ...) -> tuple[list[int], float]: ...
-def pair_wise_phase_correlation(vol1: np.ndarray, vol2: np.ndarray, n_peaks: int = 8, return_cc: bool = False) -> list[int] | tuple[list[int], float]:  # TODO: Test for 3D images
+def pair_wise_phase_correlation(
+    vol1: np.ndarray, vol2: np.ndarray, n_peaks: int = ..., return_cc: Literal[True] = ...
+) -> tuple[list[int], float]: ...
+def pair_wise_phase_correlation(
+    vol1: np.ndarray, vol2: np.ndarray, n_peaks: int = 8, return_cc: bool = False
+) -> list[int] | tuple[list[int], float]:  # TODO: Test for 3D images
     """Find the translation between image pairs using phase correlation and cross-correlation.
 
     Parameters

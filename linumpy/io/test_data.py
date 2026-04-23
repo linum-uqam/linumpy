@@ -11,7 +11,7 @@ from linumpy import LINUMPY_HOME
 from linumpy.io.zarr import save_omezarr
 
 
-def get_data(name: str) -> object:
+def get_data(name: str) -> Path:
     """Return a test fixture identified by *name*.
 
     Valid keys: ``'mosaic_3d_omezarr'``, ``'mosaic_3d_nifti'``,

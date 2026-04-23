@@ -54,7 +54,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def load_dilation_results(input_dir: str | Path, pattern: str) -> Any:
+def load_dilation_results(input_dir: Path, pattern: str) -> Any:
     """Load all dilation analysis JSON files from directory."""
     input_path = Path(input_dir)
     json_files = sorted(input_path.glob(pattern))
@@ -197,7 +197,7 @@ def compute_per_slice_factors(results: Any, target_scale: float = 1.0) -> Any:
     return per_slice
 
 
-def generate_report(stats: Any, corrections: Any, _per_slice: Any, output_dir: str | Path) -> Path:
+def generate_report(stats: Any, corrections: Any, _per_slice: Any, output_dir: Path) -> Path:
     """Generate text report."""
     lines = [
         "=" * 70,
@@ -303,7 +303,7 @@ def generate_report(stats: Any, corrections: Any, _per_slice: Any, output_dir: s
     return report_path
 
 
-def generate_plots(results: Any, output_dir: str | Path) -> Path:
+def generate_plots(results: Any, output_dir: Path) -> Path:
     """Generate visualization plots."""
     slice_ids = [str(r.get("slice_id", i)) for i, r in enumerate(results)]
     scale_y = [r["scale_factors"]["scale_y"] for r in results]

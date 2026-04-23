@@ -255,8 +255,8 @@ def collect_normalization_metrics(
     agarose_mask: np.ndarray,
     otsu_threshold: float,
     background_thresholds: np.ndarray,
-    output_path: str | Path,
-    input_path: str | None = None,
+    output_path: Path,
+    input_path: Path | None = None,
     params: dict | None = None,
 ) -> PipelineMetrics:
     """
@@ -327,7 +327,7 @@ def collect_xy_transform_metrics(
     tile_pairs_used: int,
     tile_shape: tuple[int, int],
     residuals: np.ndarray,
-    output_path: str | Path,
+    output_path: Path,
     input_paths: list[str] | None = None,
     params: dict | None = None,
     n_tiles_x: int | None = None,
@@ -449,9 +449,9 @@ def collect_pairwise_registration_metrics(
     rotation_deg: float,
     best_z_index: int,
     expected_z_index: int,
-    output_path: str | Path,
-    fixed_path: str | None = None,
-    moving_path: str | None = None,
+    output_path: Path,
+    fixed_path: Path | None = None,
+    moving_path: Path | None = None,
     params: dict | None = None,
     z_correlation: float = 0.0,
 ) -> PipelineMetrics:
@@ -560,8 +560,8 @@ def collect_interface_crop_metrics(
     input_shape: tuple[int, ...],
     output_shape: tuple[int, ...],
     resolution_um: float,
-    output_path: str | Path,
-    input_path: str | None = None,
+    output_path: Path,
+    input_path: Path | None = None,
     padding_needed: bool = False,
 ) -> PipelineMetrics:
     """
@@ -636,8 +636,8 @@ def collect_interface_crop_metrics(
 def collect_psf_compensation_metrics(
     psf: np.ndarray,
     agarose_coverage: float,
-    output_path: str | Path,
-    input_path: str | None = None,
+    output_path: Path,
+    input_path: Path | None = None,
     fit_gaussian: bool = False,
 ) -> PipelineMetrics:
     """
@@ -705,7 +705,7 @@ def collect_stack_metrics(
     z_offsets: np.ndarray,
     num_slices: int,
     resolution: list[float],
-    output_path: str | Path,
+    output_path: Path,
     blend_enabled: bool = False,
     normalize_enabled: bool = False,
 ) -> PipelineMetrics:
@@ -776,8 +776,8 @@ def collect_stitch_3d_metrics(
     output_shape: tuple[int, ...],
     num_tiles: int,
     resolution: list[float],
-    output_path: str | Path,
-    input_path: str | None = None,
+    output_path: Path,
+    input_path: Path | None = None,
     blending_method: str = "diffusion",
 ) -> PipelineMetrics:
     """
@@ -835,7 +835,7 @@ def collect_stitch_3d_metrics(
 # =============================================================================
 
 
-def load_metrics(filepath: str | Path) -> dict:
+def load_metrics(filepath: Path) -> dict:
     """
     Load metrics from a JSON file.
 
@@ -853,7 +853,7 @@ def load_metrics(filepath: str | Path) -> dict:
         return json.load(f)
 
 
-def aggregate_metrics(metrics_dir: str | Path, pattern: str = "*_metrics.json") -> dict[str, list[dict]]:
+def aggregate_metrics(metrics_dir: Path, pattern: str = "*_metrics.json") -> dict[str, list[dict]]:
     """
     Aggregate all metrics files from a directory.
 

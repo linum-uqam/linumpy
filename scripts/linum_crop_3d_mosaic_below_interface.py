@@ -91,30 +91,30 @@ def main() -> None:
     if end_idx > vol.shape[0]:
         out_shape = (end_idx, vol.shape[1], vol.shape[2]) if args.pad_after else vol.shape
         store = create_tempstore()
-        out_vol = zarr.open(store, mode="w", shape=out_shape, dtype=np.float32, chunks=vol.chunks)
-        out_vol[: vol.shape[0]] = vol[:]  # ty: ignore[invalid-assignment]
+        out_vol = zarr.open_array(store, mode="w", shape=out_shape, dtype=np.float32, chunks=vol.chunks)
+        out_vol[: vol.shape[0]] = vol[:]
         vol = out_vol
         start_idx = 0 if not args.crop_before_interface else surface_idx
-        vol_crop = vol[start_idx:end_idx, :, :]  # ty: ignore[invalid-argument-type]
+        vol_crop = np.asarray(vol[start_idx:end_idx, :, :])
     else:
         start_idx = 0 if not args.crop_before_interface else surface_idx
 
-    crop_dask = da.from_array(vol_crop, chunks=vol.chunks)  # ty: ignore[unresolved-attribute]
+    crop_dask = da.from_array(vol_crop, chunks=vol.chunks)
     # Save cropped volume as OME-Zarr
-    save_omezarr(crop_dask, output_path, voxel_size=res, chunks=vol.chunks)  # ty: ignore[unresolved-attribute]
+    save_omezarr(crop_dask, output_path, voxel_size=res, chunks=vol.chunks)
 
     # Collect metrics using helper function
-    original_shape = vol.shape  # ty: ignore[unresolved-attribute]
+    original_shape = vol.shape
     collect_interface_crop_metrics(
         detected_interface=avg_iface,
         crop_depth_px=depth_px,
         start_idx=start_idx,
         end_idx=end_idx,
         input_shape=original_shape,
-        output_shape=vol_crop.shape,  # ty: ignore[unresolved-attribute]
+        output_shape=vol_crop.shape,
         resolution_um=resolution_um,
         output_path=output_path,
-        input_path=str(input_path),
+        input_path=input_path,
         padding_needed=(end_idx > original_shape[0]),
     )
 

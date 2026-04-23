@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Compensate PSF blurring using a parametric model."""
+
 # Configure thread limits before numpy/scipy imports
 import linumpy.config.threads  # noqa: F401
 

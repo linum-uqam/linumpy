@@ -71,8 +71,8 @@ def parse_slice_range(range_str: str) -> Any:
 
 
 def analyze_rotation_drift(
-    pipeline_dir: str | Path,
-    output_dir: str | Path,
+    pipeline_dir: Path,
+    output_dir: Path,
     threshold: float = 2.0,
     slice_ids: Any = None,
 ) -> dict | None:
@@ -174,9 +174,7 @@ def analyze_rotation_drift(
     return result
 
 
-def analyze_shifts(
-    pipeline_dir: str | Path, output_dir: str | Path, resolution: float = 10.0, slice_ids: Any = None
-) -> dict | None:
+def analyze_shifts(pipeline_dir: Path, output_dir: Path, resolution: float = 10.0, slice_ids: Any = None) -> dict | None:
     """Analyze XY shifts from shifts_xy.csv."""
     shifts_path = Path(pipeline_dir) / "shifts_xy.csv"
     if not shifts_path.exists():
@@ -271,7 +269,7 @@ def analyze_shifts(
     return result
 
 
-def generate_summary_report(results: Any, output_dir: str | Path) -> Path:
+def generate_summary_report(results: Any, output_dir: Path) -> Path:
     """Generate comprehensive summary report."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 

@@ -49,7 +49,6 @@ def load_shifts_csv(shifts_path: Path) -> tuple[dict, list]:
     return cumsum, all_ids
 
 
-
 def build_cumulative_shifts(
     shifts_df: pd.DataFrame,
     selected_slice_ids: list,

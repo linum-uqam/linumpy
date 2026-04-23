@@ -85,8 +85,11 @@ def resample_itk(vol: np.ndarray, newshape: Sequence[int] | int, interpolator: s
     return vol_p
 
 
-
-def shrink(vol: np.ndarray, spacing: tuple[float, float, float] = (1.0, 1.0, 1.0), res: tuple[float, float, float] = (10.0, 10.0, 10.0)) -> np.ndarray:
+def shrink(
+    vol: np.ndarray,
+    spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    res: tuple[float, float, float] = (10.0, 10.0, 10.0),
+) -> np.ndarray:
     """Shrink volume up to a given resolution (in each dimension).
 
     Parameters

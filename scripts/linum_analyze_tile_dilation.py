@@ -160,7 +160,7 @@ def generate_report(
     scale_factors: Any,
     residuals: Any,
     distortions: Any,
-    output_dir: str | Path,
+    output_dir: Path,
     slice_id: int | None = None,
 ) -> Path:
     """Generate text report."""
@@ -250,7 +250,7 @@ def generate_plots(
     residuals: Any,
     nx: Any,
     ny: Any,
-    output_dir: str | Path,
+    output_dir: Path,
     slice_id: int | None = None,
 ) -> Path:
     """Generate visualization plots."""
@@ -323,7 +323,7 @@ def main() -> None:
 
     # Load mosaic grid to get tile shape
     logger.info("Loading mosaic grid metadata from %s", input_file)
-    volume, _resolution = read_omezarr(str(input_file), level=0)
+    volume, _resolution = read_omezarr(Path(input_file), level=0)
     tile_shape = volume.chunks
 
     nx = volume.shape[1] // tile_shape[1]

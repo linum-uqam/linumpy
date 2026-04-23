@@ -126,7 +126,7 @@ def main() -> None:
 
         print(f"Extracting level {level} ({tag})  shape {lv['shape']} → {out_path.name}")
 
-        vol, scale_mm = read_omezarr(str(zarr_path), level=level)
+        vol, scale_mm = read_omezarr(zarr_path, level=level)
         data = np.asarray(vol, dtype=np.float32)
 
         # NIfTI spacing is in mm; OME-Zarr scale is already in mm.

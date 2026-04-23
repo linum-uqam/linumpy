@@ -291,7 +291,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def load_registration_transforms(
-    transforms_dir: str | Path,
+    transforms_dir: Path,
     slice_ids: Any,
     skip_error_status: bool = False,
     skip_warning_status: bool = False,
@@ -516,7 +516,7 @@ def main() -> None:
     # Get resolution from first slice
     # NOTE: read_omezarr returns resolution in MILLIMETERS (OME-NGFF standard)
     first_id = available_ids[0]
-    first_vol, first_res = read_omezarr(str(slice_files[first_id]), level=0)
+    first_vol, first_res = read_omezarr(slice_files[first_id], level=0)
     first_vol = np.array(first_vol[:])
 
     # Resolution in mm (from OME-NGFF metadata)
@@ -846,7 +846,7 @@ def main() -> None:
     prev_id = first_id
 
     for _i, slice_id in enumerate(tqdm(available_ids[1:], desc="Z-matching")):
-        vol, _ = read_omezarr(str(slice_files[slice_id]), level=0)
+        vol, _ = read_omezarr(slice_files[slice_id], level=0)
         vol = np.array(vol[:])
         volume_shapes[slice_id] = vol.shape  # Cache shape
 
@@ -1024,7 +1024,7 @@ def main() -> None:
     logger.info("Assembling volume: %s x %s x %s", total_z, out_ny, out_nx)
     output_shape = (total_z, out_ny, out_nx)
 
-    output = AnalysisOmeZarrWriter(str(output_path), output_shape, chunk_shape=(100, 100, 100), dtype=np.float32)
+    output = AnalysisOmeZarrWriter(output_path, output_shape, chunk_shape=(100, 100, 100), dtype=np.float32)
 
     # Place first slice
     first_dx, first_dy = cumsum_px[first_id]
@@ -1046,7 +1046,7 @@ def main() -> None:
         blend_overlap = min(match.get("blend_overlap_voxels", overlap), overlap)
         moving_z_start = match.get("moving_z_start", 0) or 0
 
-        vol, _ = read_omezarr(str(slice_files[slice_id]), level=0)
+        vol, _ = read_omezarr(slice_files[slice_id], level=0)
         vol = np.array(vol[:]).astype(np.float32)
 
         # Skip initial noisy z-slices in moving volume
@@ -1207,7 +1207,7 @@ def main() -> None:
         z_offsets=z_offsets,
         num_slices=len(available_ids),
         resolution=list(first_res),
-        output_path=str(output_path),
+        output_path=output_path,
         blend_enabled=args.blend,
         normalize_enabled=False,
     )

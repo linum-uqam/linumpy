@@ -58,7 +58,7 @@ class CustomScaler(Scaler):
         """
         if isinstance(image, da.Array):
 
-            def _resize(image: da.Array, out_shape: tuple, **kwargs: Any) -> da.Array:  # type: ignore[override]
+            def _resize(image: Any, out_shape: tuple, **kwargs: Any) -> da.Array:  # type: ignore[override]
                 return da_resize(image, out_shape, **kwargs)
 
         else:
@@ -75,13 +75,13 @@ class CustomScaler(Scaler):
         dtype = image.dtype
         if np.iscomplexobj(image):
             image = _resize(
-                image.real.astype(float),  # ty: ignore[invalid-argument-type]
+                image.real.astype(np.float64),
                 out_shape,
                 order=1,
                 mode="reflect",
                 anti_aliasing=False,
             ) + 1j * _resize(
-                image.imag.astype(float),  # ty: ignore[invalid-argument-type]
+                image.imag.astype(np.float64),
                 out_shape,
                 order=1,
                 mode="reflect",
@@ -89,7 +89,7 @@ class CustomScaler(Scaler):
             )
         else:
             image = _resize(
-                image.astype(float),  # ty: ignore[invalid-argument-type]
+                image.astype(np.float64),
                 out_shape,
                 order=1,
                 mode="reflect",
@@ -164,7 +164,7 @@ def generate_axes_dict(ndims: int = 3, unit: str = "millimeter") -> list:
     return axes[offset:]
 
 
-def create_directory(store_path: str | Path, overwrite: bool = False) -> Path:
+def create_directory(store_path: Path, overwrite: bool = False) -> Path:
     """Create directory at *store_path*, optionally removing an existing one."""
     directory = Path(store_path)
     # Check for symlink first: is_symlink() is True even for dangling symlinks,
@@ -212,7 +212,7 @@ def validate_n_levels(n_levels: int, shape: Sequence, downscale_factor: int = 2)
 
 def save_omezarr(
     data: np.ndarray | da.Array,
-    store_path: str | Path,
+    store_path: Path,
     voxel_size: tuple | Sequence = (1e-3, 1e-3, 1e-3),
     chunks: tuple | Sequence = (128, 128, 128),
     n_levels: int = 5,
@@ -273,7 +273,7 @@ def save_omezarr(
     return zarr_group
 
 
-def read_omezarr(zarr_path: str | Path, level: int = 0) -> tuple:
+def read_omezarr(zarr_path: Path, level: int = 0) -> tuple:
     """Read OME-Zarr image at *zarr_path* and return the array and voxel size.
 
     Loads image data for *level* in the pyramid.
@@ -329,7 +329,7 @@ class OmeZarrWriter:
 
     def __init__(
         self,
-        store_path: str | Path,
+        store_path: Path,
         shape: tuple | Sequence,
         chunk_shape: tuple | Sequence,
         shards: tuple | None = None,

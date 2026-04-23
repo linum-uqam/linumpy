@@ -87,7 +87,7 @@ def compute_output_shape(slice_files: Any, cumsum_px: Any, overlap_slices: int =
     total_z = 0
 
     for slice_id, slice_file in slice_files.items():
-        vol, _ = read_omezarr(str(slice_file), level=0)
+        vol, _ = read_omezarr(Path(slice_file), level=0)
         dx, dy = cumsum_px.get(slice_id, (0, 0))
 
         z_depth = vol.shape[0]
@@ -113,7 +113,7 @@ def compute_output_shape(slice_files: Any, cumsum_px: Any, overlap_slices: int =
     return (total_z, ny, nx), (x0, y0)
 
 
-def generate_preview(volume: Any, output_path: str | Path) -> None:
+def generate_preview(volume: Any, output_path: Path) -> None:
     """Generate a preview image of the stacked volume."""
     try:
         import matplotlib.pyplot as plt
@@ -150,7 +150,7 @@ def generate_preview(volume: Any, output_path: str | Path) -> None:
         logger.warning("Could not generate preview: %s", e)
 
 
-def generate_preview_from_slice(slice_2d: Any, output_path: str | Path) -> None:
+def generate_preview_from_slice(slice_2d: Any, output_path: Path) -> None:
     """Generate a preview image from a single 2D slice."""
     try:
         import matplotlib.pyplot as plt
@@ -174,7 +174,7 @@ def generate_preview_from_slice(slice_2d: Any, output_path: str | Path) -> None:
         logger.warning("Could not generate preview: %s", e)
 
 
-def generate_preview_from_zarr(zarr_output: Any, output_path: str | Path) -> Any:
+def generate_preview_from_zarr(zarr_output: Any, output_path: Path) -> Any:
     """Generate a 3-panel preview (XY, XZ, YZ) from a zarr output without loading full volume."""
     try:
         import matplotlib.pyplot as plt
@@ -273,7 +273,7 @@ def main() -> None:
     # Get resolution from first slice
     # NOTE: read_omezarr returns resolution in MILLIMETERS (OME-NGFF standard)
     first_slice_id = sorted(slice_files.keys())[0]
-    _first_vol, first_res = read_omezarr(str(slice_files[first_slice_id]), level=0)
+    _first_vol, first_res = read_omezarr(Path(slice_files[first_slice_id]), level=0)
 
     # Resolution: res is [z, y, x] in mm from OME-NGFF, convert to µm
     res_x_mm = first_res[-1] if len(first_res) >= 3 else first_res[0]
@@ -322,7 +322,7 @@ def main() -> None:
 
     # Use chunked writer to avoid memory issues
     output = AnalysisOmeZarrWriter(
-        str(output_path),
+        Path(output_path),
         output_shape,
         chunk_shape=(min(100, output_shape[0]), min(512, output_shape[1]), min(512, output_shape[2])),
         dtype=np.float32,
@@ -331,7 +331,7 @@ def main() -> None:
     z_cursor = 0
     for i, slice_id in enumerate(available_ids):
         slice_file = slice_files[slice_id]
-        vol, _ = read_omezarr(str(slice_file), level=0)
+        vol, _ = read_omezarr(Path(slice_file), level=0)
         vol_data = np.array(vol[:]).astype(np.float32)
 
         dx, dy = cumsum_px[slice_id]

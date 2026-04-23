@@ -41,7 +41,7 @@ def get_largest_cc(segmentation: np.ndarray) -> np.ndarray:
 DEFAULT_TILE_FILE_PATTERN = r"tile_x(?P<x>\d+)_y(?P<y>\d+)_z(?P<z>\d+)"
 
 
-def get_tiles_ids(directory: str | Path, z: int | None = None) -> tuple:
+def get_tiles_ids(directory: Path, z: int | None = None) -> tuple:
     """Analyze a directory and detect all the tiles it contains."""
     input_directory = Path(directory)
 
@@ -72,7 +72,7 @@ def get_tiles_ids_from_list(tiles_list: list, file_pattern: str = DEFAULT_TILE_F
     return tile_ids
 
 
-def get_mosaic_info(directory: str | Path, z: int, overlap_fraction: float = 0.2, use_stage_positions: bool = False) -> dict:
+def get_mosaic_info(directory: Path, z: int, overlap_fraction: float = 0.2, use_stage_positions: bool = False) -> dict:
     """Return mosaic geometry and tile metadata for a given z-slice."""
     # Get a list of the input tiles
     tiles, _tile_ids = get_tiles_ids(directory, z)
@@ -157,7 +157,7 @@ def get_mosaic_info(directory: str | Path, z: int, overlap_fraction: float = 0.2
 
 
 def quick_stitch(
-    directory: str | Path,
+    directory: Path,
     z: int,
     overlap_fraction: float = 0.2,
     n_rot: int = 3,
@@ -269,13 +269,13 @@ def quick_stitch(
 
 
 def detect_mosaic(
-    directory: str | Path,
+    directory: Path,
     z: int,
     img: np.ndarray | None = None,
     margin: float = 0.5,
     display: bool = False,
-    image_file: str | None = None,
-    roi_file: str | None = None,
+    image_file: Path | None = None,
+    roi_file: Path | None = None,
     keep_largest_island: bool = False,
     stitching_settings: dict | None = None,
 ) -> tuple:
@@ -415,7 +415,7 @@ def detect_mosaic(
     return roi_x_min_margin, roi_x_max_margin, roi_y_min_margin, roi_y_max_margin
 
 
-def save_quickstitch(img: np.ndarray, quickstitch_file: str | Path) -> None:
+def save_quickstitch(img: np.ndarray, quickstitch_file: Path) -> None:
     """Save the quickstitch mosaic to a file, normalizing intensity."""
     filename = Path(quickstitch_file)
     # Normalize the intensity

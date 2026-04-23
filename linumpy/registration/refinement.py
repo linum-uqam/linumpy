@@ -2,6 +2,8 @@
 
 import numpy as np
 import SimpleITK as sitk
+from scipy.ndimage import center_of_mass, sobel
+from skimage.registration import phase_cross_correlation
 
 
 def find_best_z(fixed_vol: np.ndarray, moving_slice: np.ndarray, expected_z: int, search_range: int) -> tuple[int, float]:
@@ -78,6 +80,7 @@ def register_refinement(
     max_translation_px: float = 20.0,
     fixed_mask: np.ndarray | None = None,
     moving_mask: np.ndarray | None = None,
+    initial_offset: tuple[float, float] | None = None,
 ) -> tuple[float, float, float, float]:
     """Compute small rotation and translation refinement using SimpleITK.
 
@@ -93,6 +96,8 @@ def register_refinement(
         Maximum allowed translation in pixels.
     fixed_mask, moving_mask : np.ndarray or None
         Optional tissue masks multiplied into images before registration.
+    initial_offset : tuple[float, float] or None
+        Optional initial (dy, dx) translation offset for the transform.
 
     Returns
     -------
@@ -118,8 +123,12 @@ def register_refinement(
         transform = sitk.Euler2DTransform()
         center = [fixed.shape[1] / 2.0, fixed.shape[0] / 2.0]
         transform.SetCenter(center)
+        if initial_offset is not None:
+            transform.SetTranslation([initial_offset[1], initial_offset[0]])
     else:
         transform = sitk.TranslationTransform(2)
+        if initial_offset is not None:
+            transform.SetOffset([initial_offset[1], initial_offset[0]])
 
     reg = sitk.ImageRegistrationMethod()
     reg.SetMetricAsCorrelation()
@@ -158,3 +167,54 @@ def register_refinement(
 
     except Exception:
         return 0.0, 0.0, 0.0, float("inf")
+
+
+def centre_of_mass_offset(fixed: np.ndarray, moving: np.ndarray) -> tuple[float, float]:
+    """Compute alignment offset using center-of-mass difference.
+
+    Parameters
+    ----------
+    fixed, moving : np.ndarray
+        2D normalized images (values in [0, 1]).
+
+    Returns
+    -------
+    dy, dx : float
+        Translation from moving to fixed (fixed - moving offset).
+    """
+    fixed_binary = fixed > 0.1
+    moving_binary = moving > 0.1
+
+    if not fixed_binary.any() or not moving_binary.any():
+        return 0.0, 0.0
+
+    cy_f, cx_f = center_of_mass(fixed * fixed_binary.astype(np.float32))
+    cy_m, cx_m = center_of_mass(moving * moving_binary.astype(np.float32))
+
+    return float(cy_f - cy_m), float(cx_f - cx_m)
+
+
+def gradient_magnitude_alignment(fixed: np.ndarray, moving: np.ndarray) -> tuple[float, float]:
+    """Compute alignment offset using phase correlation on gradient magnitude images.
+
+    Parameters
+    ----------
+    fixed, moving : np.ndarray
+        2D normalized images (values in [0, 1]).
+
+    Returns
+    -------
+    dy, dx : float
+        Translation from moving to fixed (fixed - moving offset).
+    """
+
+    def grad_mag(img: np.ndarray) -> np.ndarray:
+        gx = sobel(img, axis=1)
+        gy = sobel(img, axis=0)
+        return np.sqrt(gx**2 + gy**2)
+
+    fixed_grad = grad_mag(fixed.astype(np.float32))
+    moving_grad = grad_mag(moving.astype(np.float32))
+
+    shift, _, _ = phase_cross_correlation(fixed_grad, moving_grad, normalization=None, upsample_factor=4)
+    return float(shift[0]), float(shift[1])

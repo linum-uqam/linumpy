@@ -91,7 +91,7 @@ def main() -> None:
 
     # Load the mosaic grid volume
     logger.info("Loading mosaic grid from %s", input_file)
-    volume, resolution = read_omezarr(str(input_file), level=0)
+    volume, resolution = read_omezarr(Path(input_file), level=0)
     tile_shape = volume.chunks
 
     logger.info("Volume shape: %s", volume.shape)
@@ -158,8 +158,8 @@ def main() -> None:
         output_shape=mosaic_shape,
         num_tiles=nx * ny,
         resolution=list(resolution),
-        output_path=str(output_file),
-        input_path=str(input_file),
+        output_path=output_file,
+        input_path=input_file,
         blending_method=args.blending_method,
     )
 

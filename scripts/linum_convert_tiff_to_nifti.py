@@ -14,8 +14,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_folder", type=Path, help="Full path to a folder containing TIFF images")
     p.add_argument(
-        "output_folder", type=Path,
-        help="Full path to the output folder which will contain the nifti (.nii.gz) images"
+        "output_folder", type=Path, help="Full path to the output folder which will contain the nifti (.nii.gz) images"
     )
     return p
 

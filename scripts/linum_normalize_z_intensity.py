@@ -175,7 +175,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 
 
-def save_plot(raw_metrics: Any, smoothed: Any, scale_factors: Any, n_serial_slices: Any, plot_path: str | Path) -> None:
+def save_plot(raw_metrics: Any, smoothed: Any, scale_factors: Any, n_serial_slices: Any, plot_path: Path) -> None:
     """Run function."""
     import matplotlib
 

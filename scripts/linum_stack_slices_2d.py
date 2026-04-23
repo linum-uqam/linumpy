@@ -7,8 +7,8 @@ import linumpy.config.threads  # noqa: F401
 
 import argparse
 import re
-import shutil
 from pathlib import Path
+from typing import cast
 
 import nibabel as nib
 import numpy as np
@@ -81,7 +81,7 @@ def main() -> None:
     for i, f in enumerate(files):
         # Get this volume shape
         img = nib.load(f)
-        shape = img.shape  # ty: ignore[unresolved-attribute]
+        shape = cast("nib.Nifti1Image", img).shape
 
         # Get the cumulative shift
         if i == 0:
@@ -107,18 +107,14 @@ def main() -> None:
     volume_shape = (n_slices, ny, nx)
 
     # Create the zarr persistent array
-    process_sync_file = str(zarr_file).replace(".zarr", ".sync")
-    synchronizer = zarr.ProcessSynchronizer(process_sync_file)  # ty: ignore[unresolved-attribute]
-    mosaic = zarr.open(
-        zarr_file, mode="w", shape=volume_shape, dtype=np.float32, chunks=(1, 256, 256), synchronizer=synchronizer
-    )
+    mosaic = zarr.open_array(zarr_file, mode="w", shape=volume_shape, dtype=np.float32, chunks=(1, 256, 256))
 
     # Loop over the slices
     for i in tqdm(range(len(files)), unit="slice", desc="Stacking slices"):
         # Load the slice
         f = files[i]
         z = slice_ids[i]
-        img = nib.load(f).get_fdata()  # ty: ignore[unresolved-attribute]
+        img = cast("nib.Nifti1Image", nib.load(f)).get_fdata()
 
         # Get the shift values for the slice
         if i == 0:
@@ -129,15 +125,12 @@ def main() -> None:
             dy = np.cumsum(dy_list)[i - 1] + y0
 
         # Apply the shift
-        img = apply_xy_shift(img, mosaic[0, :, :], dx, dy)  # ty: ignore[invalid-argument-type]
+        img = apply_xy_shift(img, np.asarray(mosaic[0, :, :]), int(dx), int(dy))
 
         # Add the slice to the volume
-        mosaic[z, :, :] = img  # ty: ignore[invalid-assignment]
+        mosaic[z, :, :] = img
 
         del img
-
-    # Removing the synchronizer file
-    shutil.rmtree(process_sync_file)
 
 
 if __name__ == "__main__":

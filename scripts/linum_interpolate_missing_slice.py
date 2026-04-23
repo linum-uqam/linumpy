@@ -209,7 +209,7 @@ def generate_preview(
     vol_before: Any,
     vol_after: Any,
     interpolated: Any,
-    output_path: str | Path,
+    output_path: Path,
     preview_slice: Any = None,
     dpi: int = 150,
     failure_reason: str | None = None,
@@ -519,14 +519,16 @@ def main() -> None:
         )
 
     if not failed:
-        final_result = interpolated
+        assert interpolated is not None
+        final_result: np.ndarray = interpolated
         original_dtype = vol_before.dtype
         if np.issubdtype(original_dtype, np.integer):
-            final_result = np.clip(final_result, 0, int(np.iinfo(original_dtype).max))  # ty: ignore[no-matching-overload]
+            imax = int(np.iinfo(original_dtype).max)
+            final_result = np.clip(final_result, 0, imax)
             final_result = final_result.astype(original_dtype)
 
         print(f"Saving interpolated slice to: {output_path}")
-        save_omezarr(da.from_array(final_result), str(output_path), res_before)
+        save_omezarr(da.from_array(final_result), Path(output_path), res_before)
     else:
         print("Skipping zarr output — no fabricated data will enter the reconstruction.")
 

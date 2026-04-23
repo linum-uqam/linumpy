@@ -94,7 +94,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def get_input(mosaics_dir: str | Path, transforms_dir: str | Path, parser: Any) -> Any:
+def get_input(mosaics_dir: Path, transforms_dir: Path, parser: Any) -> Any:
     """Run function."""
     # get all .ome.zarr files in in_mosaics_dir
     in_mosaics_dir = Path(mosaics_dir)

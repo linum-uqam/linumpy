@@ -245,8 +245,8 @@ def _write_metrics(
     delta_rot: float,
     z_correlation: float,
     fixed_z: int,
-    fixed_path: str,
-    moving_path: str,
+    fixed_path: Path,
+    moving_path: Path,
     max_translation_px: float,
     max_rotation_deg: float,
 ) -> None:
@@ -272,8 +272,8 @@ def _write_metrics(
             "delta_rot_deg": delta_rot,
             "max_translation_px": max_translation_px,
             "max_rotation_deg": max_rotation_deg,
-            "fixed_path": fixed_path,
-            "moving_path": moving_path,
+            "fixed_path": str(fixed_path) if fixed_path is not None else None,
+            "moving_path": str(moving_path) if moving_path is not None else None,
             "fixed_z": fixed_z,
         },
     }
@@ -349,8 +349,8 @@ def main() -> None:
             logger.warning("  z%d: offsets.txt missing, using z=0 for both slices", slice_id)
 
         # Load zarr volumes and extract the relevant 2D slices
-        fixed_vol, _res = read_omezarr(str(slice_zarrs[fixed_id]))
-        moving_vol, _res = read_omezarr(str(slice_zarrs[slice_id]))
+        fixed_vol, _res = read_omezarr(slice_zarrs[fixed_id])
+        moving_vol, _res = read_omezarr(slice_zarrs[slice_id])
 
         fixed_z = max(0, min(fixed_z, fixed_vol.shape[0] - 1))
         moving_z = max(0, min(moving_z, moving_vol.shape[0] - 1))
@@ -417,8 +417,8 @@ def main() -> None:
             delta_rot=delta_rot,
             z_correlation=z_correlation,
             fixed_z=fixed_z,
-            fixed_path=str(slice_zarrs[fixed_id]),
-            moving_path=str(slice_zarrs[slice_id]),
+            fixed_path=slice_zarrs[fixed_id],
+            moving_path=slice_zarrs[slice_id],
             max_translation_px=args.max_translation_px,
             max_rotation_deg=args.max_rotation_deg,
         )

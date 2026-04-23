@@ -98,7 +98,7 @@ def _coerce_bool(value: object) -> bool:
     return False
 
 
-def read(path: str | Path) -> OrderedDict[str, dict[str, str]]:
+def read(path: Path) -> OrderedDict[str, dict[str, str]]:
     """Read ``slice_config.csv``; return ``slice_id -> row`` with normalized ids.
 
     Raises :class:`FileNotFoundError` if the file does not exist.
@@ -121,7 +121,7 @@ def read(path: str | Path) -> OrderedDict[str, dict[str, str]]:
     return rows
 
 
-def read_header(path: str | Path) -> list[str]:
+def read_header(path: Path) -> list[str]:
     """Return the header row of ``path`` (empty list if file has no header)."""
     path = Path(path)
     if not path.exists():
@@ -167,7 +167,7 @@ def _build_header(rows: Iterable[Mapping[str, object]], extra_columns: Iterable[
 
 
 def write(
-    path: str | Path,
+    path: Path,
     rows: Iterable[Mapping[str, object]],
     extra_columns: Iterable[str] = (),
 ) -> None:
@@ -197,8 +197,8 @@ def write(
 
 
 def stamp(
-    path_in: str | Path,
-    path_out: str | Path,
+    path_in: Path,
+    path_out: Path,
     slice_id: object,
     **flags: object,
 ) -> None:
@@ -210,8 +210,8 @@ def stamp(
 
 
 def stamp_many(
-    path_in: str | Path,
-    path_out: str | Path,
+    path_in: Path,
+    path_out: Path,
     updates: Mapping[str, Mapping[str, object]],
 ) -> None:
     """Stamp multiple slices at once.
@@ -237,9 +237,9 @@ def stamp_many(
 
 
 def merge_fragments(
-    path_in: str | Path,
-    fragment_paths: Iterable[str | Path],
-    path_out: str | Path,
+    path_in: Path,
+    fragment_paths: Iterable[Path],
+    path_out: Path,
     column_map: Mapping[str, str] | None = None,
 ) -> None:
     """Merge per-slice CSV fragments into ``path_in`` and write to ``path_out``.
@@ -272,7 +272,7 @@ def merge_fragments(
     stamp_many(path_in, path_out, updates)
 
 
-def filter_slices_to_use(path: str | Path) -> set[str]:
+def filter_slices_to_use(path: Path) -> set[str]:
     """Return the set of slice IDs whose ``use`` column is truthy.
 
     When ``slice_config.csv`` is missing this raises :class:`FileNotFoundError`
@@ -293,7 +293,7 @@ def get_flag(row: Mapping[str, object], column: str, default: bool = False) -> b
     return _coerce_bool(value)
 
 
-def is_interpolated(path: str | Path, slice_id: object) -> bool:
+def is_interpolated(path: Path, slice_id: object) -> bool:
     """Return True if ``slice_id`` is flagged as interpolated in ``path``."""
     sid = normalize_slice_id(slice_id)
     rows = read(path)
@@ -303,7 +303,7 @@ def is_interpolated(path: str | Path, slice_id: object) -> bool:
     return get_flag(row, "interpolated")
 
 
-def force_skip_slices(path: str | Path) -> set[str]:
+def force_skip_slices(path: Path) -> set[str]:
     """Return slice IDs that stacking should treat as motor-only (force-skip their pairwise transforms).
 
     A slice is force-skipped when it is explicitly excluded (``use=false``)

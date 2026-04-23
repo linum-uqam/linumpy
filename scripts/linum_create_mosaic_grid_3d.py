@@ -323,7 +323,7 @@ def main() -> None:
 
     galvo_shift = 0
     if fix_galvo_shift and data_type == "OCT" and n_extra > 0:
-        from linumpy.geometry.interface import detect_galvo_for_slice  # ty: ignore[unresolved-import]
+        from linumpy.geometry.galvo import detect_galvo_for_slice
 
         print(f"Running galvo detection on {len(tiles)} tiles with threshold={galvo_threshold}")
         galvo_shift, confidence = detect_galvo_for_slice(

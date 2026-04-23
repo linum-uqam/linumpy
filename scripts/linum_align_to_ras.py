@@ -275,7 +275,7 @@ def sitk_transform_to_affine_matrix(transform: sitk.Transform) -> np.ndarray:
     return permute @ matrix @ permute.T
 
 
-def store_transform_in_metadata(zarr_path: str, transform: sitk.Transform) -> None:
+def store_transform_in_metadata(zarr_path: Path, transform: sitk.Transform) -> None:
     """Store transform in OME-Zarr metadata as affine coordinate transformation."""
     affine_matrix = sitk_transform_to_affine_matrix(transform)
     zattrs_path = Path(zarr_path) / ".zattrs"
@@ -444,8 +444,8 @@ def compute_centered_reference_and_transform(
 
 
 def apply_transform_to_zarr(
-    input_path: str,
-    output_path: str,
+    input_path: Path,
+    output_path: Path,
     transform: sitk.Transform,
     chunks: tuple | None = None,
     n_levels: int | None = None,
@@ -464,9 +464,9 @@ def apply_transform_to_zarr(
 
     Parameters
     ----------
-    input_path : str
+    input_path: Path
         Path to input OME-Zarr
-    output_path : str
+    output_path: Path
         Path to output OME-Zarr
     transform : sitk.Transform
         Transform to apply
@@ -577,7 +577,7 @@ def apply_transform_to_zarr(
 # =============================================================================
 
 
-def create_input_preview(input_path: str, output_path: str, level: int = 0) -> None:
+def create_input_preview(input_path: Path, output_path: Path, level: int = 0) -> None:
     """Create preview of input volume to help determine orientation."""
     vol_zarr, resolution = read_omezarr(input_path, level=level)
     vol = np.asarray(vol_zarr[:])
@@ -646,8 +646,8 @@ Example:
 
 
 def create_alignment_preview(
-    input_path: str,
-    output_path: str | None,
+    input_path: Path,
+    output_path: Path | None,
     transform: sitk.Transform,
     resolution: tuple,
     preview_path: str,
@@ -812,7 +812,7 @@ def create_alignment_preview(
 
 
 def create_orientation_preview(
-    input_path: str,
+    input_path: Path,
     preview_path: str,
     level: int = 0,
     orientation_permutation: tuple | None = None,
@@ -827,7 +827,7 @@ def create_orientation_preview(
 
     Parameters
     ----------
-    input_path : str
+    input_path: Path
         Path to input OME-Zarr.
     preview_path : str
         Output PNG path.
@@ -943,8 +943,8 @@ def main() -> None:
 
     # Preview-only mode
     if args.preview_only:
-        preview_path = args.preview or "input_preview.png"
-        create_input_preview(str(input_path), preview_path, level=args.level)
+        preview_path = Path(args.preview) if args.preview else Path("input_preview.png")
+        create_input_preview(input_path, preview_path, level=args.level)
         return
 
     # Parse orientation
@@ -963,7 +963,7 @@ def main() -> None:
     if args.orientation_preview or args.orientation_preview_only:
         preview_out = args.orientation_preview or "orientation_preview.png"
         create_orientation_preview(
-            str(input_path),
+            input_path,
             preview_out,
             level=args.level,
             orientation_permutation=orientation_permutation,
@@ -974,7 +974,7 @@ def main() -> None:
             return
 
     # Load input volume
-    vol_zarr, zarr_resolution = read_omezarr(str(input_path), level=args.level)
+    vol_zarr, zarr_resolution = read_omezarr(Path(input_path), level=args.level)
     resolution = tuple(zarr_resolution)
 
     # Progress bar - allocate steps for each phase
@@ -1028,12 +1028,12 @@ def main() -> None:
 
     # Apply or store transform
     if args.store_transform_only:
-        store_transform_in_metadata(str(input_path), transform)
+        store_transform_in_metadata(input_path, transform)
         pbar.update(1)
     else:
         apply_transform_to_zarr(
-            str(input_path),
-            str(output_path),
+            input_path,
+            output_path,
             transform,
             chunks=tuple(args.chunks) if args.chunks else None,
             n_levels=args.n_levels,
@@ -1057,8 +1057,8 @@ def main() -> None:
     if args.preview:
         pbar.set_postfix_str("generating preview...")
         create_alignment_preview(
-            str(input_path),
-            str(output_path) if not args.store_transform_only else None,
+            input_path,
+            output_path if not args.store_transform_only else None,
             transform,
             resolution,
             args.preview,

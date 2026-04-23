@@ -33,8 +33,8 @@ def _save_pair(tmp_path, shape=(8, 48, 48), drift_px=1.0):
     after = _make_structured_slice(shape, +drift_px, seed=2)
     slice_before = tmp_path / "slice_z00.ome.zarr"
     slice_after = tmp_path / "slice_z02.ome.zarr"
-    save_omezarr(da.from_array(before), str(slice_before), resolution)
-    save_omezarr(da.from_array(after), str(slice_after), resolution)
+    save_omezarr(da.from_array(before), slice_before, resolution)
+    save_omezarr(da.from_array(after), slice_after, resolution)
     return slice_before, slice_after
 
 
@@ -56,8 +56,8 @@ def test_average_method(script_runner, tmp_path):
     slice_after = tmp_path / "slice_z02.ome.zarr"
     output = tmp_path / "slice_z01_interpolated.ome.zarr"
 
-    save_omezarr(da.from_array(vol_before), str(slice_before), resolution)
-    save_omezarr(da.from_array(vol_after), str(slice_after), resolution)
+    save_omezarr(da.from_array(vol_before), slice_before, resolution)
+    save_omezarr(da.from_array(vol_after), slice_after, resolution)
 
     ret = script_runner.run(
         ["linum_interpolate_missing_slice.py", str(slice_before), str(slice_after), str(output), "--method", "average"]
@@ -127,8 +127,8 @@ def test_zmorph_hard_skips_on_unrelated_volumes(script_runner, tmp_path):
     after = rng.random(shape).astype(np.float32)
     slice_before = tmp_path / "slice_z00.ome.zarr"
     slice_after = tmp_path / "slice_z02.ome.zarr"
-    save_omezarr(da.from_array(before), str(slice_before), resolution)
-    save_omezarr(da.from_array(after), str(slice_after), resolution)
+    save_omezarr(da.from_array(before), slice_before, resolution)
+    save_omezarr(da.from_array(after), slice_after, resolution)
 
     output = tmp_path / "slice_z01_interpolated.ome.zarr"
     diagnostics = tmp_path / "diag.json"

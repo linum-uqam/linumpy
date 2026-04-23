@@ -51,7 +51,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def load_shifts(shifts_path: str | Path) -> Any:
+def load_shifts(shifts_path: Path) -> Any:
     """Load shifts CSV file."""
     df = pd.read_csv(shifts_path)
     required_cols = ["fixed_id", "moving_id", "x_shift_mm", "y_shift_mm"]
@@ -144,7 +144,7 @@ def detect_rotation_patterns(_angles: Any, angular_velocity: Any) -> Any:
     return patterns
 
 
-def load_registration_rotations(reg_dir: str | Path) -> pd.DataFrame | None:
+def load_registration_rotations(reg_dir: Path) -> pd.DataFrame | None:
     """Load rotation values from pairwise registration metrics."""
     import re
 
@@ -266,7 +266,7 @@ def analyze_acquisition_rotation(df: Any, expected_angle: Any = None) -> tuple[A
     return analysis, angles, angular_velocity_smooth, cumulative_rotation
 
 
-def generate_report(analysis: Any, reg_comparison: Any, output_dir: str | Path) -> Path:
+def generate_report(analysis: Any, reg_comparison: Any, output_dir: Path) -> Path:
     """Generate text report."""
     output_dir = Path(output_dir)
     lines = [
@@ -378,7 +378,7 @@ def generate_report(analysis: Any, reg_comparison: Any, output_dir: str | Path) 
 
 
 def generate_plots(
-    df: Any, angles: Any, angular_velocity: Any, cumulative_rotation: Any, reg_df: Any, output_dir: str | Path
+    df: Any, angles: Any, angular_velocity: Any, cumulative_rotation: Any, reg_df: Any, output_dir: Path
 ) -> Path:
     """Generate visualization plots."""
     output_dir = Path(output_dir)

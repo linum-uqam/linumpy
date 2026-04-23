@@ -75,10 +75,10 @@ def test_resample_mosaic_grid_um_source_resolution(tmp_path):
 def test_resample_mosaic_grid_to_file(tmp_path):
     """With out_path, the function writes to disk and returns None."""
     vol = _make_zarr_mosaic(tmp_path, n_tiles_x=1, n_tiles_y=1, tile_shape=(4, 8, 8))
-    out = str(tmp_path / "resampled.ome.zarr")
+    out = tmp_path / "resampled.ome.zarr"
     result = resample_mosaic_grid(vol, source_res=(0.01, 0.01, 0.01), target_res_um=20.0, n_levels=1, out_path=out)
     assert result is None
-    ds = zarr.open(out, mode="r")
+    ds = zarr.open(str(out), mode="r")
     assert ds is not None
 
 

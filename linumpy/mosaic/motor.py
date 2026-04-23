@@ -410,7 +410,7 @@ def pool_pairs_and_fit_global_affine(
     per_slice_stats: list[dict] = []
 
     for slice_id, zarr_path in volumes:
-        vol, _ = read_omezarr(str(zarr_path), level=0)
+        vol, _ = read_omezarr(zarr_path, level=0)
         tile_shape = tuple(vol.chunks)
         if len(tile_shape) != 3:
             logger.warning("slice %s: unexpected chunks %s, skipping", slice_id, tile_shape)

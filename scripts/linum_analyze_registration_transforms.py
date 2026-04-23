@@ -53,7 +53,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def find_registration_dirs(base_path: str | Path) -> Any:
+def find_registration_dirs(base_path: Path) -> Any:
     """Find all pairwise registration directories."""
     base = Path(base_path)
 
@@ -105,7 +105,7 @@ def parse_slice_id(dirname: Any) -> Any:
     return int(match.group(1)) if match else None
 
 
-def load_metrics_from_json(json_path: str | Path) -> dict:
+def load_metrics_from_json(json_path: Path) -> dict:
     """Load registration metrics from JSON file."""
     with Path(json_path).open() as f:
         data = json.load(f)
@@ -123,7 +123,7 @@ def load_metrics_from_json(json_path: str | Path) -> dict:
     }
 
 
-def load_rotation_from_tfm(tfm_path: str | Path) -> Any:
+def load_rotation_from_tfm(tfm_path: Path) -> Any:
     """Extract rotation angle from SimpleITK transform file."""
     import SimpleITK as sitk
 
@@ -252,7 +252,7 @@ def analyze_translation_rotation_correlation(df: Any) -> dict:
     }
 
 
-def generate_report(df: Any, analysis: Any, correlation: Any, output_dir: str | Path) -> Path:
+def generate_report(df: Any, analysis: Any, correlation: Any, output_dir: Path) -> Path:
     """Generate text report."""
     output_dir = Path(output_dir)
     lines = [
@@ -343,7 +343,7 @@ def generate_report(df: Any, analysis: Any, correlation: Any, output_dir: str | 
     return report_path
 
 
-def generate_plots(df: Any, output_dir: str | Path) -> Path:
+def generate_plots(df: Any, output_dir: Path) -> Path:
     """Generate visualization plots."""
     output_dir = Path(output_dir)
     _fig, axes = plt.subplots(2, 2, figsize=(14, 10))

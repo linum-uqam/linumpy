@@ -257,7 +257,7 @@ def _parse_info_txt(path: Path) -> dict:
     return info
 
 
-def analyze_metadata(data_dir: str | Path, axial_res_um: float, n_calibration_slices: int = 1) -> dict:
+def analyze_metadata(data_dir: Path, axial_res_um: float, n_calibration_slices: int = 1) -> dict:
     """
     Extract acquisition parameters from the raw data directory.
 

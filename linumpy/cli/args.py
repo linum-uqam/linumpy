@@ -77,7 +77,7 @@ def add_overwrite_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-f", dest="overwrite", action="store_true", help="Force overwriting of the output files.")
 
 
-def assert_output_exists(output: str | Path, parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+def assert_output_exists(output: Path, parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     """Error out if *output* already exists and overwrite flag is not set."""
     output_path = Path(output)
     if output_path.exists():

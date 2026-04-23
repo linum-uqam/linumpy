@@ -23,7 +23,7 @@ class OCT:
         Axial resolution of the data in microns.
     """
 
-    def __init__(self, directory: str | Path, axial_res: float = 3.5) -> None:
+    def __init__(self, directory: Path, axial_res: float = 3.5) -> None:
         self.directory = Path(directory)
         self.info_filename = self.directory / "info.txt"
         self.info = {}
@@ -32,7 +32,7 @@ class OCT:
         # Read the scan info
         self.read_scan_info(self.info_filename)
 
-    def read_scan_info(self, filename: str | Path) -> None:
+    def read_scan_info(self, filename: Path) -> None:
         """Read the scan information file.
 
         Parameters

@@ -64,7 +64,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from linumpy.cli.args import add_overwrite_arg, assert_output_exists
-from linumpy.geometry.interface import detect_galvo_band_in_tile, detect_galvo_shift  # ty: ignore[unresolved-import]
+from linumpy.geometry.galvo import detect_galvo_band_in_tile, detect_galvo_shift
 from linumpy.io import slice_config as slice_config_io
 from linumpy.io.zarr import OmeZarrWriter
 
@@ -630,7 +630,7 @@ def _apply_fix(
         print(f"Rolling each tile chunk by {-undo_shift:+d} px to reverse applied galvo fix")
 
     writer = OmeZarrWriter(
-        str(output_path),
+        output_path,
         shape=shape,
         chunk_shape=(shape[0], chunk_x, chunk_y),
         dtype=dtype,

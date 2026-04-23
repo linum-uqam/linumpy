@@ -18,7 +18,7 @@ def test_execution_from_directory(script_runner, tmp_path):
 
 def test_execution_from_list(script_runner, tmp_path):
     input = get_data("raw_tiles")
-    input_path = Path(input)  # ty: ignore[invalid-argument-type]
+    input_path = Path(input)
     output = tmp_path / "output.ome.zarr"
     ret = script_runner.run(
         [

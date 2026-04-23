@@ -28,13 +28,13 @@ import SimpleITK as sitk
 from linumpy.cli.args import add_overwrite_arg
 from linumpy.io.zarr import read_omezarr
 from linumpy.metrics import collect_pairwise_registration_metrics
-from linumpy.registration.transforms import (
-    centre_of_mass_offset,  # ty: ignore[unresolved-import]
-    create_transform,
-    find_best_z,  # ty: ignore[unresolved-import]
-    gradient_magnitude_alignment,  # ty: ignore[unresolved-import]
-    register_refinement,  # ty: ignore[unresolved-import]
+from linumpy.registration.refinement import (
+    centre_of_mass_offset,
+    find_best_z,
+    gradient_magnitude_alignment,
+    register_refinement,
 )
+from linumpy.registration.transforms import create_transform
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -42,8 +42,8 @@ logger = logging.getLogger(__name__)
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("in_fixed", help="Fixed volume (.ome.zarr) - bottom slice")
-    p.add_argument("in_moving", help="Moving volume (.ome.zarr) - top slice")
+    p.add_argument("in_fixed", type=Path, help="Fixed volume (.ome.zarr) - bottom slice")
+    p.add_argument("in_moving", type=Path, help="Moving volume (.ome.zarr) - top slice")
     p.add_argument("out_directory", help="Output directory")
 
     # Z-matching
@@ -245,7 +245,7 @@ def main() -> None:
         rotation_deg=float(angle_deg),
         best_z_index=int(best_z),
         expected_z_index=int(expected_z),
-        output_path=str(out_dir),
+        output_path=out_dir,
         fixed_path=args.in_fixed,
         moving_path=args.in_moving,
         z_correlation=float(z_correlation),

@@ -9,8 +9,8 @@ def test_help(script_runner):
     assert ret.success
 
 
-# BaSiC uses JAX/XLA which initializes a native thread pool that conflicts
-# with threads left by other inprocess tests (e.g. process pools from
+# BaSiCPy initializes a native thread pool at import time that conflicts
+# with threads left by other in-process tests (e.g. process pools from
 # estimate_xy_shift or mosaic grid creation). Run in subprocess for isolation.
 @pytest.mark.script_launch_mode("subprocess")
 def test_execute(script_runner, tmp_path):

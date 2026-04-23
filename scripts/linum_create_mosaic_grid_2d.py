@@ -54,12 +54,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def get_volume(filename: str, config: dict | None = None) -> np.ndarray:
+def get_volume(filename: Path, config: dict | None = None) -> np.ndarray:
     """Load and preprocess an OCT volume.
 
     Parameters
     ----------
-    filename : str
+    filename : Path
         Path to the OCT file
     config : dict
         Loading and preprocessing configuration. The expected keys are :
@@ -180,7 +180,7 @@ def main() -> None:
         tile_pos_px.append((rmin, rmax, cmin, cmax))
 
     # Create the zarr persistent array
-    mosaic = zarr.open(zarr_file, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=tile_size)
+    mosaic = zarr.open_array(zarr_file, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=tile_size)
 
     # Create a params dictionary for every tile
     params = [
@@ -199,26 +199,26 @@ def main() -> None:
 
     # Normalize the mosaic
     if args.normalize:
-        imin = np.min(mosaic)  # ty: ignore[no-matching-overload]
-        imax = np.percentile(mosaic, args.saturation)  # ty: ignore[no-matching-overload]
-        mosaic = (mosaic - imin) / (imax - imin)
-        mosaic[mosaic < 0] = 0
-        mosaic[mosaic > 1] = 1
+        mosaic_data = np.asarray(mosaic[:])
+        imin = np.min(mosaic_data)
+        imax = np.percentile(mosaic_data, args.saturation)
+        normalized = (mosaic_data - imin) / (imax - imin)
+        normalized = np.clip(normalized, 0, 1)
+        mosaic[:] = normalized
 
     # Convert the mosaic to a tiff file
     if output_file.suffix == ".tiff":
-        img = mosaic[:]  # ty: ignore[invalid-argument-type]
-        io.imsave(output_file, img)  # ty: ignore[no-matching-overload]
+        img = mosaic[:]
+        io.imsave(output_file, img)
         shutil.rmtree(zarr_file)
 
     if output_file.suffix == ".jpg":
-        imin = np.min(mosaic)  # ty: ignore[no-matching-overload]
-        imax = np.percentile(mosaic, args.saturation)  # ty: ignore[no-matching-overload]
-        mosaic = (mosaic - imin) / (imax - imin)
-        mosaic[mosaic < 0] = 0
-        mosaic[mosaic > 1] = 1
-        mosaic = (mosaic * 255).astype(np.uint8)
-        img = mosaic[:]
+        mosaic_data = np.asarray(mosaic[:])
+        imin = np.min(mosaic_data)
+        imax = np.percentile(mosaic_data, args.saturation)
+        mosaic_norm = (mosaic_data - imin) / (imax - imin)
+        mosaic_norm = np.clip(mosaic_norm, 0, 1)
+        img = (mosaic_norm * 255).astype(np.uint8)
         io.imsave(output_file, img)
         shutil.rmtree(zarr_file)
 

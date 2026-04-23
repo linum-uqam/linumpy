@@ -93,7 +93,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def load_slice_config(config_path: str | Path) -> set[int]:
+def load_slice_config(config_path: Path) -> set[int]:
     """Return the integer slice IDs marked ``use=true`` in ``config_path``."""
     return {int(sid) for sid in slice_config_io.filter_slices_to_use(config_path)}
 
@@ -234,7 +234,7 @@ def compute_common_shape(mosaic_files: Any, slice_ids: Any, cumsum_shifts: Any) 
     return nx, ny, x0, y0
 
 
-def _estimate_shift_by_registration(fixed_path: str | Path, moving_path: str | Path) -> Any:
+def _estimate_shift_by_registration(fixed_path: Path, moving_path: Path) -> Any:
     """Estimate the XY shift between two 3D mosaics via 2-D phase cross-correlation.
 
     Computes a max-projection over the central 20 % of Z-slices for each

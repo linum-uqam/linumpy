@@ -64,7 +64,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def check_folders(parser: Any, folder: str | Path) -> list:
+def check_folders(parser: Any, folder: Path) -> list:
     """
     Check if the folder contains tiff files or subfolders with tiff files.
 

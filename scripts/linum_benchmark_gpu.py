@@ -326,7 +326,7 @@ def benchmark_intensity_normalization(size: int, iterations: int = 3, check_corr
     )
 
 
-def benchmark_real_data(input_path: str | Path, iterations: int = 3) -> Any:
+def benchmark_real_data(input_path: Path, iterations: int = 3) -> Any:
     """Benchmark with real OME-Zarr data."""
     from linumpy.gpu.morphology import gaussian_filter
     from linumpy.io.zarr import read_omezarr

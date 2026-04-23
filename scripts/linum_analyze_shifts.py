@@ -43,7 +43,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def load_shifts(shifts_path: str | Path) -> Any:
+def load_shifts(shifts_path: Path) -> Any:
     """Load shifts CSV file.
 
     Rows are sorted by ``moving_id`` so that every ``cumsum`` downstream
@@ -87,7 +87,7 @@ def filter_with_local_median(df: Any, outlier_mask: Any) -> Any:
     return df_filtered
 
 
-def generate_report(df: Any, df_filtered: Any, outlier_mask: Any, stats: Any, resolution: Any, output_dir: str | Path) -> str:
+def generate_report(df: Any, df_filtered: Any, outlier_mask: Any, stats: Any, resolution: Any, output_dir: Path) -> str:
     """Generate text report."""
     px_per_mm = 1000 / resolution
 
@@ -172,7 +172,7 @@ def generate_report(df: Any, df_filtered: Any, outlier_mask: Any, stats: Any, re
     return report_text
 
 
-def generate_plots(df: Any, df_filtered: Any, _outlier_mask: Any, stats: Any, resolution: Any, output_dir: str | Path) -> Path:
+def generate_plots(df: Any, df_filtered: Any, _outlier_mask: Any, stats: Any, resolution: Any, output_dir: Path) -> Path:
     """Generate visualization plots."""
     px_per_mm = 1000 / resolution
     upper_bound = stats["upper_bound"]

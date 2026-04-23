@@ -194,7 +194,7 @@ def main() -> None:
 
     # Load volume
     logger.info("Loading mosaic grid: %s", input_file)
-    vol_dask, resolution = read_omezarr(str(input_file), level=0)
+    vol_dask, resolution = read_omezarr(input_file, level=0)
     if not hasattr(vol_dask, "chunks") or vol_dask.chunks is None:
         raise ValueError(
             f"Input mosaic {input_file} has no chunk metadata; tile shape "
@@ -292,7 +292,7 @@ def main() -> None:
 
     from linumpy.io.zarr import save_omezarr
 
-    save_omezarr(da.from_array(output), str(output_file), resolution, n_levels=3)
+    save_omezarr(da.from_array(output), output_file, resolution, n_levels=3)
 
     # Collect metrics
     from linumpy.metrics import PipelineMetrics

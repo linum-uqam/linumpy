@@ -132,7 +132,7 @@ def _analyze_slice(
     max_refinement_px: float,
     json_dir: Path | None,
 ) -> dict[str, object]:
-    vol, _resolution = read_omezarr(str(zarr_path), level=0)
+    vol, _resolution = read_omezarr(Path(zarr_path), level=0)
 
     tile_shape = tuple(vol.chunks)
     if len(tile_shape) != 3:

@@ -64,7 +64,7 @@ class ThorOCT:
 
     def __init__(
         self,
-        path: str | Path | None = None,
+        path: Path | None = None,
         compressed_data: zipfile.ZipFile | None = None,
         config: PreprocessingConfig | None = None,
     ) -> None:
@@ -387,7 +387,7 @@ class ThorOCT:
         return new_data, raw_positions
 
     @staticmethod
-    def get_psoct_tiles_ids(tiles_directory: str | Path, number_of_angles: int = 2) -> tuple:
+    def get_psoct_tiles_ids(tiles_directory: Path, number_of_angles: int = 2) -> tuple:
         """
         Get the .scan file and all .oct files from the tiles_directory.
 

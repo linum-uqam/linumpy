@@ -116,7 +116,7 @@ def main() -> None:
         num_tiles=nx * ny,
         resolution=list(resolution),
         output_path=output_file,
-        input_path=str(input_file),
+        input_path=input_file,
         blending_method=blending_method,
     )
 

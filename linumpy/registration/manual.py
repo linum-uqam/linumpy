@@ -311,7 +311,7 @@ class ManualImageCorrection:
                 data_rgb[..., 0] = data_ref
         return np.clip(data_rgb, 0.0, 1.0)
 
-    def save_results(self, filename: str | Path) -> None:
+    def save_results(self, filename: Path) -> None:
         """
         Save resulting corrections to npz file.
 

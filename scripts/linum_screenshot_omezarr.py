@@ -40,7 +40,7 @@ def main() -> None:
     # Resolve symlinks (common in Nextflow work directories)
     in_path = in_path.resolve()
 
-    image, _ = read_omezarr(str(in_path))
+    image, _ = read_omezarr(Path(in_path))
 
     save_orthogonal_views(
         image, args.out_figure, z_slice=args.z_slice, x_slice=args.x_slice, y_slice=args.y_slice, cmap=args.cmap

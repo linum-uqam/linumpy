@@ -8,7 +8,9 @@ from skimage.filters import threshold_otsu
 from linumpy.geometry.interface import find_tissue_interface
 
 
-def crop_volume(vol: np.ndarray, xlim: list[int] | None = None, ylim: list[int] | None = None, zlim: list[int] | None = None) -> np.ndarray:
+def crop_volume(
+    vol: np.ndarray, xlim: list[int] | None = None, ylim: list[int] | None = None, zlim: list[int] | None = None
+) -> np.ndarray:
     """Crops the given volume according to the range given as input.
 
     Parameters
@@ -57,7 +59,6 @@ def crop_volume(vol: np.ndarray, xlim: list[int] | None = None, ylim: list[int] 
         return vol[xlim[0] : xlim[1], ylim[0] : ylim[1]]
 
     return vol
-
 
 
 def crop_z0_whole_slice(
@@ -128,7 +129,6 @@ def crop_z0_whole_slice(
         return crop_volume(vol, zlim=[zmin, zmax])
 
 
-
 def mask_under_interface(vol: np.ndarray, interface: np.ndarray, return_mask: bool = False) -> np.ndarray:
     """Create a boolean mask for all voxels at or below the interface depth."""
     nx, ny, nz = vol.shape
@@ -141,8 +141,9 @@ def mask_under_interface(vol: np.ndarray, interface: np.ndarray, return_mask: bo
         return vol * mask
 
 
-
-def apply_interface_correction(vol: np.ndarray, interface: np.ndarray) -> np.ndarray:  # TODO: Test this algorithm to make sure it works well.
+def apply_interface_correction(
+    vol: np.ndarray, interface: np.ndarray
+) -> np.ndarray:  # TODO: Test this algorithm to make sure it works well.
     """Apply interface depth correction using linear interpolation.
 
     Parameters

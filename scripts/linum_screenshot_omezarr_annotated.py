@@ -75,7 +75,7 @@ def main() -> None:
     # Resolve symlinks (common in Nextflow work directories)
     in_path = in_path.resolve()
 
-    image, res = read_omezarr(str(in_path))
+    image, res = read_omezarr(Path(in_path))
 
     # Determine number of input slices
     n_input_slices = args.n_slices if (args.n_slices is not None and args.n_slices > 0) else None
