@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
-"""Convert a zarr file to an ome-zarr file"""
+"""Convert a zarr file to an ome-zarr file."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 from pathlib import Path
@@ -14,10 +14,10 @@ import zarr
 from linumpy.io.zarr import save_omezarr
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input", help="Full path to a zarr file (.zarr)")
-    p.add_argument("output", help="Full path to the output ome-zarr file (.ome-zarr)")
+    p.add_argument("input", type=Path, help="Full path to a zarr file (.zarr)")
+    p.add_argument("output", type=Path, help="Full path to the output ome-zarr file (.ome-zarr)")
     p.add_argument(
         "-r",
         "--resolution",
@@ -31,7 +31,8 @@ def _build_arg_parser():
     return p
 
 
-def main():
+def main() -> None:
+    """Run the zarr-to-OME-Zarr conversion script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -45,10 +46,7 @@ def main():
 
     # Convert the resolution to mm
     scales = []
-    if len(resolution) == 1:
-        scales = [resolution[0] * 1e-3] * 3
-    else:
-        scales = [r * 1e-3 for r in resolution]
+    scales = [resolution[0] * 0.001] * 3 if len(resolution) == 1 else [r * 0.001 for r in resolution]
 
     foo = zarr.open(input_file, mode="r")
     out_dask = da.from_zarr(foo)

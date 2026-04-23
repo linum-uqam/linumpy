@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-""" """
+"""Take a screenshot of an OME-Zarr file."""
 
 import argparse
+from pathlib import Path
 
 import matplotlib
 import numpy as np
@@ -12,21 +13,23 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("in_zarr", help="Full path to a zarr file.")
-    p.add_argument("out_figure", help="Full path to the output figure")
+    p.add_argument("in_zarr", type=Path, help="Full path to a zarr file.")
+    p.add_argument("out_figure", type=Path, help="Full path to the output figure")
     p.add_argument("--z_slice", type=int, help="Slice index along first axis.")
     p.add_argument("--x_slice", type=int, help="Slice index along the second axis.")
     p.add_argument("--y_slice", type=int, help="Slice index along the last axis.")
     return p
 
 
-def main():
+def main() -> None:
+    """Run the OME-Zarr screenshot script."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 
     image, _ = read_omezarr(args.in_zarr)
+    image = np.asarray(image)
 
     z_slice = args.z_slice if args.z_slice is not None else image.shape[0] // 2
     x_slice = args.x_slice if args.x_slice is not None else image.shape[1] // 2

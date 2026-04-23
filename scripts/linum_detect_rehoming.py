@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Read a shifts CSV produced by linum_compute_shifts_3d.py and detect/correct
+Read a shifts CSV produced by linum_compute_shifts_3d.py and detect/correct.
+
 two classes of spurious inter-slice shifts.
 
 Background
@@ -41,7 +42,7 @@ Outputs
 """
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import json
@@ -50,14 +51,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from linumpy.shifts.utils import correct_tile_offset_shifts, filter_outlier_shifts
-from linumpy.utils.io import add_overwrite_arg, assert_output_exists
+from linumpy.cli.args import add_overwrite_arg, assert_output_exists
+from linumpy.stack_alignment.filter import correct_tile_offset_shifts, filter_outlier_shifts
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("in_shifts", help="Shifts CSV file (e.g. shifts_xy.csv) produced by linum_compute_shifts_3d.py.")
-    p.add_argument("out_shifts", help="Output corrected shifts CSV file.")
+    p.add_argument("in_shifts", type=Path, help="Shifts CSV file (e.g. shifts_xy.csv) produced by linum_compute_shifts_3d.py.")
+    p.add_argument("out_shifts", type=Path, help="Output corrected shifts CSV file.")
     p.add_argument(
         "--return_fraction",
         type=float,
@@ -94,8 +95,7 @@ def _build_arg_parser():
         "  [%(default)s]",
     )
     p.add_argument(
-        "--diagnostics",
-        metavar="DIR",
+        "--diagnostics", type=Path, metavar="DIR",
         default=None,
         help="If provided, write a JSON report and PNG plot of corrected spikes to this directory.",
     )
@@ -155,7 +155,7 @@ def _save_diagnostics(
         "corrected_tile_offsets": [r for r in records if r["correction_type"] == "tile_offset"],
     }
     report_path = diag_dir / "rehoming_report.json"
-    with open(report_path, "w") as fh:
+    with report_path.open("w") as fh:
         json.dump(report, fh, indent=2)
     print(f"  Diagnostics report: {report_path}")
 
@@ -166,8 +166,8 @@ def _save_diagnostics(
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        step_mag_before = np.sqrt(shifts_before["x_shift_mm"] ** 2 + shifts_before["y_shift_mm"] ** 2)
-        step_mag_after = np.sqrt(shifts_after["x_shift_mm"] ** 2 + shifts_after["y_shift_mm"] ** 2)
+        np.sqrt(shifts_before["x_shift_mm"] ** 2 + shifts_before["y_shift_mm"] ** 2)
+        np.sqrt(shifts_after["x_shift_mm"] ** 2 + shifts_after["y_shift_mm"] ** 2)
         positions = np.arange(len(shifts_before))
 
         fig, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
@@ -228,7 +228,8 @@ def _save_diagnostics(
         print("  matplotlib not available — skipping plot.")
 
 
-def main():
+def main() -> None:
+    """Run the rehoming detection and correction script."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 
@@ -256,8 +257,10 @@ def main():
             for idx in tile_corrected_indices:
                 row_b = shifts_before.loc[idx]
                 row_a = shifts_after.loc[idx]
+                assert isinstance(row_b, pd.Series)
+                assert isinstance(row_a, pd.Series)
                 print(
-                    f"  step {int(row_b['fixed_id'])}→{int(row_b['moving_id'])}: "
+                    f"  step {int(shifts_before.at[idx, 'fixed_id'])}→{int(shifts_before.at[idx, 'moving_id'])}: "  # ty: ignore[invalid-argument-type]  # pandas-stubs Scalar includes date/Timestamp but column is always integer IDs at runtime
                     f"({row_b['x_shift_mm']:.4f}, {row_b['y_shift_mm']:.4f}) mm "
                     f"→ ({row_a['x_shift_mm']:.4f}, {row_a['y_shift_mm']:.4f}) mm"
                 )

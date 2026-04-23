@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
+"""Resample a mosaic grid to a target resolution."""
 import argparse
 import itertools
+from pathlib import Path
 
 import numpy as np
 from skimage.transform import rescale
 
-from linumpy.io import OmeZarrWriter, read_omezarr
+from linumpy.io.zarr import OmeZarrWriter, read_omezarr
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("in_mosaic", help="Input mosaic grid in .ome.zarr.")
-    p.add_argument("out_mosaic", help="Output resampled mosaic .ome.zarr.")
+    p.add_argument("in_mosaic", type=Path, help="Input mosaic grid in .ome.zarr.")
+    p.add_argument("out_mosaic", type=Path, help="Output resampled mosaic .ome.zarr.")
     p.add_argument("--resolution", "-r", type=float, default=10.0, help="Isotropic resolution for resampling in microns.")
     p.add_argument("--n_levels", type=int, default=5, help="Number of levels in pyramid decomposition [%(default)s].")
     return p
 
 
-def main():
+def main() -> None:
+    """Run the mosaic grid resampling script."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

@@ -19,12 +19,11 @@ from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_zarr", help="Path to the input 3D OME-Zarr OCT volume")
+    p.add_argument("input_zarr", type=Path, help="Path to the input 3D OME-Zarr OCT volume")
     p.add_argument(
-        "output_zarr",
-        help="Path to the output 3D OME-Zarr *cropped* volume",
+        "output_zarr", type=Path, help="Path to the output 3D OME-Zarr *cropped* volume",
     )
     p.add_argument(
         "--sigma_xy",
@@ -53,7 +52,8 @@ def _build_arg_parser():
     return p
 
 
-def main():
+def main() -> None:
+    """Run the script to crop a 3D mosaic below the tissue interface."""
     args = _build_arg_parser().parse_args()
     input_path = Path(args.input_zarr)
     output_path = Path(args.output_zarr)
@@ -62,8 +62,10 @@ def main():
     vol, res = read_omezarr(input_path, level=0)
     print("Loaded volume shape:", vol.shape)
     resolution_um = res[0] * 1000
+    vol_chunks = vol.chunks
 
     # vol is (Z, X, Y); reorient to (X, Y, Z) for xyzcorr functions
+    vol = np.asarray(vol)
     vol_f = np.abs(vol) if np.iscomplexobj(vol) else vol
     vol_f = np.transpose(vol_f, (1, 2, 0))
     if args.percentile_max is not None:
@@ -80,19 +82,17 @@ def main():
     print(f"Average surface depth: {avg_iface} voxels")
 
     # Compute number of Z-slices for desired depth (um / um-per-voxel)
-    depth_px = int(round(args.depth / resolution_um))
+    depth_px = round(args.depth / resolution_um)
     print(f"Cropping depth: {depth_px} voxels ({args.depth} um)")
 
     # Compute end index for cropping
     surface_idx = max(0, min(avg_iface, vol.shape[0] - 1))
     end_idx = surface_idx + depth_px
     if end_idx > vol.shape[0]:
-        if args.pad_after:
-            out_shape = (end_idx, vol.shape[1], vol.shape[2])
-        else:
-            out_shape = vol.shape
+        out_shape = (end_idx, vol.shape[1], vol.shape[2]) if args.pad_after else vol.shape
         store = create_tempstore()
-        out_vol = zarr.open(store, mode="w", shape=out_shape, dtype=np.float32, chunks=vol.chunks)
+        out_vol = zarr.open(store, mode="w", shape=out_shape, dtype=np.float32, chunks=vol_chunks)
+        assert isinstance(out_vol, zarr.Array)
         out_vol[: vol.shape[0]] = vol[:]
         vol = out_vol
 
@@ -100,9 +100,9 @@ def main():
     start_idx = 0 if not args.crop_before_interface else surface_idx
     vol_crop = vol[start_idx:end_idx, :, :]
 
-    crop_dask = da.from_array(vol_crop, chunks=vol.chunks)
+    crop_dask = da.from_array(vol_crop, chunks=vol_chunks)
     # Save cropped volume as OME-Zarr
-    save_omezarr(crop_dask, output_path, voxel_size=res, chunks=vol.chunks)
+    save_omezarr(crop_dask, output_path, voxel_size=res, chunks=vol_chunks)
 
 
 if __name__ == "__main__":

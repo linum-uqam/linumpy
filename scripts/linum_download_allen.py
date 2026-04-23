@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
 
-"""
-Download the Allen mouse brain template, and setting the correct RAS+ direction and spacing.
-"""
+"""Download the Allen mouse brain template, and setting the correct RAS+ direction and spacing."""
 
 import argparse
 from pathlib import Path
 
 import SimpleITK as sitk
 
-from linumpy.io import allen
+from linumpy.reference import allen
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("output", help="Output nifti filename")
+    p.add_argument("output", type=Path, help="Output nifti filename")
     p.add_argument(
         "-r",
         "--resolution",
@@ -27,7 +25,8 @@ def _build_arg_parser():
     return p
 
 
-def main():
+def main() -> None:
+    """Run the Allen Brain Atlas download script."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

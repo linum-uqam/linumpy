@@ -3,20 +3,23 @@
 """Crop the tiles given a 2D mosaic grid."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 from pathlib import Path
 
 import SimpleITK as sitk
 
-from linumpy.stitching.mosaic_grid import MosaicGrid
+from linumpy.mosaic.grid import MosaicGrid
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_image", help="Full path to a 2D mosaic grid image.")
-    p.add_argument("output_image", default=None, help="Full path to the cropped mosaic grid image (must be .tiff or .tif)")
+    p.add_argument("input_image", type=Path, help="Full path to a 2D mosaic grid image.")
+    p.add_argument(
+        "output_image", type=Path, default=None,
+        help="Full path to the cropped mosaic grid image (must be .tiff or .tif)"
+    )
     p.add_argument("--xmin", type=int, default=0, help="Minimum x limit in pixel (default=%(default)s)")
     p.add_argument("--xmax", type=int, default=-1, help="Minimum x limit in pixel (default=%(default)s)")
     p.add_argument("--ymin", type=int, default=0, help="Minimum y limit in pixel (default=%(default)s)")
@@ -34,7 +37,8 @@ def _build_arg_parser():
     return p
 
 
-def main():
+def main() -> None:
+    """Run the tile cropping script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -60,7 +64,7 @@ def main():
     image = sitk.GetArrayFromImage(sitk.ReadImage(str(input_image)))
 
     # Create the mosaic grid object
-    mosaic = MosaicGrid(image, tile_shape=tile_shape)
+    mosaic = MosaicGrid(image, tile_shape=tuple(tile_shape))
 
     # Crop the tiles
     mosaic.crop_tiles(xlim, ylim)

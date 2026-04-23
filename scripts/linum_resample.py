@@ -3,7 +3,7 @@
 """Resample a nifti volume to a given resolution."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 from pathlib import Path
@@ -12,16 +12,20 @@ import numpy as np
 import SimpleITK as sitk
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_volume", help="Full path to a nifti volume.")
-    p.add_argument("output_volume", default=None, help="Full path to the output nifti volume (must be .nii or .nii.gz)")
+    p.add_argument("input_volume", type=Path, help="Full path to a nifti volume.")
+    p.add_argument(
+        "output_volume", type=Path, default=None,
+        help="Full path to the output nifti volume (must be .nii or .nii.gz)"
+    )
     p.add_argument("resolution", type=float, default=25.0, help="Output resolution in micron (default=%(default)s)")
 
     return p
 
 
-def main():
+def main() -> None:
+    """Run the NIfTI resampling script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()

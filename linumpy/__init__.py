@@ -1,10 +1,10 @@
 """linumpy — light-sheet and OCT microscopy processing library."""
 
 # Configure thread limits FIRST, before any numerical libraries are imported
-from linumpy.config.threads import apply_threadpool_limits
-
 import os as _os
 from pathlib import Path as _Path
+
+from linumpy.config.threads import apply_threadpool_limits
 
 
 def get_home() -> str:

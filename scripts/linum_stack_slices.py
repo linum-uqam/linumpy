@@ -3,11 +3,10 @@
 """Stack 2D mosaics into a single volume."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import re
-import shutil
 from pathlib import Path
 
 import nibabel as nib
@@ -16,31 +15,36 @@ import pandas
 import zarr
 from tqdm.auto import tqdm
 
-from linumpy.utils_images import apply_xy_shift
+from linumpy.imaging.transform import apply_xy_shift
 
 # TODO: add option to give a folder
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument(
-        "input_images",
-        nargs="+",
-        help=r"Full path to a 2D mosaic grid image (nifti files). Expects this format: '.*z(\d+)_.*' to extract the slice number.",
+        "input_images", type=Path, nargs="+",
+        help=r"Full path to a 2D mosaic grid image (nifti files). Expects this format: '.*z(\d+)_.*'"
+        r" to extract the slice number.",
     )
-    p.add_argument("output_volume", help="Assembled volume filename (must be a .zarr)")
-    p.add_argument("--xy_shifts", required=False, default=None, help="CSV file containing the xy shifts for each slice")
+    p.add_argument("output_volume", type=Path, help="Assembled volume filename (must be a .zarr)")
+    p.add_argument(
+        "--xy_shifts", type=Path, required=False, default=None,
+        help="CSV file containing the xy shifts for each slice"
+    )
     p.add_argument("--resolution_xy", type=float, default=1.0, help="Lateral (xy) resolution in micron. (default=%(default)s)")
     p.add_argument(
         "--resolution_z",
         type=float,
         default=1.0,
-        help="Axial (z) resolution in micron, corresponding to the z distance between images in the stack. (default=%(default)s)",
+        help="Axial (z) resolution in micron, corresponding to the z distance between images in the stack."
+        " (default=%(default)s)",
     )
     return p
 
 
-def main():
+def main() -> None:
+    """Run the 2D slice stacking script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -56,6 +60,7 @@ def main():
     slice_ids = []
     for f in files:
         foo = re.match(pattern, f.name)
+        assert foo is not None
         slice_ids.append(int(foo.groups()[0]))
     n_slices = np.max(slice_ids) - np.min(slice_ids) + 1
 
@@ -77,6 +82,7 @@ def main():
     for i, f in enumerate(files):
         # Get this volume shape
         img = nib.load(f)
+        assert isinstance(img, nib.Nifti1Image)
         shape = img.shape
 
         # Get the cumulative shift
@@ -103,18 +109,19 @@ def main():
     volume_shape = (n_slices, ny, nx)
 
     # Create the zarr persistent array
-    process_sync_file = str(zarr_file).replace(".zarr", ".sync")
-    synchronizer = zarr.ProcessSynchronizer(process_sync_file)
-    mosaic = zarr.open(
-        zarr_file, mode="w", shape=volume_shape, dtype=np.float32, chunks=(1, 256, 256), synchronizer=synchronizer
+    mosaic = zarr.open(  # type: ignore[call-overload]
+        zarr_file, mode="w", shape=volume_shape, dtype=np.float32, chunks=(1, 256, 256)
     )
+    assert isinstance(mosaic, zarr.Array)
 
     # Loop over the slices
     for i in tqdm(range(len(files)), unit="slice", desc="Stacking slices"):
         # Load the slice
         f = files[i]
         z = slice_ids[i]
-        img = nib.load(f).get_fdata()
+        img_nii = nib.load(f)
+        assert isinstance(img_nii, nib.Nifti1Image)
+        img = img_nii.get_fdata()
 
         # Get the shift values for the slice
         if i == 0:
@@ -125,15 +132,14 @@ def main():
             dy = np.cumsum(dy_list)[i - 1] + y0
 
         # Apply the shift
-        img = apply_xy_shift(img, mosaic[0, :, :], dx, dy)
+        img = apply_xy_shift(np.asarray(img), np.asarray(mosaic[0, :, :]), dx, dy)
 
         # Add the slice to the volume
         mosaic[z, :, :] = img
 
         del img
 
-    # Removing the synchronizer file
-    shutil.rmtree(process_sync_file)
+    # (Synchronizer file removed - ProcessSynchronizer not used in zarr v3)
 
 
 if __name__ == "__main__":
