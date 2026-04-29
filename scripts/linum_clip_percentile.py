@@ -33,8 +33,8 @@ def main() -> None:
 
     vol, res = read_omezarr(args.in_volume)
     darr = da.from_zarr(vol)
-    p_lower = float(da.percentile(darr.ravel(), args.percentile_lower).compute())
-    p_upper = float(da.percentile(darr.ravel(), args.percentile_upper).compute())
+    p_lower = float(da.percentile(darr.ravel(), args.percentile_lower).compute()[0])
+    p_upper = float(da.percentile(darr.ravel(), args.percentile_upper).compute()[0])
     darr = da.clip(darr, p_lower, p_upper)
 
     if args.rescale:
