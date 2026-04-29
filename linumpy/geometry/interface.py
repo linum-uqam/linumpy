@@ -6,6 +6,7 @@ from typing import Literal, overload
 import numpy as np
 from scipy.ndimage import (
     binary_fill_holes,
+    gaussian_filter,
     gaussian_filter1d,
     gaussian_gradient_magnitude,
     label,
@@ -83,7 +84,6 @@ def find_tissue_depth(vol: np.ndarray, zmin: int = 15, zmax: int = 100, agarose_
     return z0
 
 
-
 def get_interface_depth_from_mask(vol: np.ndarray) -> np.ndarray:
     """Compute the interface depths from a 3D tissue mask.
 
@@ -108,8 +108,15 @@ def get_interface_depth_from_mask(vol: np.ndarray) -> np.ndarray:
     return depths
 
 
-
-def find_tissue_interface(vol: np.ndarray, s_xy: int = 15, s_z: int = 2, use_log: bool = True, mask: np.ndarray | None = None, order: int = 1, detect_cutting_errors: bool = False) -> np.ndarray:
+def find_tissue_interface(
+    vol: np.ndarray,
+    s_xy: int = 15,
+    s_z: int = 2,
+    use_log: bool = True,
+    mask: np.ndarray | None = None,
+    order: int = 1,
+    detect_cutting_errors: bool = False,
+) -> np.ndarray:
     """Detect the tissue interface.
 
     Parameters
@@ -162,8 +169,9 @@ def find_tissue_interface(vol: np.ndarray, s_xy: int = 15, s_z: int = 2, use_log
     return z0
 
 
-
-def find_cutting_plane(vol: np.ndarray, z0map: np.ndarray, agarose_mean: float, agarose_std: float) -> tuple[np.ndarray, np.ndarray, float]:
+def find_cutting_plane(
+    vol: np.ndarray, z0map: np.ndarray, agarose_mean: float, agarose_std: float
+) -> tuple[np.ndarray, np.ndarray, float]:
     """Find the cutting plane using agarose segmentation.
 
     Parameters
@@ -219,11 +227,11 @@ def find_cutting_plane(vol: np.ndarray, z0map: np.ndarray, agarose_mean: float, 
 
 # Fitting plane on agarose z0 values
 
+
 def _plane(pos: np.ndarray, a: float, b: float, c: float) -> np.ndarray:
     x = pos[0]
     y = pos[1]
     return a * x + b * y + c
-
 
 
 def remove_z0_outliers(z0map: np.ndarray) -> np.ndarray:
@@ -251,13 +259,17 @@ def remove_z0_outliers(z0map: np.ndarray) -> np.ndarray:
         return z0map
 
 
-
 @overload
 def fit_interface(interface: np.ndarray, method: str = ..., return_center: Literal[False] = ...) -> np.ndarray: ...
 @overload
-def fit_interface(interface: np.ndarray, method: str = ..., return_center: Literal[True] = ...) -> tuple[np.ndarray, tuple[float, float]]: ...
+def fit_interface(
+    interface: np.ndarray, method: str = ..., return_center: Literal[True] = ...
+) -> tuple[np.ndarray, tuple[float, float]]: ...
 
-def fit_interface(interface: np.ndarray, method: str = "linear", return_center: bool = False) -> np.ndarray | tuple[np.ndarray, tuple[float, float]]:
+
+def fit_interface(
+    interface: np.ndarray, method: str = "linear", return_center: bool = False
+) -> np.ndarray | tuple[np.ndarray, tuple[float, float]]:
     """Fit a model on the given interface.
 
     Parameters
@@ -316,12 +328,14 @@ def fit_interface(interface: np.ndarray, method: str = "linear", return_center: 
 
 # Quadratic model for interface fit
 
-def quadratic_interface(pos: np.ndarray, a: float, b: float, c: float, d: float, e: float, f: float, g: float, h: float) -> np.ndarray:
+
+def quadratic_interface(
+    pos: np.ndarray, a: float, b: float, c: float, d: float, e: float, f: float, g: float, h: float
+) -> np.ndarray:
     """Evaluate a quadratic surface model for the tissue interface."""
     x = pos[0] - g
     y = pos[1] - h
     return a * x + b * y + c * x * y + d * x**2 + e * y**2 + f
-
 
 
 def get_quadratic_interface(popt: np.ndarray, volshape: tuple[int, int, int] = (512, 512, 120)) -> np.ndarray:
@@ -331,7 +345,6 @@ def get_quadratic_interface(popt: np.ndarray, volshape: tuple[int, int, int] = (
     interface = np.zeros([volshape[0], volshape[1]])
     interface[xx[:], yy[:]] = tmp
     return interface
-
 
 
 def linear_homogeneous_profile(z: np.ndarray, z0: float, dz: float, I0: float, Ib: float, sigma: float) -> np.ndarray:
@@ -370,8 +383,9 @@ def linear_homogeneous_profile(z: np.ndarray, z0: float, dz: float, I0: float, I
     return I
 
 
-
-def estimate_lh_profile_parameters(vol: np.ndarray, s: int = 25) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def estimate_lh_profile_parameters(
+    vol: np.ndarray, s: int = 25
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Estimates the linear-homogeneous intensity profile parameters.
 
     Parameters
@@ -459,3 +473,45 @@ def estimate_lh_profile_parameters(vol: np.ndarray, s: int = 25) -> tuple[np.nda
             sigma[x, y] = this_sigma
 
     return z0, dz, I0, Ib, sigma
+
+
+def detect_interface_z(vol: np.ndarray, sigma_xy: float = 3.0, sigma_z: float = 2.0, use_log: bool = False) -> int:
+    """Detect water/tissue interface along Z using gradient-based method.
+
+    Applies Gaussian smoothing then finds the peak of the first-order
+    Z-derivative to locate the tissue surface.
+
+    Parameters
+    ----------
+    vol : np.ndarray
+        Volume with shape (X, Y, Z) — already transposed from OME-Zarr (Z, X, Y).
+    sigma_xy : float
+        Gaussian smoothing sigma in XY before Z-gradient.
+    sigma_z : float
+        Gaussian smoothing sigma for Z-gradient computation.
+    use_log : bool
+        Apply log transform before gradient detection.
+
+    Returns
+    -------
+    int
+        Estimated interface depth in Z voxels.
+    """
+    vol_f = np.log(vol + 1e-6) if use_log else vol.astype(np.float32)
+
+    pad_width = int(np.round(sigma_z * 4))
+    vol_padded = np.pad(vol_f, ((0, 0), (0, 0), (pad_width, 0)), mode="edge")
+    vol_padded = gaussian_filter(vol_padded, (sigma_xy, sigma_xy, 0))
+    dz = gaussian_filter1d(vol_padded, sigma=sigma_z, axis=-1, order=1)
+
+    mean_xy = np.mean(vol_f, axis=2)
+    nonzero_vals = mean_xy[mean_xy > 0]
+    if nonzero_vals.size > 0:
+        threshold = np.percentile(nonzero_vals, 5)
+        tissue_mask = mean_xy > threshold
+        avg_dz = np.sum(dz[tissue_mask, :], axis=0)
+    else:
+        avg_dz = np.sum(dz, axis=(0, 1))
+
+    avg_iface = max(int(np.argmax(avg_dz)) - pad_width, 0)
+    return avg_iface
