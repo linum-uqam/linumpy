@@ -1,33 +1,32 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
-Compensate the tissue attenuation using a precomputed attenuation
+Compensate the tissue attenuation using a precomputed attenuation.
+
 bias field.
 """
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
+from pathlib import Path
+
 import dask.array as da
 
-from linumpy.io.zarr import save_omezarr, read_omezarr
+from linumpy.io.zarr import read_omezarr, save_omezarr
 
 
-def _build_arg_parser():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input",
-                   help="Input volume (.ome.zarr)")
-    p.add_argument("bias",
-                   help="Attenuation bias field (.ome.zarr)")
-    p.add_argument("output",
-                   help="Compensated volume (.ome.zarr)")
+def _build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("input", type=Path, help="Input volume (.ome.zarr)")
+    p.add_argument("bias", type=Path, help="Attenuation bias field (.ome.zarr)")
+    p.add_argument("output", type=Path, help="Compensated volume (.ome.zarr)")
 
     return p
 
 
-def main():
+def main() -> None:
+    """Run the attenuation compensation script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -43,10 +42,7 @@ def main():
     vol_dask /= bias_dask
 
     # Save the output
-    save_omezarr(vol_dask.astype(da.float32),
-              args.output,
-              voxel_size=res,
-              chunks=chunks)
+    save_omezarr(vol_dask.astype(da.float32), args.output, voxel_size=res, chunks=chunks)
 
 
 if __name__ == "__main__":

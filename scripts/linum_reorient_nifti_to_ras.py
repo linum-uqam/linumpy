@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """Reorient a volume to RAS+ using control points in pixel coordinates (ex: from Fiji).
 
- The control points are positioned on the anterior, posterior, superior, and inferior sides of the brain.
- The script will estimate the main axis of the volume and reorient it to RAS+. Currently, the script only
- performs 90° rotations and flips."""
+The control points are positioned on the anterior, posterior, superior, and inferior sides of the brain.
+The script will estimate the main axis of the volume and reorient it to RAS+. Currently, the script only
+performs 90° rotations and flips.
+"""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 from pathlib import Path
@@ -16,35 +16,34 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 
-
 choices = {
-    'x+': [1.0, 0.0, 0.0],
-    'x-': [-1.0, 0.0, 0.0],
-    'y+': [0.0, 1.0, 0.0],
-    'y-': [0.0, -1.0, 0.0],
-    'z+': [0.0, 0.0, 1.0],
-    'z-': [0.0, 0.0, -1.0]
+    "x+": [1.0, 0.0, 0.0],
+    "x-": [-1.0, 0.0, 0.0],
+    "y+": [0.0, 1.0, 0.0],
+    "y-": [0.0, -1.0, 0.0],
+    "z+": [0.0, 0.0, 1.0],
+    "z-": [0.0, 0.0, -1.0],
 }
 
 
-def _build_arg_parser():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_volume",
-                   help="Full path to the input volume (.nii or .nii.gz)")
-    p.add_argument("output_volume",
-                   help="Full path to the output volume (.nii or .nii.gz)")
-    p.add_argument('ant_to_pos', choices=choices.keys(),
-                   help='Anterior-to-posterior axis with sign describing whether\n'
-                        'indices increase or decrease along the axis when going\n'
-                        'anterior to posterior.')
-    p.add_argument('inf_to_sup', choices=choices.keys(),
-                   help='Inferior-to-superior axis.')
+def _build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("input_volume", type=Path, help="Full path to the input volume (.nii or .nii.gz)")
+    p.add_argument("output_volume", type=Path, help="Full path to the output volume (.nii or .nii.gz)")
+    p.add_argument(
+        "ant_to_pos",
+        choices=choices.keys(),
+        help="Anterior-to-posterior axis with sign describing whether\n"
+        "indices increase or decrease along the axis when going\n"
+        "anterior to posterior.",
+    )
+    p.add_argument("inf_to_sup", choices=choices.keys(), help="Inferior-to-superior axis.")
 
     return p
 
 
-def main():
+def main() -> None:
+    """Run the NIfTI reorientation to RAS script."""
     # Parse arguments
     parser = _build_arg_parser()
     args = parser.parse_args()
@@ -81,6 +80,7 @@ def main():
 
     # Apply the transformation to the volume
     img = nib.load(input_volume)
+    assert isinstance(img, nib.Nifti1Image)
     vol = img.get_fdata(dtype=np.float32)
     vol_ras = nib.orientations.apply_orientation(vol, transformation)
 

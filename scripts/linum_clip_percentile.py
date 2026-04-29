@@ -1,42 +1,40 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Clip .ome.zarr volume intensities between lower and upper percentile.
-"""
+"""Clip .ome.zarr volume intensities between lower and upper percentile."""
+
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
-import numpy as np
+from pathlib import Path
 
-from linumpy.io.zarr import read_omezarr, save_omezarr
 import dask.array as da
 
+from linumpy.io.zarr import read_omezarr, save_omezarr
 
-def _build_arg_parser():
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument('in_volume',
-                   help='Input volume .ome.zarr.')
-    p.add_argument('out_volume',
-                   help='Output volume .ome.zarr.')
-    p.add_argument('--percentile_lower', default=0, type=float,
-                   help='Percentile below which values will be clipped [%(default)s].')
-    p.add_argument('--percentile_upper', default=99.9, type=float,
-                   help='Percentile above which values will be clipped [%(default)s].')
-    p.add_argument('--rescale', action='store_true',
-                   help='Rescale volume intensities after clipping.')
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("in_volume", type=Path, help="Input volume .ome.zarr.")
+    p.add_argument("out_volume", type=Path, help="Output volume .ome.zarr.")
+    p.add_argument(
+        "--percentile_lower", default=0, type=float, help="Percentile below which values will be clipped [%(default)s]."
+    )
+    p.add_argument(
+        "--percentile_upper", default=99.9, type=float, help="Percentile above which values will be clipped [%(default)s]."
+    )
+    p.add_argument("--rescale", action="store_true", help="Rescale volume intensities after clipping.")
     return p
 
 
-def main():
+def main() -> None:
+    """Run the percentile clipping script."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 
     vol, res = read_omezarr(args.in_volume)
     darr = da.from_zarr(vol)
-    p_lower = np.percentile(vol[:], args.percentile_lower)
-    p_upper = np.percentile(vol[:], args.percentile_upper)
+    p_lower = float(da.percentile(darr.ravel(), args.percentile_lower).compute()[0])
+    p_upper = float(da.percentile(darr.ravel(), args.percentile_upper).compute()[0])
     darr = da.clip(darr, p_lower, p_upper)
 
     if args.rescale:
@@ -46,5 +44,5 @@ def main():
     save_omezarr(darr, args.out_volume, res, vol.chunks)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

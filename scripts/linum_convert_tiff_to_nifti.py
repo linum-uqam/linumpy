@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+"""Convert TIFF image stack to NIfTI format."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
-import os
 import argparse
-import SimpleITK as sitk
 from pathlib import Path
 
-def _build_arg_parser():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_folder",
-                   help="Full path to a folder containing TIFF images")
-    p.add_argument("output_folder",
-                   help="Full path to the output folder which will contain the nifti (.nii.gz) images")
+import SimpleITK as sitk
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("input_folder", type=Path, help="Full path to a folder containing TIFF images")
+    p.add_argument(
+        "output_folder", type=Path, help="Full path to the output folder which will contain the nifti (.nii.gz) images"
+    )
     return p
 
-def main():
+
+def main() -> None:
+    """Run the TIFF-to-NIfTI conversion script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -29,11 +31,10 @@ def main():
     output_folder.mkdir(exist_ok=True, parents=True)
 
     # List the TIFF files in the input folder
-    tiff_files = [file for file in input_folder.glob('*') if file.suffix in [".tif", ".tiff",".TIF",".TIFF"] ]
+    tiff_files = [file for file in input_folder.glob("*") if file.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]]
     for tiff_file in tiff_files:
-        
         # Create the output path
-        output_nifti_file = output_folder / Path(tiff_file.stem + '.nii.gz')
+        output_nifti_file = output_folder / Path(tiff_file.stem + ".nii.gz")
 
         # Load the TIFF image
         image = sitk.ReadImage(tiff_file)
@@ -41,6 +42,6 @@ def main():
         # Save the image as a nifti file
         sitk.WriteImage(image, output_nifti_file)
 
+
 if __name__ == "__main__":
     main()
-
