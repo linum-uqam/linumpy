@@ -117,7 +117,7 @@ def main() -> None:
 
     for level in args.levels:
         if level < 0 or level >= n_available:
-            print(f"WARNING: Level {level} out of range (0–{n_available - 1}), skipping.")
+            print(f"WARNING: Level {level} out of range (0-{n_available - 1}), skipping.")
             continue
 
         lv = levels_info[level]

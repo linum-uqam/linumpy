@@ -9,19 +9,19 @@ estimate suitable nextflow.config parameters.
 Estimable parameters
 --------------------
 From shifts_xy.csv:
-  max_shift_mm                    — IQR upper bound of normal inter-slice shifts
-  common_space_max_step_mm        — 95th percentile of consecutive normal shift changes
-  interpolate_missing_slices      — true when gaps (moving_id - fixed_id > 1) are found
+  max_shift_mm                    -- IQR upper bound of normal inter-slice shifts
+  common_space_max_step_mm        -- 95th percentile of consecutive normal shift changes
+  interpolate_missing_slices      -- true when gaps (moving_id - fixed_id > 1) are found
 
 From the raw data directory (--data_dir):
-  registration_slicing_interval_mm  — from slice_thickness in metadata.json / state.json
-  stitch_overlap_fraction           — from overlap_fraction in metadata.json / state.json
-  resolution                        — smallest standard resolution >= native lateral px size
-  crop_interface_out_depth          — depth below tissue interface; user must verify
-  registration_max_translation      — tile width in pixels at target resolution
+  registration_slicing_interval_mm  -- from slice_thickness in metadata.json / state.json
+  stitch_overlap_fraction           -- from overlap_fraction in metadata.json / state.json
+  resolution                        -- smallest standard resolution >= native lateral px size
+  crop_interface_out_depth          -- depth below tissue interface; user must verify
+  registration_max_translation      -- tile width in pixels at target resolution
 
 Parameters that cannot be estimated automatically:
-  crop_interface_out_depth    — requires tissue-specific knowledge; an estimate is given
+  crop_interface_out_depth    -- requires tissue-specific knowledge; an estimate is given
                                 based on the raw OCT depth and focus position, but should
                                 be verified by inspecting a cross-section preview.
 
@@ -261,8 +261,8 @@ def analyze_metadata(data_dir: Path, axial_res_um: float, n_calibration_slices: 
 
     Reads (in priority order):
       1. First tissue slice metadata.json (skipping calibration slices)
-      2. <data_dir>/state.json            — fallback for missing fields
-      3. First tile info.txt in the tissue slice — for OCT depth parameters
+      2. <data_dir>/state.json            -- fallback for missing fields
+      3. First tile info.txt in the tissue slice -- for OCT depth parameters
 
     Parameters
     ----------
@@ -458,7 +458,7 @@ def build_report(shift_stats: dict, acq: dict, shifts_path: str) -> str:
         if acq.get("total_depth_um") is not None:
             lines.append(
                 f"  OCT depth       :   {acq['n_depth_pixels']} px "
-                f"× {acq['axial_res_um']:.1f} µm/px "
+                f"x {acq['axial_res_um']:.1f} µm/px "
                 f"= {acq['total_depth_um']:.0f} µm total axial range"
             )
         if acq.get("focus_z") is not None:
@@ -547,7 +547,7 @@ def build_config_snippet(shift_stats: dict, acq: dict, args: argparse.Namespace)
     # ── Crop depth ───────────────────────────────────────────────────────────
     if acq.get("ok") and acq.get("crop_depth_um"):
         crop_depth = acq["crop_depth_um"]
-        depth_comment = "// 30 % of OCT depth below tissue interface — verify against cross-section preview"
+        depth_comment = "// 30 % of OCT depth below tissue interface -- verify against cross-section preview"
     else:
         crop_depth = "TODO"
         depth_comment = "// depth in µm to keep below the tissue interface; inspect a cross-section preview to set correctly"
@@ -585,7 +585,7 @@ def build_config_snippet(shift_stats: dict, acq: dict, args: argparse.Namespace)
         )
     else:
         max_trans_px = 200
-        max_trans_comment = "// default — set to tile width in pixels at target resolution"
+        max_trans_comment = "// default -- set to tile width in pixels at target resolution"
 
     # ── Missing slice interpolation ───────────────────────────────────────────
     if shift_stats["has_gaps"]:

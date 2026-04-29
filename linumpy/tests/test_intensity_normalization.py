@@ -84,12 +84,27 @@ def test_normalize_volume_background_thresholds_length():
     assert len(thresholds) == vol.shape[0]
 
 
+def test_normalize_volume_agarose_floor_at_zero():
+    """Volume minimum should be exactly 0 -- the per-slice agarose-median floor
+    is subtracted so background voxels at or below the median go to 0.
+
+    This keeps background dark in manual-align overlays and downstream
+    visualizations.
+    """
+    rng = np.random.default_rng(0)
+    vol = rng.random((4, 24, 24)).astype(np.float32) * 0.1  # low = agarose
+    vol[:, 8:16, 8:16] += 0.5  # bright tissue block
+    mask, _ = get_agarose_mask(vol)
+    result, _ = normalize_volume(vol.copy(), mask)
+    assert float(result.min()) == 0.0
+
+
 def test_normalize_volume_preserves_relative_brightness():
     """Global divisor must preserve a 2:1 inter-section brightness ratio.
 
-    Construct two sections that are identical in structure but one has 2× the
+    Construct two sections that are identical in structure but one has 2x the
     overall signal level.  After normalize_volume the bright section's mean
-    should remain ~2× the dim section's mean.
+    should remain ~2x the dim section's mean.
     """
     rng = np.random.default_rng(42)
     n_y, n_x = 32, 32
@@ -97,7 +112,7 @@ def test_normalize_volume_preserves_relative_brightness():
     section_dim = rng.random((n_y, n_x)).astype(np.float32) * 0.1
     section_dim[8:24, 8:24] += 0.4  # tissue above agarose
 
-    # Bright section: same structure, 2× signal
+    # Bright section: same structure, 2x signal
     section_bright = section_dim * 2.0
 
     vol = np.stack([section_dim, section_bright], axis=0)  # (2, 32, 32)
@@ -105,7 +120,7 @@ def test_normalize_volume_preserves_relative_brightness():
 
     result, _ = normalize_volume(vol.copy(), agarose_mask)
 
-    # The bright section's tissue median should be ~2× the dim section's
+    # The bright section's tissue median should be ~2x the dim section's
     tissue_mask_2d = ~agarose_mask
     mean_dim = float(np.mean(result[0][tissue_mask_2d]))
     mean_bright = float(np.mean(result[1][tissue_mask_2d]))

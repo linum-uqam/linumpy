@@ -1,8 +1,6 @@
 # GPU Acceleration
 
 
----
-
 ## Overview
 
 linumpy supports GPU acceleration for compute-intensive operations using NVIDIA CUDA via CuPy. GPU acceleration is **optional** - all functions automatically fall back to CPU (NumPy/SciPy) if:
@@ -10,6 +8,21 @@ linumpy supports GPU acceleration for compute-intensive operations using NVIDIA 
 - CuPy is not installed
 - No CUDA-capable GPU is available
 - GPU memory is insufficient
+
+```mermaid
+flowchart TD
+    CALL[GPU-aware function called<br/>backend='auto' default] --> CHK1{CuPy installed?}
+    CHK1 -->|no| CPU[Run on CPU<br/>NumPy / SciPy / SimpleITK]
+    CHK1 -->|yes| CHK2{CUDA device available?}
+    CHK2 -->|no| CPU
+    CHK2 -->|yes| PICK[Auto-select least-loaded GPU]
+    PICK --> RUN[Run CuPy kernel on device]
+    RUN -->|OOM / runtime error| CPU
+    RUN -->|success| OUT([Result])
+    CPU --> OUT
+```
+
+backend selection is per-call (`backend="cpu" | "gpu" | "auto"`); the auto path is the safe default and is what the Nextflow workflows use when `use_gpu=true`.
 
 ---
 
@@ -21,8 +34,7 @@ nvidia-smi | grep "CUDA Version"
 
 # Install linumpy with GPU support (choose your CUDA version)
 uv pip install 'linumpy[gpu]'           # CUDA 12.x (default)
-uv pip install 'linumpy[gpu-cuda11]'    # CUDA 11.x
-uv pip install 'linumpy[gpu-cuda13]'    # CUDA 13.x (requires extra setup for JAX)
+uv pip install 'linumpy[gpu-cuda13]'    # CUDA 13.x
 
 # Verify GPU
 linum_gpu_info.py
@@ -43,97 +55,32 @@ linum_diagnose_pipeline.py --benchmark
 
 ### CuPy Version Reference
 
-| CUDA Version | CuPy Package |
-|--------------|--------------|
-| CUDA 11.x | `cupy-cuda11x` |
-| CUDA 12.x | `cupy-cuda12x` |
-| CUDA 13.x | `cupy-cuda13x` |
+| CUDA Version | CuPy Package | linumpy extra |
+|--------------|--------------|---------------|
+| CUDA 12.x    | `cupy-cuda12x` | `linumpy[gpu]` |
+| CUDA 13.x    | `cupy-cuda13x` | `linumpy[gpu-cuda13]` |
 
 ---
 
-## JAX GPU for BaSiCPy (fix_illumination)
+## BaSiCPy (fix_illumination)
 
-The `fix_illumination` step uses BaSiCPy which is built on JAX. JAX GPU requires additional setup.
+The `fix_illumination` step uses BaSiCPy 2.x, which now ships with a
+**PyTorch backend** (no JAX). BaSiCPy will use a CUDA-enabled PyTorch wheel
+automatically when one is installed; otherwise it runs on CPU.
 
-### Important: JAX 0.4.23 Library Requirements
-
-BaSiCPy requires `jax<=0.4.23`. JAX 0.4.23 was compiled against specific library versions:
-- cuSOLVER 11 (libcusolver.so.11)
-- cuSPARSE 12 (libcusparse.so.12)
-- cuFFT 11 (libcufft.so.11)
-- cuBLAS 12 (libcublas.so.12)
-- cuDNN 8 (libcudnn.so.8)
-
-These exact versions are only available in **specific pinned versions** of the `nvidia-xxx-cu12` packages. Newer versions of these packages have different `.so` versions that are **incompatible**.
-
-### Automated Setup (Recommended)
+If you only need linumpy's CuPy paths (resampling, FFT, morphology, N4),
+no extra steps beyond `pip install 'linumpy[gpu]'` are required. To enable
+GPU acceleration of BaSiCPy as well, install a CUDA build of PyTorch:
 
 ```bash
-# Run the fix script - handles everything
-source shell_scripts/fix_jax_cuda_plugin.sh
+# Pick the index URL that matches your CUDA toolkit
+uv pip install torch --index-url https://download.pytorch.org/whl/cu121
 ```
 
-This script:
-1. Removes conflicting nvidia packages
-2. Installs JAX 0.4.23 with **pinned nvidia package versions**:
-   - `nvidia-cublas-cu12==12.3.4.1`
-   - `nvidia-cudnn-cu12==8.9.7.29`
-   - `nvidia-cusolver-cu12==11.5.4.101`
-   - etc.
-3. Applies patchelf fix (required for Linux 6.x+ kernels)
-4. Sets up LD_LIBRARY_PATH
-5. Tests JAX CUDA with SVD operation
-
-### Manual Setup
-
-If you prefer manual setup:
+Verify:
 
 ```bash
-# 1. Uninstall all conflicting packages
-uv pip uninstall jax jaxlib jax-cuda12-plugin nvidia-cusolver nvidia-cufft \
-    nvidia-cusparse nvidia-cublas nvidia-cuda-runtime nvidia-cudnn nvidia-nvjitlink \
-    nvidia-cublas-cu12 nvidia-cuda-cupti-cu12 nvidia-cuda-runtime-cu12 \
-    nvidia-cudnn-cu12 nvidia-cufft-cu12 nvidia-cusolver-cu12 nvidia-cusparse-cu12 \
-    nvidia-nccl-cu12 nvidia-nvjitlink-cu12
-
-# 2. Install JAX 0.4.23 with CUDA wheel
-uv pip install 'jax==0.4.23' 'jaxlib==0.4.23+cuda12.cudnn89' \
-    -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-
-# 3. Install PINNED nvidia package versions (critical - newer versions won't work!)
-uv pip install \
-    'nvidia-cublas-cu12==12.3.4.1' \
-    'nvidia-cuda-cupti-cu12==12.3.101' \
-    'nvidia-cuda-runtime-cu12==12.3.101' \
-    'nvidia-cudnn-cu12==8.9.7.29' \
-    'nvidia-cufft-cu12==11.0.12.1' \
-    'nvidia-cusolver-cu12==11.5.4.101' \
-    'nvidia-cusparse-cu12==12.2.0.103' \
-    'nvidia-nccl-cu12==2.19.3' \
-    'nvidia-nvjitlink-cu12==12.3.101'
-
-# 4. Apply patchelf fix (required for modern Linux kernels)
-sudo apt install patchelf
-JAXLIB_PATH=$(python -c "import jaxlib; print(jaxlib.__path__[0])")
-find "$JAXLIB_PATH" -name "*.so" -exec patchelf --clear-execstack {} \;
-find $(python -c "import site; print(site.getsitepackages()[0])")/jax_plugins \
-    -name "*.so" -exec patchelf --clear-execstack {} \;
-
-# 5. Set LD_LIBRARY_PATH (before running JAX/BaSiCPy)
-SP=$(python -c "import site; print(site.getsitepackages()[0])")
-export LD_LIBRARY_PATH="${SP}/nvidia/cublas/lib:${SP}/nvidia/cuda_runtime/lib:${SP}/nvidia/cusolver/lib:${SP}/nvidia/cusparse/lib:${SP}/nvidia/cufft/lib:${SP}/nvidia/cudnn/lib:${LD_LIBRARY_PATH}"
-
-# 6. Test
-python -c "import jax; print(jax.devices()); import jax.numpy as jnp; print(jnp.linalg.svd(jnp.eye(2)))"
-```
-
-### Verify Installation
-
-```bash
-# Check GPU availability
 linum_gpu_info.py
-
-# Run full pipeline diagnostics
 linum_diagnose_pipeline.py --benchmark
 ```
 
@@ -151,7 +98,7 @@ separate `_gpu.py` variant is needed.
 | `linum_create_mosaic_grid_3d.py` | Volume resize | 5-12x |
 | `linum_resample_mosaic_grid.py` | Volume resize | 5-12x |
 | `linum_normalize_intensities_per_slice.py` | Gaussian filter, Otsu threshold | 4-10x |
-| `linum_fix_illumination_3d.py` | BaSiCPy via JAX/CUDA | 2-5x |
+| `linum_fix_illumination_3d.py` | BaSiCPy via PyTorch/CUDA | 2-5x |
 | `linum_assess_slice_quality.py` | SSIM, morphology | 3-8x |
 | `linum_aip_png.py` | Mean projection | ≤1x |
 | `linum_generate_mosaic_aips.py` | Mean projection | ≤1x |
@@ -232,15 +179,18 @@ python -c "import cupy; print(cupy.cuda.runtime.getDeviceCount())"
 linum_gpu_info.py
 ```
 
-### JAX CUDA Issues
+### BaSiCPy / PyTorch CUDA Issues
+
+If `linum_fix_illumination_3d.py` falls back to CPU unexpectedly, verify the
+PyTorch CUDA build is installed and visible:
 
 ```bash
-# Run the fix script
-source shell_scripts/fix_jax_cuda_plugin.sh
-
-# Or check diagnostics
+python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 linum_diagnose_pipeline.py --debug-cuda
 ```
+
+Reinstall PyTorch from the matching CUDA index URL (see the BaSiCPy section
+above) if `torch.cuda.is_available()` returns `False`.
 
 ### Out of Memory
 

@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""
-Simplified pairwise registration for motor-position-based reconstruction.
+"""Simplified pairwise registration for motor-position-based reconstruction.
 
-This script performs two tasks:
-1. Z-MATCHING: Find the optimal Z-overlap between consecutive slices
-2. REFINEMENT: Compute small rotation and sub-pixel corrections
+This script performs two tasks.
 
-The XY alignment is handled by motor positions (shifts_xy.csv), so this script
-only computes small corrections, not large translations.
+1. Z-MATCHING: find the optimal Z-overlap between consecutive slices.
+2. REFINEMENT: compute small rotation and sub-pixel corrections.
 
-Output:
-- transform.tfm: SimpleITK transform file (rotation + small translation)
-- offsets.txt: Z-index correspondence [fixed_z, moving_z]
-- metrics.json: Registration quality metrics
+The XY alignment is handled by motor positions (shifts_xy.csv), so this
+script only computes small corrections, not large translations.
+
+Outputs.
+
+* ``transform.tfm`` -- SimpleITK transform file (rotation + small translation).
+* ``offsets.txt`` -- Z-index correspondence ``[fixed_z, moving_z]``.
+* ``metrics.json`` -- registration quality metrics.
 """
 
 import linumpy.config.threads  # noqa: F401

@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""
-Apply N4 bias field correction to an OME-Zarr OCT volume.
+"""Apply N4 bias field correction to an OME-Zarr OCT volume.
 
-Three correction modes are supported:
+Three correction modes are supported.
 
-  per_section  -- Independently correct each serial tissue section
-                  (removes depth-dependent attenuation per section).
-  global       -- Correct the whole stack as one volume (removes slow
-                  large-scale intensity gradients).
-  two_pass     -- Run per_section first, then global (default).
+* ``per_section`` -- independently correct each serial tissue section
+  (removes depth-dependent attenuation per section).
+* ``global`` -- correct the whole stack as one volume (removes slow
+  large-scale intensity gradients).
+* ``two_pass`` -- run ``per_section`` first, then ``global`` (default).
 
-The ``--strength`` parameter (0–1) blends between the original and the
-fully-corrected result:  output = strength * corrected + (1 - strength) * input.
+The ``--strength`` parameter (0-1) blends between the original and the
+fully-corrected result:
+``output = strength * corrected + (1 - strength) * input``.
 """
 
 # Configure thread limits before numpy/scipy imports
@@ -186,7 +186,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 def _save(arr: np.ndarray, path: str, res: list, args: argparse.Namespace) -> None:
     """Save a volume to OME-Zarr using resolution-based or fixed pyramid levels."""
-    writer = AnalysisOmeZarrWriter(path, arr.shape, chunk_shape=(128, 128, 128), dtype=np.float32)
+    from pathlib import Path
+
+    writer = AnalysisOmeZarrWriter(Path(path), arr.shape, chunk_shape=(128, 128, 128), dtype=np.float32)
     writer[:] = arr
     writer.finalize(
         res,

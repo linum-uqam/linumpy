@@ -5,7 +5,8 @@ GPU-accelerated image quality assessment functions.
 This module provides CuPy-accelerated versions of quality assessment functions.
 All functions automatically fall back to CPU if GPU is not available.
 
-Usage:
+Usage::
+
     from linumpy.gpu.image_quality import (
         compute_ssim_2d_gpu,
         compute_ssim_3d_gpu,

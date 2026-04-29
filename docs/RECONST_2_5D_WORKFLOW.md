@@ -1,7 +1,5 @@
 # 2.5D Reconstruction Workflow
 
----
-
 ## Overview
 
 The 2.5D reconstruction workflow (`soct_2.5d_reconst.nf`) converts a set of per-slice 2D mosaic
@@ -118,19 +116,18 @@ A border is removed from each tile before processing to avoid edge artifacts.
 
 The workflow runs processes in a linear sequence:
 
-```
-crop_tiles
-    └─→ estimate_illumination_bias
-             └─→ compensate_illumination_bias
-                       │
-                       ├─→ estimate_position (pools all compensated grids)
-                       │
-                       └─→ stitch_mosaic (per-slice, uses shared position transform)
-                                  └─→ stack_mosaic
-                                            ├─→ compress_stack  → stack.zarr.zip
-                                            ├─→ convert_to_omezarr
-                                            │         └─→ resample_stack → stack_10um.nii.gz
-                                            └─→ (stack.zarr itself)
+```mermaid
+flowchart TD
+    A[crop_tiles] --> B[estimate_illumination_bias]
+    B --> C[compensate_illumination_bias]
+    C --> D[estimate_position<br/>pools all grids]
+    C --> E[stitch_mosaic<br/>per-slice]
+    D --> E
+    E --> F[stack_mosaic]
+    F --> G[compress_stack<br/>stack.zarr.zip]
+    F --> H[convert_to_omezarr]
+    H --> I[resample_stack<br/>stack_10um.nii.gz]
+    F --> J[(stack.zarr)]
 ```
 
 ### 1. `crop_tiles`

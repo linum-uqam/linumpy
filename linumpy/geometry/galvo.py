@@ -27,7 +27,7 @@ def detect_galvo_band_in_tile(tile_aip: np.ndarray, min_drop_ratio: float = 0.40
     Returns
     -------
     tuple
-        ``(band_start, band_width, confidence)`` — pixel coordinates of the
+        ``(band_start, band_width, confidence)`` -- pixel coordinates of the
         detected band within the tile (along the A-line axis) and a confidence
         score in [0, 1].  Returns ``(0, 0, 0.0)`` when no band is detected.
     """

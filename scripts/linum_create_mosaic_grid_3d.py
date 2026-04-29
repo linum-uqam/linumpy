@@ -75,7 +75,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--sharding_factor",
         type=int,
         default=1,
-        help="A sharding factor of N will result in N**2 tiles per shard. [%(default)s]",
+        help="A sharding factor of N will result in N^2 tiles per shard. [%(default)s]",
     )
     options_g.add_argument(
         "--use_gpu",

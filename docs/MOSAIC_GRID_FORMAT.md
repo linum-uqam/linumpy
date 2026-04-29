@@ -1,8 +1,6 @@
 # Mosaic Grid Format (OME-Zarr)
 
 
----
-
 ## Overview
 
 Mosaic grids in linumpy are stored in the **OME-Zarr** format, a cloud-optimized, chunked array format designed for large microscopy datasets. The format supports multi-resolution pyramids, metadata, and efficient partial reads.
@@ -64,19 +62,19 @@ This is controlled by the `--pyramid_resolutions` parameter in `linum_stack_slic
 ### 3D Mosaic Grid
 
 ```
-Shape: (Z, X, Y)
+Shape: (Z, Y, X)
 ```
 
 | Dimension | Description |
 |-----------|-------------|
 | Z | Depth/axial dimension |
-| X | First lateral dimension |
-| Y | Second lateral dimension |
+| Y | First lateral dimension |
+| X | Second lateral dimension |
 
 ### 2D Mosaic Grid (AIP)
 
 ```
-Shape: (X, Y)
+Shape: (Y, X)
 ```
 
 ---
@@ -136,8 +134,8 @@ from linumpy.io.zarr import read_omezarr
 # Read image and resolution
 image, resolution = read_omezarr("mosaic_grid_3d_z00.ome.zarr")
 
-# image: dask.array.Array with shape (Z, X, Y)
-# resolution: tuple (res_z, res_x, res_y) in mm/pixel
+# image: dask.array.Array with shape (Z, Y, X)
+# resolution: tuple (res_z, res_y, res_x) in mm/pixel
 
 print(f"Shape: {image.shape}")
 print(f"Resolution: {resolution} mm/pixel")

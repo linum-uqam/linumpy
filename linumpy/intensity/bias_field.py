@@ -185,7 +185,7 @@ def compute_tissue_mask(
     Returns
     -------
     np.ndarray
-        Boolean array of shape (Z, Y, X) — True where tissue is present.
+        Boolean array of shape (Z, Y, X) -- True where tissue is present.
     """
     from scipy.ndimage import binary_closing, binary_fill_holes, gaussian_filter
     from skimage.filters import threshold_otsu
@@ -202,7 +202,7 @@ def compute_tissue_mask(
                 z_closing_sections=z_closing_sections,
             )
         except ImportError:
-            pass  # CuPy missing — fall back to CPU below.
+            pass  # CuPy missing -- fall back to CPU below.
 
     # Anisotropic 3-D smoothing: stronger in XY, light in Z to preserve
     # oblique tissue boundaries without per-Z Otsu noise.
@@ -263,7 +263,7 @@ def n4_correct(
     vol : np.ndarray
         Float32 input volume (Z, Y, X).
     mask : np.ndarray or None
-        Boolean tissue mask (Z, Y, X) — same shape as *vol*.  A full-volume
+        Boolean tissue mask (Z, Y, X) -- same shape as *vol*.  A full-volume
         mask is used when *None*.
     shrink_factor : int
         Isotropic spatial downsampling factor for the N4 fit.
@@ -273,7 +273,7 @@ def n4_correct(
     spline_distance_mm : float
         Approximate distance (in mm) between B-spline control-point knots.
     voxel_size_mm : 3-tuple of float
-        Voxel size (z, y, x) in mm — sets physical spacing for SimpleITK.
+        Voxel size (z, y, x) in mm -- sets physical spacing for SimpleITK.
     backend : {"cpu", "gpu", "auto"}
         Backend selector.  ``"cpu"`` (default) uses SimpleITK's N4
         implementation.  ``"gpu"`` dispatches to
@@ -326,7 +326,7 @@ def n4_correct(
     if n_iterations is None:
         n_iterations = [50, 50, 50, 50]
 
-    # Build SimpleITK images — ITK convention is (x, y, z), so transpose (Z,Y,X)→(X,Y,Z)
+    # Build SimpleITK images -- ITK convention is (x, y, z), so transpose (Z,Y,X)→(X,Y,Z)
     sitk_vol = sitk.GetImageFromArray(vol_f32.transpose(2, 1, 0))
     sitk_vol.SetSpacing((float(voxel_size_mm[2]), float(voxel_size_mm[1]), float(voxel_size_mm[0])))
 

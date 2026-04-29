@@ -122,7 +122,7 @@ def main() -> None:
 
     metrics = load_registration_metrics(args.transforms_dir)
     if not metrics:
-        logger.warning("No registration metrics found in %s — copying slice_config unchanged", args.transforms_dir)
+        logger.warning("No registration metrics found in %s -- copying slice_config unchanged", args.transforms_dir)
         slice_config_io.stamp_many(args.slice_config_in, args.slice_config_out, {})
         return
 
@@ -135,7 +135,7 @@ def main() -> None:
         ids = [s[0] for s in cluster]
         corrs = [s[1] for s in cluster]
         logger.info(
-            "Bad cluster: slices z%s–z%s (%d pairs, z_corr range %.3f–%.3f)",
+            "Bad cluster: slices z%s-z%s (%d pairs, z_corr range %.3f-%.3f)",
             str(ids[0]).zfill(2),
             str(ids[-1]).zfill(2),
             len(cluster),

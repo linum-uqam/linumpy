@@ -10,7 +10,7 @@ mosaic grid** for slice ``i``.  Two artifacts can inflate these values:
 1. **Mosaic grid expansion** (``--tile_fov_mm``): The acquisition software
    adapts the mosaic size to the visible tissue.  When it adds (or removes) a
    whole tile column at the left boundary between slices, ``xmin_mm`` jumps by
-   exactly ±N × tile_FOV even though the tissue did not move.  These steps are
+   exactly ±N x tile_FOV even though the tissue did not move.  These steps are
    *persistent* (not self-cancelling) and look like valid re-homing events to
    the spike detector.  Correct them first with ``--tile_fov_mm``.
 
@@ -22,20 +22,20 @@ mosaic grid** for slice ``i``.  Two artifacts can inflate these values:
 Detection criterion (``rehome`` method, default):
     A step at position i is treated as a glitch spike when
 
-        |step[i] + step[i±1]| < return_fraction × |step[i]|
+        |step[i] + step[i±1]| < return_fraction x |step[i]|
 
     i.e. the round-trip magnitude is less than ``return_fraction`` times the
     single-step magnitude (default 0.4 → adjacent step reverses > 60 %).
     Re-homing events (large step whose neighbours are small or compound in the
-    same direction) satisfy |step[i] + step[i±1]| ≥ return_fraction × |step[i]|
+    same direction) satisfy |step[i] + step[i±1]| ≥ return_fraction x |step[i]|
     and are therefore left untouched.
 
 Outputs
 -------
-* ``<out_shifts>`` — corrected shifts CSV (same schema as input).
+* ``<out_shifts>`` -- corrected shifts CSV (same schema as input).
 * Optionally, with ``--diagnostics <dir>``:
-    - ``rehoming_report.json`` — lists every glitch spike that was corrected.
-    - ``rehoming_plot.png``    — per-step magnitude chart with corrections marked.
+    - ``rehoming_report.json`` -- lists every glitch spike that was corrected.
+    - ``rehoming_plot.png``    -- per-step magnitude chart with corrections marked.
 """
 
 # Configure thread limits before numpy/scipy imports
@@ -82,13 +82,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Observed artifact step size in mm: the amount xmin_mm shifts\n"
         "spuriously at mosaic grid-expansion transitions.\n"
         "This value must be determined empirically from the\n"
-        "shifts_xy.csv data — it is NOT simply tile_size_um × (1-overlap).\n"
+        "shifts_xy.csv data -- it is NOT simply tile_size_um x (1-overlap).\n"
         "To find it: look for a cluster of near-equal large steps in\n"
         "x_shift_mm (e.g. several rows all ≈ +0.875 mm).  The common\n"
         "value is the artifact step; its magnitude depends on the mosaic\n"
         "grid layout at the time of acquisition.\n"
-        "When set, any step within tile_fov_tolerance of N × tile_fov_mm\n"
-        "(N integer ≠ 0) is corrected by subtracting N × tile_fov_mm.\n"
+        "When set, any step within tile_fov_tolerance of N x tile_fov_mm\n"
+        "(N integer ≠ 0) is corrected by subtracting N x tile_fov_mm.\n"
         "If unsure, leave unset and inspect the --diagnostics plot.\n"
         "[%(default)s]",
     )
@@ -237,14 +237,14 @@ def _save_diagnostics(
         axes[1].grid(True, alpha=0.3)
 
         n_tile = len(tile_corrected_indices)
-        axes[0].set_title(f"Rehoming correction — {len(corrected_indices)} spike(s), {n_tile} tile-offset(s) corrected")
+        axes[0].set_title(f"Rehoming correction -- {len(corrected_indices)} spike(s), {n_tile} tile-offset(s) corrected")
         fig.tight_layout()
         plot_path = diag_dir / "rehoming_plot.png"
         fig.savefig(plot_path, dpi=150)
         plt.close(fig)
         print(f"  Diagnostics plot:   {plot_path}")
     except ImportError:
-        print("  matplotlib not available — skipping plot.")
+        print("  matplotlib not available -- skipping plot.")
 
 
 def _stamp_slice_config(
@@ -286,7 +286,7 @@ def main() -> None:
 
     # --- Pass 1: mosaic grid-expansion correction -----------------------------
     # When the acquisition adds/removes tile columns at the mosaic boundary,
-    # xmin_mm shifts by N × tile_FOV (no real tissue movement).  These steps
+    # xmin_mm shifts by N x tile_FOV (no real tissue movement).  These steps
     # are persistent and do NOT self-cancel, so the spike detector misses them.
     tile_corrected_indices = []
     shifts_after = shifts_before
@@ -340,10 +340,10 @@ def main() -> None:
 
     total_corrected = len(tile_corrected_indices) + n_corrected
     if total_corrected == 0:
-        print("No encoder artifacts detected — shifts unchanged.")
+        print("No encoder artifacts detected -- shifts unchanged.")
 
     # Add a 'reliable' column: 0 for transitions whose *corrected* motor step
-    # magnitude still exceeds max_shift_mm — meaning neither Pass 1 (tile
+    # magnitude still exceeds max_shift_mm -- meaning neither Pass 1 (tile
     # offset) nor Pass 2 (spike) was able to explain the motor step, so
     # the true XY transition is unknown. Rows that pass 1/2 successfully
     # corrected are marked reliable=1.

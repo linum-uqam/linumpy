@@ -36,7 +36,10 @@ def _load_slab(zarr_path: Path, level: int, z0: int, dz: int):
             root = zarr.open(store, mode="r", path=top)
     else:
         root = zarr.open(str(zarr_path), mode="r")
-    arr = np.asarray(root[str(level)][...], dtype=np.float32)
+    assert isinstance(root, zarr.Group)
+    level_arr = root[str(level)]
+    assert isinstance(level_arr, zarr.Array)
+    arr = np.asarray(level_arr[...], dtype=np.float32)
     while arr.ndim > 3 and arr.shape[0] == 1:
         arr = arr[0]
     arr = arr[z0 : z0 + dz]
@@ -142,7 +145,7 @@ def main():
         ax.axis("off")
         plt.colorbar(h, ax=ax, fraction=0.046, pad=0.04)
 
-    fig.suptitle(f"N4 bias-field correction — live OCT slab (z={z_mid}, shape={vol.shape})", fontsize=12)
+    fig.suptitle(f"N4 bias-field correction -- live OCT slab (z={z_mid}, shape={vol.shape})", fontsize=12)
     plt.tight_layout()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(args.output, dpi=120, bbox_inches="tight")

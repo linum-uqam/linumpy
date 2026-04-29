@@ -380,7 +380,7 @@ def load_registration_transforms(
                     confidence = 1.0  # fallback for older JSONs without confidence score
 
                 # Always extract translations and zcorr for accumulation,
-                # BEFORE gating — so translations are available even for
+                # BEFORE gating -- so translations are available even for
                 # slices whose transforms are skipped due to bad rotation.
                 try:
                     metrics_tx = float(metrics_data["metrics"]["translation_x"]["value"])
@@ -695,7 +695,7 @@ def main() -> None:
             n_total = len(pairwise_translations)
             logger.info("Translation filter: excluded %s/%s pairs at boundary (>= %.1f px)", n_excluded, n_total, boundary)
 
-        # Second pass: accumulate filtered translations (NO cap yet — cap applied after smoothing)
+        # Second pass: accumulate filtered translations (NO cap yet -- cap applied after smoothing)
         # Optionally weight each translation by its confidence score
         cumulative_tx, cumulative_ty = 0.0, 0.0
         n_accumulated = 0
@@ -881,7 +881,7 @@ def main() -> None:
             # boundary to blend at, while keeping z-spacing fixed at slicing_interval.
             # This handles cases where the actual tissue overlap is smaller than the
             # imaging depth implies (i.e. the cut removed more tissue than expected).
-            # Skip refinement for low-confidence slices — spurious correlation matches
+            # Skip refinement for low-confidence slices -- spurious correlation matches
             # at degraded tissue boundaries cause Z-jumps.
             blend_overlap = overlap
             slice_confidence = None
@@ -889,7 +889,7 @@ def main() -> None:
                 if registration_transforms[slice_id] is not None:
                     slice_confidence = registration_transforms[slice_id][3]
                 else:
-                    # Transform was skipped (error/warning) — treat as zero confidence
+                    # Transform was skipped (error/warning) -- treat as zero confidence
                     slice_confidence = 0.0
             refine_ok = slice_confidence is None or slice_confidence >= args.blend_z_refine_min_confidence
             if args.blend_z_refine_vox > 0 and overlap > 0 and refine_ok:

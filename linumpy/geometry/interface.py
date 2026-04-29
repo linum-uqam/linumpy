@@ -484,7 +484,7 @@ def detect_interface_z(vol: np.ndarray, sigma_xy: float = 3.0, sigma_z: float = 
     Parameters
     ----------
     vol : np.ndarray
-        Volume with shape (X, Y, Z) — already transposed from OME-Zarr (Z, X, Y).
+        Volume with shape (X, Y, Z) -- already transposed from OME-Zarr (Z, X, Y).
     sigma_xy : float
         Gaussian smoothing sigma in XY before Z-gradient.
     sigma_z : float

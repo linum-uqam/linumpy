@@ -1,4 +1,4 @@
-"""Tests for linumpy/io/allen.py — orientation handling and registration.
+"""Tests for linumpy/io/allen.py -- orientation handling and registration.
 
 The Allen template download is monkey-patched to return a synthetic PIR-oriented
 volume with a deliberately asymmetric tissue distribution.  That keeps these
@@ -54,7 +54,7 @@ def _make_synthetic_pir_template(resolution_um: int = 100) -> sitk.Image:
 
 
 # ---------------------------------------------------------------------------
-# download_template_ras_aligned — orientation
+# download_template_ras_aligned -- orientation
 # ---------------------------------------------------------------------------
 
 
@@ -167,7 +167,7 @@ class TestNumpyToSitkImage:
 
 
 # ---------------------------------------------------------------------------
-# register_3d_rigid_to_allen — end-to-end self-registration
+# register_3d_rigid_to_allen -- end-to-end self-registration
 # ---------------------------------------------------------------------------
 
 
@@ -255,7 +255,7 @@ class TestRegisterRigidToAllen:
         the non-zero bounding box equals the cube's shape exactly, making the
         expected crop origin easy to compute.
         """
-        # A fully filled cube — nonzero bbox equals the full cube shape.
+        # A fully filled cube -- nonzero bbox equals the full cube shape.
         cube_size = 12
         cube = np.ones((cube_size, cube_size, cube_size), dtype=np.float32)
         leading_pad = (20, 15, 25)  # (pad_z, pad_y, pad_x); each > 10 (margin)

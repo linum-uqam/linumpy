@@ -188,7 +188,7 @@ def test_interpolate_z_morph_hard_skips_when_registration_unreliable():
     """Unrelated noise volumes must not produce a fabricated interpolation.
 
     Failed gates return ``(None, diag)`` with ``interpolation_failed=True``
-    — the pipeline treats this as a genuine gap rather than inserting a
+    -- the pipeline treats this as a genuine gap rather than inserting a
     blended volume.
     """
     rng = np.random.default_rng(99)

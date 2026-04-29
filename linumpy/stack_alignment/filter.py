@@ -27,7 +27,7 @@ def filter_outlier_shifts(
         'rehome' (recommended default): distinguishes genuine re-homing events
         from encoder glitch spikes.  A step is only corrected if it is large
         AND approximately self-cancelling with an adjacent step.  Specifically,
-        a step at position i is treated as a spike when
+        a step at position i is treated as a spike when::
 
             |step[i] + step[i±1]| < return_fraction * |step[i]|
 
@@ -39,7 +39,7 @@ def filter_outlier_shifts(
         Multiplier for IQR-based detection (only used by 'iqr' method).
     return_fraction : float
         For 'rehome': fraction threshold below which a round-trip is
-        considered self-cancelling (default 0.4 — if the adjacent step
+        considered self-cancelling (default 0.4 -- if the adjacent step
         reverses more than 60 % of a large step, treat as glitch spike).
 
     Returns
@@ -132,10 +132,10 @@ def filter_outlier_shifts(
             step_mag = shift_mag[idx]
 
             if not _is_spike(pos, step_x, step_y, step_mag):
-                # Re-homing event — leave it unchanged
+                # Re-homing event -- leave it unchanged
                 continue
 
-            # Glitch spike — replace with local median of non-outlier neighbours
+            # Glitch spike -- replace with local median of non-outlier neighbours
             neighbor_vals_x, neighbor_vals_y = [], []
             for offset in [-2, -1, 1, 2]:
                 neighbor_pos = pos + offset
@@ -185,13 +185,13 @@ def correct_tile_offset_shifts(
     in the shifts file as an apparent lateral tissue drift even though the tissue
     itself did not move.  The magnitude equals however far the detected tissue
     boundary shifted, which is determined by tissue geometry and the ROI
-    detection algorithm — **not** by the overlap-corrected tile step or any
+    detection algorithm -- **not** by the overlap-corrected tile step or any
     stage hardware quantum.
 
     .. note::
         The artifact step ``tile_fov_x_mm`` must be **empirically determined**
         from the shifts_xy.csv data.  It is **not** equal to
-        ``tile_size_um × (1 - overlap_fraction) / 1000`` (the stitching tile
+        ``tile_size_um x (1 - overlap_fraction) / 1000`` (the stitching tile
         step).  To find the correct value, inspect the x_shift_mm column for a
         cluster of near-equal large steps; that common value is the artifact step.
 
@@ -201,8 +201,8 @@ def correct_tile_offset_shifts(
     the true inter-slice tissue drift.
 
     This function checks each pairwise step independently: if the X component
-    is within ``tolerance`` of N × ``tile_fov_x_mm`` (for integer N ≠ 0), the
-    offset N × tile_fov_x_mm is subtracted, recovering the true tissue drift.
+    is within ``tolerance`` of N x ``tile_fov_x_mm`` (for integer N ≠ 0), the
+    offset N x tile_fov_x_mm is subtracted, recovering the true tissue drift.
     The same is done for the Y component independently.
 
     Parameters
@@ -212,15 +212,15 @@ def correct_tile_offset_shifts(
         (and optionally x_shift, y_shift in pixels).
     tile_fov_x_mm : float
         Empirically determined artifact step size in X (mm).  Must be found
-        from the shifts data — see note above.
+        from the shifts data -- see note above.
     tile_fov_y_mm : float, optional
         Tile field-of-view width in Y (mm).  Defaults to ``tile_fov_x_mm``.
     tolerance : float
         Fractional tolerance: a component is treated as a tile-multiple when
-        ``|component - N × fov| / fov < tolerance``.  Default 0.05 (5 %).
+        ``|component - N x fov| / fov < tolerance``.  Default 0.05 (5 %).
     min_step_mm : float
         Only inspect steps whose magnitude exceeds this value (mm).
-        Default 0 — all steps are checked.
+        Default 0 -- all steps are checked.
 
     Returns
     -------
@@ -354,7 +354,7 @@ def filter_step_outliers(
                         is_spike = True
                         break
             if not is_spike:
-                continue  # Re-homing event — leave unchanged
+                continue  # Re-homing event -- leave unchanged
 
         if method == "clamp":
             scale = max_step_mm / shift_mag[idx]

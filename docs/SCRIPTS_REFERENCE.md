@@ -1,11 +1,14 @@
 # Scripts Reference
 
 
----
-
 ## Overview
 
 linumpy provides a comprehensive set of command-line scripts for microscopy data processing. All scripts follow a consistent interface with `--help` for usage information.
+
+> **Source layout.** Most scripts live in `scripts/`. Diagnostic and
+> benchmark tools live in `scripts/diagnostics/`. All scripts are exposed
+> as console entry points by `pyproject.toml`, so they can be invoked
+> directly by name regardless of source location.
 
 ---
 
@@ -297,7 +300,7 @@ linum_correct_bias_field.py <input.ome.zarr> <output.ome.zarr> \
 | `--spline_distance_mm` | auto | B-spline control point spacing (default: 2.0 mm per-section, 10.0 mm global) |
 | `--mask_smoothing_sigma` | `2.0` | Gaussian sigma for tissue mask smoothing |
 | `--save_bias_field` | — | If given, write the estimated bias field to this OME-Zarr path |
-| `--n_levels` | `3` | Pyramid levels in output OME-Zarr |
+| `--n_levels` | `None` | Pyramid levels in output OME-Zarr (auto-chosen if unset) |
 
 ---
 
@@ -388,12 +391,12 @@ linum_stitch_motor_only.py <mosaic_grid.ome.zarr> <output.ome.zarr> \
     [--blending_method {none,average,diffusion}]
 ```
 
-### linum_stack_slices.py
+### linum_stack_slices_2d.py
 
-Stack 2D slices into 3D volume.
+Stack 2D AIPs into a 3D volume using `shifts_xy.csv`.
 
 ```bash
-linum_stack_slices.py <slices_dir> <output> --xy_shifts <shifts.csv>
+linum_stack_slices_2d.py <slices_dir> <output> --xy_shifts <shifts.csv>
 ```
 
 ### linum_stack_slices_3d.py
@@ -1014,13 +1017,15 @@ linum_extract_pyramid_levels.py <input.ome.zarr> 0 2
 
 Output files are named `<zarr_stem>_level<N>_<resolution>.nii.gz` and saved next to the input.
 
-### linum_resample.py
+### linum_resample_nifti.py
 
-Resample image to different resolution.
+Resample a NIfTI image to a target isotropic resolution.
 
 ```bash
-linum_resample.py <input> <output> -r <resolution>
+linum_resample_nifti.py <input.nii.gz> <output.nii.gz> -r <resolution>
 ```
+
+For resampling 2D mosaic grids see `linum_resample_mosaic_grid.py`.
 
 ### linum_reorient_nifti_to_ras.py
 
@@ -1030,12 +1035,12 @@ Reorient NIfTI to RAS orientation.
 linum_reorient_nifti_to_ras.py <input.nii.gz> <output.nii.gz>
 ```
 
-### linum_axis_XYZ_to_ZYX.py
+### linum_axis_xyz_to_zyx.py
 
 Transpose axes from XYZ to ZYX.
 
 ```bash
-linum_axis_XYZ_to_ZYX.py <input> <output>
+linum_axis_xyz_to_zyx.py <input> <output>
 ```
 
 ### linum_segment_brain_3d.py

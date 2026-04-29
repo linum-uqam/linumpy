@@ -12,7 +12,7 @@ def _make_zarr_mosaic(tmp_path, n_tiles_x=2, n_tiles_y=2, tile_shape=(4, 8, 8), 
     Create a zarr array mosaic grid.
 
     zarr's .chunks returns a plain tuple of ints (e.g. (4, 8, 8)), which is
-    what resample_mosaic_grid expects — unlike dask's .chunks which returns
+    what resample_mosaic_grid expects -- unlike dask's .chunks which returns
     tuples of tuples.
     """
     nz, th, tw = tile_shape
@@ -23,7 +23,7 @@ def _make_zarr_mosaic(tmp_path, n_tiles_x=2, n_tiles_y=2, tile_shape=(4, 8, 8), 
 
 
 # ---------------------------------------------------------------------------
-# resample_mosaic_grid — validation
+# resample_mosaic_grid -- validation
 # ---------------------------------------------------------------------------
 
 
@@ -35,7 +35,7 @@ def test_resample_mosaic_grid_raises_without_chunks():
 
 
 # ---------------------------------------------------------------------------
-# resample_mosaic_grid — source resolution in mm (< 1)
+# resample_mosaic_grid -- source resolution in mm (< 1)
 # ---------------------------------------------------------------------------
 
 
@@ -58,7 +58,7 @@ def test_resample_mosaic_grid_output_is_smaller_for_downscale(tmp_path):
 def test_resample_mosaic_grid_output_is_larger_for_upscale(tmp_path):
     """Up-sampling (target < source) must produce a larger volume."""
     vol = _make_zarr_mosaic(tmp_path, n_tiles_x=1, n_tiles_y=1, tile_shape=(4, 8, 8))
-    # source 0.050 mm = 50 µm, target 10 µm → scale ×5
+    # source 0.050 mm = 50 µm, target 10 µm → scale x5
     result = resample_mosaic_grid(vol, source_res=(0.05, 0.05, 0.05), target_res_um=10.0)
     assert result.shape[0] > vol.shape[0]
 
@@ -83,7 +83,7 @@ def test_resample_mosaic_grid_to_file(tmp_path):
 
 
 def test_resample_mosaic_grid_multi_tile_consistency(tmp_path):
-    """2×2 tiles produces ≈2× the per-tile output size compared to 1×1."""
+    """2x2 tiles produces ≈2x the per-tile output size compared to 1x1."""
     tile_shape = (4, 8, 8)
     tmp1 = tmp_path / "a"
     tmp2 = tmp_path / "b"

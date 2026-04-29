@@ -59,8 +59,18 @@ gpu-cuda13 = [
     "cupy-cuda13x>=13.0.0",
 ]
 docs = [
-    "sphinx>=6.0.0",
-    "sphinx-rtd-theme>=1.0.0",
+    "sphinx>=9.1",
+    "pydata-sphinx-theme>=0.17",
+    "sphinx-autoapi>=3.8",
+    "sphinx-argparse>=0.5",
+    "sphinx-design>=0.7",
+    "sphinxcontrib-mermaid>=1.0",
+    "myst-parser>=5.0",
+    "linkify-it-py>=2.1",
+    "sphinx-copybutton>=0.5",
+    "sphinx-notfound-page>=1.0",
+    "sphinx-sitemap>=2.6",
+    "sphinxext-opengraph>=0.9",
 ]
 
 [project.scripts]
@@ -196,8 +206,9 @@ select = ["E", "F", "W", "I", "UP", "B", "RUF", "SIM", "C4", "PIE", "PTH",
 # ANN401: Any is legitimately unavoidable in a few callback/override signatures.
 ignore = ["N813", "ANN401"]
 extend-select = ["D417"]
-# Scientific codebase: these Unicode characters are intentional
-allowed-confusables = ["–", "×", "σ", "ℹ"]
+# Scientific codebase: Greek letters and the info-icon glyph are intentional;
+# ASCII confusables (× → x, – → -, — → --) are normalised in source.
+allowed-confusables = ["σ", "ℹ"]
 
 [tool.ruff.lint.pydocstyle]
 # numpy-style docstrings across the whole codebase.

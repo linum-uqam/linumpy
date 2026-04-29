@@ -1,0 +1,10 @@
+Pipelines
+=========
+
+.. toctree::
+   :maxdepth: 2
+
+   PIPELINE_OVERVIEW
+   NEXTFLOW_WORKFLOWS
+   RECONST_2_5D_WORKFLOW
+   RECONSTRUCTION_DIAGNOSTICS
