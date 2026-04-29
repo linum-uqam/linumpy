@@ -34,6 +34,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx.ext.intersphinx",
+    "sphinx.ext.mathjax",
     "autoapi.extension",
     "sphinxarg.ext",
     "myst_parser",
@@ -54,8 +55,10 @@ source_suffix = {
     ".md": "markdown",
 }
 myst_enable_extensions = [
+    "amsmath",
     "colon_fence",
     "deflist",
+    "dollarmath",
     "fieldlist",
     "linkify",
     "substitution",
@@ -70,8 +73,12 @@ mermaid_fullscreen_button = "⛶"
 mermaid_height = "640px"
 mermaid_light_theme = "neutral"
 mermaid_dark_theme = "dark"
+# startOnLoad must be False — sphinxcontrib-mermaid's default.js calls
+# mermaid.run() itself after wiring d3 zoom and the fullscreen modal. With
+# startOnLoad=True mermaid auto-renders before the wrapper attaches, leaving
+# diagrams without zoom/fullscreen buttons.
 mermaid_init_config = {
-    "startOnLoad": True,
+    "startOnLoad": False,
     "securityLevel": "loose",
     "flowchart": {"htmlLabels": True, "curve": "basis", "useMaxWidth": True},
     "themeVariables": {"fontSize": "16px"},
