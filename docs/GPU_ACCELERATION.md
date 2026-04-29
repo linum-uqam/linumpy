@@ -20,9 +20,9 @@ linumpy supports GPU acceleration for compute-intensive operations using NVIDIA 
 nvidia-smi | grep "CUDA Version"
 
 # Install linumpy with GPU support (choose your CUDA version)
-pip install linumpy[gpu]           # CUDA 12.x (default)
-pip install linumpy[gpu-cuda11]    # CUDA 11.x
-pip install linumpy[gpu-cuda13]    # CUDA 13.x (requires extra setup for JAX)
+uv pip install 'linumpy[gpu]'           # CUDA 12.x (default)
+uv pip install 'linumpy[gpu-cuda11]'    # CUDA 11.x
+uv pip install 'linumpy[gpu-cuda13]'    # CUDA 13.x (requires extra setup for JAX)
 
 # Verify GPU
 linum_gpu_info.py
@@ -90,18 +90,18 @@ If you prefer manual setup:
 
 ```bash
 # 1. Uninstall all conflicting packages
-pip uninstall -y jax jaxlib jax-cuda12-plugin nvidia-cusolver nvidia-cufft \
+uv pip uninstall jax jaxlib jax-cuda12-plugin nvidia-cusolver nvidia-cufft \
     nvidia-cusparse nvidia-cublas nvidia-cuda-runtime nvidia-cudnn nvidia-nvjitlink \
     nvidia-cublas-cu12 nvidia-cuda-cupti-cu12 nvidia-cuda-runtime-cu12 \
     nvidia-cudnn-cu12 nvidia-cufft-cu12 nvidia-cusolver-cu12 nvidia-cusparse-cu12 \
     nvidia-nccl-cu12 nvidia-nvjitlink-cu12
 
 # 2. Install JAX 0.4.23 with CUDA wheel
-pip install 'jax==0.4.23' 'jaxlib==0.4.23+cuda12.cudnn89' \
+uv pip install 'jax==0.4.23' 'jaxlib==0.4.23+cuda12.cudnn89' \
     -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
 # 3. Install PINNED nvidia package versions (critical - newer versions won't work!)
-pip install \
+uv pip install \
     'nvidia-cublas-cu12==12.3.4.1' \
     'nvidia-cuda-cupti-cu12==12.3.101' \
     'nvidia-cuda-runtime-cu12==12.3.101' \
@@ -155,7 +155,7 @@ separate `_gpu.py` variant is needed.
 | `linum_assess_slice_quality.py` | SSIM, morphology | 3-8x |
 | `linum_aip_png.py` | Mean projection | ≤1x |
 | `linum_generate_mosaic_aips.py` | Mean projection | ≤1x |
-| `linum_normalize_z_intensity.py` | Scale-factor computation | varies |
+| `linum_correct_bias_field.py` | N4 bias field estimation | varies |
 | `linum_estimate_global_transform.py` | Phase correlation | 8-16x |
 
 ---

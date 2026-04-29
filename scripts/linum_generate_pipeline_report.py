@@ -696,7 +696,7 @@ def discover_images(
 
     # Auto-detect overview from stack output directories if not provided via CLI
     if not images["overview"]:
-        for stack_dir_name in ("stack_motor", "stack", "normalize_z_intensity"):
+        for stack_dir_name in ("stack_motor", "stack", "correct_bias_field", "normalize_z_intensity"):
             d = input_dir / stack_dir_name
             if d.exists():
                 pngs = sorted(d.glob("*.png"))

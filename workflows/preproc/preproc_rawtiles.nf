@@ -9,7 +9,7 @@ nextflow.enable.dsl = 2
 // Parameters are defined in nextflow.config
 
 process create_mosaic_grid {
-    publishDir "${params.output}", mode: 'link'  // Hard link: no duplication, file stays accessible
+    publishDir "$params.output", mode: 'link'  // Hard link: no duplication, file stays accessible
     
     input:
         tuple val(slice_id), path(tiles)
@@ -35,7 +35,7 @@ process create_mosaic_grid {
 }
 
 process generate_aip {
-    publishDir "${params.output}/aips", mode: 'copy'
+    publishDir "$params.output/aips", mode: 'copy'
 
     input:
         tuple val(slice_id), path(mosaic_grid)
@@ -55,7 +55,7 @@ process generate_aip {
 
 process generate_mosaic_preview {
     maxForks 1
-    publishDir "${params.output}/previews", mode: 'copy'
+    publishDir "$params.output/previews", mode: 'copy'
 
     input:
         tuple val(slice_id), path(mosaic_grid)
@@ -74,14 +74,14 @@ process generate_mosaic_preview {
 
 process estimate_xy_shifts_from_metadata {
     cpus params.processes
-    publishDir "${params.output}", mode: 'copy'
+    publishDir "$params.output", mode: 'copy' 
     input:
         path(input_dir)
     output:
         path("shifts_xy.csv")
     script:
     """
-    linum_estimate_xy_shift_from_metadata.py ${input_dir} shifts_xy.csv --n_processes ${params.processes}
+    linum_estimate_xy_shift_from_metadata.py ${input_dir} shifts_xy.csv --n_processes $params.processes
     """
 
     stub:
@@ -91,7 +91,7 @@ process estimate_xy_shifts_from_metadata {
 }
 
 process generate_slice_config {
-    publishDir "${params.output}", mode: 'copy'
+    publishDir "$params.output", mode: 'copy'
     
     input:
         tuple path(shifts_file), path(input_dir)
@@ -116,17 +116,17 @@ process generate_slice_config {
 workflow {
     if (params.use_old_folder_structure)
     {
-        inputSlices = channel.fromPath("${params.input}/tile_x*_y*_z*/", type: 'dir')
+        inputSlices = channel.fromPath("$params.input/tile_x*_y*_z*/", type: 'dir')
                             .map{path -> tuple(path.toString().substring(path.toString().length() - 2), path)}
                             .groupTuple()
     }
     else
     {
-        inputSlices = channel.fromPath("${params.input}/**/tile_x*_y*_z*/", type: 'dir')
+        inputSlices = channel.fromPath("$params.input/**/tile_x*_y*_z*/", type: 'dir')
                             .map{path -> tuple(path.toString().substring(path.toString().length() - 2), path)}
                             .groupTuple()
     }
-    input_dir_channel = channel.fromPath("${params.input}", type: 'dir')
+    input_dir_channel = channel.fromPath("$params.input", type: 'dir')
 
     // Generate a 3D mosaic grid at full resolution
     create_mosaic_grid(inputSlices)
