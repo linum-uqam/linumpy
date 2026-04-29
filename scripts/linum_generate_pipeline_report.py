@@ -668,10 +668,10 @@ def discover_images(
     Discover preview images in the pipeline output directory.
 
     Returns a dict mapping category → sorted list of image paths:
-      'overview'              – main volume screenshots (up to 2)
-      'stitch_preview'        – per-slice stitched previews
-      'common_space_preview'  – common-space alignment previews
-      'diag_*'                – images found in diagnostics/ subdirs
+      'overview'              - main volume screenshots (up to 2)
+      'stitch_preview'        - per-slice stitched previews
+      'common_space_preview'  - common-space alignment previews
+      'diag_*'                - images found in diagnostics/ subdirs
     """
     images: dict[str, list[Path]] = {
         "overview": [],
@@ -848,7 +848,7 @@ def _render_grouped_issues_html(grouped: list[dict], color_class: str, label: st
             html += f'                <div class="issue-item">{g["details"][0]}</div>\n'
         else:
             vals = g["values"]
-            val_str = f"range {min(vals):.3g} – {max(vals):.3g}" if vals else f"{g['count']} occurrences"
+            val_str = f"range {min(vals):.3g} - {max(vals):.3g}" if vals else f"{g['count']} occurrences"
             thresh_str = f", threshold: {g['threshold']:.3g}" if g["threshold"] is not None else ""
             summary_line = f"<strong>{g['metric']}</strong>: {g['count']} slices affected ({val_str}{thresh_str})"
             html += '                <details class="sub-issue">\n'
@@ -959,7 +959,7 @@ def _render_interpolation_section_html(
             sid = r.get("slice_id", "") or "?"
             failed = bool(r.get("interpolation_failed"))
             status_label = "SKIPPED" if failed else "OK"
-            method_used = r.get("method_used", "") or ("—" if failed else "")
+            method_used = r.get("method_used", "") or ("--" if failed else "")
             fb = r.get("fallback_reason", "") or ""
             pre = r.get("pre_reg_ncc", "")
             post = r.get("post_reg_ncc", "")
@@ -1048,7 +1048,7 @@ def _render_interpolation_section_text(interpolation: dict) -> str:
             sid = (r.get("slice_id", "") or "?")[:6]
             failed = bool(r.get("interpolation_failed"))
             status = "SKIP" if failed else "OK"
-            method_used = (r.get("method_used", "") or ("—" if failed else ""))[:14]
+            method_used = (r.get("method_used", "") or ("--" if failed else ""))[:14]
             fb = (r.get("fallback_reason", "") or "")[:28]
             pre = r.get("pre_reg_ncc", "")
             post = r.get("post_reg_ncc", "")
@@ -1866,7 +1866,7 @@ def generate_text_report(
                     lines.append(f"    - {g['details'][0]}")
                 else:
                     vals = g["values"]
-                    val_str = f"range {min(vals):.3g}–{max(vals):.3g}" if vals else f"{g['count']} occurrences"
+                    val_str = f"range {min(vals):.3g}-{max(vals):.3g}" if vals else f"{g['count']} occurrences"
                     lines.append(f"    - {g['metric']}: {g['count']} slices ({val_str})")
 
         if all_warnings:
@@ -1877,7 +1877,7 @@ def generate_text_report(
                     lines.append(f"    - {g['details'][0]}")
                 else:
                     vals = g["values"]
-                    val_str = f"range {min(vals):.3g}–{max(vals):.3g}" if vals else f"{g['count']} occurrences"
+                    val_str = f"range {min(vals):.3g}-{max(vals):.3g}" if vals else f"{g['count']} occurrences"
                     lines.append(f"    - {g['metric']}: {g['count']} slices ({val_str})")
 
         if verbose:
@@ -1948,7 +1948,7 @@ def main() -> None:
 
     print(f"Found {sum(len(v) for v in aggregated.values())} metrics files across {len(aggregated)} pipeline steps")
 
-    # Discover preview images — only for zip bundles; HTML is always image-free
+    # Discover preview images -- only for zip bundles; HTML is always image-free
     images: dict[str, list[Path]] = {}
     if output_format == "zip" and not args.no_images:
         images = discover_images(input_dir, overview_png=args.overview_png, annotated_png=args.annotated_png)

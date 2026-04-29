@@ -1,8 +1,6 @@
 # Pipeline Overview
 
 
----
-
 ## Overview
 
 The linumpy processing pipeline converts raw S-OCT (Serial Optical Coherence Tomography) microscopy data into reconstructed 3D volumes. The pipeline consists of two main stages:
@@ -463,7 +461,7 @@ and shift each A-line so that $z'(y, x) = z - (\hat{z}_0(y, x) - \min \hat{z}_0)
 $$
 \min_{F, D, B_i} \quad \sum_i \| A_i - (F \odot B_i + D)\|_1 + \lambda_F \|F\|_* + \lambda_D \|D\|_1
 $$
-where $F$ is the flat-field (smooth, nuclear-norm regularised), $D$ is the dark-field, and $B_i$ is the per-tile baseline. Each tile is then corrected as $\hat{B}_i = (A_i - D) / F$. The JAX implementation runs this on GPU.
+where $F$ is the flat-field (smooth, nuclear-norm regularised), $D$ is the dark-field, and $B_i$ is the per-tile baseline. Each tile is then corrected as $\hat{B}_i = (A_i - D) / F$. BaSiCPy 2.x runs this on the GPU via its PyTorch backend when a CUDA build of PyTorch is available.
 
 ---
 
@@ -649,7 +647,7 @@ Both pipelines support optional GPU acceleration using NVIDIA CUDA via CuPy. GPU
 | Preprocessing | `create_mosaic_grid` | Galvo detection, volume resize |
 | Preprocessing | `generate_aip` | Mean projection |
 | 3D Reconstruction | `resample_mosaic_grid` | Volume resize |
-| 3D Reconstruction | `fix_illumination` | BaSiCPy background correction (JAX on GPU) |
+| 3D Reconstruction | `fix_illumination` | BaSiCPy background correction (PyTorch on GPU) |
 | 3D Reconstruction | `normalize` | Intensity normalization, percentile clipping |
 
 ### Running with GPU

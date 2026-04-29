@@ -1,8 +1,6 @@
 # Slice Configuration Feature
 
 
----
-
 ## Overview
 
 `slice_config.csv` is the **single source of truth for per-slice pipeline decisions**. It controls which slices are included in the 3D reconstruction pipeline and records how every stage has acted on each slice, in a machine- and human-readable audit trail.
@@ -52,7 +50,7 @@ This caused errors when:
 
 A CSV file (`slice_config.csv`) records per-slice pipeline decisions. Below is a fully-populated example after a complete run:
 
-```csv
+```text
 slice_id,use,quality_score,galvo_confidence,galvo_fix,rehomed,rehoming_reliable,auto_excluded,auto_exclude_reason,interpolated,interpolation_failed,interpolation_method_used,interpolation_fallback_reason,notes
 00,false,0.000,0.234,false,false,,false,,false,false,,,calibration_slice
 01,true,0.812,0.891,true,false,,false,,false,false,,,
@@ -167,7 +165,7 @@ The first slice in an acquisition is typically a **calibration slice** that is t
 
 When quality assessment runs, the writer only populates canonical columns:
 
-```csv
+```text
 slice_id,use,quality_score,notes
 00,false,0.000,calibration_slice
 01,true,0.812,
@@ -489,7 +487,7 @@ All Python-side slice filtering (e.g. `linum_estimate_global_transform.py`) uses
 
 The shifts file contains pairwise shifts between consecutive slices:
 
-```csv
+```text
 fixed_id,moving_id,x_shift,y_shift,x_shift_mm,y_shift_mm
 0,1,10,5,0.01,0.005
 1,2,8,3,0.008,0.003

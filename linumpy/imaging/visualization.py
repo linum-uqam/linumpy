@@ -237,8 +237,8 @@ def _panel_labels_from_orientation(orientation: str) -> tuple | None:
     then computes panel names and axis labels from the source-dimension letters.
 
     The volume has shape (Z=dim0, Y=dim1, X=dim2).
-    Panel 1 is ``image[:, x_slice, :]`` — shows (dim0, dim2)=(Z,X), fixes dim1 (Y).
-    Panel 2 is ``image[:, :, y_slice]``  — shows (dim0, dim1)=(Z,Y), fixes dim2 (X).
+    Panel 1 is ``image[:, x_slice, :]`` -- shows (dim0, dim2)=(Z,X), fixes dim1 (Y).
+    Panel 2 is ``image[:, :, y_slice]``  -- shows (dim0, dim1)=(Z,Y), fixes dim2 (X).
 
     Parameters
     ----------
@@ -508,8 +508,8 @@ def save_annotated_views(
         else ""
     )
     fig.suptitle(
-        f"Z-Slice Alignment View — {n_input_slices} input slices ({slice_range_str}){orient_note}\n"
-        f"Volume: {n_z_voxels} Z × {n_rows} X × {n_cols} Y voxels"
+        f"Z-Slice Alignment View -- {n_input_slices} input slices ({slice_range_str}){orient_note}\n"
+        f"Volume: {n_z_voxels} Z x {n_rows} X x {n_cols} Y voxels"
         f"  ·  NOTE: axes reflect raw acquisition geometry, NOT final neuroimaging orientation",
         color="yellow",
         fontsize=11,

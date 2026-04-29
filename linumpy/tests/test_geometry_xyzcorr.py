@@ -145,7 +145,7 @@ def test_detect_interface_z_no_wrap_artifact():
     interface_z = 30
     vol = np.zeros((n_x, n_y, n_z), dtype=np.float32)
     vol[:, :, interface_z:] = 100.0
-    # Make the last few Z slices extra bright — would create z=0 artifact with wrap padding
+    # Make the last few Z slices extra bright -- would create z=0 artifact with wrap padding
     vol[:, :, -5:] = 500.0
     rng = np.random.default_rng(7)
     vol += rng.random((n_x, n_y, n_z)).astype(np.float32) * 2.0

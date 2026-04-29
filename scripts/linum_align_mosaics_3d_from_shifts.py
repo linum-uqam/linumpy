@@ -388,7 +388,7 @@ def main() -> None:
                     dx_mm, dy_mm, dx_px, dy_px, ncc = _estimate_shift_by_registration(
                         mosaic_files[fixed_id], mosaic_files[moving_id]
                     )
-                    # Check correlation quality — reject low-quality phase correlations
+                    # Check correlation quality -- reject low-quality phase correlations
                     orig_dx_mm = shifts_df.loc[idx, "x_shift_mm"]
                     orig_dy_mm = shifts_df.loc[idx, "y_shift_mm"]
                     if args.refine_min_correlation > 0 and ncc < args.refine_min_correlation:

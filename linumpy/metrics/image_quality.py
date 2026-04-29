@@ -4,6 +4,7 @@ Image quality assessment functions for slice analysis.
 
 This module provides CPU-based functions for assessing image quality in 3D volumes,
 including:
+
 - Structural Similarity Index (SSIM)
 - Edge preservation scoring
 - Variance consistency analysis
@@ -11,7 +12,8 @@ including:
 
 For GPU-accelerated versions, see `linumpy.gpu.image_quality`.
 
-Usage:
+Usage::
+
     from linumpy.metrics.image_quality import (
         compute_ssim_2d,
         compute_ssim_3d,
@@ -140,7 +142,7 @@ def compute_ssim_3d(vol1: np.ndarray, vol2: np.ndarray, win_size: int = 7, sampl
 
     ssim_scores = []
     for z in indices:
-        # Load one plane (or crop) at a time — works for zarr and numpy
+        # Load one plane (or crop) at a time -- works for zarr and numpy
         p1 = np.asarray(vol1[z, ys:ye, xs:xe])
         p2 = np.asarray(vol2[z, ys:ye, xs:xe])
         score = compute_ssim_2d(p1, p2, win_size)
@@ -197,7 +199,7 @@ def compute_edge_score(vol: np.ndarray, reference: np.ndarray, sample_z: int | N
     if edges_r.max() > 0:
         edges_r = edges_r / edges_r.max()
 
-    # Compute correlation — suppress divide warning when edges are constant (e.g. zero array)
+    # Compute correlation -- suppress divide warning when edges are constant (e.g. zero array)
     with np.errstate(invalid="ignore"):
         correlation = np.corrcoef(edges_v.flatten(), edges_r.flatten())[0, 1]
 
@@ -286,9 +288,9 @@ def assess_slice_quality(
     ny = vol.shape[1] if vol.ndim == 3 else vol.shape[0]
     nx = vol.shape[2] if vol.ndim == 3 else vol.shape[1]
 
-    # Compute center-crop bounds once — all plane reads below use this region.
+    # Compute center-crop bounds once -- all plane reads below use this region.
     # For large single-resolution zarr mosaic grids this is the primary
-    # performance control: a 1024×1024 crop loads ~2 MB instead of ~5 GB.
+    # performance control: a 1024x1024 crop loads ~2 MB instead of ~5 GB.
     if xy_roi > 0:
         yc, xc = ny // 2, nx // 2
         half = xy_roi // 2
@@ -317,7 +319,7 @@ def assess_slice_quality(
         metrics["overall"] = 0.0
         return 0.0, metrics
 
-    # Compute SSIM with neighbors — each call loads only sample_depth cropped planes
+    # Compute SSIM with neighbors -- each call loads only sample_depth cropped planes
     ssim_scores = []
     if vol_before is not None:
         metrics["ssim_before"] = compute_ssim_3d(vol, vol_before, sample_depth=sample_depth, xy_roi=xy_roi)

@@ -87,7 +87,7 @@ def compute_aip(vol: Any, use_gpu: bool = True) -> np.ndarray:
 def save_aip_png(aip: np.ndarray, output_path: Path) -> None:
     """Normalize and save an AIP array as a 16-bit PNG.
 
-    Intensities are clipped to the 0.1–99.9 percentile range and mapped
+    Intensities are clipped to the 0.1-99.9 percentile range and mapped
     to the full uint16 range. Spatial resolution is preserved: each data
     pixel maps to exactly one output pixel.
 

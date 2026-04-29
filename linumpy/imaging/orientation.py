@@ -30,7 +30,8 @@ def parse_orientation_code(orientation: str) -> tuple[tuple[int, ...], tuple[int
     axis_permutation : tuple of int
         Source indices for each target dimension, such that
         ``np.transpose(volume, axis_permutation)`` produces a volume whose axes are
-        ordered (S, R, A) — matching the numpy_to_sitk_image convention where:
+        ordered (S, R, A) -- matching the numpy_to_sitk_image convention where:
+
           - numpy dim 0 → SITK Z → Allen S (Superior)
           - numpy dim 1 → SITK X → Allen R (Right)
           - numpy dim 2 → SITK Y → Allen A (Anterior)
@@ -45,7 +46,7 @@ def parse_orientation_code(orientation: str) -> tuple[tuple[int, ...], tuple[int
 
     Examples
     --------
-    >>> parse_orientation_code('SRA')  # source already in (S, R, A) order — identity
+    >>> parse_orientation_code('SRA')  # source already in (S, R, A) order -- identity
     ((0, 1, 2), (1, 1, 1))
     >>> parse_orientation_code('PIR')  # common OCT orientation
     ((1, 2, 0), (-1, 1, -1))

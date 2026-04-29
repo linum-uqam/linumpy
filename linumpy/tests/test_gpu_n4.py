@@ -176,7 +176,7 @@ def test_n4_correct_gpu_reduces_residual_spread():
 
     vol, _, mask = _make_synthetic_volume(shape=(24, 48, 48), bias_amp=0.5)
 
-    # Restrict to one tissue class (interior) — true intensity is constant
+    # Restrict to one tissue class (interior) -- true intensity is constant
     # there, so any spread comes from the bias field.
     z, y, x = vol.shape
     zg, yg, xg = np.mgrid[0:z, 0:y, 0:x].astype(np.float32)

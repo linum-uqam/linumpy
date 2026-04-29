@@ -221,7 +221,7 @@ def get_attenuation_faber2004(
     References
     ----------
     - Faber et al. Quantitative measurement of attenuation coefficients of weakly
-     scattering media using optical coherence tomography. Opt. Express 12, 4353–4365 (2004).
+      scattering media using optical coherence tomography. Opt. Express 12, 4353-4365 (2004).
     """
     # Average the A-line together in the XY plane
     if N > 0:

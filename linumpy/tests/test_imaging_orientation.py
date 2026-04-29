@@ -22,7 +22,7 @@ def _make_gradient_vol(shape=(4, 6, 8)):
 
 
 # ---------------------------------------------------------------------------
-# parse_orientation_code — valid codes
+# parse_orientation_code -- valid codes
 # ---------------------------------------------------------------------------
 
 
@@ -106,7 +106,7 @@ class TestParseOrientationCodeValid:
 
 
 # ---------------------------------------------------------------------------
-# parse_orientation_code — error cases
+# parse_orientation_code -- error cases
 # ---------------------------------------------------------------------------
 
 
@@ -129,14 +129,14 @@ class TestParseOrientationCodeErrors:
             parse_orientation_code("RRS")
 
     def test_duplicate_axis_opposite_direction(self):
-        """RLS has R=dim1 and L=dim1 — same target axis."""
+        """RLS has R=dim1 and L=dim1 -- same target axis."""
         with pytest.raises(ValueError):
             parse_orientation_code("RLS")
 
     def test_missing_axis(self):
         """SAI uses neither R nor L so target-dim1 is missing."""
-        # S→dim0, A→dim2, I→dim0 — actually duplicate! Let's use a truly missing case.
-        # SAP: S→0, A→2, P→2 — duplicate (A and P both target dim2).
+        # S→dim0, A→dim2, I→dim0 -- actually duplicate! Let's use a truly missing case.
+        # SAP: S→0, A→2, P→2 -- duplicate (A and P both target dim2).
         with pytest.raises(ValueError):
             parse_orientation_code("SAP")
 

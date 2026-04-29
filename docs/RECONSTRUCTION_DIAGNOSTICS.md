@@ -189,6 +189,27 @@ linum_diagnose_reconstruction.py \
 
 ## Troubleshooting Workflow
 
+```mermaid
+flowchart TD
+    A[Reconstruction artifact:<br/>edge mismatch / overhang] --> B[linum_diagnose_reconstruction.py<br/>diagnostic_report.txt]
+    B --> C{Symptom?}
+    C -->|cumulative rotation drift| D[Rotation drift]
+    C -->|individual slice quality| E[Bad slice]
+    C -->|large inter-slice XY jumps| F[Motor / encoder issue]
+    C -->|tile-level mismatch| G[Tile dilation]
+    D --> D1[Set registration_transform=euler<br/>raise registration_max_rotation]
+    E --> E1[auto_assess_quality=true<br/>auto_exclude_enabled=true]
+    F --> F1[detect_rehoming=true<br/>tile_fov_mm=0.875<br/>common_space_refine_unreliable=true]
+    G --> G1[linum_analyze_tile_dilation.py<br/>then per-tile correction]
+    D1 --> R[Re-run with --debug_slices subset]
+    E1 --> R
+    F1 --> R
+    G1 --> R
+    R --> V[Re-run diagnostics<br/>verify improvement]
+    V -->|still bad| C
+    V -->|fixed| DONE([Done])
+```
+
 ### Step 1: Quick Assessment
 ```bash
 # Run diagnostics on existing output

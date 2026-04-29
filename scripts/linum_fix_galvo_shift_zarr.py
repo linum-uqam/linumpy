@@ -118,7 +118,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--detection_level",
         type=int,
         default=1,
-        help="Pyramid level used for auto-detection (0=full res). Default: 1 (2× downsampled for speed).",
+        help="Pyramid level used for auto-detection (0=full res). Default: 1 (2x downsampled for speed).",
     )
     detect_group.add_argument(
         "--min_confidence",
@@ -145,14 +145,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--preview_level",
         type=int,
         default=2,
-        help="Pyramid level used for the preview (0=full res). Default: 2 (4× downsampled, faster). ",
+        help="Pyramid level used for the preview (0=full res). Default: 2 (4x downsampled, faster). ",
     )
     preview_group.add_argument("--cmap", default="magma", help="Colormap for the preview [%(default)s].")
 
     scan_group = p.add_argument_group(
         "Band-start scan",
         "Sweep band_start over a range to visually find the correct value. "
-        "Generates a contact-sheet PNG — no fix is applied. "
+        "Generates a contact-sheet PNG -- no fix is applied. "
         "Requires --band_width.",
     )
     scan_group.add_argument("--scan", metavar="OUT_PNG", help="Output PNG for the band-start contact sheet.")
@@ -242,8 +242,8 @@ def _generate_comparison_preview(
     vmin = float(np.percentile(all_after, 0.1))
     vmax = float(np.percentile(all_after, 99.9))
 
-    titles_top = ["BEFORE  –  XY", "BEFORE  –  XZ", "BEFORE  –  YZ"]
-    titles_bot = ["AFTER   –  XY", "AFTER   –  XZ", "AFTER   –  YZ"]
+    titles_top = ["BEFORE  -  XY", "BEFORE  -  XZ", "BEFORE  -  YZ"]
+    titles_bot = ["AFTER   -  XY", "AFTER   -  XZ", "AFTER   -  YZ"]
     width_ratios = [p.shape[1] for p in before_panels]
 
     fig, axes = plt.subplots(2, 3, gridspec_kw={"width_ratios": width_ratios, "hspace": 0.05, "wspace": 0.02})
@@ -347,7 +347,7 @@ def _auto_detect(zarr_root: Path, detection_level: int, n_extra: int | None = No
     band_start and band_width are expressed in level-0 (full-resolution) pixels.
 
     When *n_extra* is provided the same gradient-pair detector used by the
-    pipeline (``detect_galvo_shift``) is applied to each chunk AIP — this is
+    pipeline (``detect_galvo_shift``) is applied to each chunk AIP -- this is
     much more robust than the threshold-based fallback.  Without *n_extra* the
     simpler ``detect_galvo_band_in_tile`` is used.
 
@@ -525,7 +525,7 @@ def _scan_band_start(
             tiles.append(chunk.mean(axis=0))  # (chunk_x, chunk_y) AIP
 
     if not tiles:
-        print("  No tiles with sufficient signal found — cannot generate scan.")
+        print("  No tiles with sufficient signal found -- cannot generate scan.")
         return
 
     avg_tile = np.mean(np.stack(tiles, axis=0), axis=0)  # representative XY view
@@ -561,7 +561,7 @@ def _scan_band_start(
         axes_flat[j].set_visible(False)
 
     fig.suptitle(
-        f"band_start scan  |  band_width={band_width}px  |  pyramid level {actual_level} ({scale_factor}× downsampled)",
+        f"band_start scan  |  band_width={band_width}px  |  pyramid level {actual_level} ({scale_factor}x downsampled)",
         color="white",
         fontsize=10,
     )
@@ -624,7 +624,7 @@ def _apply_fix(
         print(
             f"Rolling each tile chunk by +{roll_amount} px "
             f"(band [{band_start}:{band_end}] → right edge of tile) "
-            f"in {n_cx}×{n_cy} tile chunks."
+            f"in {n_cx}x{n_cy} tile chunks."
         )
     else:
         print(f"Rolling each tile chunk by {-undo_shift:+d} px to reverse applied galvo fix")
@@ -654,7 +654,7 @@ def _apply_fix(
     if n_levels_in > 1:
         print(f"Regenerating OME-Zarr pyramid ({n_levels_in} levels) ...")
     else:
-        print("Input has no pyramid — writing single-level OME-Zarr.")
+        print("Input has no pyramid -- writing single-level OME-Zarr.")
     # n_levels in finalize() counts *additional* downsampled levels beyond level 0,
     # so pass (n_levels_in - 1) to reproduce the same number of levels as the input.
     writer.finalize(res, n_levels=n_levels_in - 1)
@@ -706,7 +706,7 @@ def main() -> None:
         assert_output_exists(output_path, parser, args)
 
     # ------------------------------------------------------------------
-    # Step 0 – band-start scan (optional, exits early without writing fix)
+    # Step 0 - band-start scan (optional, exits early without writing fix)
     # ------------------------------------------------------------------
     if args.scan:
         if args.scan_range is None:
@@ -731,7 +731,7 @@ def main() -> None:
         return
 
     # ------------------------------------------------------------------
-    # Step 1 – determine band / shift parameters
+    # Step 1 - determine band / shift parameters
     # ------------------------------------------------------------------
     band_start, band_width, confidence = 0, 0, 0.0
     undo_shift = args.shift
@@ -782,7 +782,7 @@ def main() -> None:
         print(f"[undo] will reverse roll shift={undo_shift}px per tile chunk")
 
     # ------------------------------------------------------------------
-    # Step 2 – open level-0 array to report tile metadata
+    # Step 2 - open level-0 array to report tile metadata
     # ------------------------------------------------------------------
     arr, _res, _, _ = _open_level(input_path, level=0)
     chunk_x = arr.chunks[1]
@@ -793,7 +793,7 @@ def main() -> None:
     print("\nMosaic info (level 0):")
     print(f"  shape        = {arr.shape}  (Z, Y, X)")
     print(f"  tile chunks  = ({chunk_x}, {chunk_y}) px in (X, Y)")
-    print(f"  tile grid    = {n_cx} × {n_cy} tiles")
+    print(f"  tile grid    = {n_cx} x {n_cy} tiles")
     if args.mode == "fix":
         print(f"  band columns = [{band_start}:{band_start + band_width}] px (within each tile chunk of width {chunk_x})")
 
@@ -802,7 +802,7 @@ def main() -> None:
         return
 
     # ------------------------------------------------------------------
-    # Step 3 – apply fix / undo and write output zarr
+    # Step 3 - apply fix / undo and write output zarr
     # ------------------------------------------------------------------
     print(f"\nWriting corrected zarr → {output_path}")
     _apply_fix(
@@ -817,7 +817,7 @@ def main() -> None:
     print(f"Corrected zarr written: {output_path}")
 
     # ------------------------------------------------------------------
-    # Step 4 – optionally generate before/after comparison preview
+    # Step 4 - optionally generate before/after comparison preview
     # ------------------------------------------------------------------
     if args.preview:
         preview_path = Path(args.preview)
@@ -834,7 +834,7 @@ def main() -> None:
         )
 
     # ------------------------------------------------------------------
-    # Step 5 – optionally update slice_config.csv
+    # Step 5 - optionally update slice_config.csv
     # ------------------------------------------------------------------
     if args.update_config:
         if args.slice_id is None:

@@ -18,7 +18,7 @@ XZ/YZ cross-sections are generated in two complementary ways:
   Per-pair files (preferred): ``pair_z{fid:02d}_z{mid:02d}_fixed.npz`` and
   ``pair_z{fid:02d}_z{mid:02d}_moving.npz``.  Both slices in the pair share
   the same Y/X column, chosen by maximising the *combined* intensity at the
-  overlap depth — so the two cross-sections always show the same anatomical
+  overlap depth -- so the two cross-sections always show the same anatomical
   plane and can be compared directly.
 
   Per-slice fallback: ``slice_z{sid:02d}.npz``, one per slice, using the
@@ -139,9 +139,9 @@ def _save_xy_aips_for_pair(
     ``overlap_px`` is the number of Z voxels (at the working pyramid level) to
     average at each boundary:
 
-    - **Fixed slice**: last *overlap_px* voxels of Z — the bottom of the fixed
+    - **Fixed slice**: last *overlap_px* voxels of Z -- the bottom of the fixed
       volume, which physically overlaps with the top of the moving volume.
-    - **Moving slice**: first *overlap_px* voxels of Z — the top of the moving
+    - **Moving slice**: first *overlap_px* voxels of Z -- the top of the moving
       volume, which physically overlaps with the bottom of the fixed volume.
 
     Both projections cover the same tissue depth, giving matching structure in
@@ -487,7 +487,7 @@ def main(argv: Any = None) -> None:
 
     # ------------------------------------------------------------------
     # Pass 1: XY AIPs (per slice) + per-slice XZ/YZ fallback files.
-    # Each slice is independent — process in parallel.
+    # Each slice is independent -- process in parallel.
     # ------------------------------------------------------------------
     logger.info("Computing XY AIPs and per-slice XZ/YZ fallbacks at pyramid level %s using %s workers...", level, workers)
     slice_tasks = [
@@ -505,9 +505,9 @@ def main(argv: Any = None) -> None:
                 bar.update(1)
 
     # ------------------------------------------------------------------
-    # Pass 2: Paired XZ/YZ files — both slices share the same column,
+    # Pass 2: Paired XZ/YZ files -- both slices share the same column,
     # chosen from the combined signal at their mutual overlap depth.
-    # Each pair is independent — process in parallel.
+    # Each pair is independent -- process in parallel.
     # ------------------------------------------------------------------
     sorted_ids = sorted(slice_paths.keys())
     pairs = [(sorted_ids[i - 1], sorted_ids[i]) for i in range(1, len(sorted_ids)) if sorted_ids[i] in transform_paths]

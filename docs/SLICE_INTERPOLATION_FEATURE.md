@@ -1,7 +1,5 @@
 # Slice Interpolation Feature
 
----
-
 ## Overview
 
 The slice interpolation feature reconstructs missing slices in Serial OCT
@@ -82,6 +80,26 @@ in `slice_config.csv`. No separate flag is needed.
 The only scientifically motivated reconstruction method is `zmorph`.
 `average` and `weighted` are simpler baselines kept for comparison and as
 fallbacks; they do not use any 2D registration.
+
+### Decision flow at a glance
+
+```mermaid
+flowchart TD
+    START([Missing slice between<br/>vol_before and vol_after]) --> PLANES[find_best_overlap_planes<br/>foreground filter + NCC search]
+    PLANES -->|no foreground planes| F1[fallback_reason:<br/>no_foreground_planes]
+    PLANES -->|best NCC < min_overlap_correlation| F2[fallback_reason:<br/>low_overlap_ncc]
+    PLANES -->|good pair| REG[2D ITK registration<br/>boundary plane → reference]
+    REG -->|optimiser raised| F3[fallback_reason:<br/>registration_exception]
+    REG -->|det T ≤ 0| F4[fallback_reason:<br/>affine_determinant_non_positive]
+    REG -->|post-reg NCC ↑ < threshold| F5[fallback_reason:<br/>reg_did_not_improve]
+    REG -->|gates pass| WARP[For each output plane at α = z / (nz_out-1):<br/>warp vol_before by T^α<br/>warp vol_after by T^(α-1)<br/>gaussian-feathered cross-fade]
+    WARP --> OUT([Interpolated zarr<br/>+ manifest + diagnostics])
+    F1 --> SKIP([Hard skip:<br/>no zarr written,<br/>genuine gap in stack])
+    F2 --> SKIP
+    F3 --> SKIP
+    F4 --> SKIP
+    F5 --> SKIP
+```
 
 ### `zmorph` — z-aware morphing (default)
 
@@ -288,7 +306,7 @@ Each interpolation run also emits a human-readable JSON file at
 `${output}/interpolate_missing_slice/slice_z{NN}_interpolated_diagnostics.json`
 with the full trace:
 
-```jsonc
+```json
 {
   "method": "zmorph",
   "method_used": "zmorph",

@@ -1,8 +1,6 @@
 # Nextflow Workflows Guide
 
 
----
-
 ## Overview
 
 linumpy uses [Nextflow](https://www.nextflow.io/) for orchestrating complex processing pipelines. Nextflow provides:
@@ -609,7 +607,7 @@ Both workflows support GPU acceleration using NVIDIA CUDA via CuPy. GPU processi
 | `preproc_rawtiles.nf` | `create_mosaic_grid` | Galvo detection, volume resize |
 | `preproc_rawtiles.nf` | `generate_aip` | Mean projection |
 | `soct_3d_reconst.nf` | `resample_mosaic_grid` | Volume resize |
-| `soct_3d_reconst.nf` | `fix_illumination` | BaSiCPy background correction (JAX on GPU) |
+| `soct_3d_reconst.nf` | `fix_illumination` | BaSiCPy background correction (PyTorch on GPU) |
 | `soct_3d_reconst.nf` | `normalize` | Intensity normalization, percentile clipping |
 
 ### Usage
@@ -660,13 +658,16 @@ The pipelines provide fine-grained control over CPU usage, allowing you to reser
 
 ### Configuration Options
 
-Both pipelines support two approaches:
+Both pipelines support two approaches. Defaults differ between workflows:
+the **preproc** pipeline ships with `max_cpus = null` and `reserved_cpus = 2`,
+while the **3D reconstruction** pipeline uses `max_cpus = 16` and
+`reserved_cpus = 4` (see `workflows/<pipeline>/nextflow.config`).
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `max_cpus` | `null` | Explicit maximum CPUs to use (takes precedence) |
-| `reserved_cpus` | `2` | Number of cores to keep free for overhead |
-| `processes` | `1` | Python processes per Nextflow task |
+| Parameter | preproc default | reconst_3d default | Description |
+|-----------|-----------------|--------------------|-------------|
+| `max_cpus` | `null` | `16` | Explicit maximum CPUs to use (takes precedence) |
+| `reserved_cpus` | `2` | `4` | Number of cores to keep free for overhead |
+| `processes` | `1` | `1` | Python processes per Nextflow task |
 
 ### Usage Examples
 

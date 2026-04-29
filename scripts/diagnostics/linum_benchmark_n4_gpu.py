@@ -152,6 +152,7 @@ def _load_live_volume(zarr_path: Path, level: int = 0, slice_index: int | None =
     If ``slice_index`` is given, returns a single Z-slice (one serial section).
     """
     import zarr
+    import zarr.storage
 
     if str(zarr_path).endswith(".zip"):
         store = zarr.storage.ZipStore(str(zarr_path), mode="r")
@@ -171,7 +172,10 @@ def _load_live_volume(zarr_path: Path, level: int = 0, slice_index: int | None =
             root = zarr.open(store, mode="r", path=inner_prefix)
     else:
         root = zarr.open(str(zarr_path), mode="r")
-    arr = np.asarray(root[str(level)][...], dtype=np.float32)
+    assert isinstance(root, zarr.Group)
+    level_arr = root[str(level)]
+    assert isinstance(level_arr, zarr.Array)
+    arr = np.asarray(level_arr[...], dtype=np.float32)
     while arr.ndim > 3 and arr.shape[0] == 1:
         arr = arr[0]
     if arr.ndim != 3:
