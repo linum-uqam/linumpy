@@ -1,24 +1,26 @@
 #! /usr/bin/env python
 
-"""Computes the tissue apparent attenuation coefficient map
+"""Computes the tissue apparent attenuation coefficient map.
+
 and then use the average attenuation to compensate its effect in
 the OCT reflectivity data.
 """
 
 # Configure thread limits before numpy/scipy imports
 # TODO: Keep the OCT pixel format (which is float32 ?)
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
+from linumpy.intensity.attenuation import get_extended_attenuation_vermeer2013
 from linumpy.io.zarr import read_omezarr, save_omezarr
-from linumpy.preproc.icorr import get_extendedAttenuation_Vermeer2013
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Run function."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
 
     # Mandatory parameters
@@ -27,13 +29,14 @@ def _build_arg_parser():
 
     # Optional argument
     p.add_argument("-m", "--mask", default=None, help="Optional tissue mask (.ome.zarr)")
-    p.add_argument("--s_xy", default=0.0, type=float, help="Lateral smoothing sigma (default=%(default)s)")
-    p.add_argument("--s_z", default=5.0, type=float, help="Axial smoothing sigma (default=%(default)s)")
+    p.add_argument("--s_xy", default=0.0, type=float, help="Lateral smoothing sigma [%(default)s]")
+    p.add_argument("--s_z", default=5.0, type=float, help="Axial smoothing sigma [%(default)s]")
 
     return p
 
 
 def main() -> None:
+    """Run function operation."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -60,7 +63,7 @@ def main() -> None:
     # TODO: If there is a 1.0e-6 multiplier it means dz is
     # expected to be given in meters. However, from docstring
     # the resolution appears to be expected in microns also.
-    attn = get_extendedAttenuation_Vermeer2013(vol, mask=mask, k=0, res=res_axial_microns, fillHoles=True, zshift=10)
+    attn = get_extended_attenuation_vermeer2013(vol, mask=mask, k=0, res=res_axial_microns, fill_holes=True, zshift=10)
 
     # Saving the attenuation
     attn = np.moveaxis(attn, (0, 1, 2), (2, 1, 0))

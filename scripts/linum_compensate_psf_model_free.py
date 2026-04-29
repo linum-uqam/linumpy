@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
+"""Axial beam profile correction.
+
+The script estimates the beam profile from agarose voxels and then applies the inverse profile to each a-line.
 """
-Axial beam profile correction. The script estimates the beam profile
-from agarose voxels and then applies the inverse profile to each a-line.
-"""
+
+# Configure thread limits before numpy/scipy imports
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 
@@ -11,14 +14,17 @@ import matplotlib
 import numpy as np
 from skimage.filters import threshold_otsu
 
+from linumpy.geometry.crop import mask_under_interface
+from linumpy.geometry.interface import find_tissue_interface
 from linumpy.io.zarr import read_omezarr, save_omezarr
-from linumpy.preproc.xyzcorr import findTissueInterface, maskUnderInterface
+from linumpy.metrics import collect_psf_compensation_metrics
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Run function."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("input_zarr", help="Path to file (.ome.zarr) containing the 3D mosaic grid.")
     p.add_argument("output_zarr", help="Corrected 3D mosaic grid file path (.ome.zarr).")
@@ -36,6 +42,7 @@ def _build_arg_parser():
 
 
 def main() -> None:
+    """Run function operation."""
     # Parse the arguments
     parser = _build_arg_parser()
     args = parser.parse_args()
@@ -50,8 +57,8 @@ def main() -> None:
     otsu = threshold_otsu(aip)
     agarose_mask = aip < otsu
 
-    interface = findTissueInterface(vol[:])
-    mask = maskUnderInterface(vol[:], interface, returnMask=True)
+    interface = find_tissue_interface(vol[:])
+    mask = mask_under_interface(vol[:], interface, return_mask=True)
 
     # Exclude out of bounds columns
     mask_all = mask.all(axis=0)  # True where mask is True for every voxel along the aline
@@ -62,6 +69,7 @@ def main() -> None:
     profile = np.mean(profile, axis=-1)
 
     # TODO: Prevent this from happening (happens when the profile is all 0s).
+    background = 0.0
     try:
         profile = np.clip(profile, np.min(profile[profile > 0.0]), None)
 
@@ -107,6 +115,16 @@ def main() -> None:
     # save to ome-zarr
     dask_arr = da.from_array(vol_corr)
     save_omezarr(dask_arr, args.output_zarr, voxel_size=res, chunks=vol.chunks, n_levels=args.n_levels)
+
+    # Collect metrics using helper function
+    agarose_coverage = float(np.sum(agarose_mask)) / agarose_mask.size
+    collect_psf_compensation_metrics(
+        psf=psf,
+        agarose_coverage=agarose_coverage,
+        output_path=args.output_zarr,
+        input_path=args.input_zarr,
+        fit_gaussian=args.fit_gaussian,
+    )
 
 
 if __name__ == "__main__":

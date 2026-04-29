@@ -15,28 +15,35 @@ Output:
 - metrics.json: Registration quality metrics
 """
 
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import logging
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import SimpleITK as sitk
 
+from linumpy.cli.args import add_overwrite_arg
 from linumpy.io.zarr import read_omezarr
-from linumpy.stitching.registration import create_transform, find_best_z, register_refinement
-from linumpy.utils.io import add_overwrite_arg
-from linumpy.utils.metrics import collect_pairwise_registration_metrics
+from linumpy.metrics import collect_pairwise_registration_metrics
+from linumpy.registration.refinement import (
+    centre_of_mass_offset,
+    find_best_z,
+    gradient_magnitude_alignment,
+    register_refinement,
+)
+from linumpy.registration.transforms import create_transform
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("in_fixed", help="Fixed volume (.ome.zarr) - bottom slice")
-    p.add_argument("in_moving", help="Moving volume (.ome.zarr) - top slice")
+    p.add_argument("in_fixed", type=Path, help="Fixed volume (.ome.zarr) - bottom slice")
+    p.add_argument("in_moving", type=Path, help="Moving volume (.ome.zarr) - top slice")
     p.add_argument("out_directory", help="Output directory")
 
     # Z-matching
@@ -52,21 +59,35 @@ def _build_arg_parser():
     # Refinement
     ref_group = p.add_argument_group("Refinement")
     ref_group.add_argument(
-        "--enable_rotation", action="store_true", default=True, help="Enable rotation correction [%(default)s]"
+        "--enable_rotation",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Enable rotation correction. Use --no-enable_rotation to disable. [%(default)s]",
     )
-    ref_group.add_argument("--no_rotation", dest="enable_rotation", action="store_false")
+    # Legacy alias retained for backward-compatibility with the Nextflow pipeline
+    # (workflows/reconst_3d/soct_3d_reconst.nf still emits --no_rotation).
+    ref_group.add_argument(
+        "--no_rotation",
+        dest="enable_rotation",
+        action="store_false",
+        help=argparse.SUPPRESS,
+    )
     ref_group.add_argument(
         "--max_rotation_deg", type=float, default=5.0, help="Maximum rotation correction in degrees [%(default)s]"
     )
     ref_group.add_argument(
         "--max_translation_px", type=float, default=20.0, help="Maximum translation refinement in pixels [%(default)s]"
     )
-
-    # Masks
-    p.add_argument("--use_masks", action="store_true", help="Use tissue masks")
-    p.add_argument("--fixed_mask", type=str, default=None)
-    p.add_argument("--moving_mask", type=str, default=None)
-    p.add_argument("--mask_mode", choices=["multiply", "none"], default="multiply")
+    ref_group.add_argument(
+        "--initial_alignment",
+        choices=["none", "com", "gradient", "both"],
+        default="both",
+        help="Initial alignment method before refinement:\n"
+        "  none     - no initial alignment\n"
+        "  com      - centre of mass alignment\n"
+        "  gradient - gradient magnitude phase correlation\n"
+        "  both     - try gradient first, fall back to com [%(default)s]",
+    )
 
     # Output
     p.add_argument("--out_transform", default="transform.tfm")
@@ -77,7 +98,7 @@ def _build_arg_parser():
     return p
 
 
-def normalize(image):
+def normalize(image: Any) -> Any:
     """Normalize image to [0, 1] using percentile clipping."""
     valid = image > 0
     if not np.any(valid):
@@ -94,14 +115,15 @@ def normalize(image):
 
 
 def main() -> None:
+    """Run the pairwise registration script."""
     p = _build_arg_parser()
     args = p.parse_args()
 
     # Load volumes
-    logger.info(f"Loading fixed: {args.in_fixed}")
+    logger.info("Loading fixed: %s", args.in_fixed)
     fixed_vol, res = read_omezarr(args.in_fixed)
 
-    logger.info(f"Loading moving: {args.in_moving}")
+    logger.info("Loading moving: %s", args.in_moving)
     moving_vol, _ = read_omezarr(args.in_moving)
 
     # Create output directory
@@ -114,13 +136,6 @@ def main() -> None:
     moving_slice = np.array(moving_vol[args.moving_z_index])
     moving_norm = normalize(moving_slice)
 
-    # Load masks if provided
-    fixed_mask = None
-    moving_mask = None
-    if args.use_masks and args.moving_mask:
-        moving_mask_vol, _ = read_omezarr(args.moving_mask)
-        moving_mask = np.array(moving_mask_vol[args.moving_z_index]) > 0
-
     # Calculate expected Z position
     # The moving slice (top of moving volume) should match near the BOTTOM of fixed volume
     # expected_z is where in fixed_vol we expect to find a match for moving_slice
@@ -128,8 +143,8 @@ def main() -> None:
     # NOTE: read_omezarr returns resolution in millimeters (OME-NGFF standard)
     res_z_mm = res[0] if len(res) >= 1 else 0.010  # mm (default 10 µm)
 
-    logger.info(f"Resolution from metadata: {res}")
-    logger.info(f"Using Z resolution: {res_z_mm} mm ({res_z_mm * 1000:.2f} µm)")
+    logger.info("Resolution from metadata: %s", res)
+    logger.info("Using Z resolution: %s mm (%.2f µm)", res_z_mm, res_z_mm * 1000)
 
     # Calculate interval in voxels: slicing_interval_mm / res_z_mm
     interval_vox = round(args.slicing_interval_mm / res_z_mm)
@@ -140,48 +155,62 @@ def main() -> None:
     fixed_nz = fixed_vol.shape[0]
     expected_z = fixed_nz - interval_vox + args.moving_z_index
 
-    logger.info(f"Fixed volume: {fixed_nz} slices")
-    logger.info(f"Interval: {args.slicing_interval_mm} mm = {interval_vox} voxels")
-    logger.info(f"Search range: {args.search_range_mm} mm = {search_vox} voxels")
-    logger.info(f"Expected Z (before clamp): {expected_z}")
+    logger.info("Fixed volume: %s slices", fixed_nz)
+    logger.info("Interval: %s mm = %s voxels", args.slicing_interval_mm, interval_vox)
+    logger.info("Search range: %s mm = %s voxels", args.search_range_mm, search_vox)
+    logger.info("Expected Z (before clamp): %s", expected_z)
 
     # Ensure expected_z is within bounds
     expected_z = max(0, min(fixed_nz - 1, expected_z))
 
-    logger.info(f"Searching for match near z={expected_z} in fixed volume (search ±{search_vox})")
+    logger.info("Searching for match near z=%s in fixed volume (search ±%s)", expected_z, search_vox)
 
     # Find best Z match
-    best_z, z_correlation = find_best_z(fixed_vol, moving_slice, expected_z, search_vox, moving_mask)
+    best_z, z_correlation = find_best_z(fixed_vol, moving_slice, expected_z, search_vox)
 
-    logger.info(f"Best Z match: {best_z} (expected: {expected_z}, correlation: {z_correlation:.4f})")
+    logger.info("Best Z match: %s (expected: %s, correlation: %.4f)", best_z, expected_z, z_correlation)
 
     # Warn if z-match deviates significantly from expected
     z_deviation = abs(best_z - expected_z)
     if z_deviation > search_vox // 2:
-        logger.warning(f"Z-match deviation is large ({z_deviation} voxels) - may indicate alignment issues")
+        logger.warning("Z-match deviation is large (%s voxels) - may indicate alignment issues", z_deviation)
 
     # Get fixed slice at best Z
     fixed_slice = np.array(fixed_vol[best_z])
     fixed_norm = normalize(fixed_slice)
 
-    # Load fixed mask
-    if args.use_masks and args.fixed_mask:
-        fixed_mask_vol, _ = read_omezarr(args.fixed_mask)
-        fixed_mask = np.array(fixed_mask_vol[best_z]) > 0
+    # Compute initial alignment offset
+    initial_offset = None
+    if args.initial_alignment != "none":
+        if args.initial_alignment in ("gradient", "both"):
+            dy, dx = gradient_magnitude_alignment(fixed_norm, moving_norm)
+            mag = np.sqrt(dy**2 + dx**2)
+            if mag > 1.0:
+                initial_offset = (dy, dx)
+                logger.info("Gradient magnitude initial offset: dy=%.1f, dx=%.1f", dy, dx)
+
+        if initial_offset is None and args.initial_alignment in ("com", "both"):
+            dy, dx = centre_of_mass_offset(fixed_norm, moving_norm)
+            mag = np.sqrt(dy**2 + dx**2)
+            if mag > 1.0:
+                initial_offset = (dy, dx)
+                logger.info("Centre of mass initial offset: dy=%.1f, dx=%.1f", dy, dx)
+
+        if initial_offset is None:
+            logger.info("No significant initial offset detected, starting from identity")
 
     # Compute refinement
-    logger.info(f"Computing refinement (rotation={args.enable_rotation})...")
+    logger.info("Computing refinement (rotation=%s)...", args.enable_rotation)
     tx, ty, angle_deg, metric = register_refinement(
         fixed_norm,
         moving_norm,
         enable_rotation=args.enable_rotation,
         max_rotation_deg=args.max_rotation_deg,
         max_translation_px=args.max_translation_px,
-        fixed_mask=fixed_mask,
-        moving_mask=moving_mask,
+        initial_offset=initial_offset,
     )
 
-    logger.info(f"Refinement: tx={tx:.2f}px, ty={ty:.2f}px, rot={angle_deg:.3f}°")
+    logger.info("Refinement: tx=%.2fpx, ty=%.2fpx, rot=%.3f°", tx, ty, angle_deg)
 
     # Create and save transform
     center = [fixed_slice.shape[1] / 2.0, fixed_slice.shape[0] / 2.0]
@@ -191,6 +220,23 @@ def main() -> None:
     # Save offsets
     np.savetxt(str(out_dir / args.out_offsets), np.array([best_z, args.moving_z_index]), fmt="%d")
 
+    # Detect interpolated neighbours. Registrations where either volume is a
+    # synthetic (interpolated) slice produce unreliable rotation/translation
+    # because one side of the pair is a blend of non-overlapping tissue. We
+    # still run the registration (so a .tfm exists), but force the metrics
+    # into the "error" status so the downstream stacking gate
+    # (skip_error_status in linum_stack_slices_motor.py) discards the
+    # transform and falls back to motor-only positioning for that slice.
+    fixed_is_interpolated = "_interpolated" in Path(args.in_fixed).name
+    moving_is_interpolated = "_interpolated" in Path(args.in_moving).name
+    touches_interpolated = fixed_is_interpolated or moving_is_interpolated
+    if touches_interpolated:
+        logger.warning(
+            "Registration involves an interpolated slice (fixed=%s, moving=%s); marking transform as unreliable.",
+            fixed_is_interpolated,
+            moving_is_interpolated,
+        )
+
     # Collect metrics using standard collector
     collect_pairwise_registration_metrics(
         registration_error=float(metric) if metric != float("inf") else 0.0,
@@ -199,9 +245,10 @@ def main() -> None:
         rotation_deg=float(angle_deg),
         best_z_index=int(best_z),
         expected_z_index=int(expected_z),
-        output_path=str(out_dir),
+        output_path=out_dir,
         fixed_path=args.in_fixed,
         moving_path=args.in_moving,
+        z_correlation=float(z_correlation),
         params={
             "slicing_interval_mm": args.slicing_interval_mm,
             "search_range_mm": args.search_range_mm,
@@ -210,10 +257,29 @@ def main() -> None:
             "max_translation_px": args.max_translation_px,
             "z_correlation": float(z_correlation),
             "z_deviation": int(z_deviation),
+            "fixed_is_interpolated": bool(fixed_is_interpolated),
+            "moving_is_interpolated": bool(moving_is_interpolated),
         },
     )
 
-    logger.info(f"Results saved to {out_dir}")
+    if touches_interpolated:
+        # Re-save the metrics JSON with a forced error status so
+        # stack_slices_motor discards this transform via skip_error_status.
+        import json
+
+        metrics_file = out_dir / "pairwise_registration_metrics.json"
+        if metrics_file.exists():
+            with metrics_file.open() as f:
+                data = json.load(f)
+            data["overall_status"] = "error"
+            data.setdefault("errors", []).append("One or both inputs are an interpolated slice; transform is synthetic.")
+            if "registration_confidence" in data.get("metrics", {}):
+                data["metrics"]["registration_confidence"]["value"] = 0.0
+                data["metrics"]["registration_confidence"]["status"] = "error"
+            with metrics_file.open("w") as f:
+                json.dump(data, f, indent=2)
+
+    logger.info("Results saved to %s", out_dir)
 
     # Screenshot
     if args.screenshot:
@@ -256,7 +322,7 @@ def main() -> None:
         plt.tight_layout()
         plt.savefig(args.screenshot, dpi=150, bbox_inches="tight")
         plt.close()
-        logger.info(f"Screenshot saved to {args.screenshot}")
+        logger.info("Screenshot saved to %s", args.screenshot)
 
 
 if __name__ == "__main__":

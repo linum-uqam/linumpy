@@ -8,7 +8,7 @@ performs 90° rotations and flips.
 """
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 from pathlib import Path
@@ -26,10 +26,10 @@ choices = {
 }
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_volume", help="Full path to the input volume (.nii or .nii.gz)")
-    p.add_argument("output_volume", help="Full path to the output volume (.nii or .nii.gz)")
+    p.add_argument("input_volume", type=Path, help="Full path to the input volume (.nii or .nii.gz)")
+    p.add_argument("output_volume", type=Path, help="Full path to the output volume (.nii or .nii.gz)")
     p.add_argument(
         "ant_to_pos",
         choices=choices.keys(),
@@ -43,6 +43,7 @@ def _build_arg_parser():
 
 
 def main() -> None:
+    """Run the NIfTI reorientation to RAS script."""
     # Parse arguments
     parser = _build_arg_parser()
     args = parser.parse_args()
@@ -79,6 +80,7 @@ def main() -> None:
 
     # Apply the transformation to the volume
     img = nib.load(input_volume)
+    assert isinstance(img, nib.Nifti1Image)
     vol = img.get_fdata(dtype=np.float32)
     vol_ras = nib.orientations.apply_orientation(vol, transformation)
 
