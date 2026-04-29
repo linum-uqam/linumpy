@@ -83,11 +83,11 @@ SimpleITK:
   the bias estimate. The fit is computed as three sequential 1-D
   `tensordot` contractions; per-axis B-spline basis matrices are cached
   per pyramid level (see
-  [linumpy/gpu/bspline.py](../linumpy/gpu/bspline.py)).
+  [linumpy/gpu/bspline.py](https://github.com/linum-uqam/linumpy/blob/dev/linumpy/gpu/bspline.py)).
 - **Centred-Gaussian Wiener deconvolution** for histogram sharpening
   instead of the Vidal-Pantaleoni asymmetric kernel SimpleITK ships. The
   weighted bin update uses a single `cupy.bincount` call over the full
-  volume (see [linumpy/gpu/n4.py](../linumpy/gpu/n4.py)).
+  volume (see [linumpy/gpu/n4.py](https://github.com/linum-uqam/linumpy/blob/dev/linumpy/gpu/n4.py)).
 - **Separable Catmull-Rom upsample** for re-projecting the B-spline lattice
   back to image space, rather than `cupyx.scipy.ndimage.zoom`.
 - **Single host→device transfer** per call: the volume and mask are pushed
@@ -103,7 +103,7 @@ bit-equivalent to SimpleITK. Section 4 quantifies the resulting envelope.
 ## 4. Equivalency tests
 
 The unit tests in
-[linumpy/tests/test_n4_gpu_equivalency.py](../linumpy/tests/test_n4_gpu_equivalency.py)
+[linumpy/tests/test_n4_gpu_equivalency.py](https://github.com/linum-uqam/linumpy/blob/dev/linumpy/tests/test_n4_gpu_equivalency.py)
 pin the GPU backend against SimpleITK on synthetic spherical phantoms with
 known multiplicative bias. The phantom is built as
 `vol = truth × bias` inside a sphere mask of radius 1.2 (in normalised
@@ -136,7 +136,7 @@ server.
 ## 5. Performance
 
 Benchmarks measured on a single NVIDIA GPU (47 GB) using
-[scripts/diagnostics/linum_benchmark_n4_gpu.py](../scripts/diagnostics/linum_benchmark_n4_gpu.py).
+[scripts/diagnostics/linum_benchmark_n4_gpu.py](https://github.com/linum-uqam/linumpy/blob/dev/scripts/diagnostics/linum_benchmark_n4_gpu.py).
 The CPU path is `SimpleITK.N4BiasFieldCorrectionImageFilter` with the same
 control-point spacing and iteration schedule as the GPU path. Both paths
 include the `shrink_factor` downsample. The GPU column already excludes a
@@ -220,7 +220,7 @@ directory.
 
 The Nextflow `reconst_3d` workflow exposes a single global GPU switch
 (`params.use_gpu`, defined in
-[workflows/reconst_3d/nextflow.config](../workflows/reconst_3d/nextflow.config)).
+[workflows/reconst_3d/nextflow.config](https://github.com/linum-uqam/linumpy/blob/dev/workflows/reconst_3d/nextflow.config)).
 When set, the `correct_bias_field` process runs the GPU N4 backend with
 `maxForks = 1` to avoid GPU contention; otherwise it uses the SimpleITK
 CPU path with `params.processes` threads. No per-process flag is needed:
