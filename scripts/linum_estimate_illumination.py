@@ -21,13 +21,12 @@ log_epsilon = 1e-8
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_images", nargs="+", help="Full path to a 2D mosaic grid image.")
-    p.add_argument("output_flatfield", help="Flatfield filename (must be a .nii or .nii.gz file).")
+    p.add_argument("input_images", type=Path, nargs="+", help="Full path to a 2D mosaic grid image.")
+    p.add_argument("output_flatfield", type=Path, help="Flatfield filename (must be a .nii or .nii.gz file).")
     p.add_argument(
-        "--output_darkfield",
-        default=None,
-        help="Optional darkfield filename (if none is given, the darkfield won't be estimated). "
-        "(must be a .nii or .nii.gz file).",
+        "--output_darkfield", type=Path, default=None,
+        help="Optional darkfield filename (if none is given, the darkfield won't be estimated)."
+        " (must be a .nii or .nii.gz file).",
     )
     p.add_argument(
         "-t",
@@ -36,10 +35,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=512,
         help="Tile shape in pixel. You can provide both the row and col shape if different. Additional "
-        "shapes will be ignored. [%(default)s]",
+        "shapes will be ignored. (default=%(default)s)",
     )
     p.add_argument(
-        "--n_samples", type=int, default=512, help="Maximum number of tiles to use for the optimization. [%(default)s]"
+        "--n_samples", type=int, default=512, help="Maximum number of tiles to use for the optimization. (default=%(default)s)"
     )
     p.add_argument("--use_log", action="store_true", help="Perform optimization and correction in log space.")
     p.add_argument("--working_size", type=int, default=128)
@@ -48,7 +47,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    """Run function."""
+    """Run the illumination estimation script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -76,7 +75,7 @@ def main() -> None:
             log_imax = image.max()
             image = (image - log_imin) / (log_imax - log_imin)
 
-        mosaic = MosaicGrid(image, tile_shape=tile_shape)
+        mosaic = MosaicGrid(image, tile_shape=tuple(tile_shape))
 
         # Convert the image into a stack of ndarrays of shape N_Images x Height x Width
         these_tiles, _ = mosaic.get_tiles()
