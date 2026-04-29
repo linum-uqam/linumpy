@@ -18,6 +18,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+!workflows/**/lib/
+!workflows/**/lib/**
 parts/
 sdist/
 var/
@@ -183,6 +185,13 @@ workflows/work/
 *.zarr
 *.nii.gz
 *.sif
+
+# Test stub-data placeholders. The `*.zarr` rule above ignores zarr directories
+# wholesale; for nf-test stub runs we still need the empty directory markers
+# (`.gitkeep`) tracked so the workflow's input glob finds at least one
+# `mosaic_grid*.ome.zarr` directory. Re-include the directory and its keepers.
+!workflows/**/tests/data/*.ome.zarr
+!workflows/**/tests/data/*.ome.zarr/.gitkeep
 
 # Config files
 *.ini

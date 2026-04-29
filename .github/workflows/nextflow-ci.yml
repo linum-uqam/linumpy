@@ -1,0 +1,71 @@
+name: Nextflow CI
+
+on:
+  push:
+    branches: ["main", "dev"]
+    paths:
+      - "workflows/**"
+      - ".github/workflows/nextflow-ci.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "workflows/**"
+      - ".github/workflows/nextflow-ci.yml"
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5.2.0
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Nextflow
+        run: |
+          wget -qO nextflow https://github.com/nextflow-io/nextflow/releases/latest/download/nextflow
+          chmod +x nextflow
+          sudo mv nextflow /usr/local/bin/
+
+      - name: Install nf-test
+        run: |
+          NF_TEST_VERSION=0.9.5
+          wget -qO nf-test.tar.gz "https://github.com/askimed/nf-test/releases/download/v${NF_TEST_VERSION}/nf-test-${NF_TEST_VERSION}.tar.gz"
+          tar -xzf nf-test.tar.gz
+          mkdir -p "$HOME/.nf-test"
+          mv nf-test.jar "$HOME/.nf-test/nf-test.jar"
+          sudo mv nf-test /usr/local/bin/nf-test
+          sudo chmod +x /usr/local/bin/nf-test
+
+      - name: Lint Nextflow files
+        # `nextflow lint` does not load Groovy classes from `lib/`, so it
+        # falsely reports `Helpers` as undefined wherever the workflow calls
+        # `Helpers.X(...)`. We strip ANSI colour codes from the output, drop
+        # those known false-positives, and re-derive the exit status.
+        run: |
+          tmp=$(mktemp)
+          nextflow lint \
+            workflows/preproc/preproc_rawtiles.nf \
+            workflows/reconst_3d/soct_3d_reconst.nf \
+            workflows/reconst_2.5d/soct_2.5d_reconst.nf \
+            > "$tmp" 2>&1 || true
+          sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' "$tmp" \
+            | awk '/`Helpers` is not defined/ { skip = 3; next } skip > 0 { skip--; next } { print }' \
+            > "$tmp.filt"
+          cat "$tmp.filt"
+          if grep -qE '^Error ' "$tmp.filt"; then
+            echo "::error::nextflow lint reported errors (excluding Helpers false-positives)"
+            exit 1
+          fi
+          echo "Lint passed (Helpers false-positives ignored: lib/ classes are loaded at runtime but not by 'nextflow lint')."
+
+      - name: Validate Nextflow configs
+        run: |
+          nextflow config workflows/preproc/nextflow.config -profile standard || true
+          nextflow config workflows/reconst_3d/nextflow.config -profile standard || true
+
+      - name: Run nf-test stub runs
+        run: nf-test test workflows/preproc/tests/ workflows/reconst_3d/tests/

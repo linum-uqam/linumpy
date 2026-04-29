@@ -1,0 +1,30 @@
+nextflow_pipeline {
+    name "Test preproc_rawtiles.nf"
+    script "../preproc_rawtiles.nf"
+
+    test("Should run without failures in stub mode") {
+        options "-stub"
+
+        when {
+            params {
+                input = "${projectDir}/workflows/preproc/tests/data"
+                output = "${outputDir}"
+                generate_aips = false
+                generate_previews = false
+                generate_slice_config = false
+                use_gpu = false
+            }
+        }
+
+        then {
+            assert workflow.success
+            def tasks = workflow.trace.tasks()
+            assert tasks.size() > 0
+            // Verify core channel wiring: mosaic grid creation and shift estimation ran
+            assert tasks.any { it.name =~ /create_mosaic_grid/ }
+            assert tasks.any { it.name =~ /estimate_xy_shifts_from_metadata/ }
+            // Both test tile dirs should produce one task each
+            assert tasks.count { it.name =~ /create_mosaic_grid/ } == 2
+        }
+    }
+}
