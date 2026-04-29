@@ -8,11 +8,253 @@ nextflow.enable.dsl = 2
  * Output: 3D OME-Zarr volume with multi-resolution pyramid
  *
  * Channel patterns and authoring conventions: docs/NEXTFLOW_WORKFLOWS.md
- *
- * Helper functions (slice ID parsing, path utilities, CLI flag builders, stack
- * option builders) live in ./lib/Helpers.groovy and are auto-loaded by
- * Nextflow. Call sites use the `Helpers.` prefix.
  */
+
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
+
+// Annotated-screenshot CLI flags shared by `stack` and `correct_bias_field`.
+def annotatedScreenshotArgs(String sliceIdsStr) {
+    def show_lines = params.annotated_show_lines ? '--show_lines' : ''
+    def orient = params.ras_input_orientation?.trim()?.replace("'", '') ?: ''
+    def orientation = orient ? "--orientation ${orient}" : ''
+    return "--slice_ids \"${sliceIdsStr}\" --label_every ${params.annotated_label_every} ${show_lines} ${orientation} --crop_to_tissue"
+}
+
+// True when the named per-stage diagnostic flag (or `diagnostic_mode`) is set.
+def diagEnabled(String flag) { params.diagnostic_mode || params[flag] }
+
+// Resolve subject_name from inputDir when not explicitly set:
+//   1. `params.subject_name` if provided
+//   2. `sub-XX` token anywhere in the path
+//   3. parent of common input dirnames (`mosaic-grids`, `mosaics`, ...)
+//   4. leaf directory name
+def resolveSubjectName(String inputDir) {
+    if (params.subject_name) return params.subject_name
+    def subMatch = inputDir.split('/').find { part -> part ==~ /sub-\w+/ }
+    if (subMatch) return subMatch
+    def inputFile = file(inputDir)
+    def dirName = inputFile.getName()
+    if (dirName in ['mosaic-grids', 'mosaics', 'mosaic_grids', 'input', 'data']) {
+        return inputFile.getParent()?.getName() ?: dirName
+    }
+    return dirName
+}
+
+// ---------------------------------------------------------------------------
+// `stack` option builders. Split by concern so each `if` group lives next to
+// the related parameters rather than as one 65-line imperative blob.
+// ---------------------------------------------------------------------------
+
+def stackBlendingArgs() {
+    def opts = ""
+    if (params.stack_blend_enabled) opts += " --blend"
+    if (params.blend_refinement_px > 0) opts += " --blend_refinement_px ${params.blend_refinement_px}"
+    if (params.stack_blend_z_refine_vox > 0) opts += " --blend_z_refine_vox ${params.stack_blend_z_refine_vox}"
+    if (params.blend_z_refine_min_confidence > 0) opts += " --blend_z_refine_min_confidence ${params.blend_z_refine_min_confidence}"
+    return opts
+}
+
+def stackZMatchingArgs() {
+    def opts = ""
+    opts += " --slicing_interval_mm ${params.registration_slicing_interval_mm}"
+    opts += " --search_range_mm ${params.registration_allowed_drifting_mm}"
+    opts += " --moving_z_first_index ${params.moving_slice_first_index}"
+    if (params.use_expected_z_overlap) opts += " --use_expected_overlap"
+    if (params.z_overlap_min_corr > 0) opts += " --z_overlap_min_corr ${params.z_overlap_min_corr}"
+    if (params.analyze_shifts) opts += " --output_z_matches z_matches.csv"
+    opts += " --output_stacking_decisions stacking_decisions.csv"
+    return opts
+}
+
+def stackPairwiseTransformArgs() {
+    if (!params.apply_pairwise_transforms) return ""
+    def opts = " --transforms_dir transforms"
+    if (params.apply_rotation_only) opts += " --rotation_only"
+    opts += " --max_rotation_deg ${params.max_rotation_deg}"
+    if (params.load_transform_min_zcorr > 0) opts += " --load_min_zcorr ${params.load_transform_min_zcorr}"
+    if (params.load_transform_max_rotation > 0) opts += " --load_max_rotation ${params.load_transform_max_rotation}"
+    if (params.skip_error_transforms) opts += " --skip_error_transforms"
+    if (params.skip_warning_transforms) opts += " --skip_warning_transforms"
+    opts += " --confidence_high ${params.transform_confidence_high}"
+    opts += " --confidence_low ${params.transform_confidence_low}"
+    return opts
+}
+
+// Drives per-slice use/auto_excluded → motor-only fallback in stack.
+def stackSliceConfigArg(slice_config) {
+    return slice_config.name != 'NO_SLICE_CONFIG' ? " --slice_config ${slice_config}" : ""
+}
+
+// Skipped when refine_manual_transforms baked manual corrections into the
+// transforms directory; passing them again would double-apply.
+def stackManualOverrideArg() {
+    return (params.manual_transforms_dir && !params.refine_manual_transforms)
+        ? " --manual_transforms_dir ${params.manual_transforms_dir}"
+        : ""
+}
+
+def stackCumulativeArgs() {
+    if (!params.stack_accumulate_translations) return ""
+    def opts = " --accumulate_translations"
+    if (params.stack_confidence_weight_translations) opts += " --confidence_weight_translations"
+    if (params.stack_max_cumulative_drift_px > 0) opts += " --max_cumulative_drift_px ${params.stack_max_cumulative_drift_px}"
+    // > 0 filters clamped translations; 0 = keep all (preserves re-homing boundary corrections).
+    if (params.stack_max_pairwise_translation > 0) opts += " --max_pairwise_translation ${params.stack_max_pairwise_translation}"
+    return opts
+}
+
+def stackSmoothingArgs() {
+    def opts = ""
+    if (params.stack_smooth_window > 0) opts += " --smooth_window ${params.stack_smooth_window}"
+    if (params.stack_translation_smooth_sigma > 0) opts += " --translation_smooth_sigma ${params.stack_translation_smooth_sigma}"
+    if (params.stack_translation_min_zcorr > 0) opts += " --translation_min_zcorr ${params.stack_translation_min_zcorr}"
+    return opts
+}
+
+// Build pyramid-related CLI arguments from `params.pyramid_*` settings.
+// `nLevelsFlag` names the downstream flag (`--n_levels` for most scripts,
+// `--n-levels` for `linum_align_to_ras.py`).
+def pyramidArgs(nLevelsFlag = '--n_levels') {
+    def opts = ""
+    if (params.pyramid_n_levels != null) {
+        opts += " ${nLevelsFlag} ${params.pyramid_n_levels}"
+    } else {
+        def base_res = params.resolution > 0 ? params.resolution : 10
+        def valid = params.pyramid_resolutions.findAll { r -> r >= base_res }.sort()
+        if (!valid.contains(base_res)) valid = [base_res] + valid
+        opts += " --pyramid_resolutions " + valid.collect { r -> r.toString() }.join(' ')
+        opts += params.pyramid_make_isotropic ? " --make_isotropic" : " --no_isotropic"
+    }
+    return opts
+}
+
+// Extract z## slice ID string from a filename; returns "unknown" if not found.
+def extractSliceId(filename) {
+    def name = filename instanceof Path ? filename.getName() : filename.toString()
+    def matcher = name =~ /z(\d+)/
+    return matcher ? matcher[0][1] : "unknown"
+}
+
+// Extract slice ID as integer; returns -1 if not found.
+def extractSliceIdInt(filename) {
+    def id = extractSliceId(filename)
+    return id == "unknown" ? -1 : id.toInteger()
+}
+
+// Return tuple(slice_id, file) for a given file path.
+def toSliceTuple(file_path) {
+    tuple(extractSliceId(file_path), file_path)
+}
+
+// Return sorted, comma-separated slice IDs from a list of files (e.g. "01,02,03,05").
+def extractSliceIdsString(fileList) {
+    fileList
+        .collect { f -> extractSliceId(f) }
+        .findAll { s -> s != "unknown" }
+        .sort { s -> s.toInteger() }
+        .join(',')
+}
+
+// Remove duplicate and trailing slashes from a path string.
+def normalizePath(path) {
+    return path.replaceAll('/+', '/').replaceAll('/$', '')
+}
+
+// Join path components safely.
+def joinPath(base, filename) {
+    return "${normalizePath(base)}/${filename}"
+}
+
+// Parse a slice_config.csv and return a map with the sets of slice IDs
+// marked for use vs. excluded: `[use: Set<String>, excluded: Set<String>]`.
+// Boolean parsing is kept in lockstep with `linumpy.io.slice_config._parse_bool`
+// (true / 1 / yes / y / t, case-insensitive). Edit there when the canonical
+// schema changes — Nextflow can't depend on Python at workflow-init time.
+def parseSliceConfig(configPath) {
+    def slicesToUse = [] as Set
+    def slicesExcluded = [] as Set
+    def file = new File(configPath)
+
+    if (!file.exists()) error("Slice config file not found: ${configPath}")
+
+    def truthy = ['true', '1', 'yes', 'y', 't'] as Set
+    file.withReader { reader ->
+        reader.readLine() // Skip header
+        reader.eachLine { line ->
+            def parts = line.split(',')
+            if (parts.size() >= 2) {
+                def sliceId = parts[0].trim()
+                def use = parts[1].trim().toLowerCase()
+                if (truthy.contains(use)) slicesToUse.add(sliceId)
+                else slicesExcluded.add(sliceId)
+            }
+        }
+    }
+
+    return [use: slicesToUse, excluded: slicesExcluded]
+}
+
+// Detect single-slice gaps in a sorted slice list.
+// Returns a list of [missingId, beforeId, afterId] tuples.
+def detectSingleGaps(sliceList) {
+    def gaps = []
+    def sliceIds = sliceList
+        .collect { f -> extractSliceIdInt(f) }
+        .findAll { n -> n >= 0 }
+        .sort()
+
+    sliceIds.eachWithIndex { current, i ->
+        if (i >= sliceIds.size() - 1) {
+            return
+        }
+        def next = sliceIds[i + 1]
+        def gap = next - current
+
+        if (gap == 2) {
+            def missingId = String.format("%02d", current + 1)
+            def beforeId = String.format("%02d", current)
+            def afterId = String.format("%02d", next)
+            gaps.add([missingId, beforeId, afterId])
+            log.info "Gap detected: slice ${missingId} (between ${beforeId} and ${afterId})"
+        } else if (gap > 2) {
+            log.warn "Multiple missing slices between ${current} and ${next} - cannot interpolate"
+        }
+    }
+    return gaps
+}
+
+// Partition a flat list of staged files into (slices, transforms): .ome.zarr
+// items go to slices, everything else (excluding *.json metrics) to
+// transforms. Used by export_manual_align / refine_manual_transforms inputs.
+def partitionSlicesAndTransforms(items) {
+    def slices = items.findAll { f -> f.getName().endsWith('.ome.zarr') }
+    def transforms = items.findAll { f -> def n = f.getName(); !n.endsWith('.ome.zarr') && !n.endsWith('.json') }
+    return tuple(slices, transforms)
+}
+
+// Parse debug_slices parameter; supports "25,26", "25-29", or "25,27-29".
+// Returns a set of zero-padded slice IDs, or null if not specified.
+def parseDebugSlices(debugSlicesStr) {
+    if (!debugSlicesStr || debugSlicesStr.trim().isEmpty()) return null
+
+    def sliceIds = [] as Set
+    debugSlicesStr.split(',').each { part ->
+        part = part.trim()
+        if (part.contains('-')) {
+            def rangeParts = part.split('-')
+            if (rangeParts.size() == 2) {
+                def start = rangeParts[0].trim().toInteger()
+                def end = rangeParts[1].trim().toInteger()
+                (start..end).each { n -> sliceIds.add(String.format("%02d", n)) }
+            }
+        } else {
+            sliceIds.add(String.format("%02d", part.toInteger()))
+        }
+    }
+    return sliceIds
+}
 
 // =============================================================================
 // SUB-WORKFLOW INCLUDES
@@ -40,7 +282,7 @@ include {
 // -----------------------------------------------------------------------------
 
 process README {
-    publishDir { "${params.output}/${task.process}" }, mode: 'move'
+    publishDir "${params.output}/${task.process}", mode: 'move'
 
     output:
     path "readme.txt"
@@ -66,6 +308,8 @@ process README {
 }
 
 process analyze_shifts {
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
     input:
     path(shifts_file)
 
@@ -87,7 +331,7 @@ process analyze_shifts {
 }
 
 process generate_report {
-    publishDir "${params.output}", mode: 'copy'
+    publishDir "$params.output", mode: 'copy'
 
     input:
     tuple path(zarr), path(zip), path(png), path(annotated_png)
@@ -183,6 +427,8 @@ process fix_illumination {
 // -----------------------------------------------------------------------------
 
 process estimate_global_transform {
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
     input:
     path("pool_input/*")
     path(slice_config)
@@ -225,7 +471,7 @@ process estimate_global_transform {
 }
 
 process stitch_3d_with_refinement {
-    publishDir { "${params.output}/${task.process}" }, mode: 'copy', pattern: "*_metrics.json"
+    publishDir "${params.output}/${task.process}", mode: 'copy', pattern: "*_metrics.json"
 
     input:
     tuple val(slice_id), path(mosaic_grid), path(input_transform)
@@ -278,7 +524,7 @@ process generate_stitch_preview {
 // -----------------------------------------------------------------------------
 
 process beam_profile_correction {
-    publishDir { "${params.output}/${task.process}" }, mode: 'copy', pattern: "*_metrics.json"
+    publishDir "${params.output}/${task.process}", mode: 'copy', pattern: "*_metrics.json"
 
     input:
     tuple val(slice_id), path(slice_3d)
@@ -300,7 +546,7 @@ process beam_profile_correction {
 }
 
 process crop_interface {
-    publishDir { "${params.output}/${task.process}" }, mode: 'copy', pattern: "*_metrics.json"
+    publishDir "${params.output}/${task.process}", mode: 'copy', pattern: "*_metrics.json"
 
     input:
     tuple val(slice_id), path(image)
@@ -324,7 +570,7 @@ process crop_interface {
 }
 
 process normalize {
-    publishDir { "${params.output}/${task.process}" }, mode: 'copy', pattern: "*_metrics.json"
+    publishDir "${params.output}/${task.process}", mode: 'copy', pattern: "*_metrics.json"
 
     input:
     tuple val(slice_id), path(image)
@@ -351,6 +597,8 @@ process normalize {
 // -----------------------------------------------------------------------------
 
 process detect_rehoming_events {
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
     input:
     tuple path(shifts_csv), path(slice_config_in)
 
@@ -384,6 +632,8 @@ process detect_rehoming_events {
 // (when supplied) is merged so manually-excluded slices stay excluded.
 // See docs/NEXTFLOW_WORKFLOWS.md "Authoring Notes" for the two-input pattern.
 process auto_assess_quality {
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
     input:
     path "inputs/*"
     path existing_slice_config
@@ -412,6 +662,8 @@ process auto_assess_quality {
 }
 
 process bring_to_common_space {
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
     input:
     tuple path("inputs/*"), path("shifts_xy.csv"), path(slice_config)
 
@@ -469,6 +721,8 @@ process generate_common_space_preview {
 // On gate failure the zarr is omitted (hard skip); see
 // docs/SLICE_INTERPOLATION_FEATURE.md for the full failure policy.
 process interpolate_missing_slice {
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
     input:
     tuple val(missing_slice_id), path(slice_before), path(slice_after)
 
@@ -540,6 +794,8 @@ process finalise_interpolation {
 // -----------------------------------------------------------------------------
 
 process register_pairwise {
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
     input:
     tuple path(fixed_vol), path(moving_vol)
 
@@ -573,6 +829,8 @@ process register_pairwise {
 // combines the manual correction with a tight image-based residual correction.
 // Only runs when params.refine_manual_transforms = true.
 process refine_manual_transforms {
+    publishDir "${params.output}/${task.process}", mode: 'copy'
+
     input:
     tuple path(fixed_vol), path(moving_vol), path("auto_transforms")
 
@@ -602,6 +860,8 @@ process refine_manual_transforms {
 // via --slice_config and treats those slices as motor-only.
 // See docs/NEXTFLOW_WORKFLOWS.md "Authoring Notes" for the two-input pattern.
 process auto_exclude_slices {
+    publishDir "$params.output/$task.process", mode: 'copy'
+
     input:
     path "transforms/*"
     path slice_config_in
@@ -630,6 +890,8 @@ process auto_exclude_slices {
 // Produces AIP images and copies pairwise transforms into a self-contained
 // directory that can be downloaded and opened by the manual alignment widget.
 process make_manual_align_package {
+    publishDir "$params.output/$task.process", mode: 'copy'
+
     input:
     tuple path("slices/*"), path("transforms/*")
 
@@ -661,7 +923,7 @@ process make_manual_align_package {
 // publishDir mode is conditional: 'symlink' when a downstream step will produce
 // the final output (preserves work-dir files for -resume); 'move' when this is last.
 process stack {
-    publishDir { "${params.output}/${task.process}" },
+    publishDir "$params.output/$task.process",
         mode: (params.correct_bias_field || params.align_to_ras_enabled) ? 'symlink' : 'move',
         saveAs: { fn -> fn.endsWith('.ome.zarr') ? null : fn }
 
@@ -675,17 +937,17 @@ process stack {
     path("stacking_decisions.csv"), optional: true, emit: stacking_decisions
 
     script:
-    def options = Helpers.stackBlendingArgs(params) +
-                  Helpers.stackZMatchingArgs(params) +
-                  Helpers.stackPairwiseTransformArgs(params) +
-                  Helpers.stackSliceConfigArg(slice_config) +
-                  Helpers.stackManualOverrideArg(params) +
-                  Helpers.stackCumulativeArgs(params) +
-                  Helpers.stackSmoothingArgs(params) +
+    def options = stackBlendingArgs() +
+                  stackZMatchingArgs() +
+                  stackPairwiseTransformArgs() +
+                  stackSliceConfigArg(slice_config) +
+                  stackManualOverrideArg() +
+                  stackCumulativeArgs() +
+                  stackSmoothingArgs() +
                   " --no_xy_shift" +  // slices are already in common space
-                  Helpers.pyramidArgs(params)
+                  pyramidArgs()
 
-    def annotated_args = Helpers.annotatedScreenshotArgs(params, slice_ids_str)
+    def annotated_args = annotatedScreenshotArgs(slice_ids_str)
     """
     linum_stack_slices_motor.py slices ${shifts_file} ${subject_name}.ome.zarr ${options}
     zip -r ${subject_name}.ome.zarr.zip ${subject_name}.ome.zarr
@@ -707,7 +969,7 @@ process stack {
 process correct_bias_field {
     cpus params.processes
 
-    publishDir { "${params.output}/${task.process}" },
+    publishDir "$params.output/$task.process",
         mode: params.align_to_ras_enabled ? 'symlink' : 'move',
         saveAs: { fn -> fn.endsWith('.ome.zarr') ? null : fn }
 
@@ -719,7 +981,7 @@ process correct_bias_field {
 
     script:
     def n_slices_opt = n_slices > 0 ? "--n_serial_slices ${n_slices}" : ""
-    def annotated_args = Helpers.annotatedScreenshotArgs(params, slice_ids_str)
+    def annotated_args = annotatedScreenshotArgs(slice_ids_str)
     def backend_flag = params.use_gpu ? "auto" : "cpu"
     def hm_perz_flag = params.bias_histogram_match_per_zplane ? "--histogram_match_per_zplane" : ""
     def tissue_thresh_flag = params.bias_tissue_threshold != null ? "--tissue_threshold ${params.bias_tissue_threshold}" : ""
@@ -734,7 +996,7 @@ process correct_bias_field {
         ${hm_perz_flag} \
         ${tissue_thresh_flag} \
         ${zprofile_flag} \
-        ${Helpers.pyramidArgs(params)}
+        ${pyramidArgs()}
 
     zip -r ${subject_name}.ome.zarr.zip ${subject_name}.ome.zarr
 
@@ -754,7 +1016,7 @@ process correct_bias_field {
 
 // Atlas registration to Allen Mouse Brain Atlas. Always the final step when enabled.
 process align_to_ras {
-    publishDir { "${params.output}/${task.process}" }, mode: 'move', saveAs: { fn ->
+    publishDir "$params.output/$task.process", mode: 'move', saveAs: { fn ->
         fn.endsWith('.ome.zarr') ? null : fn
     }
 
@@ -774,7 +1036,7 @@ process align_to_ras {
     def rotation_arg = params.ras_initial_rotation ? "--initial-rotation ${params.ras_initial_rotation}" : ""
     def preview_arg = params.allen_preview ? "--preview ${subject_name}_ras_preview.png" : ""
     def orientation_preview_arg = params.ras_orientation_preview ? "--orientation-preview ${subject_name}_ras_orientation_preview.png" : ""
-    def ras_pyramid_opts = Helpers.pyramidArgs(params, '--n-levels')
+    def ras_pyramid_opts = pyramidArgs('--n-levels')
     """
     linum_align_to_ras.py ${stacked_zarr} ${subject_name}_ras.ome.zarr \
         --allen-resolution ${params.allen_resolution} \
@@ -800,12 +1062,12 @@ process align_to_ras {
 workflow {
     README()
 
-    def inputDir = Helpers.normalizePath(params.input)
-    def subject_name = Helpers.resolveSubjectName(inputDir, params.subject_name)
+    def inputDir = normalizePath(params.input)
+    def subject_name = resolveSubjectName(inputDir)
     log.info "Subject: ${subject_name}"
     log.info "GPU: ${params.use_gpu ? 'ENABLED' : 'DISABLED'}"
 
-    def debugSlices = Helpers.parseDebugSlices(params.debug_slices)
+    def debugSlices = parseDebugSlices(params.debug_slices)
     if (debugSlices) {
         log.info "DEBUG MODE: Processing only slices ${debugSlices.sort().join(', ')}"
     }
@@ -827,11 +1089,11 @@ workflow {
     shifts_xy = channel.value(file(shifts_xy_path))
 
     // Slice config (optional)
-    def slice_config_path = params.slice_config ?: Helpers.joinPath(inputDir, "slice_config.csv")
+    def slice_config_path = params.slice_config ?: joinPath(inputDir, "slice_config.csv")
     def slicesToUse = null
     if (file(slice_config_path).exists()) {
         log.info "Slice config: ${slice_config_path}"
-        def parsed = Helpers.parseSliceConfig(slice_config_path)
+        def parsed = parseSliceConfig(slice_config_path)
         slicesToUse = parsed.use
         def total = slicesToUse.size() + parsed.excluded.size()
         log.info "Slice config: ${total} entries (${slicesToUse.size()} included, ${parsed.excluded.size()} excluded)"
@@ -851,7 +1113,7 @@ workflow {
         error("No mosaic grids found in ${inputDir}. Expected: mosaic_grid*_z00.ome.zarr")
     }
 
-    def selectedIds = mosaicFiles.collect { f -> Helpers.extractSliceId(f) }.findAll { sid ->
+    def selectedIds = mosaicFiles.collect { f -> extractSliceId(f) }.findAll { sid ->
         if (debugSlices != null) return debugSlices.contains(sid)
         if (slicesToUse != null) return slicesToUse.contains(sid)
         return true
@@ -866,7 +1128,7 @@ workflow {
 
     inputSlices = channel
         .fromList(mosaicFiles)
-        .map { f -> Helpers.toSliceTuple(f) }
+        .map { f -> toSliceTuple(f) }
         .filter { slice_id, _files ->
             if (debugSlices != null) {
                 def included = debugSlices.contains(slice_id)
@@ -961,7 +1223,7 @@ workflow {
     if (params.common_space_preview) {
         preview_input = bring_to_common_space.out
             .flatten()
-            .map { f -> Helpers.toSliceTuple(f) }
+            .map { f -> toSliceTuple(f) }
         generate_common_space_preview(preview_input)
     }
 
@@ -971,7 +1233,7 @@ workflow {
     // slice_config_final.csv. See docs/SLICE_INTERPOLATION_FEATURE.md.
     if (params.interpolate_missing_slices) {
         gaps_channel = slices_common_space
-            .map { sliceList -> [Helpers.detectSingleGaps(sliceList), sliceList] }
+            .map { sliceList -> [detectSingleGaps(sliceList), sliceList] }
             .flatMap { gapsAndSlices ->
                 def gaps = gapsAndSlices[0]
                 def sliceList = gapsAndSlices[1]
@@ -1029,7 +1291,7 @@ workflow {
     if (params.export_manual_align) {
         export_input = slices_collected
             .combine(transforms_collected)
-            .map { items -> Helpers.partitionSlicesAndTransforms(items) }
+            .map { items -> partitionSlicesAndTransforms(items) }
         make_manual_align_package(export_input)
     }
 
@@ -1084,7 +1346,7 @@ workflow {
         .merge(transforms_for_stack) { acc, t -> tuple(acc[0], acc[1], t) }
         .merge(stack_slice_config) { acc, sc -> tuple(acc[0], acc[1], acc[2], sc) }
         .map { slices, shifts, transforms, sc ->
-            tuple(slices, shifts, transforms, sc, subject_name, Helpers.extractSliceIdsString(slices))
+            tuple(slices, shifts, transforms, sc, subject_name, extractSliceIdsString(slices))
         }
 
     stack(stack_input)
@@ -1121,15 +1383,15 @@ workflow {
         log.info "DIAGNOSTIC MODE enabled (acq rotation, rotation drift, motor-only stitch/stack)"
     }
 
-    if (Helpers.diagEnabled(params, 'analyze_acquisition_rotation')) {
+    if (diagEnabled('analyze_acquisition_rotation')) {
         analyze_acquisition_rotation(shifts_xy, register_pairwise.out.collect())
     }
 
-    if (Helpers.diagEnabled(params, 'analyze_rotation_drift')) {
+    if (diagEnabled('analyze_rotation_drift')) {
         analyze_rotation_drift(register_pairwise.out.collect())
     }
 
-    if (Helpers.diagEnabled(params, 'motor_only_stack')) {
+    if (diagEnabled('motor_only_stack')) {
         motor_only_stack_input = normalize.out.normalized
             .map { _id, slice_file -> slice_file }
             .collect()
@@ -1139,7 +1401,7 @@ workflow {
     // motor_only_stitch is also a prerequisite for compare_stitching, so run it
     // whenever either is requested. A second `stitch_motor_only(illum_fixed)`
     // call would emit the same channel twice, which Nextflow forbids.
-    def runMotorStitch = Helpers.diagEnabled(params, 'motor_only_stitch')
+    def runMotorStitch = diagEnabled('motor_only_stitch')
     def runComparison = params.compare_stitching || params.diagnostic_mode
     if (runMotorStitch || runComparison) {
         stitch_motor_only(illum_fixed)
@@ -1150,8 +1412,8 @@ workflow {
 
         stitch_refined(illum_fixed)
 
-        motor_stitch_with_id = stitch_motor_only.out.map { f -> Helpers.toSliceTuple(f) }
-        refined_stitch_with_id = stitch_refined.out[0].map { f -> Helpers.toSliceTuple(f) }
+        motor_stitch_with_id = stitch_motor_only.out.map { f -> toSliceTuple(f) }
+        refined_stitch_with_id = stitch_refined.out[0].map { f -> toSliceTuple(f) }
 
         comparison_input = motor_stitch_with_id
             .combine(refined_stitch_with_id, by: 0)

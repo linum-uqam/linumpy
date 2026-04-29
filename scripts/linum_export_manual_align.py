@@ -307,6 +307,18 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--interpolated_slices_remote_dir",
+        default=None,
+        help=(
+            "Absolute server path to the published interpolated-slice directory "
+            "(e.g. /scratch/workspace/sub-22/output/interpolate_missing_slice). "
+            "When set, per-slice remote paths for interpolated slices "
+            "(detected by '_interpolated' in the filename) point to this "
+            "directory instead of --slices_remote_dir. Stored in metadata.json "
+            "so the manual-align plugin can find interpolated slices on the server."
+        ),
+    )
+    p.add_argument(
         "--xy_overlap_px",
         type=int,
         default=20,
@@ -318,6 +330,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     return p
+
+
+def _is_interpolated(path: Path) -> bool:
+    """Return True if this slice was produced by the interpolation step.
+
+    Interpolated slices are named ``slice_z{N}_interpolated.ome.zarr``
+    (the ``_interpolated`` suffix is set by ``linum_interpolate_missing_slice.py``).
+    """
+    return "_interpolated" in path.name
 
 
 def _discover_slices(slices_dir: Path) -> dict[int, Path]:
@@ -425,6 +446,11 @@ def main(argv: Any = None) -> None:
     # Use the explicitly provided server path when available; fall back to slices_dir.
     # Normalize to remove any double-slashes produced by a trailing slash in params.output.
     slices_remote_dir = str(Path(args.slices_remote_dir)) if args.slices_remote_dir else str(slices_dir)
+    # Separate remote dir for interpolated slices (e.g. interpolate_missing_slice/).
+    # Falls back to slices_remote_dir when not provided (backward-compatible).
+    interp_remote_dir = (
+        str(Path(args.interpolated_slices_remote_dir)) if args.interpolated_slices_remote_dir else slices_remote_dir
+    )
     workers = args.workers or max(1, (os.cpu_count() or 4) - 2)
     overlap_px = args.xy_overlap_px
     logger.info("XY overlap slab: %s voxels at pyramid level %s", overlap_px, args.level)
@@ -537,6 +563,25 @@ def main(argv: Any = None) -> None:
             shutil.copy2(metrics_file, out_tdir / "pairwise_registration_metrics.json")
 
     # Write metadata
+    interpolated_ids = sorted(sid for sid, p in slice_paths.items() if _is_interpolated(p))
+    # Per-slice remote paths: interpolated slices come from a separate publish
+    # directory (interpolate_missing_slice/) while real slices live in
+    # bring_to_common_space/.  Storing an explicit path per slice lets the
+    # plugin's SSH reader always find the file regardless of its origin.
+    slice_remote_paths = {
+        str(sid): (
+            f"{interp_remote_dir}/{p.name}"
+            if _is_interpolated(p) and interp_remote_dir != slices_remote_dir
+            else f"{slices_remote_dir}/{p.name}"
+        )
+        for sid, p in slice_paths.items()
+    }
+    if interpolated_ids:
+        logger.info(
+            "Detected %s interpolated slice(s): %s",
+            len(interpolated_ids),
+            interpolated_ids,
+        )
     metadata = {
         "pyramid_level": level,
         "n_slices": len(slice_paths),
@@ -547,12 +592,21 @@ def main(argv: Any = None) -> None:
         "slice_filenames": {str(sid): p.name for sid, p in slice_paths.items()},
         "axis_views": {"xz_dir": "aips_xz", "yz_dir": "aips_yz", "paired": bool(pairs)},
         "n_transforms": sum(1 for tpath in transform_paths.values() if list(tpath.glob("*.tfm"))),
-        # Absolute server path to the published per-slice OME-Zarr files.
+        # Absolute server path to the published common-space OME-Zarr files.
         # Passed via --slices_remote_dir from the Nextflow process so it points to
         # the publishDir path rather than the work-directory staging path.
         # Used by the plugin to open persistent SSH+Python readers for interactive
         # cross-section navigation (slider to select Y or X position at full resolution).
         "slices_remote_dir": slices_remote_dir,
+        # Per-slice remote paths: accounts for interpolated slices that live in
+        # a different publish directory (interpolate_missing_slice/) than the
+        # common-space slices (bring_to_common_space/).  Takes precedence over
+        # slices_remote_dir when the plugin resolves a slice path.
+        "slice_remote_paths": slice_remote_paths,
+        # IDs of slices that were synthesised by the interpolation step rather
+        # than acquired directly.  The plugin can use this list to label them
+        # as "[interpolated]" and to warn the user that the content is synthetic.
+        "interpolated_slice_ids": interpolated_ids,
         "cross_section_level": level,
     }
     metadata_path = output_dir / "manual_align_metadata.json"

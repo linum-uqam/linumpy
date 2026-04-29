@@ -74,9 +74,6 @@ nextflow_pipeline {
                 apply_pairwise_transforms = true
                 correct_bias_field = true
                 generate_report = false
-                // GitHub-hosted runners have only 4 CPUs; the default of 8
-                // causes 'Process requirement exceeds available CPUs'.
-                processes = 2
             }
         }
 
