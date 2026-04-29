@@ -84,21 +84,6 @@ def test_normalize_volume_background_thresholds_length():
     assert len(thresholds) == vol.shape[0]
 
 
-def test_normalize_volume_agarose_floor_at_zero():
-    """Volume minimum should be exactly 0 — the per-slice agarose-median floor
-    is subtracted so background voxels at or below the median go to 0.
-
-    This keeps background dark in manual-align overlays and downstream
-    visualizations.
-    """
-    rng = np.random.default_rng(0)
-    vol = rng.random((4, 24, 24)).astype(np.float32) * 0.1  # low = agarose
-    vol[:, 8:16, 8:16] += 0.5  # bright tissue block
-    mask, _ = get_agarose_mask(vol)
-    result, _ = normalize_volume(vol.copy(), mask)
-    assert float(result.min()) == 0.0
-
-
 def test_normalize_volume_preserves_relative_brightness():
     """Global divisor must preserve a 2:1 inter-section brightness ratio.
 

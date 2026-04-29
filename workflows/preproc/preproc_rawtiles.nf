@@ -9,7 +9,7 @@ nextflow.enable.dsl = 2
 // Parameters are defined in nextflow.config
 
 process create_mosaic_grid {
-    publishDir "$params.output", mode: 'link'  // Hard link: no duplication, file stays accessible
+    publishDir "${params.output}", mode: 'link'  // Hard link: no duplication, file stays accessible
     
     input:
         tuple val(slice_id), path(tiles)
@@ -27,10 +27,15 @@ process create_mosaic_grid {
     """
     linum_create_mosaic_grid_3d.py mosaic_grid_3d_z${slice_id}.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution} --sharding_factor ${params.sharding_factor} ${options} ${gpu_opts}
     """
+
+    stub:
+    """
+    mkdir -p mosaic_grid_3d_z${slice_id}.ome.zarr
+    """
 }
 
 process generate_aip {
-    publishDir "$params.output/aips", mode: 'copy'
+    publishDir "${params.output}/aips", mode: 'copy'
 
     input:
         tuple val(slice_id), path(mosaic_grid)
@@ -41,11 +46,16 @@ process generate_aip {
     """
     linum_aip_png.py ${mosaic_grid} aip_z${slice_id}.png ${gpu_opts}
     """
+
+    stub:
+    """
+    touch aip_z${slice_id}.png
+    """
 }
 
 process generate_mosaic_preview {
     maxForks 1
-    publishDir "$params.output/previews", mode: 'copy'
+    publishDir "${params.output}/previews", mode: 'copy'
 
     input:
         tuple val(slice_id), path(mosaic_grid)
@@ -55,23 +65,33 @@ process generate_mosaic_preview {
     """
     linum_screenshot_omezarr.py ${mosaic_grid} mosaic_grid_z${slice_id}_preview.png
     """
+
+    stub:
+    """
+    touch mosaic_grid_z${slice_id}_preview.png
+    """
 }
 
 process estimate_xy_shifts_from_metadata {
     cpus params.processes
-    publishDir "$params.output", mode: 'copy' 
+    publishDir "${params.output}", mode: 'copy'
     input:
         path(input_dir)
     output:
         path("shifts_xy.csv")
     script:
     """
-    linum_estimate_xy_shift_from_metadata.py ${input_dir} shifts_xy.csv --n_processes $params.processes
+    linum_estimate_xy_shift_from_metadata.py ${input_dir} shifts_xy.csv --n_processes ${params.processes}
+    """
+
+    stub:
+    """
+    printf 'fixed_id,moving_id,x_shift,y_shift,x_shift_mm,y_shift_mm\n' > shifts_xy.csv
     """
 }
 
 process generate_slice_config {
-    publishDir "$params.output", mode: 'copy'
+    publishDir "${params.output}", mode: 'copy'
     
     input:
         tuple path(shifts_file), path(input_dir)
@@ -85,23 +105,28 @@ process generate_slice_config {
     """
     linum_generate_slice_config.py ${shifts_file} slice_config.csv --from_shifts ${exclude_first_opt} ${galvo_opts}
     """
+
+    stub:
+    """
+    printf 'slice_id,use\n' > slice_config.csv
+    """
 }
 
 
 workflow {
     if (params.use_old_folder_structure)
     {
-        inputSlices = Channel.fromPath("$params.input/tile_x*_y*_z*/", type: 'dir')
+        inputSlices = channel.fromPath("${params.input}/tile_x*_y*_z*/", type: 'dir')
                             .map{path -> tuple(path.toString().substring(path.toString().length() - 2), path)}
                             .groupTuple()
     }
     else
     {
-        inputSlices = Channel.fromPath("$params.input/**/tile_x*_y*_z*/", type: 'dir')
+        inputSlices = channel.fromPath("${params.input}/**/tile_x*_y*_z*/", type: 'dir')
                             .map{path -> tuple(path.toString().substring(path.toString().length() - 2), path)}
                             .groupTuple()
     }
-    input_dir_channel = Channel.fromPath("$params.input", type: 'dir')
+    input_dir_channel = channel.fromPath("${params.input}", type: 'dir')
 
     // Generate a 3D mosaic grid at full resolution
     create_mosaic_grid(inputSlices)

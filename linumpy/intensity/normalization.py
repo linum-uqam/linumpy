@@ -18,9 +18,8 @@ def normalize_volume(
     Normalize volume intensities based on agarose background.
 
     Each z-slice is clipped at its per-slice percentile cap and agarose-median
-    floor, then the agarose floor is subtracted per slice (so background goes
-    to exactly 0).  The entire volume is then divided by a single global
-    divisor (the maximum per-slice tissue span across all slices), so relative
+    floor.  The entire volume is then divided by a single global divisor (the
+    maximum per-slice percentile cap across all slices), so relative
     inter-section brightness is preserved.
 
     Parameters
@@ -36,7 +35,7 @@ def normalize_volume(
     -------
     tuple
         (normalized_volume, background_thresholds)
-        - normalized_volume: float32 volume in [0, 1] with agarose at 0.
+        - normalized_volume: float32 volume in [0, 1].
         - background_thresholds: Array of agarose-median per slice.
     """
     vol = vol.astype(np.float32, copy=False)
@@ -49,11 +48,8 @@ def normalize_volume(
     background_thresholds = np.array([np.median(s[agarose_mask]) for s in vol])
     vol = np.clip(vol, background_thresholds[:, None, None], None)
 
-    # Subtract per-slice agarose floor so background voxels become exactly 0
-    vol = vol - background_thresholds[:, None, None]
-
     # Single global divisor: preserves relative inter-section brightness
-    global_max = float((pmax - background_thresholds).max())
+    global_max = float(pmax.max())
     if global_max > 0:
         vol = vol / global_max
 
@@ -305,7 +301,9 @@ def apply_histogram_matching(
 
     if use_gpu:
         try:
-            return _apply_histogram_matching_gpu(vol, bounds, ref_bins, ref_cdf, n_bins, tissue_threshold)
+            return _apply_histogram_matching_gpu(
+                vol, bounds, ref_bins, ref_cdf, n_bins, tissue_threshold
+            )
         except ImportError:
             pass
 
