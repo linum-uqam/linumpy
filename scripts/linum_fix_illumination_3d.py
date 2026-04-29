@@ -42,6 +42,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=float,
         help="Values above this percentile will be clipped when\nestimating the flatfield (inside range [0-100]).",
     )
+    p.add_argument("--n_levels", type=int, default=5, help="Number of levels in pyramid representation. [%(default)s]")
     p.add_argument(
         "--use_gpu",
         default=True,
@@ -185,7 +186,7 @@ def main() -> None:
         print(f"Minimum value in the output volume is {min_value}. Clipping at 0.")
         out_dask = da.clip(out_dask, 0.0, None)
 
-    save_omezarr(out_dask, output_zarr, voxel_size=resolution, chunks=vol.chunks)
+    save_omezarr(out_dask, output_zarr, voxel_size=resolution, chunks=vol.chunks, n_levels=args.n_levels)
     tmp_dir.cleanup()
 
 
