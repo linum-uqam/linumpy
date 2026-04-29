@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""
-Using xy shifts file, bring all mosaics in `in_mosaics_dir` to a common space. Each.
+"""Using xy shifts file, bring all mosaics in `in_mosaics_dir` to a common space.
 
-volume is resampled to a common shape and its content is translated following the
+Each volume is resampled to a common shape and its content is translated following the
 transforms in xy shifts. All transformed mosaics are saved to `out_directory`.
 
 Optionally accepts a slice configuration file to filter which slices to process.
@@ -13,10 +12,10 @@ When slices are skipped, their shifts are accumulated to maintain proper alignme
 import linumpy.config.threads  # noqa: F401
 
 import argparse
-import csv
 import re
 from os.path import split as psplit
 from pathlib import Path
+from typing import Any
 
 import dask.array as da
 import numpy as np
@@ -24,15 +23,16 @@ import pandas as pd
 
 from linumpy.cli.args import add_overwrite_arg, assert_output_exists
 from linumpy.imaging.transform import apply_xy_shift
+from linumpy.io import slice_config as slice_config_io
 from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.stack_alignment.io import build_cumulative_shifts
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("in_mosaics_dir", type=Path, help="Directory containing mosaics to bring to common space.")
-    p.add_argument("in_shifts", type=Path, help="Spreadsheet containing xy shifts (.csv).")
-    p.add_argument("out_directory", type=Path, help="Output directory containing the aligned mosaics.")
+    p.add_argument("in_mosaics_dir", help="Directory containing mosaics to bring to common space.")
+    p.add_argument("in_shifts", help="Spreadsheet containing xy shifts (.csv).")
+    p.add_argument("out_directory", help="Output directory containing the aligned mosaics.")
     p.add_argument(
         "--slice_config",
         default=None,
@@ -69,31 +69,38 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "replace the metadata-derived shift with a 2-D phase cross-correlation\n"
         "estimate computed from the stitched mosaics.  Requires scikit-image.",
     )
+    p.add_argument(
+        "--refine_max_discrepancy_px",
+        type=float,
+        default=0,
+        help="When --refine_unreliable is active, reject the image-based estimate and\n"
+        "keep the original motor estimate if the two differ by more than this\n"
+        "many pixels (L2 norm). 0 = accept all image-based estimates (default).\n"
+        "Recommended: 50. Guards against phase-correlation failures on large-\n"
+        "offset or low-overlap transitions where the image estimate is wrong.",
+    )
+    p.add_argument(
+        "--refine_min_correlation",
+        type=float,
+        default=0.0,
+        help="Minimum normalized cross-correlation (0-1) from phase cross-correlation\n"
+        "to accept an image-based refinement. 0 = accept all (default).\n"
+        "Recommended: 0.15-0.3. Rejects refinements where the phase correlation\n"
+        "quality is too low, indicating an unreliable shift estimate.",
+    )
 
     add_overwrite_arg(p)
     return p
 
 
 def load_slice_config(config_path: Path) -> set[int]:
-    """Load slice configuration and return set of slice IDs to use."""
-    slices_to_use = set()
-    with Path(config_path).open() as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            slice_id = int(row["slice_id"])
-            use = row["use"].lower().strip() in ("true", "1", "yes")
-            if use:
-                slices_to_use.add(slice_id)
-    return slices_to_use
+    """Return the integer slice IDs marked ``use=true`` in ``config_path``."""
+    return {int(sid) for sid in slice_config_io.filter_slices_to_use(config_path)}
 
 
-def _replace_with_local_median(df: pd.DataFrame, idx: int, window: int, skip_mask: dict | None = None) -> dict | None:
+def _replace_with_local_median(df: Any, idx: int, window: Any, skip_mask: Any = None) -> Any:
+    """Run function."""
     pos = df.index.get_loc(idx)
-    if not isinstance(pos, int):
-        if not isinstance(pos, np.integer):
-            msg = f"Expected integer index location, got {type(pos)}"
-            raise TypeError(msg)
-        pos = int(pos)
     neighbor_vals_x = []
     neighbor_vals_y = []
     neighbor_vals_px_x = []
@@ -123,8 +130,8 @@ def _replace_with_local_median(df: pd.DataFrame, idx: int, window: int, skip_mas
     return result
 
 
-def handle_excluded_slice_shifts(shifts_df: pd.DataFrame, excluded_slice_ids: list[int] | set[int], mode: str = "keep", window: int = 2) -> pd.DataFrame:
-    """Handle shifts involving excluded slices by zeroing or interpolating."""
+def handle_excluded_slice_shifts(shifts_df: Any, excluded_slice_ids: Any, mode: str = "keep", window: int = 2) -> Any:
+    """Run function operation."""
     if not excluded_slice_ids or mode == "keep":
         return shifts_df
 
@@ -182,7 +189,7 @@ def handle_excluded_slice_shifts(shifts_df: pd.DataFrame, excluded_slice_ids: li
     return df
 
 
-def compute_common_shape(mosaic_files: dict, slice_ids: list, cumsum_shifts: dict) -> tuple:
+def compute_common_shape(mosaic_files: Any, slice_ids: Any, cumsum_shifts: Any) -> tuple[int, int, float, float]:
     """
     Compute the common shape needed to fit all aligned mosaics.
 
@@ -227,7 +234,7 @@ def compute_common_shape(mosaic_files: dict, slice_ids: list, cumsum_shifts: dic
     return nx, ny, x0, y0
 
 
-def _estimate_shift_by_registration(fixed_path: Path, moving_path: Path) -> tuple:
+def _estimate_shift_by_registration(fixed_path: Path, moving_path: Path) -> Any:
     """Estimate the XY shift between two 3D mosaics via 2-D phase cross-correlation.
 
     Computes a max-projection over the central 20 % of Z-slices for each
@@ -255,7 +262,7 @@ def _estimate_shift_by_registration(fixed_path: Path, moving_path: Path) -> tupl
     fixed_data = np.array(fixed_vol)
     moving_data = np.array(moving_vol)
 
-    def _proj(arr: np.ndarray) -> np.ndarray:
+    def _proj(arr: Any) -> Any:
         nz = arr.shape[0]
         z0 = max(0, nz // 2 - max(1, nz // 10))
         z1 = min(nz, nz // 2 + max(1, nz // 10))
@@ -268,7 +275,8 @@ def _estimate_shift_by_registration(fixed_path: Path, moving_path: Path) -> tupl
     h = max(fixed_proj.shape[0], moving_proj.shape[0])
     w = max(fixed_proj.shape[1], moving_proj.shape[1])
 
-    def _pad(arr: np.ndarray, th: int, tw: int) -> np.ndarray:
+    def _pad(arr: Any, th: Any, tw: Any) -> Any:
+        """Run function."""
         ph = th - arr.shape[0]
         pw = tw - arr.shape[1]
         return np.pad(arr, ((ph // 2, ph - ph // 2), (pw // 2, pw - pw // 2)))
@@ -276,7 +284,17 @@ def _estimate_shift_by_registration(fixed_path: Path, moving_path: Path) -> tupl
     fixed_padded = _pad(fixed_proj, h, w)
     moving_padded = _pad(moving_proj, h, w)
 
-    shift, _, _ = phase_cross_correlation(fixed_padded, moving_padded, upsample_factor=10)
+    shift, _error, _ = phase_cross_correlation(fixed_padded, moving_padded, upsample_factor=10)
+
+    # Compute NCC on the overlap region after applying the estimated shift.
+    dy_int, dx_int = round(float(shift[0])), round(float(shift[1]))
+    fy0, fy1 = max(0, dy_int), min(h, h + dy_int)
+    fx0, fx1 = max(0, dx_int), min(w, w + dx_int)
+    my0, my1 = max(0, -dy_int), min(h, h - dy_int)
+    mx0, mx1 = max(0, -dx_int), min(w, w - dx_int)
+    f_crop = fixed_padded[fy0:fy1, fx0:fx1]
+    m_crop = moving_padded[my0:my1, mx0:mx1]
+    ncc = float(np.corrcoef(f_crop.flat, m_crop.flat)[0, 1]) if f_crop.size > 0 else 0.0
 
     # phase_cross_correlation returns (row_shift, col_shift) = (dy, dx) in pixels.
     # A positive dy means the moving image is shifted downward (larger row index = larger Y).
@@ -293,11 +311,11 @@ def _estimate_shift_by_registration(fixed_path: Path, moving_path: Path) -> tupl
     dx_mm = dx_px * res_x_mm
     dy_mm = dy_px * res_y_mm
 
-    return dx_mm, dy_mm, dx_px, dy_px
+    return dx_mm, dy_mm, dx_px, dy_px, ncc
 
 
 def main() -> None:
-    """Run the 3D mosaic alignment from shifts script."""
+    """Run function operation."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 
@@ -367,13 +385,36 @@ def main() -> None:
                     print(f"  Skipping z{fixed_id:02d}→z{moving_id:02d}: mosaic file(s) not found")
                     continue
                 try:
-                    dx_mm, dy_mm, dx_px, dy_px = _estimate_shift_by_registration(
+                    dx_mm, dy_mm, dx_px, dy_px, ncc = _estimate_shift_by_registration(
                         mosaic_files[fixed_id], mosaic_files[moving_id]
                     )
+                    # Check correlation quality — reject low-quality phase correlations
+                    orig_dx_mm = shifts_df.loc[idx, "x_shift_mm"]
+                    orig_dy_mm = shifts_df.loc[idx, "y_shift_mm"]
+                    if args.refine_min_correlation > 0 and ncc < args.refine_min_correlation:
+                        print(
+                            f"  z{fixed_id:02d}→z{moving_id:02d}: image estimate discarded "
+                            f"(ncc={ncc:.3f} < {args.refine_min_correlation:.3f}); "
+                            f"keeping motor estimate ({orig_dx_mm:.3f}, {orig_dy_mm:.3f}) mm"
+                        )
+                        continue
+                    # Check discrepancy between image estimate and original motor estimate
+                    if args.refine_max_discrepancy_px > 0 and "x_shift" in shifts_df.columns:
+                        orig_dx_px = float(shifts_df.loc[idx, "x_shift"])
+                        orig_dy_px = float(shifts_df.loc[idx, "y_shift"])
+                        discrepancy_px = np.sqrt((dx_px - orig_dx_px) ** 2 + (dy_px - orig_dy_px) ** 2)
+                        if discrepancy_px > args.refine_max_discrepancy_px:
+                            print(
+                                f"  z{fixed_id:02d}→z{moving_id:02d}: image estimate discarded "
+                                f"(discrepancy={discrepancy_px:.1f} px > "
+                                f"{args.refine_max_discrepancy_px:.0f} px threshold, ncc={ncc:.3f}); "
+                                f"keeping motor estimate ({orig_dx_mm:.3f}, {orig_dy_mm:.3f}) mm"
+                            )
+                            continue
                     print(
-                        f"  z{fixed_id:02d}→z{moving_id:02d}: metadata=({shifts_df.loc[idx, 'x_shift_mm']:.3f}, "
-                        f"{shifts_df.loc[idx, 'y_shift_mm']:.3f}) mm → "
-                        f"registered=({dx_mm:.3f}, {dy_mm:.3f}) mm"
+                        f"  z{fixed_id:02d}→z{moving_id:02d}: metadata=({orig_dx_mm:.3f}, "
+                        f"{orig_dy_mm:.3f}) mm → "
+                        f"registered=({dx_mm:.3f}, {dy_mm:.3f}) mm [ncc={ncc:.3f}]"
                     )
                     shifts_df.loc[idx, "x_shift_mm"] = dx_mm
                     shifts_df.loc[idx, "y_shift_mm"] = dy_mm
@@ -426,7 +467,7 @@ def main() -> None:
         img, res = read_omezarr(mosaic_file)
 
         # Load image data
-        img_data = np.asarray(img[:])
+        img_data = img[:]
 
         # Reference array shape is (Z, height, width) = (Z, ny, nx)
         reference = np.zeros((img_data.shape[0], ny, nx), dtype=img_data.dtype)
