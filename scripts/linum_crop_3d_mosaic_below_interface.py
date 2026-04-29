@@ -55,6 +55,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "to finding the interface*. Original values will\n"
         "remain in output clipped volume (range [0-100]).",
     )
+    p.add_argument("--n_levels", type=int, default=5, help="Number of levels in pyramid representation. [%(default)s]")
     return p
 
 
@@ -101,7 +102,7 @@ def main() -> None:
 
     crop_dask = da.from_array(vol_crop, chunks=vol.chunks)
     # Save cropped volume as OME-Zarr
-    save_omezarr(crop_dask, output_path, voxel_size=res, chunks=vol.chunks)
+    save_omezarr(crop_dask, output_path, voxel_size=res, chunks=vol.chunks, n_levels=args.n_levels)
 
     # Collect metrics using helper function
     original_shape = vol.shape

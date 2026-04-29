@@ -128,7 +128,7 @@ process resample_mosaic_grid {
     def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
     """
     linum_resample_mosaic_grid.py ${mosaic_grid} "mosaic_grid_z${slice_id}_resampled.ome.zarr" \
-        -r ${params.resolution} ${gpu_flag} -v
+        -r ${params.resolution} ${gpu_flag} --n_levels 0 -v
     """
 
     stub:
@@ -147,7 +147,8 @@ process fix_focal_curvature {
     script:
     def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
     """
-    linum_detect_focal_curvature.py ${mosaic_grid} "mosaic_grid_z${slice_id}_focal_fix.ome.zarr" ${gpu_flag}
+    linum_detect_focal_curvature.py ${mosaic_grid} "mosaic_grid_z${slice_id}_focal_fix.ome.zarr" \\
+        --n_levels 0 ${gpu_flag}
     """
 
     stub:
@@ -170,7 +171,7 @@ process fix_illumination {
     """
     linum_fix_illumination_3d.py ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" \
         --n_processes ${params.processes} \
-        --percentile_max ${params.clip_percentile_upper} ${gpu_flag}
+        --percentile_max ${params.clip_percentile_upper} ${gpu_flag} --n_levels 0
     """
 
     stub:
@@ -244,6 +245,7 @@ process stitch_3d_with_refinement {
         --refinement_mode blend_shift \
         --max_refinement_px ${params.max_blend_refinement_px} \
         ${transform_arg} \
+        --n_levels 0 \
         -f
     """
 
@@ -291,7 +293,7 @@ process beam_profile_correction {
     script:
     """
     linum_compensate_psf_model_free.py ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" \
-        --percentile_max ${params.clip_percentile_upper}
+        --percentile_max ${params.clip_percentile_upper} --n_levels 0
     """
 
     stub:
@@ -315,7 +317,7 @@ process crop_interface {
     linum_crop_3d_mosaic_below_interface.py ${image} "slice_z${slice_id}_crop_interface.ome.zarr" \
         --depth ${params.crop_interface_out_depth} \
         --crop_before_interface \
-        --percentile_max ${params.clip_percentile_upper}
+        --percentile_max ${params.clip_percentile_upper} --n_levels 0
     """
 
     stub:
@@ -338,7 +340,7 @@ process normalize {
     def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
     """
     linum_normalize_intensities_per_slice.py ${image} "slice_z${slice_id}_normalize.ome.zarr" \
-        --percentile_max ${params.clip_percentile_upper} ${gpu_flag}
+        --percentile_max ${params.clip_percentile_upper} ${gpu_flag} --n_levels 0
     """
 
     stub:
