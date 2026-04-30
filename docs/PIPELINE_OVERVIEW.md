@@ -47,8 +47,6 @@ flowchart TD
     P3 --> INTER
     INTER --> R00
     INTER --> R01
-    R14 --> OUT
-    R14b --> OUT
     R16 --> OUT
 
     classDef opt fill:#f5f5f5,stroke:#999,stroke-dasharray:3 3,color:#555
@@ -273,7 +271,7 @@ interpolate_missing_slice
 - Fills single-slice gaps using the two neighbouring slices
 - Enabled by `interpolate_missing_slices = true` (default)
 - Default method is **zmorph** (z-aware morphing via fractional affine
-  transforms on the boundary planes) — see [SLICE_INTERPOLATION_FEATURE.md](SLICE_INTERPOLATION_FEATURE.md)
+  transforms on the boundary planes) — see {doc}`SLICE_INTERPOLATION_FEATURE`
 - When zmorph's quality gates fail the slot stays a genuine gap (no zarr
   emitted) — nothing is fabricated
 - `finalise_interpolation` merges per-slice manifest fragments into
@@ -664,7 +662,7 @@ nextflow run preproc_rawtiles.nf --input /path/to/data --output /path/to/output 
 
 - NVIDIA GPU with CUDA support
 - CuPy installed (`uv pip install cupy-cuda12x`)
-- See [GPU_ACCELERATION.md](GPU_ACCELERATION.md) for detailed setup
+- See {doc}`GPU_ACCELERATION` for detailed setup
 
 ---
 

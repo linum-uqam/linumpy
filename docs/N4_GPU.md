@@ -134,7 +134,7 @@ server.
 ## 5. Performance
 
 Benchmarks measured on a single NVIDIA GPU (47 GB) using the
-`linum_benchmark_n4_gpu` script (see [Scripts reference](SCRIPTS_REFERENCE.md)).
+`linum_benchmark_n4_gpu` script (see {doc}`SCRIPTS_REFERENCE`).
 The CPU path is `SimpleITK.N4BiasFieldCorrectionImageFilter` with the same
 control-point spacing and iteration schedule as the GPU path. Both paths
 include the `shrink_factor` downsample. The GPU column already excludes a
@@ -218,7 +218,7 @@ directory.
 
 The Nextflow `reconst_3d` workflow exposes a single global GPU switch
 (`params.use_gpu`, defined in the reconst_3d Nextflow config; see
-[Nextflow workflows](NEXTFLOW_WORKFLOWS.md)).
+{doc}`Nextflow workflows <NEXTFLOW_WORKFLOWS>`).
 When set, the `correct_bias_field` process runs the GPU N4 backend with
 `maxForks = 1` to avoid GPU contention; otherwise it uses the SimpleITK
 CPU path with `params.processes` threads. No per-process flag is needed:

@@ -132,7 +132,7 @@ After `finalise_interpolation`, any slice that reached `linum_interpolate_missin
   - `interpolation_method_used` empty
   - `interpolation_fallback_reason` = one of `low_overlap_ncc`, `no_foreground_planes`, `registration_exception`, `reg_did_not_improve`, `affine_determinant_non_positive`
 
-The pipeline never fabricates a slice from a weighted blend when registration fails; blending two neighbours that could not be registered introduces ghost contours and would also be made-up data. See [`SLICE_INTERPOLATION_FEATURE.md`](SLICE_INTERPOLATION_FEATURE.md) for the interpolation algorithm details and rationale.
+The pipeline never fabricates a slice from a weighted blend when registration fails; blending two neighbours that could not be registered introduces ghost contours and would also be made-up data. See {doc}`SLICE_INTERPOLATION_FEATURE` for the interpolation algorithm details and rationale.
 
 ---
 

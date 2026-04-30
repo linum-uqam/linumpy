@@ -25,7 +25,7 @@ survives to the final quality report.
   therefore fabricated slice.
 - Per-slice JSON diagnostics and per-slice manifest fragments are merged
   directly into `slice_config.csv` — the single source of truth for per-slice
-  decisions, see [`SLICE_CONFIG_FEATURE.md`](SLICE_CONFIG_FEATURE.md).
+  decisions, see {doc}`SLICE_CONFIG_FEATURE`.
   Successful interpolations stamp `interpolated=true`; failures stamp
   `interpolation_failed=true` plus the specific `fallback_reason`.
 - Downstream propagation: `linum_register_pairwise.py` automatically marks
@@ -60,7 +60,7 @@ constraints.
 ### Driving the interpolator from `slice_config.csv`
 
 The preprocessing pipeline generates an initial `slice_config.csv`
-(see [`SLICE_CONFIG_FEATURE.md`](SLICE_CONFIG_FEATURE.md)). The user
+(see {doc}`SLICE_CONFIG_FEATURE`). The user
 (or the automated quality assessment) may mark additional slices with
 `use=false`. In the reconstruction pipeline those slices are filtered out
 *before* common-space alignment, which leaves a gap in the numeric slice ID
