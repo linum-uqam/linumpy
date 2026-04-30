@@ -269,7 +269,7 @@ gaps are not interpolated (insufficient information) and remain as holes.
 
 When zmorph's quality gates fail the slot is left as a genuine gap (no zarr
 output); a manifest fragment and diagnostics JSON are still emitted. See
-[SLICE_INTERPOLATION_FEATURE.md](SLICE_INTERPOLATION_FEATURE.md) for details.
+{doc}`SLICE_INTERPOLATION_FEATURE` for details.
 
 #### Automatic Slice Quality Assessment
 
@@ -638,7 +638,7 @@ params {
 For GPU support:
 - NVIDIA GPU with CUDA support
 - CuPy installed: `uv pip install cupy-cuda12x`
-- See [GPU_ACCELERATION.md](GPU_ACCELERATION.md) for detailed setup
+- See {doc}`GPU_ACCELERATION` for detailed setup
 
 ### Expected Speedups
 
@@ -1124,7 +1124,7 @@ without exhaustion.
 zmorph's quality gates reject the interpolation it emits a manifest fragment
 with `interpolation_failed=true` and no zarr; `finalise_interpolation`
 stamps that into `slice_config_final.csv` and the slot stays a genuine gap
-in the stacked volume. See [`SLICE_INTERPOLATION_FEATURE.md`](SLICE_INTERPOLATION_FEATURE.md)
+in the stacked volume. See {doc}`SLICE_INTERPOLATION_FEATURE`
 for the full policy.
 
 ### `finalise_interpolation` is published-only

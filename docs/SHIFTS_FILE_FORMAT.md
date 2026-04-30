@@ -126,7 +126,7 @@ If some slices are excluded from reconstruction, the pairwise shifts must be acc
 
 ### Solution
 
-See [SLICE_CONFIG_FEATURE.md](SLICE_CONFIG_FEATURE.md) for the slice configuration system that handles this.
+See {doc}`SLICE_CONFIG_FEATURE` for the slice configuration system that handles this.
 
 ### Example
 

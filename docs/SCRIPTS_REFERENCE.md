@@ -593,7 +593,7 @@ genuine gap (no zarr output) and the failure is stamped into
 `slice_config_final.csv`. `average` and `weighted` are available as explicit
 baselines.
 
-See [SLICE_INTERPOLATION_FEATURE.md](SLICE_INTERPOLATION_FEATURE.md) for the
+See {doc}`SLICE_INTERPOLATION_FEATURE` for the
 physical model and parameter-tuning guidance.
 
 ```bash
