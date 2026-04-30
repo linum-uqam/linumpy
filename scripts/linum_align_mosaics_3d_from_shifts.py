@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Using xy shifts file, bring all mosaics in `in_mosaics_dir` to a common space. Each
 volume is resampled to a common shape and its content is translated following the
@@ -8,6 +7,7 @@ transforms in xy shifts. All transformed mosaics are saved to `out_directory`.
 Optionally accepts a slice configuration file to filter which slices to process.
 When slices are skipped, their shifts are accumulated to maintain proper alignment.
 """
+
 # Configure thread limits before numpy/scipy imports
 import linumpy._thread_config  # noqa: F401
 
@@ -23,44 +23,52 @@ import numpy as np
 import pandas as pd
 
 from linumpy.io.zarr import read_omezarr, save_omezarr
-from linumpy.utils.io import add_overwrite_arg, assert_output_exists
 from linumpy.shifts.utils import build_cumulative_shifts
+from linumpy.utils.io import add_overwrite_arg, assert_output_exists
 from linumpy.utils_images import apply_xy_shift
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument('in_mosaics_dir',
-                   help='Directory containing mosaics to bring to common space.')
-    p.add_argument('in_shifts',
-                   help='Spreadsheet containing xy shifts (.csv).')
-    p.add_argument('out_directory',
-                   help='Output directory containing the aligned mosaics.')
-    p.add_argument('--slice_config', default=None,
-                   help='Optional slice configuration file (.csv) to filter slices.\n'
-                        'Expected columns: slice_id, use (true/false), notes (optional)')
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("in_mosaics_dir", help="Directory containing mosaics to bring to common space.")
+    p.add_argument("in_shifts", help="Spreadsheet containing xy shifts (.csv).")
+    p.add_argument("out_directory", help="Output directory containing the aligned mosaics.")
+    p.add_argument(
+        "--slice_config",
+        default=None,
+        help="Optional slice configuration file (.csv) to filter slices.\n"
+        "Expected columns: slice_id, use (true/false), notes (optional)",
+    )
 
-    p.add_argument('--excluded_slice_mode',
-                   choices=['keep', 'local_median', 'median', 'zero'],
-                   default='keep',
-                   help='How to handle shifts that involve excluded slices:\n'
-                        '  keep: use original shifts (default)\n'
-                        '  local_median: replace with local median of neighbors\n'
-                        '  median: replace with global median of non-excluded shifts\n'
-                        '  zero: replace with zero')
-    p.add_argument('--excluded_slice_window', type=int, default=2,
-                   help='Neighbor window for excluded-slice replacement [%(default)s]')
+    p.add_argument(
+        "--excluded_slice_mode",
+        choices=["keep", "local_median", "median", "zero"],
+        default="keep",
+        help="How to handle shifts that involve excluded slices:\n"
+        "  keep: use original shifts (default)\n"
+        "  local_median: replace with local median of neighbors\n"
+        "  median: replace with global median of non-excluded shifts\n"
+        "  zero: replace with zero",
+    )
+    p.add_argument(
+        "--excluded_slice_window", type=int, default=2, help="Neighbor window for excluded-slice replacement [%(default)s]"
+    )
 
     # Drift centering
-    p.add_argument('--no_center_drift', action='store_true',
-                   help='Do not center drift around middle slice.\n'
-                        'By default, drift is centered to prevent slices from moving out of volume.')
+    p.add_argument(
+        "--no_center_drift",
+        action="store_true",
+        help="Do not center drift around middle slice.\n"
+        "By default, drift is centered to prevent slices from moving out of volume.",
+    )
 
-    p.add_argument('--refine_unreliable', action='store_true',
-                   help='For transitions flagged as unreliable (reliable=0 in the shifts CSV),\n'
-                        'replace the metadata-derived shift with a 2-D phase cross-correlation\n'
-                        'estimate computed from the stitched mosaics.  Requires scikit-image.')
+    p.add_argument(
+        "--refine_unreliable",
+        action="store_true",
+        help="For transitions flagged as unreliable (reliable=0 in the shifts CSV),\n"
+        "replace the metadata-derived shift with a 2-D phase cross-correlation\n"
+        "estimate computed from the stitched mosaics.  Requires scikit-image.",
+    )
 
     add_overwrite_arg(p)
     return p
@@ -69,11 +77,11 @@ def _build_arg_parser():
 def load_slice_config(config_path):
     """Load slice configuration and return set of slice IDs to use."""
     slices_to_use = set()
-    with open(config_path, 'r') as f:
+    with open(config_path) as f:
         reader = csv.DictReader(f)
         for row in reader:
-            slice_id = int(row['slice_id'])
-            use = row['use'].lower().strip() in ('true', '1', 'yes')
+            slice_id = int(row["slice_id"])
+            use = row["use"].lower().strip() in ("true", "1", "yes")
             if use:
                 slices_to_use.add(slice_id)
     return slices_to_use
@@ -94,35 +102,29 @@ def _replace_with_local_median(df, idx, window, skip_mask=None):
             neighbor_idx = df.index[neighbor_pos]
             if skip_mask is not None and skip_mask.get(neighbor_idx, False):
                 continue
-            neighbor_vals_x.append(df.loc[neighbor_idx, 'x_shift_mm'])
-            neighbor_vals_y.append(df.loc[neighbor_idx, 'y_shift_mm'])
-            if 'x_shift' in df.columns:
-                neighbor_vals_px_x.append(df.loc[neighbor_idx, 'x_shift'])
-                neighbor_vals_px_y.append(df.loc[neighbor_idx, 'y_shift'])
+            neighbor_vals_x.append(df.loc[neighbor_idx, "x_shift_mm"])
+            neighbor_vals_y.append(df.loc[neighbor_idx, "y_shift_mm"])
+            if "x_shift" in df.columns:
+                neighbor_vals_px_x.append(df.loc[neighbor_idx, "x_shift"])
+                neighbor_vals_px_y.append(df.loc[neighbor_idx, "y_shift"])
 
     if not neighbor_vals_x:
         return None
 
-    result = {
-        'x_shift_mm': float(np.median(neighbor_vals_x)),
-        'y_shift_mm': float(np.median(neighbor_vals_y))
-    }
+    result = {"x_shift_mm": float(np.median(neighbor_vals_x)), "y_shift_mm": float(np.median(neighbor_vals_y))}
     if neighbor_vals_px_x:
-        result['x_shift'] = float(np.median(neighbor_vals_px_x))
-        result['y_shift'] = float(np.median(neighbor_vals_px_y))
+        result["x_shift"] = float(np.median(neighbor_vals_px_x))
+        result["y_shift"] = float(np.median(neighbor_vals_px_y))
     return result
 
 
-def handle_excluded_slice_shifts(shifts_df, excluded_slice_ids, mode='keep', window=2):
-    if not excluded_slice_ids or mode == 'keep':
+def handle_excluded_slice_shifts(shifts_df, excluded_slice_ids, mode="keep", window=2):
+    if not excluded_slice_ids or mode == "keep":
         return shifts_df
 
     df = shifts_df.copy()
-    excluded_set = set(int(s) for s in excluded_slice_ids)
-    mask = (
-        df['fixed_id'].astype(int).isin(excluded_set) |
-        df['moving_id'].astype(int).isin(excluded_set)
-    )
+    excluded_set = {int(s) for s in excluded_slice_ids}
+    mask = df["fixed_id"].astype(int).isin(excluded_set) | df["moving_id"].astype(int).isin(excluded_set)
     n_pairs = int(mask.sum())
     if n_pairs == 0:
         print("No shifts involve excluded slices")
@@ -130,46 +132,46 @@ def handle_excluded_slice_shifts(shifts_df, excluded_slice_ids, mode='keep', win
 
     print(f"Handling {n_pairs} shifts involving excluded slices (mode: {mode})")
 
-    if mode == 'zero':
-        df.loc[mask, ['x_shift_mm', 'y_shift_mm']] = 0.0
-        if 'x_shift' in df.columns:
-            df.loc[mask, ['x_shift', 'y_shift']] = 0.0
+    if mode == "zero":
+        df.loc[mask, ["x_shift_mm", "y_shift_mm"]] = 0.0
+        if "x_shift" in df.columns:
+            df.loc[mask, ["x_shift", "y_shift"]] = 0.0
         return df
 
     non_masked = df[~mask]
     if non_masked.empty:
         print("Warning: all shifts involve excluded slices; falling back to zeros")
-        df.loc[mask, ['x_shift_mm', 'y_shift_mm']] = 0.0
-        if 'x_shift' in df.columns:
-            df.loc[mask, ['x_shift', 'y_shift']] = 0.0
+        df.loc[mask, ["x_shift_mm", "y_shift_mm"]] = 0.0
+        if "x_shift" in df.columns:
+            df.loc[mask, ["x_shift", "y_shift"]] = 0.0
         return df
 
-    if mode == 'median':
-        med_x = float(non_masked['x_shift_mm'].median())
-        med_y = float(non_masked['y_shift_mm'].median())
-        df.loc[mask, 'x_shift_mm'] = med_x
-        df.loc[mask, 'y_shift_mm'] = med_y
-        if 'x_shift' in df.columns:
-            df.loc[mask, 'x_shift'] = float(non_masked['x_shift'].median())
-            df.loc[mask, 'y_shift'] = float(non_masked['y_shift'].median())
+    if mode == "median":
+        med_x = float(non_masked["x_shift_mm"].median())
+        med_y = float(non_masked["y_shift_mm"].median())
+        df.loc[mask, "x_shift_mm"] = med_x
+        df.loc[mask, "y_shift_mm"] = med_y
+        if "x_shift" in df.columns:
+            df.loc[mask, "x_shift"] = float(non_masked["x_shift"].median())
+            df.loc[mask, "y_shift"] = float(non_masked["y_shift"].median())
         return df
 
     # local_median
-    skip_mask = {idx: True for idx in df[mask].index}
+    skip_mask = dict.fromkeys(df[mask].index, True)
     for idx in df[mask].index:
         replacement = _replace_with_local_median(df, idx, window, skip_mask=skip_mask)
         if replacement is None:
-            df.loc[idx, 'x_shift_mm'] = float(non_masked['x_shift_mm'].median())
-            df.loc[idx, 'y_shift_mm'] = float(non_masked['y_shift_mm'].median())
-            if 'x_shift' in df.columns:
-                df.loc[idx, 'x_shift'] = float(non_masked['x_shift'].median())
-                df.loc[idx, 'y_shift'] = float(non_masked['y_shift'].median())
+            df.loc[idx, "x_shift_mm"] = float(non_masked["x_shift_mm"].median())
+            df.loc[idx, "y_shift_mm"] = float(non_masked["y_shift_mm"].median())
+            if "x_shift" in df.columns:
+                df.loc[idx, "x_shift"] = float(non_masked["x_shift"].median())
+                df.loc[idx, "y_shift"] = float(non_masked["y_shift"].median())
             continue
-        df.loc[idx, 'x_shift_mm'] = replacement['x_shift_mm']
-        df.loc[idx, 'y_shift_mm'] = replacement['y_shift_mm']
-        if 'x_shift' in replacement:
-            df.loc[idx, 'x_shift'] = replacement['x_shift']
-            df.loc[idx, 'y_shift'] = replacement['y_shift']
+        df.loc[idx, "x_shift_mm"] = replacement["x_shift_mm"]
+        df.loc[idx, "y_shift_mm"] = replacement["y_shift_mm"]
+        if "x_shift" in replacement:
+            df.loc[idx, "x_shift"] = replacement["x_shift"]
+            df.loc[idx, "y_shift"] = replacement["y_shift"]
 
     return df
 
@@ -177,7 +179,7 @@ def handle_excluded_slice_shifts(shifts_df, excluded_slice_ids, mode='keep', win
 def compute_common_shape(mosaic_files, slice_ids, cumsum_shifts):
     """
     Compute the common shape needed to fit all aligned mosaics.
-    
+
     Parameters
     ----------
     mosaic_files : dict
@@ -288,7 +290,7 @@ def _estimate_shift_by_registration(fixed_path, moving_path):
     return dx_mm, dy_mm, dx_px, dy_px
 
 
-def main():
+def main() -> None:
     parser = _build_arg_parser()
     args = parser.parse_args()
 
@@ -299,7 +301,7 @@ def main():
 
     # Get all .ome.zarr files in in_mosaics_dir and build mapping
     in_mosaics_dir = Path(args.in_mosaics_dir)
-    mosaics_list = sorted([p for p in in_mosaics_dir.glob('*.ome.zarr')])
+    mosaics_list = sorted(in_mosaics_dir.glob("*.ome.zarr"))
 
     # Extract slice IDs from filenames and build slice_id -> file mapping
     pattern = r".*z(\d+).*"
@@ -342,21 +344,18 @@ def main():
 
     if excluded:
         shifts_df = handle_excluded_slice_shifts(
-            shifts_df,
-            excluded_slice_ids=excluded,
-            mode=args.excluded_slice_mode,
-            window=args.excluded_slice_window
+            shifts_df, excluded_slice_ids=excluded, mode=args.excluded_slice_mode, window=args.excluded_slice_window
         )
 
     # Refine unreliable transitions with image-based registration if requested
-    if args.refine_unreliable and 'reliable' in shifts_df.columns:
-        unreliable_mask = shifts_df['reliable'].astype(int) == 0
+    if args.refine_unreliable and "reliable" in shifts_df.columns:
+        unreliable_mask = shifts_df["reliable"].astype(int) == 0
         n_unreliable = int(unreliable_mask.sum())
         if n_unreliable > 0:
             print(f"Refining {n_unreliable} unreliable transitions via image registration...")
             for idx in shifts_df[unreliable_mask].index:
-                fixed_id = int(shifts_df.loc[idx, 'fixed_id'])
-                moving_id = int(shifts_df.loc[idx, 'moving_id'])
+                fixed_id = int(shifts_df.loc[idx, "fixed_id"])
+                moving_id = int(shifts_df.loc[idx, "moving_id"])
                 if fixed_id not in mosaic_files or moving_id not in mosaic_files:
                     print(f"  Skipping z{fixed_id:02d}→z{moving_id:02d}: mosaic file(s) not found")
                     continue
@@ -364,33 +363,38 @@ def main():
                     dx_mm, dy_mm, dx_px, dy_px = _estimate_shift_by_registration(
                         mosaic_files[fixed_id], mosaic_files[moving_id]
                     )
-                    print(f"  z{fixed_id:02d}→z{moving_id:02d}: metadata=({shifts_df.loc[idx, 'x_shift_mm']:.3f}, "
-                          f"{shifts_df.loc[idx, 'y_shift_mm']:.3f}) mm → "
-                          f"registered=({dx_mm:.3f}, {dy_mm:.3f}) mm")
-                    shifts_df.loc[idx, 'x_shift_mm'] = dx_mm
-                    shifts_df.loc[idx, 'y_shift_mm'] = dy_mm
-                    if 'x_shift' in shifts_df.columns:
-                        shifts_df.loc[idx, 'x_shift'] = dx_px
-                        shifts_df.loc[idx, 'y_shift'] = dy_px
+                    print(
+                        f"  z{fixed_id:02d}→z{moving_id:02d}: metadata=({shifts_df.loc[idx, 'x_shift_mm']:.3f}, "
+                        f"{shifts_df.loc[idx, 'y_shift_mm']:.3f}) mm → "
+                        f"registered=({dx_mm:.3f}, {dy_mm:.3f}) mm"
+                    )
+                    shifts_df.loc[idx, "x_shift_mm"] = dx_mm
+                    shifts_df.loc[idx, "y_shift_mm"] = dy_mm
+                    if "x_shift" in shifts_df.columns:
+                        shifts_df.loc[idx, "x_shift"] = dx_px
+                        shifts_df.loc[idx, "y_shift"] = dy_px
                 except Exception as exc:
-                    print(f"  Warning: registration failed for z{fixed_id:02d}→z{moving_id:02d} ({exc}); "
-                          f"keeping metadata shift")
+                    print(
+                        f"  Warning: registration failed for z{fixed_id:02d}→z{moving_id:02d} ({exc}); keeping metadata shift"
+                    )
         else:
             print("No unreliable transitions found in shifts file; --refine_unreliable has no effect")
     elif args.refine_unreliable:
-        print("Warning: --refine_unreliable requested but shifts CSV has no 'reliable' column; "
-              "re-run linum_estimate_xy_shift_from_metadata.py to generate it")
+        print(
+            "Warning: --refine_unreliable requested but shifts CSV has no 'reliable' column; "
+            "re-run linum_estimate_xy_shift_from_metadata.py to generate it"
+        )
 
     # Report original cumulative drift
-    orig_cumsum_x = shifts_df['x_shift_mm'].cumsum()
-    orig_cumsum_y = shifts_df['y_shift_mm'].cumsum()
+    orig_cumsum_x = shifts_df["x_shift_mm"].cumsum()
+    orig_cumsum_y = shifts_df["y_shift_mm"].cumsum()
     print(f"Original total drift (all slices): ({orig_cumsum_x.iloc[-1]:.3f}, {orig_cumsum_y.iloc[-1]:.3f}) mm")
 
     # Validate that shifts file contains required slices
     shifts_slice_ids = set()
     for _, row in shifts_df.iterrows():
-        shifts_slice_ids.add(int(row['fixed_id']))
-        shifts_slice_ids.add(int(row['moving_id']))
+        shifts_slice_ids.add(int(row["fixed_id"]))
+        shifts_slice_ids.add(int(row["moving_id"]))
 
     missing_in_shifts = set(selected_slice_ids) - shifts_slice_ids
     if missing_in_shifts:
@@ -441,9 +445,11 @@ def main():
         outfile = pjoin(args.out_directory, filename)
         save_omezarr(da.from_array(aligned), outfile, res, chunks=img.chunks)
 
-        print(f"  Processed slice {slice_id:02d}: cumulative_shift=({dx:.1f}, {dy:.1f}) px, "
-              f"applied_shift=({dx_shifted:.1f}, {dy_shifted:.1f}) px")
+        print(
+            f"  Processed slice {slice_id:02d}: cumulative_shift=({dx:.1f}, {dy:.1f}) px, "
+            f"applied_shift=({dx_shifted:.1f}, {dy_shifted:.1f}) px"
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

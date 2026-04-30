@@ -1,19 +1,18 @@
-# -*- coding: utf-8 -*-
-from typing import Tuple
-
-import SimpleITK as sitk
 import numpy as np
+import SimpleITK as sitk
 from matplotlib import pyplot as plt
 
 
 def normalize(img: np.ndarray, saturation: float = 99.7) -> np.ndarray:
     """Normalize an image between 0 and 1.
-    Parameters
+
+    Parameters.
     ----------
     img : np.ndarray
         The image to normalize.
     saturation : float, optional
         The saturation value for the normalization
+
     Returns
     -------
     np.ndarray
@@ -28,12 +27,14 @@ def normalize(img: np.ndarray, saturation: float = 99.7) -> np.ndarray:
 
 def get_overlay_as_rgb(img1: np.ndarray, img2: np.ndarray) -> np.ndarray:
     """Combine the two images into a single RGB image.
-    Parameters
+
+    Parameters.
     ----------
     img1 : np.ndarray
         The first image.
     img2 : np.ndarray
         The second image.
+
     Returns
     -------
     np.ndarray
@@ -46,14 +47,16 @@ def get_overlay_as_rgb(img1: np.ndarray, img2: np.ndarray) -> np.ndarray:
     return rgb
 
 
-def match_shape(img1: np.ndarray, img2: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def match_shape(img1: np.ndarray, img2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Match the shape of two images by padding the smallest one.
-    Parameters
+
+    Parameters.
     ----------
     img1 : np.ndarray
         The first image.
     img2 : np.ndarray
         The second image.
+
     Returns
     -------
     Tuple[np.ndarray, np.ndarray]
@@ -75,7 +78,7 @@ def match_shape(img1: np.ndarray, img2: np.ndarray) -> Tuple[np.ndarray, np.ndar
     return padded_images
 
 
-def display_overlap(img1, img2, title=None, do_normalization=False):
+def display_overlap(img1, img2, title=None, do_normalization=False) -> None:
     if do_normalization:
         img1 = normalize(img1)
         img2 = normalize(img2)
@@ -106,7 +109,7 @@ def apply_xy_shift(img: np.ndarray, reference: np.ndarray, dx: int, dy: int) -> 
     fixed = sitk.GetImageFromArray(reference)
     moving = sitk.GetImageFromArray(img)
 
-    translation = [0.] * fixed.GetDimension()
+    translation = [0.0] * fixed.GetDimension()
     # Set the translation
     translation[0] = dx
     translation[1] = dy

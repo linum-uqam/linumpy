@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
-"""Convert 3D OCT tiles to a 2D mosaic grid
+"""Convert 3D OCT tiles to a 2D mosaic grid.
 
 Notes
 -----
@@ -25,30 +24,34 @@ from linumpy.microscope.oct import OCT
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("tiles_directory",
-                   help="Full path to a directory containing the tiles to process")
-    p.add_argument("output_file",
-                   help="Full path to the output file (jpg, tiff, or zarr)")
-    p.add_argument("-r", "--resolution", type=float, default=-1,
-                   help="Output isotropic resolution in micron per pixel. (Use -1 to keep the original resolution). (default=%(default)s)")
-    p.add_argument("-z", "--slice", type=int, default=0,
-                   help="Slice to process (default=%(default)s)")
-    p.add_argument("--n_cpus", type=int, default=-1,
-                   help="Number of CPUs to use for parallel processing (default=%(default)s). If -1, all CPUs - 1 are used.")
-    p.add_argument("--normalize", action="store_true",
-                   help="Normalize the mosaic (default=%(default)s)")
-    p.add_argument("--saturation", type=float, default=99.9,
-                   help="Saturation value for the normalization (default=%(default)s)")
-    p.add_argument("-c", "--config", type=str, default=None,
-                   help="JSON mosaic configuration file (default=%(default)s)")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("tiles_directory", help="Full path to a directory containing the tiles to process")
+    p.add_argument("output_file", help="Full path to the output file (jpg, tiff, or zarr)")
+    p.add_argument(
+        "-r",
+        "--resolution",
+        type=float,
+        default=-1,
+        help="Output isotropic resolution in micron per pixel. (Use -1 to keep the original resolution). (default=%(default)s)",
+    )
+    p.add_argument("-z", "--slice", type=int, default=0, help="Slice to process (default=%(default)s)")
+    p.add_argument(
+        "--n_cpus",
+        type=int,
+        default=-1,
+        help="Number of CPUs to use for parallel processing (default=%(default)s). If -1, all CPUs - 1 are used.",
+    )
+    p.add_argument("--normalize", action="store_true", help="Normalize the mosaic (default=%(default)s)")
+    p.add_argument(
+        "--saturation", type=float, default=99.9, help="Saturation value for the normalization (default=%(default)s)"
+    )
+    p.add_argument("-c", "--config", type=str, default=None, help="JSON mosaic configuration file (default=%(default)s)")
 
     return p
 
 
-def get_volume(filename: str, config: dict = None) -> np.ndarray:
-    """Load and preprocess an OCT volume
+def get_volume(filename: str, config: dict | None = None) -> np.ndarray:
+    """Load and preprocess an OCT volume.
 
     Parameters
     ----------
@@ -63,15 +66,13 @@ def get_volume(filename: str, config: dict = None) -> np.ndarray:
             flip_alines : bool
             flip_bscans : bool
     """
-
     # Get the loading options
     if config is None:
         config = {}
     crop = config.get("crop", True)
     fix_shift = config.get("fix_shift", True)
     if fix_shift:
-        fix_shift = config.get("shift",
-                               True)  # Either a precomputed shift, or a True value to compute it during loading.
+        fix_shift = config.get("shift", True)  # Either a precomputed shift, or a True value to compute it during loading.
 
     # Load the volume
     vol = OCT(filename).load_image(crop=crop, fix_galvo_shift=fix_shift)
@@ -93,8 +94,8 @@ def get_volume(filename: str, config: dict = None) -> np.ndarray:
     return img
 
 
-def process_tile(params: dict):
-    """Process a tile and add it to the mosaic"""
+def process_tile(params: dict) -> None:
+    """Process a tile and add it to the mosaic."""
     f = params["file"]
     rmin, rmax, cmin, cmax = params["tile_pos_px"]
     tile_size = params["tile_size"]
@@ -112,25 +113,19 @@ def process_tile(params: dict):
     mosaic[rmin:rmax, cmin:cmax] = img
 
 
-def main():
+def main() -> None:
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
 
     # Load the JSON config file
-    if args.config is not None:
-        mosaic_config = json.load(open(args.config))
-    else:
-        mosaic_config = {}
+    mosaic_config = json.load(open(args.config)) if args.config is not None else {}
 
     # Parameters
     tiles_directory = Path(args.tiles_directory)
     output_file = Path(args.output_file)
     assert output_file.suffix in [".jpg", ".tiff", ".zarr"], "The output file must be .jpg, .tiff, or .zarr file."
-    if output_file.suffix == ".zarr":
-        zarr_file = output_file
-    else:
-        zarr_file = output_file.with_suffix(".zarr")
+    zarr_file = output_file if output_file.suffix == ".zarr" else output_file.with_suffix(".zarr")
     z = args.slice
     output_resolution = args.resolution
     n_cpus = args.n_cpus
@@ -168,7 +163,7 @@ def main():
     tile_size = (tile_size[0], tile_size[1])
     tile_pos_px = []
     for i in range(len(tiles_pos)):
-        mx, my, mz = tiles_pos[i]
+        mx, my, _mz = tiles_pos[i]
         rmin = (mx - mx_min) * tile_size[0]
         rmax = rmin + tile_size[0]
         cmin = (my - my_min) * tile_size[1]
@@ -176,19 +171,20 @@ def main():
         tile_pos_px.append((rmin, rmax, cmin, cmax))
 
     # Create the zarr persistent array
-    mosaic = zarr.open(zarr_file, mode="w", shape=mosaic_shape,
-                       dtype=np.float32, chunks=tile_size)
+    mosaic = zarr.open(zarr_file, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=tile_size)
 
     # Create a params dictionary for every tile
     params = []
     for i in range(len(tiles)):
-        params.append({
-            "file": tiles[i],
-            "tile_pos_px": tile_pos_px[i],
-            "tile_size": tile_size,
-            "mosaic": mosaic,
-            "config": mosaic_config,
-        })
+        params.append(
+            {
+                "file": tiles[i],
+                "tile_pos_px": tile_pos_px[i],
+                "tile_size": tile_size,
+                "mosaic": mosaic,
+                "config": mosaic_config,
+            }
+        )
 
     # Process the tiles in parallel
     pqdm(params, process_tile, n_jobs=n_cpus, desc="Processing tiles")
@@ -217,6 +213,7 @@ def main():
         img = mosaic[:]
         io.imsave(output_file, img)
         shutil.rmtree(zarr_file)
+
 
 if __name__ == "__main__":
     main()

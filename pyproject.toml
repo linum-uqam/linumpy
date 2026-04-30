@@ -1,3 +1,242 @@
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "linumpy"
+version = "0.1.1"
+description = "linumpy: microscopy tools and utilities"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.12"
+authors = [
+    { name = "The LINUM developers" },
+]
+maintainers = [
+    { name = "Joël Lefebvre", email = "lefebvre.joel@uqam.ca" },
+]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "numpy",
+    "scipy",
+    "scikit-image",
+    "scikit-learn",
+    "matplotlib",
+    "pandas",
+    "nibabel",
+    "dipy",
+    "dask>=2024.10.0",
+    "SimpleITK",
+    "tqdm",
+    "pqdm",
+    "hyperactive",
+    "basicpy",
+    "zarr>=3.0.10",
+    "ome-zarr>=0.9.0",
+    "napari",
+    "napari-ome-zarr",
+    "pynrrd",
+    "numcodecs",
+    "threadpoolctl",
+    "pandas-stubs~=2.3.3",
+]
+
+[project.urls]
+Homepage = "https://github.com/linum-uqam/linumpy"
+Repository = "https://github.com/linum-uqam/linumpy"
+
+[project.optional-dependencies]
+gpu = [
+    "cupy-cuda12x>=12.0.0",
+]
+gpu-cuda13 = [
+    "cupy-cuda13x>=13.0.0",
+]
+docs = [
+    "sphinx>=6.0.0",
+    "sphinx-rtd-theme>=1.0.0",
+]
+
+[project.scripts]
+"linum_aip.py" = "scripts.linum_aip:main"
+"linum_align_mosaics_3d_from_shifts.py" = "scripts.linum_align_mosaics_3d_from_shifts:main"
+"linum_apply_slices_transforms.py" = "scripts.linum_apply_slices_transforms:main"
+"linum_axis_xyz_to_zyx.py" = "scripts.linum_axis_xyz_to_zyx:main"
+"linum_clip_percentile.py" = "scripts.linum_clip_percentile:main"
+"linum_compensate_attenuation.py" = "scripts.linum_compensate_attenuation:main"
+"linum_compensate_illumination.py" = "scripts.linum_compensate_illumination:main"
+"linum_compensate_psf_from_model.py" = "scripts.linum_compensate_psf_from_model:main"
+"linum_compensate_psf_model_free.py" = "scripts.linum_compensate_psf_model_free:main"
+"linum_compute_attenuation_bias_field.py" = "scripts.linum_compute_attenuation_bias_field:main"
+"linum_compute_attenuation.py" = "scripts.linum_compute_attenuation:main"
+"linum_convert_bin_to_nii.py" = "scripts.linum_convert_bin_to_nii:main"
+"linum_convert_nifti_to_nrrd.py" = "scripts.linum_convert_nifti_to_nrrd:main"
+"linum_convert_nifti_to_zarr.py" = "scripts.linum_convert_nifti_to_zarr:main"
+"linum_convert_omezarr_to_nifti.py" = "scripts.linum_convert_omezarr_to_nifti:main"
+"linum_convert_tiff_to_nifti.py" = "scripts.linum_convert_tiff_to_nifti:main"
+"linum_convert_tiff_to_omezarr.py" = "scripts.linum_convert_tiff_to_omezarr:main"
+"linum_convert_zarr_to_omezarr.py" = "scripts.linum_convert_zarr_to_omezarr:main"
+"linum_create_all_mosaic_grids_2d.py" = "scripts.linum_create_all_mosaic_grids_2d:main"
+"linum_create_mosaic_grid_2d.py" = "scripts.linum_create_mosaic_grid_2d:main"
+"linum_create_mosaic_grid_3d.py" = "scripts.linum_create_mosaic_grid_3d:main"
+"linum_crop_3d_mosaic_below_interface.py" = "scripts.linum_crop_3d_mosaic_below_interface:main"
+"linum_crop_tiles.py" = "scripts.linum_crop_tiles:main"
+"linum_detect_focal_curvature.py" = "scripts.linum_detect_focal_curvature:main"
+"linum_detect_rehoming.py" = "scripts.linum_detect_rehoming:main"
+"linum_download_allen.py" = "scripts.linum_download_allen:main"
+"linum_estimate_illumination.py" = "scripts.linum_estimate_illumination:main"
+"linum_estimate_slices_transforms_gui.py" = "scripts.linum_estimate_slices_transforms_gui:main"
+"linum_estimate_transform.py" = "scripts.linum_estimate_transform:main"
+"linum_estimate_xy_shift_from_metadata.py" = "scripts.linum_estimate_xy_shift_from_metadata:main"
+"linum_fix_illumination_3d.py" = "scripts.linum_fix_illumination_3d:main"
+"linum_intensity_normalization.py" = "scripts.linum_intensity_normalization:main"
+"linum_merge_slices_into_folders.py" = "scripts.linum_merge_slices_into_folders:main"
+"linum_normalize_intensities_per_slice.py" = "scripts.linum_normalize_intensities_per_slice:main"
+"linum_register_pairwise.py" = "scripts.linum_register_pairwise:main"
+"linum_reorient_nifti_to_ras.py" = "scripts.linum_reorient_nifti_to_ras:main"
+"linum_resample.py" = "scripts.linum_resample:main"
+"linum_resample_mosaic_grid.py" = "scripts.linum_resample_mosaic_grid:main"
+"linum_screenshot_omezarr.py" = "scripts.linum_screenshot_omezarr:main"
+"linum_segment_brain_3d.py" = "scripts.linum_segment_brain_3d:main"
+"linum_stack_slices.py" = "scripts.linum_stack_slices:main"
+"linum_stack_slices_3d.py" = "scripts.linum_stack_slices_3d:main"
+"linum_stitch_2d.py" = "scripts.linum_stitch_2d:main"
+"linum_stitch_3d.py" = "scripts.linum_stitch_3d:main"
+"linum_view_oct_raw_tile.py" = "scripts.linum_view_oct_raw_tile:main"
+"linum_view_omezarr.py" = "scripts.linum_view_omezarr:main"
+"linum_view_zarr.py" = "scripts.linum_view_zarr:main"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11",
+    "ty>=0.0.27",
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-console-scripts",
+    "pre-commit>=4.5.1",
+]
+
+[tool.uv]
+# basicpy 2.0.0 (latest) pins scipy<1.13, which transitively forces numpy<2.
+# Override that ceiling so we can use modern numpy/scipy. basicpy still works
+# at runtime against newer scipy in our usage.
+override-dependencies = [
+    "scipy",
+    "numpy",
+]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    # Third-party: SWIG/SimpleITK native type registration (SwigPyPacked, SwigPyObject, swigvarlink)
+    "ignore:builtin type [Ss]wig.*has no __module__ attribute:DeprecationWarning",
+    # Third-party: nrrd library uses deprecated datetime.utcnow()
+    "ignore:datetime.datetime.utcnow\\(\\) is deprecated:DeprecationWarning:nrrd",
+    # Expected with test data: OCT files have no extra a-lines for shift estimation
+    "ignore:Cannot estimate the shift correction:UserWarning",
+    # Intentional deprecation of linum_stack_slices_3d.py
+    "ignore:linum_stack_slices_3d.py is deprecated:DeprecationWarning",
+]
+
+[tool.setuptools.packages.find]
+include = ["linumpy*", "scripts*"]
+
+# --- Ruff ---
+[tool.ruff]
+target-version = "py312"
+line-length = 127
+fix = true
+include = ["linumpy*", "scripts*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "PIE"]
+# N813: SimpleITK as sitk is the universal Python convention — excluded globally.
+ignore = ["N813"]
+
+[tool.ruff.lint.per-file-ignores]
+# These scripts must import linumpy._thread_config before any other imports
+# so E402 (module-level import not at top) is unavoidable.
+"scripts/linum_fix_illumination_3d.py" = ["E402"]
+"scripts/linum_normalize_intensities_per_slice.py" = ["E402"]
+# Star imports and re-exports in __init__.py are intentional
+"linumpy/__init__.py" = ["F401"]
+"linumpy/io/__init__.py" = ["F401", "F403"]
+"linumpy/preproc/__init__.py" = ["F403"]
+"linumpy/stitching/__init__.py" = ["F403"]
+
+# Pre-existing lint warnings on files inherited from pre-build-tooling history.
+# Will be mopped up in dependent PRs as they touch these files.
+"linumpy/io/data_io.py" = ["E501", "E722"]
+"linumpy/io/thorlabs.py" = ["E501"]
+"linumpy/preproc/icorr.py" = ["E501", "E722", "E741", "UP031"]
+"linumpy/preproc/xyzcorr.py" = ["E722", "E741", "UP031"]
+"linumpy/reconstruction.py" = ["E501"]
+"linumpy/stitching/FileUtils.py" = ["E501", "E722"]
+"linumpy/stitching/mosaic_grid.py" = ["E501", "E722", "E741"]
+"linumpy/stitching/registration.py" = ["E722"]
+"linumpy/stitching/stitch_utils.py" = ["E722"]
+"linumpy/stitching/topology.py" = ["B007", "E722", "UP031"]
+"scripts/linum_compensate_illumination.py" = ["E501"]
+"scripts/linum_convert_tiff_to_omezarr.py" = ["E741"]
+"scripts/linum_create_all_mosaic_grids_2d.py" = ["E501"]
+"scripts/linum_create_mosaic_grid_2d.py" = ["E501"]
+"scripts/linum_estimate_illumination.py" = ["E501"]
+"scripts/linum_estimate_transform.py" = ["E501"]
+"scripts/linum_stack_slices.py" = ["E501"]
+"scripts/linum_view_zarr.py" = ["E501"]
+
+[tool.ruff.lint.isort]
+# linumpy._thread_config sets OMP_NUM_THREADS & friends and MUST be imported
+# before numpy/scipy/SimpleITK or the env vars have no effect.
+known-first-party = ["linumpy"]
+sections.thread-config = ["linumpy._thread_config"]
+section-order = ["future", "thread-config", "standard-library", "third-party", "first-party", "local-folder"]
+
+[tool.ruff.format]
+# Use default (black-compatible) formatting
+
+# --- ty ---
+[tool.ty.src]
+include = ["linumpy", "scripts"]
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.rules]
+# possibly-unresolved-reference defaults to "warn" in ty; raise it to "error"
+# so that variables only assigned inside conditional branches are caught.
+possibly-unresolved-reference = "error"
+
+[tool.ty.analysis]
+# Optional GPU deps — not installed in the standard dev env.
+# Using replace-imports-with-any so downstream attribute/subscript access
+# on the imported module is typed as Any rather than causing cascading errors.
+replace-imports-with-any = ["cupy.**", "cupyx.**", "numba.**"]
+
+# --- ty overrides ---
+
+# Relax rules in test files
+[[tool.ty.overrides]]
+include = ["linumpy/tests/**", "scripts/tests/**", "**/test_*.py", "**/conftest.py"]
+
+[tool.ty.overrides.rules]
+possibly-unresolved-reference = "ignore"
+unresolved-attribute = "ignore"
+invalid-assignment = "ignore"
+
+# GPU modules use conditional imports and duck-typed array backends;
+# many attribute/subscript errors are false positives even with cupy→Any.
+[[tool.ty.overrides]]
+include = ["linumpy/gpu/**"]
+
+[tool.ty.overrides.rules]
+unresolved-attribute = "ignore"
+not-subscriptable = "warn"
+invalid-assignment = "ignore"
+call-non-callable = "ignore"

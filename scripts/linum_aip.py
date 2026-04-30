@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """Compute the average intensity projection of a 3D zarr volume."""
 
@@ -8,24 +7,23 @@ import linumpy._thread_config  # noqa: F401
 
 import argparse
 from pathlib import Path
-import dask.array as da
 
+import dask.array as da
 import numpy as np
 import zarr
-from linumpy.io.zarr import save_omezarr, read_omezarr, create_tempstore
+
+from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
+
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_zarr",
-                   help="Full path to the zarr volume.")
-    p.add_argument("output_image", default=None,
-                   help="Full path to the output zarr image")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("input_zarr", help="Full path to the zarr volume.")
+    p.add_argument("output_image", default=None, help="Full path to the output zarr image")
 
     return p
 
 
-def main():
+def main() -> None:
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -39,10 +37,8 @@ def main():
 
     # Prepare the output
     shape = vol.shape[1:3]
-    zarr_store = create_tempstore(suffix='.zarr')
-    aip = zarr.open(zarr_store, mode="w", shape=shape,
-                    dtype= np.float32,
-                    chunks=vol.chunks[1:3])
+    zarr_store = create_tempstore(suffix=".zarr")
+    aip = zarr.open(zarr_store, mode="w", shape=shape, dtype=np.float32, chunks=vol.chunks[1:3])
 
     # Process every tile
     tile_shape = vol.chunks

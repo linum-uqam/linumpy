@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Simplified pairwise registration for motor-position-based reconstruction.
 
@@ -19,60 +18,60 @@ Output:
 import linumpy._thread_config  # noqa: F401
 
 import argparse
-import json
 import logging
-import os
 from pathlib import Path
 
 import numpy as np
 import SimpleITK as sitk
 
 from linumpy.io.zarr import read_omezarr
-from linumpy.stitching.registration import (find_best_z, register_refinement,
-                                             create_transform)
+from linumpy.stitching.registration import create_transform, find_best_z, register_refinement
 from linumpy.utils.io import add_overwrite_arg
 from linumpy.utils.metrics import collect_pairwise_registration_metrics
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument('in_fixed', help='Fixed volume (.ome.zarr) - bottom slice')
-    p.add_argument('in_moving', help='Moving volume (.ome.zarr) - top slice')
-    p.add_argument('out_directory', help='Output directory')
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("in_fixed", help="Fixed volume (.ome.zarr) - bottom slice")
+    p.add_argument("in_moving", help="Moving volume (.ome.zarr) - top slice")
+    p.add_argument("out_directory", help="Output directory")
 
     # Z-matching
-    z_group = p.add_argument_group('Z-matching')
-    z_group.add_argument('--slicing_interval_mm', type=float, default=0.200,
-                         help='Physical slice thickness in mm [%(default)s]')
-    z_group.add_argument('--search_range_mm', type=float, default=0.100,
-                         help='Search range around expected Z in mm [%(default)s]')
-    z_group.add_argument('--moving_z_index', type=int, default=0,
-                         help='Z-index in moving volume to align [%(default)s]')
+    z_group = p.add_argument_group("Z-matching")
+    z_group.add_argument(
+        "--slicing_interval_mm", type=float, default=0.200, help="Physical slice thickness in mm [%(default)s]"
+    )
+    z_group.add_argument(
+        "--search_range_mm", type=float, default=0.100, help="Search range around expected Z in mm [%(default)s]"
+    )
+    z_group.add_argument("--moving_z_index", type=int, default=0, help="Z-index in moving volume to align [%(default)s]")
 
     # Refinement
-    ref_group = p.add_argument_group('Refinement')
-    ref_group.add_argument('--enable_rotation', action='store_true', default=True,
-                           help='Enable rotation correction [%(default)s]')
-    ref_group.add_argument('--no_rotation', dest='enable_rotation', action='store_false')
-    ref_group.add_argument('--max_rotation_deg', type=float, default=5.0,
-                           help='Maximum rotation correction in degrees [%(default)s]')
-    ref_group.add_argument('--max_translation_px', type=float, default=20.0,
-                           help='Maximum translation refinement in pixels [%(default)s]')
+    ref_group = p.add_argument_group("Refinement")
+    ref_group.add_argument(
+        "--enable_rotation", action="store_true", default=True, help="Enable rotation correction [%(default)s]"
+    )
+    ref_group.add_argument("--no_rotation", dest="enable_rotation", action="store_false")
+    ref_group.add_argument(
+        "--max_rotation_deg", type=float, default=5.0, help="Maximum rotation correction in degrees [%(default)s]"
+    )
+    ref_group.add_argument(
+        "--max_translation_px", type=float, default=20.0, help="Maximum translation refinement in pixels [%(default)s]"
+    )
 
     # Masks
-    p.add_argument('--use_masks', action='store_true', help='Use tissue masks')
-    p.add_argument('--fixed_mask', type=str, default=None)
-    p.add_argument('--moving_mask', type=str, default=None)
-    p.add_argument('--mask_mode', choices=['multiply', 'none'], default='multiply')
+    p.add_argument("--use_masks", action="store_true", help="Use tissue masks")
+    p.add_argument("--fixed_mask", type=str, default=None)
+    p.add_argument("--moving_mask", type=str, default=None)
+    p.add_argument("--mask_mode", choices=["multiply", "none"], default="multiply")
 
     # Output
-    p.add_argument('--out_transform', default='transform.tfm')
-    p.add_argument('--out_offsets', default='offsets.txt')
-    p.add_argument('--screenshot', default=None, help='Save debug screenshot')
+    p.add_argument("--out_transform", default="transform.tfm")
+    p.add_argument("--out_offsets", default="offsets.txt")
+    p.add_argument("--screenshot", default=None, help="Save debug screenshot")
 
     add_overwrite_arg(p)
     return p
@@ -94,7 +93,7 @@ def normalize(image):
     return np.clip(norm, 0, 1)
 
 
-def main():
+def main() -> None:
     p = _build_arg_parser()
     args = p.parse_args()
 
@@ -133,8 +132,8 @@ def main():
     logger.info(f"Using Z resolution: {res_z_mm} mm ({res_z_mm * 1000:.2f} µm)")
 
     # Calculate interval in voxels: slicing_interval_mm / res_z_mm
-    interval_vox = int(round(args.slicing_interval_mm / res_z_mm))
-    search_vox = int(round(args.search_range_mm / res_z_mm))
+    interval_vox = round(args.slicing_interval_mm / res_z_mm)
+    search_vox = round(args.search_range_mm / res_z_mm)
 
     # The overlap region is at the bottom of fixed volume
     # The match should be near: fixed_vol.shape[0] - interval_vox + moving_z_index
@@ -173,12 +172,13 @@ def main():
     # Compute refinement
     logger.info(f"Computing refinement (rotation={args.enable_rotation})...")
     tx, ty, angle_deg, metric = register_refinement(
-        fixed_norm, moving_norm,
+        fixed_norm,
+        moving_norm,
         enable_rotation=args.enable_rotation,
         max_rotation_deg=args.max_rotation_deg,
         max_translation_px=args.max_translation_px,
         fixed_mask=fixed_mask,
-        moving_mask=moving_mask
+        moving_mask=moving_mask,
     )
 
     logger.info(f"Refinement: tx={tx:.2f}px, ty={ty:.2f}px, rot={angle_deg:.3f}°")
@@ -189,12 +189,11 @@ def main():
     sitk.WriteTransform(transform, str(out_dir / args.out_transform))
 
     # Save offsets
-    np.savetxt(str(out_dir / args.out_offsets),
-               np.array([best_z, args.moving_z_index]), fmt='%d')
+    np.savetxt(str(out_dir / args.out_offsets), np.array([best_z, args.moving_z_index]), fmt="%d")
 
     # Collect metrics using standard collector
     collect_pairwise_registration_metrics(
-        registration_error=float(metric) if metric != float('inf') else 0.0,
+        registration_error=float(metric) if metric != float("inf") else 0.0,
         tx=float(tx),
         ty=float(ty),
         rotation_deg=float(angle_deg),
@@ -204,14 +203,14 @@ def main():
         fixed_path=args.in_fixed,
         moving_path=args.in_moving,
         params={
-            'slicing_interval_mm': args.slicing_interval_mm,
-            'search_range_mm': args.search_range_mm,
-            'enable_rotation': args.enable_rotation,
-            'max_rotation_deg': args.max_rotation_deg,
-            'max_translation_px': args.max_translation_px,
-            'z_correlation': float(z_correlation),
-            'z_deviation': int(z_deviation)
-        }
+            "slicing_interval_mm": args.slicing_interval_mm,
+            "search_range_mm": args.search_range_mm,
+            "enable_rotation": args.enable_rotation,
+            "max_rotation_deg": args.max_rotation_deg,
+            "max_translation_px": args.max_translation_px,
+            "z_correlation": float(z_correlation),
+            "z_deviation": int(z_deviation),
+        },
     )
 
     logger.info(f"Results saved to {out_dir}")
@@ -233,32 +232,32 @@ def main():
         resampler.SetInterpolator(sitk.sitkLinear)
         registered = sitk.GetArrayFromImage(resampler.Execute(moving_sitk))
 
-        fig, axes = plt.subplots(2, 2, figsize=(12, 12))
+        _fig, axes = plt.subplots(2, 2, figsize=(12, 12))
 
-        axes[0, 0].imshow(fixed_norm, cmap='gray')
-        axes[0, 0].set_title(f'Fixed (z={best_z})')
+        axes[0, 0].imshow(fixed_norm, cmap="gray")
+        axes[0, 0].set_title(f"Fixed (z={best_z})")
 
-        axes[0, 1].imshow(moving_norm, cmap='gray')
-        axes[0, 1].set_title(f'Moving (z={args.moving_z_index})')
+        axes[0, 1].imshow(moving_norm, cmap="gray")
+        axes[0, 1].set_title(f"Moving (z={args.moving_z_index})")
 
-        axes[1, 0].imshow(registered, cmap='gray')
-        axes[1, 0].set_title(f'Registered (tx={tx:.1f}, ty={ty:.1f}, rot={angle_deg:.2f}°)')
+        axes[1, 0].imshow(registered, cmap="gray")
+        axes[1, 0].set_title(f"Registered (tx={tx:.1f}, ty={ty:.1f}, rot={angle_deg:.2f}°)")
 
         # Overlay
         overlay = np.zeros((*fixed_norm.shape, 3))
         overlay[:, :, 0] = fixed_norm  # Red
         overlay[:, :, 1] = registered  # Green
         axes[1, 1].imshow(overlay)
-        axes[1, 1].set_title('Overlay (fixed=red, registered=green)')
+        axes[1, 1].set_title("Overlay (fixed=red, registered=green)")
 
         for ax in axes.flat:
-            ax.axis('off')
+            ax.axis("off")
 
         plt.tight_layout()
-        plt.savefig(args.screenshot, dpi=150, bbox_inches='tight')
+        plt.savefig(args.screenshot, dpi=150, bbox_inches="tight")
         plt.close()
         logger.info(f"Screenshot saved to {args.screenshot}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

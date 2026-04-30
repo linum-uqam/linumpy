@@ -1,6 +1,5 @@
 #! /usr/bin/env python
-# -*- coding: utf-8 -*-
-""" This modules contains all methods related to I/O for the slicer data.
+"""This modules contains all methods related to I/O for the slicer data.
 
 .. moduleauthor:: Joël Lefebvre <joel.lefebvre@polymtl.ca>
 
@@ -13,11 +12,10 @@ import re
 import nibabel as nib
 import numpy as np
 from PIL import Image
-from pathlib import Path
 
 
 def listSlicesInDir(directory, extension=".nii", returnIndices=False):
-    slice_list = list()
+    slice_list = []
     content = os.listdir(directory)
     for elem in content:
         if elem.endswith(extension):
@@ -26,7 +24,7 @@ def listSlicesInDir(directory, extension=".nii", returnIndices=False):
     zlist = getSliceListIndices(slice_list)
 
     # Sort
-    tmp = sorted(zip(zlist, slice_list))
+    tmp = sorted(zip(zlist, slice_list, strict=False))
     slice_list = [elem[1] for elem in tmp]
     zlist = [elem[0] for elem in tmp]
     if returnIndices:
@@ -36,9 +34,9 @@ def listSlicesInDir(directory, extension=".nii", returnIndices=False):
 
 
 def getSliceListIndices(slice_list):
-    zList = list()
+    zList = []
     for this_file in slice_list:
-        filename_rx = re.compile(".*z(\d+).*")
+        filename_rx = re.compile(r".*z(\d+).*")
         tmp = filename_rx.match(this_file)
         if tmp is not None:
             zList.append(int(tmp.groups()[0]))
@@ -76,15 +74,7 @@ def load_volume(
 
     filename = os.path.join(
         directory,
-        prefix
-        + "_"
-        + "x%02.0f" % (pos[0])
-        + "_"
-        + "y%02.0f" % (pos[1])
-        + "_"
-        + "z%02.0f" % (pos[2])
-        + suffix
-        + extension,
+        prefix + "_" + f"x{pos[0]:02.0f}" + "_" + f"y{pos[1]:02.0f}" + "_" + f"z{pos[2]:02.0f}" + suffix + extension,
     )
     return load_volumeByFilename(filename, vol_shape, precision)
 
@@ -117,7 +107,9 @@ def load_slice(directory, z, prototype="slice_z%d", extension=".nii"):
         return -1
 
 
-def load_volumeByFilename(filename: str, volshape: tuple=(512, 512, 120), precision: str="float32", convert2Bool: bool=True) -> np.ndarray:
+def load_volumeByFilename(
+    filename: str, volshape: tuple = (512, 512, 120), precision: str = "float32", convert2Bool: bool = True
+) -> np.ndarray:
     """Load a volume based on its filename.
 
     Parameters
@@ -162,9 +154,7 @@ def load_volumeByFilename(filename: str, volshape: tuple=(512, 512, 120), precis
 
     elif extension in [".bin"]:
         dt = precision  # big endian 32-bit floating-point number
-        read_order = (
-            "C"  # Matlab fwrite save the data in a column order (i.e. Fortran Order)
-        )
+        read_order = "C"  # Matlab fwrite save the data in a column order (i.e. Fortran Order)
         volume = np.fromfile(filename, dtype=dt)
         volume = np.reshape(volume, volshape, order=read_order)
         volume = np.swapaxes(volume, 0, 1)  # Matlab inverts the X and Y axis
@@ -177,9 +167,7 @@ def load_volumeByFilename(filename: str, volshape: tuple=(512, 512, 120), precis
     return volume
 
 
-def save_nifti(
-    fname, volume, pixDim=(1, 1, 1), pixelFormat=None, intent=1007, expand_dim=True
-):
+def save_nifti(fname, volume, pixDim=(1, 1, 1), pixelFormat=None, intent=1007, expand_dim=True) -> None:
     """Save volume as a nifti format. The origin is assumed to be at the center of the volume.
 
     Parameters
@@ -216,9 +204,7 @@ def save_nifti(
     afft[3, 1] = -np.round(ny / 2) * pixDim[1]  # y origin
     afft[3, 2] = -np.round(nz / 2) * pixDim[2]  # z origin
 
-    if volume.dtype is np.dtype(bool):
-        volume = 255 * volume.astype(np.uint8)
-    elif len(np.unique(np.ravel(volume))) == 2:
+    if volume.dtype is np.dtype(bool) or len(np.unique(np.ravel(volume))) == 2:
         volume = 255 * volume.astype(np.uint8)
 
     # Create the nibabel img object and adjust header.
@@ -226,9 +212,7 @@ def save_nifti(
         pixelFormat = volume.dtype
 
     if volume.ndim > 3 and expand_dim:
-        img = nib.Nifti1Image(
-            np.expand_dims(volume.astype(pixelFormat), 3), afft
-        )  # A nifti image
+        img = nib.Nifti1Image(np.expand_dims(volume.astype(pixelFormat), 3), afft)  # A nifti image
     else:
         img = nib.Nifti1Image(volume.astype(pixelFormat), afft)  # A nifti image
     header = img.header
@@ -252,7 +236,7 @@ def save_nifti(
         raise
 
 
-def save_rgbNifti(vol, filename):
+def save_rgbNifti(vol, filename) -> None:
     """Save volume as a RGB nifti. The origin is assumed to be at the center of the volume.
 
     :param vol: (ndarray) Volume to save (NxMx3 for a RGB image, NxMxOx3 for a RGB volume)
@@ -285,7 +269,7 @@ def save_rgbNifti(vol, filename):
     nib.save(img, filename)
 
 
-def save_png(vol, filename):
+def save_png(vol, filename) -> None:
     """Save image as a *.png* file.
 
     :param vol: ndarray to save
@@ -294,7 +278,7 @@ def save_png(vol, filename):
     .. note:: Image intensity is normalized on a 2^8 intensity scale.
     """
     vol = np.squeeze(vol)
-    if not (vol.ndim == 2):
+    if vol.ndim != 2:
         print("Dimension of array should be 2")
         raise
 
@@ -306,10 +290,10 @@ def save_png(vol, filename):
 
 
 def load_acqinfo_from_csv(filename):
-    """Import the acquisition information from a csv file"""
+    """Import the acquisition information from a csv file."""
     with open(filename, "rb") as f:
         reader = csv.reader(f)
-        info = dict()
+        info = {}
 
         rownum = 0
         for row in reader:
@@ -319,7 +303,7 @@ def load_acqinfo_from_csv(filename):
             else:
                 colnum = 0
                 for col in row:
-                    if not len(header[colnum]) == 0:
+                    if len(header[colnum]) != 0:
                         info[header[colnum]] = _convert2num(col)
                         colnum += 1
             rownum += 1
@@ -337,7 +321,7 @@ def load_acqinfo_from_csv(filename):
 
 
 def _convert2num(s):
-    """Convert string to number, unless it is a string"""
+    """Convert string to number, unless it is a string."""
     a = s  # Default is str
     try:
         a = int(s)
