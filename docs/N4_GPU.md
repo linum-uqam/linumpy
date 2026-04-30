@@ -75,10 +75,14 @@ The GPU path (`backend="gpu"`, in `linumpy.gpu.n4`) re-implements N4 on top
 of `cupy` / `cupyx.scipy.signal`, with the following differences from
 SimpleITK:
 
-- **Cubic B-spline kernel regression** (separable along each axis) instead
-  of full BSpline scattered-data approximation. The fit is computed as
-  three sequential 1-D `tensordot` contractions; per-axis B-spline basis
-  matrices are cached per pyramid level (see
+- **Pseudo-squared-distance B-spline (PSDB) scattered-data fit**
+  (separable along each axis) following Lee, Wolberg & Shin
+  (*IEEE TVCG 1997*), iterated on the residual log-bias as N4 does. PSDB
+  preserves tissue contrast on regions with strong intensity variation
+  where a plain weighted-mean kernel regression would absorb signal into
+  the bias estimate. The fit is computed as three sequential 1-D
+  `tensordot` contractions; per-axis B-spline basis matrices are cached
+  per pyramid level (see
   [linumpy/gpu/bspline.py](../linumpy/gpu/bspline.py)).
 - **Centred-Gaussian Wiener deconvolution** for histogram sharpening
   instead of the Vidal-Pantaleoni asymmetric kernel SimpleITK ships. The
@@ -120,8 +124,9 @@ phantom, not the theoretical SimpleITK accuracy:
 
 In addition, two structural tests pin the GPU primitives:
 
-- `test_bspline_fit_reproduces_low_order_polynomial`: the GPU separable
-  cubic-B-spline fit reproduces a low-order polynomial up to round-off.
+- `test_bspline_fit_converges_to_low_order_polynomial`: the GPU separable
+  cubic-B-spline fit, iterated on the residual as N4 does, converges to a
+  low-order polynomial up to round-off.
 - `test_numpy_and_cupy_paths_agree_n4`: the NumPy fallback and the CuPy
   path produce the same corrected volume (skipped when CuPy is missing).
 
