@@ -37,8 +37,6 @@ later N4 fitting levels, lets the fit absorb tissue-scale features
 weights regularise short-range support and recover the contrast.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 import numpy as np

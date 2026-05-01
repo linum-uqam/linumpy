@@ -5,8 +5,6 @@ The script is loaded via :mod:`importlib` so we can test its pure-Python helper
 functions (no ``zarr`` I/O) without relying on the console entry point.
 """
 
-from __future__ import annotations
-
 import importlib.util
 from pathlib import Path
 

@@ -1,7 +1,5 @@
 """Tests for linumpy/intensity/bias_field.py (and gpu/bias_field.py)."""
 
-from __future__ import annotations
-
 import numpy as np
 import pytest
 

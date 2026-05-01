@@ -26,8 +26,6 @@ failure modes, and the connection to ``slice_config.csv`` (``interpolated``,
 ``interpolation_failed``, ``interpolation_fallback_reason`` columns).
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 

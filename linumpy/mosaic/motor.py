@@ -232,7 +232,7 @@ def compute_registration_refinements(
                     dy *= scale
                     refinements["stats"]["clamped_pairs"] += 1
 
-                refinements["horizontal"][(i, j)] = {"dx": float(dx), "dy": float(dy)}
+                refinements["horizontal"][i, j] = {"dx": float(dx), "dy": float(dy)}
                 refinements["stats"]["valid_pairs"] += 1
                 all_shifts.append(magnitude)
             except Exception as e:
@@ -278,7 +278,7 @@ def compute_registration_refinements(
                     dy *= scale
                     refinements["stats"]["clamped_pairs"] += 1
 
-                refinements["vertical"][(i, j)] = {"dx": float(dx), "dy": float(dy)}
+                refinements["vertical"][i, j] = {"dx": float(dx), "dy": float(dy)}
                 refinements["stats"]["valid_pairs"] += 1
                 all_shifts.append(magnitude)
             except Exception as e:

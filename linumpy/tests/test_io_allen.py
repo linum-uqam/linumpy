@@ -6,8 +6,6 @@ tests offline and lets us verify that ``download_template_ras_aligned`` really
 produces a RAS+ volume (``+X = Right``, ``+Y = Anterior``, ``+Z = Superior``).
 """
 
-from __future__ import annotations
-
 import numpy as np
 import pytest
 import SimpleITK as sitk

@@ -201,9 +201,9 @@ def save_omezarr(
     metadata = {"method": "ome_zarr.writer.write_image", "version": ome_zarr_version, "args": pyramid_kw}
 
     create_directory(store_path, overwrite)
-    _loc = parse_url(store_path, mode="w")
-    assert _loc is not None
-    store = _loc.store
+    loc = parse_url(store_path, mode="w")
+    assert loc is not None
+    store = loc.store
     zarr_group = zarr.group(store=store)
 
     write_image(
@@ -241,9 +241,9 @@ def resolve_omezarr_level_path(zarr_path: Path, level: int = 0) -> Path:
     Path
         On-disk path of the level's zarr array.
     """
-    _zarr_loc = parse_url(zarr_path)
-    assert _zarr_loc is not None
-    reader = Reader(_zarr_loc)
+    zarr_loc = parse_url(zarr_path)
+    assert zarr_loc is not None
+    reader = Reader(zarr_loc)
     nodes = list(reader())
     image_node = nodes[0]
 
@@ -270,9 +270,9 @@ def read_omezarr(zarr_path: Path, level: int = 0) -> tuple:
     :type res: tuple (3,)
     :return res: Voxel size of zarr array.
     """
-    _zarr_loc = parse_url(zarr_path)
-    assert _zarr_loc is not None
-    reader = Reader(_zarr_loc)
+    zarr_loc = parse_url(zarr_path)
+    assert zarr_loc is not None
+    reader = Reader(zarr_loc)
     nodes = list(reader())
     image_node = nodes[0]
 
@@ -402,9 +402,9 @@ class OmeZarrWriter:
             else:
                 raise ValueError(f"Overwrite set to False and {store_path} non-empty.")
 
-        _store_loc = parse_url(store_path, mode="w", fmt=self.fmt)
-        assert _store_loc is not None
-        store = _store_loc.store
+        store_loc = parse_url(store_path, mode="w", fmt=self.fmt)
+        assert store_loc is not None
+        store = store_loc.store
         self.root = zarr.group(store=store)
 
         shape = tuple(int(v) for v in shape)
@@ -536,8 +536,7 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
         """Downsample from *source_path* to *target_path* with a specific target shape."""
         group_path = str(parent.store_path)
         # Remove file:// prefix if present (from zarr URL format)
-        if group_path.startswith("file://"):
-            group_path = group_path[7:]
+        group_path = group_path.removeprefix("file://")
         img_path = parent.store_path / parent.path
         image_path = Path(group_path) / parent.path
 
@@ -648,8 +647,7 @@ class AnalysisOmeZarrWriter(OmeZarrWriter):
         # Get the path to level 0 (base resolution) for downsampling source
         # Remove file:// prefix if present (from zarr URL format)
         group_path = str(self.root.store_path)
-        if group_path.startswith("file://"):
-            group_path = group_path[7:]  # Remove "file://" prefix
+        group_path = group_path.removeprefix("file://")  # Remove "file://" prefix
 
         for i, target_um in enumerate(valid_targets):
             path = f"{i}"

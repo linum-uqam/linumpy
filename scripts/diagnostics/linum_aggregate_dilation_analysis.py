@@ -234,19 +234,27 @@ def generate_report(stats: Any, corrections: Any, _per_slice: Any, output_dir: P
     dev_x = corrections["deviation_from_unity"]["x_percent"]
 
     if abs(dev_y) > 1.0 or abs(dev_x) > 1.0:
-        lines.append("⚠ SIGNIFICANT DILATION DETECTED")
-        lines.append(f"  Y-direction: {abs(dev_y):.2f}% {'contraction' if dev_y > 0 else 'expansion'}")
-        lines.append(f"  X-direction: {abs(dev_x):.2f}% {'contraction' if dev_x > 0 else 'expansion'}")
-        lines.append("")
-        lines.append("  This will cause edge misalignment in 3D reconstruction.")
-        lines.append("  Apply the recommended correction factors below.")
+        lines.extend(
+            (
+                "⚠ SIGNIFICANT DILATION DETECTED",
+                f"  Y-direction: {abs(dev_y):.2f}% {'contraction' if dev_y > 0 else 'expansion'}",
+                f"  X-direction: {abs(dev_x):.2f}% {'contraction' if dev_x > 0 else 'expansion'}",
+                "",
+                "  This will cause edge misalignment in 3D reconstruction.",
+                "  Apply the recommended correction factors below.",
+            )
+        )
     else:
         lines.append("✓ Scale factors close to 1.0 - minimal dilation detected")
 
     if stats["anisotropy"]["mean"] > 0.01:
-        lines.append("")
-        lines.append(f"⚠ ANISOTROPIC SCALING: X and Y scales differ by {stats['anisotropy']['mean'] * 100:.2f}%")
-        lines.append("  Use different correction factors for X and Y directions.")
+        lines.extend(
+            (
+                "",
+                f"⚠ ANISOTROPIC SCALING: X and Y scales differ by {stats['anisotropy']['mean'] * 100:.2f}%",
+                "  Use different correction factors for X and Y directions.",
+            )
+        )
 
     lines.extend(
         [
@@ -296,8 +304,7 @@ def generate_report(stats: Any, corrections: Any, _per_slice: Any, output_dir: P
     )
 
     report_path = Path(output_dir) / "aggregated_dilation_report.txt"
-    with Path(report_path).open("w") as f:
-        f.write("\n".join(lines))
+    Path(report_path).write_text("\n".join(lines))
 
     logger.info("Report saved to %s", report_path)
     return report_path

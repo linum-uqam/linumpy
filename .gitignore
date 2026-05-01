@@ -173,6 +173,10 @@ cython_debug/
 .nextflow/
 *.nextflow.log*
 
+# nf-test
+.nf-test/
+.nf-test.log
+
 # Standalone tools (separate git repos)
 tools/
 workflows/work/

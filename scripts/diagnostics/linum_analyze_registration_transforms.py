@@ -336,8 +336,7 @@ def generate_report(df: Any, analysis: Any, correlation: Any, output_dir: Path) 
     lines.append("=" * 70)
 
     report_path = output_dir / "rotation_analysis.txt"
-    with Path(report_path).open("w") as f:
-        f.write("\n".join(lines))
+    Path(report_path).write_text("\n".join(lines))
 
     logger.info("Report saved to %s", report_path)
     return report_path

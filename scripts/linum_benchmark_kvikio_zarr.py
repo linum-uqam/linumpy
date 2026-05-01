@@ -30,8 +30,6 @@ Generate a 16 GiB random uncompressed zarr v3 on /scratch_nvme and bench::
         --runs 3
 """
 
-from __future__ import annotations
-
 import argparse
 import contextlib
 import sys

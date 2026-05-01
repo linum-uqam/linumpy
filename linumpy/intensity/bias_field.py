@@ -12,8 +12,6 @@ Typical two-pass usage::
     vol_out, _ = n4_correct(vol_ps, mask)
 """
 
-from __future__ import annotations
-
 import multiprocessing
 from typing import Any
 

@@ -33,8 +33,6 @@ scripts running in parallel), make sure each writer targets a distinct
 output path; otherwise the last writer wins.
 """
 
-from __future__ import annotations
-
 import csv
 from collections import OrderedDict
 from pathlib import Path

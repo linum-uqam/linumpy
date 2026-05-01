@@ -76,10 +76,10 @@ def main() -> None:
     # Axis-1 of the mosaic is the tile-grid *row* direction (tile_shape[1])
     # and axis-2 is the *column* direction (tile_shape[2]); name the bounds
     # accordingly so the later `pos[0] -= posr_min` reads naturally.
-    posr_min = min([pos[0] for pos in positions])
-    posr_max = max([pos[0] + tile_shape[1] for pos in positions])
-    posc_min = min([pos[1] for pos in positions])
-    posc_max = max([pos[1] + tile_shape[2] for pos in positions])
+    posr_min = min(pos[0] for pos in positions)
+    posr_max = max(pos[0] + tile_shape[1] for pos in positions)
+    posc_min = min(pos[1] for pos in positions)
+    posc_max = max(pos[1] + tile_shape[2] for pos in positions)
     mosaic_shape = [volume.shape[0], int(posr_max - posr_min), int(posc_max - posc_min)]
 
     # Stitch the mosaic

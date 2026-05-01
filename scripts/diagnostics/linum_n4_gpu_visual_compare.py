@@ -6,8 +6,6 @@ N4, and writes a side-by-side PNG (input | CPU corrected | GPU corrected |
 |CPU - GPU|) for documentation.
 """
 
-from __future__ import annotations
-
 import argparse
 from pathlib import Path
 
@@ -32,7 +30,7 @@ def _load_slab(zarr_path: Path, level: int, z0: int, dz: int):
 
             with zipfile.ZipFile(str(zarr_path)) as zf:
                 names = zf.namelist()
-            top = sorted({n.split("/", 1)[0] for n in names if "/" in n})[0]
+            top = min(n.split("/", 1)[0] for n in names if "/" in n)
             root = zarr.open(store, mode="r", path=top)
     else:
         root = zarr.open(str(zarr_path), mode="r")

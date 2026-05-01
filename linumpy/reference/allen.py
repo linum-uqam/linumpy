@@ -79,8 +79,7 @@ def download_template(resolution: int, cache: bool = True, cache_dir: str = ".da
         # Download the template
         response = requests.get(url, stream=True)
         with Path(nrrd_file).open("wb") as f:
-            for data in tqdm(response.iter_content()):
-                f.write(data)
+            f.writelines(tqdm(response.iter_content()))
 
     # Loading the nrrd file
     vol = sitk.ReadImage(str(nrrd_file))

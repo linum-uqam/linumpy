@@ -1,7 +1,5 @@
 """Tests for linumpy.gpu.bspline."""
 
-from __future__ import annotations
-
 import numpy as np
 import pytest
 

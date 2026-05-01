@@ -372,7 +372,7 @@ def _read_overlap_z_offsets(offsets_file: Path) -> tuple[int, int]:
         arr_off = np.loadtxt(str(offsets_file), dtype=int)
         if arr_off.size >= 2:
             return int(arr_off[0]), int(arr_off[1])
-    except (OSError, ValueError):
+    except OSError, ValueError:
         pass
     return 0, 0
 
@@ -451,7 +451,7 @@ def main(argv: Any = None) -> None:
     interp_remote_dir = (
         str(Path(args.interpolated_slices_remote_dir)) if args.interpolated_slices_remote_dir else slices_remote_dir
     )
-    workers = args.workers or max(1, (os.cpu_count() or 4) - 2)
+    workers = args.workers or max(1, (os.process_cpu_count() or os.cpu_count() or 4) - 2)
     overlap_px = args.xy_overlap_px
     logger.info("XY overlap slab: %s voxels at pyramid level %s", overlap_px, args.level)
 

@@ -24,8 +24,6 @@ Memory budget (per N4 call):
 i.e. ~12 GB for a (256, 1024, 1024) float32 volume.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 import numpy as np

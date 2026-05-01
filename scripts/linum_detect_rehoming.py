@@ -43,6 +43,7 @@ import linumpy.config.threads  # noqa: F401
 
 import argparse
 import json
+import operator
 from pathlib import Path
 
 import numpy as np
@@ -169,7 +170,7 @@ def _save_diagnostics(
                 "corrected_y_shift_mm": float(row_after["y_shift_mm"]),
             }
         )
-    records.sort(key=lambda r: r["index"])
+    records.sort(key=operator.itemgetter("index"))
     report = {
         "n_corrected": len(records),
         "corrected_spikes": [r for r in records if r["correction_type"] == "spike"],

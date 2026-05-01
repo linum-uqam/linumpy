@@ -935,7 +935,7 @@ rm -rf work/
 
 ```bash
 # Pull container manually
-apptainer pull linumpy.sif docker://ghcr.io/linum/linumpy:latest
+apptainer pull linumpy.sif docker://ghcr.io/linum-uqam/linumpy:latest
 
 # Run with explicit container
 nextflow run workflow.nf -with-apptainer linumpy.sif

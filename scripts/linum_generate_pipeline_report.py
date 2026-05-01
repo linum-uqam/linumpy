@@ -27,6 +27,7 @@ try:
 except ImportError:
     _PIL_AVAILABLE = False
 
+import operator
 from typing import Any
 
 import numpy as np
@@ -177,7 +178,7 @@ def group_issues(issues: list[str]) -> list[dict]:
     groups = defaultdict(list)
     for issue in issues:
         parsed = parse_issue(issue)
-        key = parsed["metric"] if parsed["metric"] else "__other__"
+        key = parsed["metric"] or "__other__"
         groups[key].append(parsed)
 
     result = []
@@ -330,11 +331,11 @@ def generate_trend_line_svg(
         )
 
     # Y-axis labels
-    elements.append(
-        f'<text x="{pad_x - 3}" y="{to_svg_y(max_y):.1f}" text-anchor="end" font-size="8" fill="#888">{max_y:.3g}</text>'
-    )
-    elements.append(
-        f'<text x="{pad_x - 3}" y="{to_svg_y(min_y):.1f}" text-anchor="end" font-size="8" fill="#888">{min_y:.3g}</text>'
+    elements.extend(
+        (
+            f'<text x="{pad_x - 3}" y="{to_svg_y(max_y):.1f}" text-anchor="end" font-size="8" fill="#888">{max_y:.3g}</text>',
+            f'<text x="{pad_x - 3}" y="{to_svg_y(min_y):.1f}" text-anchor="end" font-size="8" fill="#888">{min_y:.3g}</text>',
+        )
     )
 
     title_text = f"n={len(numeric)}, range [{min_y:.3g}, {max_y:.3g}]"
@@ -360,7 +361,7 @@ def compute_cross_slice_trends(aggregated: dict[str, list[dict]]) -> dict:
             val = m.get("metrics", {}).get(key, {}).get("value")
             if isinstance(val, (int, float)):
                 pairs.append((src, val))
-        pairs.sort(key=lambda p: p[0])  # sort by source file path
+        pairs.sort(key=operator.itemgetter(0))  # sort by source file path
         return [v for _, v in pairs]
 
     # XY tile transform: scale and shear across slices
@@ -543,7 +544,7 @@ def discover_interpolation_data(input_dir: Path) -> dict | None:
             return None
         try:
             return float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     for r in rows:
@@ -1018,12 +1019,16 @@ def _render_interpolation_section_text(interpolation: dict) -> str:
     imp_mean = summary.get("ncc_improvement_mean")
 
     lines = []
-    lines.append("")
-    lines.append(f"{get_status_emoji('info')} SLICE INTERPOLATION")
-    lines.append("-" * 70)
-    lines.append(f"  Gaps detected          : {count}")
-    lines.append(f"  Successfully interp'd  : {n_succeeded}")
-    lines.append(f"  Hard-skipped (gap)     : {n_failed}")
+    lines.extend(
+        (
+            "",
+            f"{get_status_emoji('info')} SLICE INTERPOLATION",
+            "-" * 70,
+            f"  Gaps detected          : {count}",
+            f"  Successfully interp'd  : {n_succeeded}",
+            f"  Hard-skipped (gap)     : {n_failed}",
+        )
+    )
     if pre_mean is not None:
         lines.append(f"  Mean pre-reg NCC       : {pre_mean:.3f}")
     if post_mean is not None:
@@ -1041,9 +1046,9 @@ def _render_interpolation_section_text(interpolation: dict) -> str:
         lines.append(f"  Hard-skip reasons      : {fb_parts}")
 
     if rows:
-        lines.append("")
-        lines.append(f"  {'Slice':<6} {'Status':<8} {'Used':<14} {'Reason':<28} {'PreNCC':>7} {'PostNCC':>7}")
-        lines.append("  " + "-" * 80)
+        lines.extend(
+            ("", f"  {'Slice':<6} {'Status':<8} {'Used':<14} {'Reason':<28} {'PreNCC':>7} {'PostNCC':>7}", "  " + "-" * 80)
+        )
         for r in rows[:50]:
             sid = (r.get("slice_id", "") or "?")[:6]
             failed = bool(r.get("interpolation_failed"))
@@ -1054,11 +1059,11 @@ def _render_interpolation_section_text(interpolation: dict) -> str:
             post = r.get("post_reg_ncc", "")
             try:
                 pre_fmt = f"{float(pre):.3f}" if pre not in ("", None) else "-"
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 pre_fmt = "-"
             try:
                 post_fmt = f"{float(post):.3f}" if post not in ("", None) else "-"
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 post_fmt = "-"
             lines.append(f"  {sid:<6} {status:<8} {method_used:<14} {fb:<28} {pre_fmt:>7} {post_fmt:>7}")
         if len(rows) > 50:
@@ -1806,41 +1811,49 @@ def generate_text_report(
     aggregated = sort_steps(aggregated)
 
     lines = []
-    lines.append("=" * 70)
-    lines.append(title.center(70))
-    lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}".center(70))
-    lines.append("=" * 70)
-    lines.append("")
+    lines.extend(
+        ("=" * 70, title.center(70), f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}".center(70), "=" * 70, "")
+    )
 
     _, error_count, warning_count, ok_count = compute_overall_status(aggregated)
 
-    lines.append("SUMMARY")
-    lines.append("-" * 70)
-    lines.append(f"  Pipeline Steps: {len(aggregated)}")
-    lines.append(f"  Total Metrics Files: {sum(len(v) for v in aggregated.values())}")
-    lines.append(
-        f"  Status: {get_status_emoji('ok')} OK: {ok_count}  "
-        f"{get_status_emoji('warning')} Warnings: {warning_count}  "
-        f"{get_status_emoji('error')} Errors: {error_count}"
+    lines.extend(
+        (
+            "SUMMARY",
+            "-" * 70,
+            f"  Pipeline Steps: {len(aggregated)}",
+            f"  Total Metrics Files: {sum(len(v) for v in aggregated.values())}",
+            f"  Status: {get_status_emoji('ok')} OK: {ok_count}  "
+            f"{get_status_emoji('warning')} Warnings: {warning_count}  "
+            f"{get_status_emoji('error')} Errors: {error_count}",
+            "",
+        )
     )
-    lines.append("")
 
     for step_name, metrics_list in aggregated.items():
         summary = compute_summary_statistics(metrics_list)
         step_status = get_step_status(metrics_list)
 
-        lines.append("")
-        lines.append(f"{get_status_emoji(step_status)} {step_name.replace('_', ' ').upper()}")
-        lines.append("-" * 70)
-        lines.append(f"  Items: {summary['count']} | Status: {step_status.upper()}")
+        lines.extend(
+            (
+                "",
+                f"{get_status_emoji(step_status)} {step_name.replace('_', ' ').upper()}",
+                "-" * 70,
+                f"  Items: {summary['count']} | Status: {step_status.upper()}",
+            )
+        )
 
         # Quality metrics stats
         quality_metrics, _ = separate_metrics_by_type(metrics_list)
         if quality_metrics:
-            lines.append("")
-            lines.append("  Quality Metrics:")
-            lines.append(f"  {'Metric':<25} {'Mean':>12} {'Median':>12} {'Std':>12} {'Min':>12} {'Max':>12}")
-            lines.append("  " + "-" * 77)
+            lines.extend(
+                (
+                    "",
+                    "  Quality Metrics:",
+                    f"  {'Metric':<25} {'Mean':>12} {'Median':>12} {'Std':>12} {'Min':>12} {'Max':>12}",
+                    "  " + "-" * 77,
+                )
+            )
             for metric_name, mdata in quality_metrics.items():
                 entries = mdata["entries"]
                 numeric_vals = [e["value"] for e in entries if isinstance(e.get("value"), (int, float))]
@@ -1859,8 +1872,7 @@ def generate_text_report(
         all_warnings, all_errors = collect_issues(metrics_list)
 
         if all_errors:
-            lines.append("")
-            lines.append(f"  {get_status_emoji('error')} ERRORS:")
+            lines.extend(("", f"  {get_status_emoji('error')} ERRORS:"))
             for g in group_issues(all_errors):
                 if g["count"] == 1:
                     lines.append(f"    - {g['details'][0]}")
@@ -1870,8 +1882,7 @@ def generate_text_report(
                     lines.append(f"    - {g['metric']}: {g['count']} slices ({val_str})")
 
         if all_warnings:
-            lines.append("")
-            lines.append(f"  {get_status_emoji('warning')} WARNINGS:")
+            lines.extend(("", f"  {get_status_emoji('warning')} WARNINGS:"))
             for g in group_issues(all_warnings):
                 if g["count"] == 1:
                     lines.append(f"    - {g['details'][0]}")
@@ -1881,8 +1892,7 @@ def generate_text_report(
                     lines.append(f"    - {g['metric']}: {g['count']} slices ({val_str})")
 
         if verbose:
-            lines.append("")
-            lines.append("  Individual Results:")
+            lines.extend(("", "  Individual Results:"))
             for m in metrics_list:
                 source = extract_slice_id(m.get("source_file", "unknown"))
                 m_status = m.get("overall_status", "unknown")
@@ -1896,10 +1906,7 @@ def generate_text_report(
     if interpolation:
         lines.append(_render_interpolation_section_text(interpolation))
 
-    lines.append("")
-    lines.append("=" * 70)
-    lines.append("End of Report".center(70))
-    lines.append("=" * 70)
+    lines.extend(("", "=" * 70, "End of Report".center(70), "=" * 70))
 
     return "\n".join(lines)
 
@@ -1996,8 +2003,8 @@ def main() -> None:
             image_mode=image_mode,
             max_overview_width=args.max_overview_width,
             max_thumb_width=args.max_thumb_width,
-            trends=trends if trends else None,
-            diagnostics=diagnostics if diagnostics else None,
+            trends=trends or None,
+            diagnostics=diagnostics or None,
             interpolation=interpolation,
         )
         if output_format == "zip":
@@ -2005,12 +2012,10 @@ def main() -> None:
                 output_file = output_file.with_suffix(".zip")
             generate_zip_bundle(report, images, output_file)
         else:
-            with Path(output_file).open("w") as f:
-                f.write(report)
+            Path(output_file).write_text(report)
     else:
         report = generate_text_report(aggregated, args.title, args.verbose, interpolation=interpolation)
-        with Path(output_file).open("w") as f:
-            f.write(report)
+        Path(output_file).write_text(report)
 
     print(f"Report saved to: {output_file}")
 

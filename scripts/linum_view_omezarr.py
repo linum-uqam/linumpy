@@ -27,9 +27,9 @@ def main() -> None:
     args = p.parse_args()
 
     # read the image data
-    _loc = parse_url(args.input_zarr)
-    assert _loc is not None
-    reader = Reader(_loc)
+    loc = parse_url(args.input_zarr)
+    assert loc is not None
+    reader = Reader(loc)
     # nodes may include images, labels etc
     nodes = list(reader())
 

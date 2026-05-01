@@ -136,22 +136,22 @@ def stitch_with_refinements(
 
                 # From horizontal neighbor to the left
                 if j > 0 and (i, j - 1) in refinements.get("horizontal", {}):
-                    ref = refinements["horizontal"][(i, j - 1)]
+                    ref = refinements["horizontal"][i, j - 1]
                     tile_refinements.append({"dy": -ref["dy"], "dx": -ref["dx"]})
 
                 # From horizontal neighbor to the right
                 if (i, j) in refinements.get("horizontal", {}):
-                    ref = refinements["horizontal"][(i, j)]
+                    ref = refinements["horizontal"][i, j]
                     tile_refinements.append(ref)
 
                 # From vertical neighbor above
                 if i > 0 and (i - 1, j) in refinements.get("vertical", {}):
-                    ref = refinements["vertical"][(i - 1, j)]
+                    ref = refinements["vertical"][i - 1, j]
                     tile_refinements.append({"dy": -ref["dy"], "dx": -ref["dx"]})
 
                 # From vertical neighbor below
                 if (i, j) in refinements.get("vertical", {}):
-                    ref = refinements["vertical"][(i, j)]
+                    ref = refinements["vertical"][i, j]
                     tile_refinements.append(ref)
 
                 tile = apply_blend_shift_refinement(tile, tile_refinements)
@@ -162,13 +162,13 @@ def stitch_with_refinements(
                 tile_refinements = []
 
                 if j > 0 and (i, j - 1) in refinements.get("horizontal", {}):
-                    tile_refinements.append(refinements["horizontal"][(i, j - 1)])
+                    tile_refinements.append(refinements["horizontal"][i, j - 1])
                 if (i, j) in refinements.get("horizontal", {}):
-                    tile_refinements.append(refinements["horizontal"][(i, j)])
+                    tile_refinements.append(refinements["horizontal"][i, j])
                 if i > 0 and (i - 1, j) in refinements.get("vertical", {}):
-                    tile_refinements.append(refinements["vertical"][(i - 1, j)])
+                    tile_refinements.append(refinements["vertical"][i - 1, j])
                 if (i, j) in refinements.get("vertical", {}):
-                    tile_refinements.append(refinements["vertical"][(i, j)])
+                    tile_refinements.append(refinements["vertical"][i, j])
 
                 if tile_refinements:
                     avg_dy = np.mean([r["dy"] for r in tile_refinements]) / 2

@@ -370,8 +370,7 @@ def generate_report(analysis: Any, reg_comparison: Any, output_dir: Path) -> Pat
     lines.extend(["", "=" * 70])
 
     report_path = output_dir / "acquisition_rotation_analysis.txt"
-    with Path(report_path).open("w") as f:
-        f.write("\n".join(lines))
+    Path(report_path).write_text("\n".join(lines))
 
     logger.info("Report saved to %s", report_path)
     return report_path
