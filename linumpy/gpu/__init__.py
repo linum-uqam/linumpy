@@ -47,21 +47,43 @@ if not _GPU_DISABLED_BY_ENV:
 
         # Test if CUDA is actually available
         try:
-            # First, find the GPU with most free memory
             n_devices = cp.cuda.runtime.getDeviceCount()
 
             if n_devices > 0:
-                best_gpu_id = 0
-                best_free_memory = 0
+                # Pick a GPU. If CUDA_VISIBLE_DEVICES is set externally
+                # (e.g. by Nextflow), cupy already sees only the allowed
+                # cards and n_devices reflects that — just use device 0.
+                # Otherwise round-robin across physical devices using a
+                # file-locked counter. This is robust against the race
+                # where many forks start concurrently and would all pick
+                # the "GPU with most free memory" snapshot at the same
+                # time. It is also indifferent to which work items are in
+                # flight, unlike workload-id modulo schemes.
+                if n_devices == 1 or os.environ.get("CUDA_VISIBLE_DEVICES"):
+                    best_gpu_id = 0
+                else:
+                    import fcntl
+                    import tempfile
+                    from pathlib import Path
 
-                for i in range(n_devices):
-                    with cp.cuda.Device(i):
-                        free, total = cp.cuda.runtime.memGetInfo()
-                        if free > best_free_memory:
-                            best_free_memory = free
-                            best_gpu_id = i
+                    counter_path = Path(tempfile.gettempdir()) / f"linumpy_gpu_counter_{os.getuid()}"
+                    # Open or create the counter, take an exclusive lock,
+                    # increment, release. This serialises the assignment
+                    # decision across all linumpy processes on the host.
+                    with counter_path.open("a+") as fp:
+                        fcntl.flock(fp.fileno(), fcntl.LOCK_EX)
+                        fp.seek(0)
+                        try:
+                            counter = int((fp.read() or "0").strip())
+                        except ValueError:
+                            counter = 0
+                        best_gpu_id = counter % n_devices
+                        fp.seek(0)
+                        fp.truncate()
+                        fp.write(str(counter + 1))
+                        fp.flush()
+                        fcntl.flock(fp.fileno(), fcntl.LOCK_UN)
 
-                # Select the best GPU
                 cp.cuda.Device(best_gpu_id).use()
 
                 CUPY_AVAILABLE = True
@@ -74,11 +96,10 @@ if not _GPU_DISABLED_BY_ENV:
                 GPU_MEMORY_GB = mem_info[1] / (1024**3)  # Total memory in GB
 
                 if n_devices > 1:
-                    # Only show message if there are multiple GPUs
                     import sys
 
                     print(
-                        f"Auto-selected GPU {best_gpu_id}: {GPU_DEVICE_NAME} ({best_free_memory / (1024**3):.1f} GB free)",
+                        f"Selected GPU {best_gpu_id}/{n_devices}: {GPU_DEVICE_NAME} ({mem_info[0] / (1024**3):.1f} GB free)",
                         file=sys.stderr,
                     )
             else:
