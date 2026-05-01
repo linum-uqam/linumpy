@@ -57,7 +57,7 @@ class BenchmarkTimer:
     def __init__(self) -> None:
         self.elapsed = 0
 
-    def __enter__(self) -> "BenchmarkTimer":
+    def __enter__(self) -> BenchmarkTimer:
         """Magic method function."""
         self.start = time.perf_counter()
         return self

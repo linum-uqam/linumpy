@@ -6,8 +6,6 @@ The synthetic volume is sized so both backends complete in tens of
 seconds, not minutes.
 """
 
-from __future__ import annotations
-
 import time
 
 import numpy as np

@@ -26,8 +26,6 @@ Reference numbers on a 16 GiB float32 zarr v3 (RTX A6000, ext4, GDS native)
 warm cache: kvikio ~9.9 GiB/s, zarr-gpu ~7.1 GiB/s.
 """
 
-from __future__ import annotations
-
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -80,7 +78,7 @@ def _array_is_kvikio_compatible(array_path: Path) -> bool:
 
     try:
         _load_array_spec(array_path)
-    except (NotImplementedError, FileNotFoundError, ValueError):
+    except NotImplementedError, FileNotFoundError, ValueError:
         return False
     return True
 
@@ -157,7 +155,7 @@ def read_zarr_to_gpu(array_path: str | Path, *, prefer: Backend = "auto") -> Any
 
         try:
             return read_zarr_via_kvikio(path)
-        except (RuntimeError, OSError, NotImplementedError):
+        except RuntimeError, OSError, NotImplementedError:
             pass
 
     return read_zarr_via_zarr_gpu(path)

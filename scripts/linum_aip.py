@@ -39,9 +39,9 @@ def _compute_aip(vol: Any, use_gpu: bool) -> tuple[zarr.Array, tuple]:
     shape = vol.shape[1:3]
     tile_shape = vol.chunks
     zarr_store = create_tempstore(suffix=".zarr")
-    _aip = zarr.open(zarr_store, mode="w", shape=shape, dtype=np.float32, chunks=vol.chunks[1:3])
-    assert isinstance(_aip, zarr.Array)
-    aip = _aip
+    aip_ = zarr.open(zarr_store, mode="w", shape=shape, dtype=np.float32, chunks=vol.chunks[1:3])
+    assert isinstance(aip_, zarr.Array)
+    aip = aip_
 
     nx = vol.shape[1] // tile_shape[1]
     ny = vol.shape[2] // tile_shape[2]

@@ -35,7 +35,7 @@ else:
     cupy_uniform_filter = None
 
 
-def _to_gpu(arr: np.ndarray) -> "cp.ndarray":
+def _to_gpu(arr: np.ndarray) -> cp.ndarray:
     """Transfer numpy array to GPU."""
     return cp.asarray(arr, dtype=cp.float32)
 
@@ -47,7 +47,7 @@ def _to_cpu(arr: Any) -> np.ndarray:
     return np.asarray(arr)
 
 
-def normalize_image_gpu(img: "cp.ndarray") -> "cp.ndarray":
+def normalize_image_gpu(img: cp.ndarray) -> cp.ndarray:
     """
     Normalize image to [0, 1] range on GPU.
 

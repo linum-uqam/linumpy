@@ -8,7 +8,7 @@ version = "0.1.1"
 description = "linumpy: microscopy tools and utilities"
 readme = "README.md"
 license = "GPL-3.0-or-later"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 authors = [
     { name = "The LINUM developers" },
 ]
@@ -21,6 +21,7 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
@@ -201,17 +202,20 @@ include = ["linumpy*", "scripts*"]
 
 # --- Ruff ---
 [tool.ruff]
-target-version = "py312"
+target-version = "py314"
 line-length = 127
 fix = true
 include = ["linumpy*", "scripts*"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "RUF", "SIM", "C4", "PIE", "PTH", 
-            "N", "PERF", "FLY", "TCH", "G", "D", "ANN", "ARG", "ERA"]
+            "N", "PERF", "FLY", "G", "D", "ANN", "ARG", "ERA", "FURB"]
 # N813: SimpleITK as sitk is the universal Python convention — excluded globally.
 # D212/D213 conflict: numpy convention picks D213 (summary on second line of multi-line docstrings).
 # ANN401: Any is legitimately unavoidable in a few callback/override signatures.
+# Note: flake8-type-checking (TCH/TC) is intentionally not selected — under
+# PEP 649 (Python 3.14 default), annotations are lazily evaluated, so gating
+# typing-only imports inside TYPE_CHECKING blocks no longer reduces import cost.
 ignore = ["N813", "ANN401"]
 extend-select = ["D417"]
 # Scientific codebase: Greek letters and the info-icon glyph are intentional;
@@ -257,7 +261,7 @@ convention = "numpy"
 # before numpy/scipy/SimpleITK or the env vars have no effect.
 known-first-party = ["linumpy"]
 sections.thread-config = ["linumpy.config.threads"]
-section-order = ["future", "thread-config", "standard-library", "third-party", "first-party", "local-folder"]
+section-order = ["thread-config", "standard-library", "third-party", "first-party", "local-folder"]
 
 [tool.ruff.format]
 # Use default (black-compatible) formatting
@@ -267,7 +271,7 @@ section-order = ["future", "thread-config", "standard-library", "third-party", "
 include = ["linumpy", "scripts"]
 
 [tool.ty.environment]
-python-version = "3.12"
+python-version = "3.14"
 
 [tool.ty.rules]
 # possibly-unresolved-reference defaults to "warn" in ty; raise it to "error"

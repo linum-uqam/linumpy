@@ -615,13 +615,13 @@ def collect_interface_crop_metrics(
     metrics.add_metric("end_index", int(end_idx), unit="voxels", description="End index for cropping")
 
     # Quality checks
-    _min_depth = PipelineMetrics.DEFAULT_THRESHOLDS["interface_min_depth_px"]["error"]
-    _max_fraction = PipelineMetrics.DEFAULT_THRESHOLDS["interface_max_depth_fraction"]["error"]
-    if detected_interface < _min_depth:
+    min_depth = PipelineMetrics.DEFAULT_THRESHOLDS["interface_min_depth_px"]["error"]
+    max_fraction = PipelineMetrics.DEFAULT_THRESHOLDS["interface_max_depth_fraction"]["error"]
+    if detected_interface < min_depth:
         metrics.add_metric(
             "interface_quality", "warning", description="Interface detected very close to start - may be incorrect"
         )
-    elif detected_interface > input_shape[0] * _max_fraction:
+    elif detected_interface > input_shape[0] * max_fraction:
         metrics.add_metric("interface_quality", "warning", description="Interface detected past halfway - check detection")
     else:
         metrics.add_metric("interface_quality", "ok", description="Interface detection appears reasonable")

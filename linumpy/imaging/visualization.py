@@ -261,7 +261,7 @@ def _panel_labels_from_orientation(orientation: str) -> tuple | None:
     code = orientation.strip("'\" ").upper()
     try:
         parse_orientation_code(code)  # validation only
-    except (ValueError, KeyError):
+    except ValueError, KeyError:
         return None
 
     a0, a1, a2 = code  # anatomical letter for source dim0, dim1, dim2
@@ -415,9 +415,9 @@ def save_annotated_views(
     y_slice = y_slice if y_slice is not None else n_cols // 2
 
     # Derive panel titles and axis labels from orientation when available.
-    _orient = _panel_labels_from_orientation(orientation) if orientation else None
-    if _orient:
-        p1_name, p1_xlabel, p1_ylabel, p1_fixed, p2_name, p2_xlabel, p2_ylabel, p2_fixed = _orient
+    orient = _panel_labels_from_orientation(orientation) if orientation else None
+    if orient:
+        p1_name, p1_xlabel, p1_ylabel, p1_fixed, p2_name, p2_xlabel, p2_ylabel, p2_fixed = orient
         title1 = f"{p1_name} ({p1_ylabel}\u00d7{p1_xlabel}) view at {p1_fixed}={x_slice}"
         title2 = f"{p2_name} ({p2_ylabel}\u00d7{p2_xlabel}) view at {p2_fixed}={y_slice}"
         xlabel1, ylabel1 = p1_xlabel, p1_ylabel

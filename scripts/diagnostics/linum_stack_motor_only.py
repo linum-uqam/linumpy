@@ -272,7 +272,7 @@ def main() -> None:
 
     # Get resolution from first slice
     # NOTE: read_omezarr returns resolution in MILLIMETERS (OME-NGFF standard)
-    first_slice_id = sorted(slice_files.keys())[0]
+    first_slice_id = min(slice_files.keys())
     _first_vol, first_res = read_omezarr(Path(slice_files[first_slice_id]), level=0)
 
     # Resolution: res is [z, y, x] in mm from OME-NGFF, convert to µm

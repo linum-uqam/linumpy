@@ -27,6 +27,7 @@ Configuration:
     Set USE_GPU=false environment variable to disable GPU globally.
 """
 
+import operator
 import os
 import warnings
 from typing import Any
@@ -319,7 +320,7 @@ def select_best_gpu(verbose: bool = True) -> Any:
         return None
 
     # Find GPU with most free memory
-    best_gpu = max(gpus, key=lambda g: g["free_gb"])
+    best_gpu = max(gpus, key=operator.itemgetter("free_gb"))
     best_id = best_gpu["id"]
 
     # Switch to best GPU

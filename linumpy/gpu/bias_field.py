@@ -5,8 +5,6 @@ element-wise division on GPU (CuPy + PyTorch).  All functions fall back to
 CPU (NumPy + SciPy) when ``GPU_AVAILABLE`` is False.
 """
 
-from __future__ import annotations
-
 import numpy as np
 
 from . import GPU_AVAILABLE

@@ -37,8 +37,6 @@ Example usage::
     linum_assess_slice_quality.py /path/to/mosaics slice_config.csv --no-use_gpu
 """
 
-from __future__ import annotations
-
 # Configure thread limits before numpy/scipy imports
 import linumpy.config.threads  # noqa: F401
 
@@ -261,7 +259,7 @@ def main() -> None:
 
     existing_config = None
     if args.update_existing:
-        config_to_load = args.existing_config if args.existing_config else output_file
+        config_to_load = args.existing_config or output_file
         if Path(config_to_load).exists():
             existing_config = read_existing_config(Path(config_to_load))
             print(f"Loaded existing config with {len(existing_config)} entries")

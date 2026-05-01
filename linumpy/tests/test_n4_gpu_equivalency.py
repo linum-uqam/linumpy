@@ -26,8 +26,6 @@ that matter for bias-field correction:
   a small tolerance.
 """
 
-from __future__ import annotations
-
 import numpy as np
 import pytest
 

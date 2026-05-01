@@ -191,15 +191,27 @@ def generate_report(
     if scale_deviation < 0.001:
         lines.append("✓ Scale factor ~1.0: No significant dilation detected")
     elif scale_factors["mean_scale"] > 1.0:
-        lines.append(f"⚠ Scale > 1.0: Tiles spread MORE than expected ({scale_deviation * 100:.2f}% expansion)")
-        lines.append("  → Possible cause: Tissue relaxation/expansion after cutting")
+        lines.extend(
+            (
+                f"⚠ Scale > 1.0: Tiles spread MORE than expected ({scale_deviation * 100:.2f}% expansion)",
+                "  → Possible cause: Tissue relaxation/expansion after cutting",
+            )
+        )
     else:
-        lines.append(f"⚠ Scale < 1.0: Tiles spread LESS than expected ({scale_deviation * 100:.2f}% contraction)")
-        lines.append("  → Possible cause: Stage calibration error or tissue shrinkage")
+        lines.extend(
+            (
+                f"⚠ Scale < 1.0: Tiles spread LESS than expected ({scale_deviation * 100:.2f}% contraction)",
+                "  → Possible cause: Stage calibration error or tissue shrinkage",
+            )
+        )
 
     if scale_factors["anisotropy"] > 0.005:
-        lines.append(f"⚠ Anisotropic scaling detected: X/Y scales differ by {scale_factors['anisotropy']:.4f}")
-        lines.append("  → May cause edge misalignment in 3D reconstruction")
+        lines.extend(
+            (
+                f"⚠ Anisotropic scaling detected: X/Y scales differ by {scale_factors['anisotropy']:.4f}",
+                "  → May cause edge misalignment in 3D reconstruction",
+            )
+        )
 
     lines.extend(
         [
@@ -237,8 +249,7 @@ def generate_report(
     )
 
     report_path = Path(output_dir) / "dilation_analysis.txt"
-    with Path(report_path).open("w") as f:
-        f.write("\n".join(lines))
+    Path(report_path).write_text("\n".join(lines))
 
     logger.info("Report saved to %s", report_path)
     return report_path

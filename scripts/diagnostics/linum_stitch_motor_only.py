@@ -119,10 +119,10 @@ def main() -> None:
             logger.warning(comparison["dilation_warning"])
 
     # Compute output mosaic shape
-    posx_min = min([pos[0] for pos in motor_positions])
-    posx_max = max([pos[0] + tile_shape[1] for pos in motor_positions])
-    posy_min = min([pos[1] for pos in motor_positions])
-    posy_max = max([pos[1] + tile_shape[2] for pos in motor_positions])
+    posx_min = min(pos[0] for pos in motor_positions)
+    posx_max = max(pos[0] + tile_shape[1] for pos in motor_positions)
+    posy_min = min(pos[1] for pos in motor_positions)
+    posy_max = max(pos[1] + tile_shape[2] for pos in motor_positions)
     mosaic_shape = (volume.shape[0], int(posx_max - posx_min), int(posy_max - posy_min))
 
     logger.info("Output mosaic shape: %s", mosaic_shape)

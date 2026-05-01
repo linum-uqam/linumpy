@@ -114,8 +114,7 @@ def generate_report(df: Any, df_filtered: Any, outlier_mask: Any, stats: Any, re
     ]
 
     if outlier_mask.sum() > 0:
-        report_lines.append("")
-        report_lines.append("Outlier shifts:")
+        report_lines.extend(("", "Outlier shifts:"))
         shift_mag = np.sqrt(df["x_shift_mm"] ** 2 + df["y_shift_mm"] ** 2)
         for idx in df[outlier_mask].index:
             row = df.loc[idx]

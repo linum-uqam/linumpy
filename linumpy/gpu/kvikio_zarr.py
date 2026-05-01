@@ -28,8 +28,6 @@ Notes
   kvikio falls back to a posix bounce-buffer path with no speed-up.
 """
 
-from __future__ import annotations
-
 import json
 import sys
 from itertools import product

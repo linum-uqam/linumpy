@@ -7,7 +7,7 @@
 ## Installation
 *Although a version of the library is available on PyPI, it has not been updated in a while. We highly discourage its use.*
 
-The library is tested for python 3.12. To install the library, clone the repository, change directory to the repository root and then install it with the command below:
+The library is tested for python 3.14. To install the library, clone the repository, change directory to the repository root and then install it with the command below:
 ```
 pip install .
 ```

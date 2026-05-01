@@ -383,7 +383,7 @@ def load_registration_transforms(
                 status = metrics_data.get("overall_status", "ok")
                 try:
                     confidence = float(metrics_data["metrics"]["registration_confidence"]["value"])
-                except (KeyError, TypeError, ValueError):
+                except KeyError, TypeError, ValueError:
                     confidence = 1.0  # fallback for older JSONs without confidence score
 
                 # Always extract translations and zcorr for accumulation,
@@ -392,11 +392,11 @@ def load_registration_transforms(
                 try:
                     metrics_tx = float(metrics_data["metrics"]["translation_x"]["value"])
                     metrics_ty = float(metrics_data["metrics"]["translation_y"]["value"])
-                except (KeyError, TypeError, ValueError):
+                except KeyError, TypeError, ValueError:
                     metrics_tx, metrics_ty = 0.0, 0.0
                 try:
                     metrics_zcorr = float(metrics_data["metrics"]["z_correlation"]["value"])
-                except (KeyError, TypeError, ValueError):
+                except KeyError, TypeError, ValueError:
                     metrics_zcorr = 0.0
                 all_pairwise_translations[slice_id] = (metrics_tx, metrics_ty, metrics_zcorr)
 
@@ -404,11 +404,11 @@ def load_registration_transforms(
                     # Metric-based gating: accept based on z_correlation and rotation
                     try:
                         zcorr = float(metrics_data["metrics"]["z_correlation"]["value"])
-                    except (KeyError, TypeError, ValueError):
+                    except KeyError, TypeError, ValueError:
                         zcorr = 0.0
                     try:
                         rot_deg = float(metrics_data["metrics"]["rotation"]["value"])
-                    except (KeyError, TypeError, ValueError):
+                    except KeyError, TypeError, ValueError:
                         rot_deg = 999.0
                     if zcorr < load_min_zcorr or abs(rot_deg) > load_max_rotation:
                         logger.warning(

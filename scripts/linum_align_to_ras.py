@@ -331,7 +331,7 @@ def get_pyramid_resolutions_from_zarr(zarr_path: Path) -> list[float] | None:
         try:
             with Path(metadata_path).open(encoding="utf-8") as f:
                 metadata = json.load(f)
-        except (OSError, json.JSONDecodeError):
+        except OSError, json.JSONDecodeError:
             continue
 
         multiscales = metadata.get("multiscales", [])

@@ -376,8 +376,7 @@ def generate_summary_report(results: Any, output_dir: Path) -> Path:
     lines.extend(["", "=" * 70])
 
     report_path = Path(output_dir) / "diagnostic_report.txt"
-    with Path(report_path).open("w") as f:
-        f.write("\n".join(lines))
+    Path(report_path).write_text("\n".join(lines))
 
     # Also save JSON
     json_path = Path(output_dir) / "diagnostic_results.json"

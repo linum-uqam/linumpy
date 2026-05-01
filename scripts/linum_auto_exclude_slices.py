@@ -20,6 +20,7 @@ Usage
 import argparse
 import json
 import logging
+import operator
 import os
 import re
 from pathlib import Path
@@ -88,7 +89,7 @@ def load_registration_metrics(transforms_dir: Path) -> Any:
         if z_corr is not None:
             metrics.append((slice_id, float(z_corr)))
 
-    metrics.sort(key=lambda x: x[0])
+    metrics.sort(key=operator.itemgetter(0))
     return metrics
 
 

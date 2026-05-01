@@ -1,7 +1,5 @@
 """Tests for linumpy/io/slice_config.py."""
 
-from __future__ import annotations
-
 import csv
 from pathlib import Path
 

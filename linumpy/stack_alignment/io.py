@@ -34,7 +34,7 @@ def load_shifts_csv(shifts_path: Path) -> tuple[dict, list]:
     for _, row in df.iterrows():
         fixed_id = int(row["fixed_id"])
         moving_id = int(row["moving_id"])
-        shift_lookup[(fixed_id, moving_id)] = (row["x_shift_mm"], row["y_shift_mm"])
+        shift_lookup[fixed_id, moving_id] = (row["x_shift_mm"], row["y_shift_mm"])
 
     cumsum = {all_ids[0]: (0.0, 0.0)}
     for i in range(len(all_ids) - 1):
@@ -80,7 +80,7 @@ def build_cumulative_shifts(
     for _, row in shifts_df.iterrows():
         fixed_id = int(row["fixed_id"])
         moving_id = int(row["moving_id"])
-        shift_lookup[(fixed_id, moving_id)] = (row["x_shift_mm"], row["y_shift_mm"])
+        shift_lookup[fixed_id, moving_id] = (row["x_shift_mm"], row["y_shift_mm"])
 
     all_slice_ids = set()
     for _, row in shifts_df.iterrows():

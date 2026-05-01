@@ -2,8 +2,6 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 """Sphinx configuration for the linumpy documentation."""
 
-from __future__ import annotations
-
 import sys
 from datetime import datetime
 from pathlib import Path
