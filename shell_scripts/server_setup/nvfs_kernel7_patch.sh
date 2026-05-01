@@ -23,6 +23,17 @@
 #      nvidia_p2p_dma_unmap_pages fails and nvidia-fs falls back to the
 #      no-symver path -> GDS stays in compat mode. Fix: add a *.ko.zst
 #      branch that decompresses with zstd before nm runs.
+#   4) create_nv.symvers.sh detects relative CRCs with `grep -e "\sR\s*__crc"`
+#      but on kernel 7.0 / current open-gpu-kmd builds the __crc_nvidia_p2p_*
+#      symbols are emitted as section-local rodata (lowercase `r`), not
+#      global (`R`). The detection misses them, so the script falls through
+#      and writes the *relocation offsets* (0x4, 0x8, 0xc, ...) as fake
+#      CRCs. nvidia-fs.ko then fails the modversion check on
+#      nvidia_p2p_dma_unmap_pages at load time and GDS silently drops to
+#      compat -> NVMe: Unsupported. Fix: case-insensitive grep, which
+#      triggers the existing try_compile_nvidia_sources fallback that
+#      compiles nvidia from /usr/src/nvidia-<ver> and produces a real
+#      Module.symvers via genksyms.
 #
 # USAGE (server-side, as root)
 # ----------------------------
@@ -59,9 +70,12 @@ p = Path("nvfs-mmap.c")
 s = p.read_text()
 old = "\tvm_flags = ACCESS_PRIVATE(vma, __vm_flags);"
 new = "\tvm_flags = vma->vm_flags;"
-assert old in s, "expected ACCESS_PRIVATE line not found"
-p.write_text(s.replace(old, new, 1))
-print("nvfs-mmap.c: patched vm_flags read")
+if old not in s:
+    assert new in s, "neither original nor patched vm_flags line found"
+    print("nvfs-mmap.c: already patched")
+else:
+    p.write_text(s.replace(old, new, 1))
+    print("nvfs-mmap.c: patched vm_flags read")
 PY
 
 # --- configure: add HAVE_BLK_MAP_ITER probe --------------------------------
@@ -157,13 +171,38 @@ from pathlib import Path
 p = Path("create_nv.symvers.sh")
 s = p.read_text()
 anchor = '''\tcase "$nvidia_mod" in\n\t\t*ko.xz)\n\t\t\t/bin/cp -fv $nvidia_mod .\n\t\t\tnvidia_mod=$(basename $nvidia_mod | sed -e "s/.xz//g")\n\t\t\txz -d ${nvidia_mod}.xz\n\t\t\t;;\n\tesac'''
-addition = '''\tcase "$nvidia_mod" in\n\t\t*ko.xz)\n\t\t\t/bin/cp -fv $nvidia_mod .\n\t\t\tnvidia_mod=$(basename $nvidia_mod | sed -e "s/.xz//g")\n\t\t\txz -d ${nvidia_mod}.xz\n\t\t\t;;\n\t\t*ko.zst)\n\t\t\t/bin/cp -fv $nvidia_mod .\n\t\t\tnvidia_mod=$(basename $nvidia_mod | sed -e "s/.zst//g")\n\t\t\tzstd -d --rm ${nvidia_mod}.zst\n\t\t\t;;\n\tesac'''
+addition = '''\tcase "$nvidia_mod" in\n\t\t*ko.xz)\n\t\t\t/bin/cp -fv $nvidia_mod .\n\t\t\tnvidia_mod=$(basename $nvidia_mod | sed -e "s/.xz//g")\n\t\t\txz -df ${nvidia_mod}.xz\n\t\t\t;;\n\t\t*ko.zst)\n\t\t\t/bin/cp -fv $nvidia_mod .\n\t\t\tnvidia_mod=$(basename $nvidia_mod | sed -e "s/.zst//g")\n\t\t\tzstd -df --rm ${nvidia_mod}.zst\n\t\t\t;;\n\tesac'''
 if "*ko.zst" in s:
-    print("create_nv.symvers.sh: zst branch already present")
+    # Ensure -df (force overwrite) is present even if branch already added by an older patch run
+    s2 = s.replace("zstd -d --rm", "zstd -df --rm")
+    if s2 != s:
+        p.write_text(s2)
+        print("create_nv.symvers.sh: upgraded zstd to -df (force)")
+    else:
+        print("create_nv.symvers.sh: zst branch already present")
 else:
     assert anchor in s, "xz case anchor not found in create_nv.symvers.sh"
     p.write_text(s.replace(anchor, addition, 1))
     print("create_nv.symvers.sh: added zst decompression branch")
+PY
+
+# --- create_nv.symvers.sh: case-insensitive relative-CRC detection ---------
+# kernel 7.0 / current open-gpu-kmd emit __crc_nvidia_p2p_* as section-local
+# rodata (lowercase `r`); upstream regex only matches uppercase `R` and
+# silently writes relocation offsets as fake CRCs. Make grep -i so the
+# fallback try_compile_nvidia_sources path runs and yields real CRCs.
+python3 - <<'PY'
+from pathlib import Path
+p = Path("create_nv.symvers.sh")
+s = p.read_text()
+old = 'if (nm -o $nvidia_mod | grep "$crc_mod_str" | grep -qe "\\sR\\s*__crc"); then'
+new = 'if (nm -o $nvidia_mod | grep "$crc_mod_str" | grep -qie "\\sR\\s*__crc"); then'
+if new in s:
+    print("create_nv.symvers.sh: case-insensitive CRC grep already present")
+else:
+    assert old in s, "relative-CRC grep anchor not found"
+    p.write_text(s.replace(old, new, 1))
+    print("create_nv.symvers.sh: made relative-CRC grep case-insensitive")
 PY
 
 echo "patch done"
