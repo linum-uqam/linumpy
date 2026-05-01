@@ -145,8 +145,9 @@ process fix_focal_curvature {
     tuple val(slice_id), path("mosaic_grid_z${slice_id}_focal_fix.ome.zarr")
 
     script:
+    def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
     """
-    linum_detect_focal_curvature.py ${mosaic_grid} "mosaic_grid_z${slice_id}_focal_fix.ome.zarr"
+    linum_detect_focal_curvature.py ${mosaic_grid} "mosaic_grid_z${slice_id}_focal_fix.ome.zarr" ${gpu_flag}
     """
 
     stub:
@@ -675,6 +676,7 @@ process stack {
     path("stacking_decisions.csv"), optional: true, emit: stacking_decisions
 
     script:
+    def gpu_flag = params.use_gpu ? " --use_gpu" : " --no-use_gpu"
     def options = Helpers.stackBlendingArgs(params) +
                   Helpers.stackZMatchingArgs(params) +
                   Helpers.stackPairwiseTransformArgs(params) +
@@ -683,6 +685,7 @@ process stack {
                   Helpers.stackCumulativeArgs(params) +
                   Helpers.stackSmoothingArgs(params) +
                   " --no_xy_shift" +  // slices are already in common space
+                  gpu_flag +
                   Helpers.pyramidArgs(params)
 
     def annotated_args = Helpers.annotatedScreenshotArgs(params, slice_ids_str)

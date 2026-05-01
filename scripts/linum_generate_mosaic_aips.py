@@ -62,16 +62,19 @@ def compute_aip(vol: Any, use_gpu: bool = True) -> np.ndarray:
             cmin = j * tile_shape[2]
             cmax = (j + 1) * tile_shape[2]
 
-            tile = np.asarray(vol[:, rmin:rmax, cmin:cmax])
+            tile = vol[:, rmin:rmax, cmin:cmax]
 
             if use_gpu:
                 import cupy as cp
 
-                tile_gpu = cp.asarray(tile.astype(np.float32))
-                aip[rmin:rmax, cmin:cmax] = to_cpu(cp.mean(tile_gpu, axis=0))
+                # Slices may already be cupy when the read happens inside
+                # ``gpu_zarr_context`` (no extra H→D copy). Otherwise we
+                # transfer the host tile once.
+                tile_gpu = tile if isinstance(tile, cp.ndarray) else cp.asarray(np.asarray(tile))
+                aip[rmin:rmax, cmin:cmax] = to_cpu(cp.mean(tile_gpu.astype(cp.float32), axis=0))
                 del tile_gpu
             else:
-                aip[rmin:rmax, cmin:cmax] = tile.mean(axis=0)
+                aip[rmin:rmax, cmin:cmax] = np.asarray(tile).mean(axis=0)
 
     if use_gpu:
         try:
@@ -166,12 +169,25 @@ def main() -> None:
             f"No mosaic grid files found in {input_dir}.\nExpected files matching 'mosaic_grid_3d_z*.ome.zarr'."
         )
 
-    for mosaic_file in tqdm(mosaic_files, desc="Generating AIPs"):
-        slice_id = mosaic_file.name[len("mosaic_grid_3d_z") : -len(".ome.zarr")]
-        output_file = output_dir / f"aip_z{slice_id}.png"
-        vol, _ = read_omezarr(mosaic_file, level=args.level)
-        aip = compute_aip(vol, use_gpu=use_gpu)
-        save_aip_png(aip, output_file)
+    if use_gpu:
+        # Open each volume inside the GPU context so tile slices land on
+        # device memory directly (no host round-trip per tile).
+        from linumpy.gpu.zarr_io import gpu_zarr_context
+
+        for mosaic_file in tqdm(mosaic_files, desc="Generating AIPs"):
+            slice_id = mosaic_file.name[len("mosaic_grid_3d_z") : -len(".ome.zarr")]
+            output_file = output_dir / f"aip_z{slice_id}.png"
+            with gpu_zarr_context():
+                vol, _ = read_omezarr(mosaic_file, level=args.level)
+                aip = compute_aip(vol, use_gpu=True)
+            save_aip_png(aip, output_file)
+    else:
+        for mosaic_file in tqdm(mosaic_files, desc="Generating AIPs"):
+            slice_id = mosaic_file.name[len("mosaic_grid_3d_z") : -len(".ome.zarr")]
+            output_file = output_dir / f"aip_z{slice_id}.png"
+            vol, _ = read_omezarr(mosaic_file, level=args.level)
+            aip = compute_aip(vol, use_gpu=False)
+            save_aip_png(aip, output_file)
 
 
 if __name__ == "__main__":

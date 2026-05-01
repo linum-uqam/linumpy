@@ -33,8 +33,8 @@ backend selection is per-call (`backend="cpu" | "gpu" | "auto"`); the auto path 
 nvidia-smi | grep "CUDA Version"
 
 # Install linumpy with GPU support (choose your CUDA version)
-uv pip install 'linumpy[gpu]'           # CUDA 12.x (default)
-uv pip install 'linumpy[gpu-cuda13]'    # CUDA 13.x
+uv pip install 'linumpy[gpu]'           # CUDA 13.x (default)
+uv pip install 'linumpy[gpu-cuda12]'    # CUDA 12.x
 
 # Verify GPU
 linum_gpu_info.py
@@ -57,8 +57,8 @@ linum_diagnose_pipeline.py --benchmark
 
 | CUDA Version | CuPy Package | linumpy extra |
 |--------------|--------------|---------------|
-| CUDA 12.x    | `cupy-cuda12x` | `linumpy[gpu]` |
-| CUDA 13.x    | `cupy-cuda13x` | `linumpy[gpu-cuda13]` |
+| CUDA 13.x    | `cupy-cuda13x` | `linumpy[gpu]` (default) |
+| CUDA 12.x    | `cupy-cuda12x` | `linumpy[gpu-cuda12]` |
 
 ---
 
@@ -232,4 +232,64 @@ from linumpy.gpu.fft_ops import fft2, ifft2, phase_correlation
 from linumpy.gpu.interpolation import resize, affine_transform
 from linumpy.gpu.morphology import binary_closing, gaussian_filter
 from linumpy.gpu.array_ops import normalize_percentile, clip_percentile
+from linumpy.gpu.zarr_io import read_zarr_to_gpu
 ```
+
+---
+
+## Fast zarr → GPU loading
+
+For zarr arrays on local NVMe, `linumpy.gpu.zarr_io.read_zarr_to_gpu` is the recommended entry point. It dispatches to the fastest backend available at runtime:
+
+```python
+from linumpy.gpu.zarr_io import read_zarr_to_gpu
+
+dev = read_zarr_to_gpu("/scratch_nvme/volume.zarr")
+# dev is a cupy.ndarray
+```
+
+Backend implementations live in their own modules:
+
+- `linumpy.gpu.kvikio_zarr` — kvikio / GPUDirect Storage reader (uncompressed zarr v2/v3 only).
+
+Selection order (when `prefer="auto"`):
+
+1. **kvikio (GPUDirect Storage, native mode)** — chunks DMA'd directly from NVMe into GPU memory. Fastest. Requires `kvikio` installed, GDS native mode enabled (`/etc/cufile.json`: `allow_compat_mode=false`), and an uncompressed zarr.
+2. **`zarr.config.enable_gpu()`** — host I/O with on-host decode, single H→D copy. Works for any zarr (compressed or not) and is the automatic fallback when GDS is unavailable, in compat mode, or the array is compressed.
+
+You can force a specific path with `prefer="kvikio"` or `prefer="zarr-gpu"`. The legacy `cupy.asarray(zarr.open_array(...)[:])` path is kept only as a reference baseline in `linum_benchmark_kvikio_zarr.py`.
+
+### Reference benchmark
+
+`scripts/linum_benchmark_kvikio_zarr.py` measures all three paths. On a 16 GiB float32 zarr v3 (256³ chunks) on local NVMe ext4 with an RTX A6000:
+
+| Path | Cold | Warm |
+|---|---|---|
+| kvikio (GDS native) | 8.2 GiB/s | **9.9 GiB/s** |
+| `zarr.config.enable_gpu()` | 6.3 GiB/s | 7.1 GiB/s |
+| `zarr → numpy → cupy.asarray` | 1.1 GiB/s | 2.8 GiB/s |
+
+In compat mode (GDS bounce-buffer), kvikio drops to ~4 GiB/s — slower than the `zarr-gpu` path. The auto selector detects this via `kvikio.defaults.compat_mode()` and prefers `zarr-gpu` in that case.
+
+### Installing the GDS path
+
+```bash
+# CuPy + linumpy GPU support
+uv pip install 'linumpy[gpu]'           # CUDA 13.x (default)
+uv pip install 'linumpy[gpu-cuda12]'    # CUDA 12.x
+
+# kvikio (optional, only needed for the GDS fast path)
+uv pip install 'linumpy[gds]'           # CUDA 13.x (default)
+uv pip install 'linumpy[gds-cuda12]'    # CUDA 12.x
+```
+
+### Enabling native GDS
+
+Native GDS additionally requires:
+
+- A CUDA-aware filesystem on the source path (ext4 / xfs on local NVMe is fine; NFS, overlayfs, encrypted FS are not).
+- `/etc/cufile.json`: `properties.use_compat_mode = false`.
+- IOMMU disabled or in passthrough (`amd_iommu=off iommu=off` on AMD; `intel_iommu=off` on Intel).
+- nvidia-fs DKMS module loaded with matching ABI; verify `dmesg | grep nvidia_fs` shows no "no extended symbol version" warnings after driver/kernel updates.
+
+If any of these are missing, kvikio silently falls back to a POSIX bounce-buffer (compat mode) and `read_zarr_to_gpu` will route around it.

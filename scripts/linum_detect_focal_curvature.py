@@ -7,6 +7,7 @@ import linumpy.config.threads  # noqa: F401
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 import dask.array as da
 import numpy as np
@@ -14,11 +15,10 @@ import zarr
 from basicpy import BaSiC
 
 from linumpy.geometry.interface import find_tissue_interface
+from linumpy.gpu import GPU_AVAILABLE, to_cpu
 from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
 
-# TODO: Replace by interpolation using deformation field
-# TODO: optimize for full resolution data
-# TODO: parallelize the correction
+# TODO: Replace integer roll by sub-voxel interpolation using a deformation field
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -36,6 +36,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--sigma_z", type=float, default=2.0, help="Gaussian smoothing sigma in Z before interface detection [%(default)s]"
     )
     p.add_argument("--use_log", action="store_true", help="Apply log transform before gradient detection")
+    p.add_argument(
+        "--use_gpu",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use GPU acceleration for the per-tile focal-plane shift if available [%(default)s].",
+    )
     return p
 
 
@@ -54,7 +60,13 @@ def main() -> None:
     dtype = vol.dtype
     data = np.moveaxis(np.asarray(vol), 0, -1)
     # Estimate the water-tissue interface
-    z0 = find_tissue_interface(np.abs(data), s_xy=args.sigma_xy, s_z=args.sigma_z, use_log=args.use_log)
+    z0 = find_tissue_interface(
+        np.abs(data),
+        s_xy=args.sigma_xy,
+        s_z=args.sigma_z,
+        use_log=args.use_log,
+        use_gpu=args.use_gpu,
+    )
 
     # Extract the tile shape from the filename
     tile_shape = vol.chunks
@@ -84,10 +96,24 @@ def main() -> None:
     # Apply the correction to a tile
     corr = ((flatfield - 1) * z0.mean()).astype(int)
 
+    use_gpu = args.use_gpu and GPU_AVAILABLE
+    if use_gpu:
+        import cupy as cp
+
+        xp: Any = cp
+    else:
+        xp = np
+
+    nz_full = vol.shape[0]
+    z_arange = xp.arange(nz_full)[:, None, None]
+    corr_xp = xp.asarray(corr)
+    # Per-(m, n) circular shift along Z, vectorised via take_along_axis.
+    # Equivalent to: tile[:, m, n] = roll(tile[:, m, n], -corr[m, n]).
+
     temp_store = create_tempstore()
-    _vol_corr = zarr.open(temp_store, mode="w", shape=vol.shape, dtype=dtype, chunks=tile_shape)
-    assert isinstance(_vol_corr, zarr.Array)
-    vol_corr = _vol_corr
+    vol_corr_ = zarr.open(temp_store, mode="w", shape=vol.shape, dtype=dtype, chunks=tile_shape)
+    assert isinstance(vol_corr_, zarr.Array)
+    vol_corr = vol_corr_
 
     for i in range(nx):
         for j in range(ny):
@@ -95,14 +121,14 @@ def main() -> None:
             rmax = (i + 1) * tile_shape[1]
             cmin = j * tile_shape[2]
             cmax = (j + 1) * tile_shape[2]
-            tile = np.asarray(vol[:, rmin:rmax, cmin:cmax])
-
-            # Apply the correction (shift the focal plane to flatten it)
-            for m in range(tile.shape[1]):
-                for n in range(tile.shape[2]):
-                    tile[:, m, n] = np.roll(tile[:, m, n], -corr[m, n])
-
-            vol_corr[:, rmin:rmax, cmin:cmax] = tile
+            tile_np = np.asarray(vol[:, rmin:rmax, cmin:cmax])
+            tile_xp = xp.asarray(tile_np) if use_gpu else tile_np
+            # corr is a single per-tile correction (shape == tile_shape[1:]) shared
+            # across all tile positions, so broadcast it against every tile rather
+            # than slicing into volume coordinates.
+            z_idx_tile = (z_arange + corr_xp[None, :, :]) % nz_full
+            tile_rolled = xp.take_along_axis(tile_xp, z_idx_tile, axis=0)
+            vol_corr[:, rmin:rmax, cmin:cmax] = to_cpu(tile_rolled) if use_gpu else tile_rolled
 
     # save to ome-zarr
     dask_arr = da.from_zarr(vol_corr)

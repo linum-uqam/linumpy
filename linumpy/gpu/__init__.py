@@ -165,6 +165,21 @@ def to_cpu(array: Any) -> Any:
     return array
 
 
+def is_cupy_array(array: Any) -> bool:
+    """Return True iff ``array`` is a CuPy ``ndarray``.
+
+    Importing CuPy is gated on availability so this stays cheap to call from
+    code paths that may be hit without CUDA.
+    """
+    if not GPU_AVAILABLE:
+        return False
+    try:
+        import cupy as cp
+    except ImportError:
+        return False
+    return isinstance(array, cp.ndarray)
+
+
 def gpu_info() -> Any:
     """
     Get information about GPU availability and configuration.

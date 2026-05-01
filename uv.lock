@@ -1552,6 +1552,36 @@ wheels = [
 ]
 
 [[package]]
+name = "kvikio-cu12"
+version = "26.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cupy-cuda12x" },
+    { name = "libkvikio-cu12" },
+    { name = "numpy" },
+    { name = "packaging" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/80/24/95abc4335e8db5b8e140dbe7bdaa9bd7c8620cc087b33ccf748f474c43b0/kvikio_cu12-26.4.0-cp311-abi3-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:72cf92d7786b9cb34c60d616a25ef1c802ee465ebc20dd4b5ca2a365b409be16", size = 587150, upload-time = "2026-04-09T11:38:07.743Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/2e/08785cce15da72c9185285b8933d0a14a040f2350241beeb92c7a3dd8ee1/kvikio_cu12-26.4.0-cp311-abi3-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:58fa8aa9782f5e426c0568a05cbf232946e80f89efc6d5ef0eaec78f0771580a", size = 626286, upload-time = "2026-04-09T11:25:20.927Z" },
+]
+
+[[package]]
+name = "kvikio-cu13"
+version = "26.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cupy-cuda13x" },
+    { name = "libkvikio-cu13" },
+    { name = "numpy" },
+    { name = "packaging" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2c/4c/ef90121df05681f697dcb5a7629b270406189b5c69ec3fb36b039d699252/kvikio_cu13-26.4.0-cp311-abi3-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f0f9ca47618d8c258456faf763e5c7a1c2dc6e94ba1cea7a7e87439c8aad9cbd", size = 587146, upload-time = "2026-04-09T11:37:19.209Z" },
+    { url = "https://files.pythonhosted.org/packages/79/8c/350a0d40ae61875cd6bea3bc74cd6938d6f499bdaa92634e681d665dc3ca/kvikio_cu13-26.4.0-cp311-abi3-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b261b23fda12b16bacef1a27cea4f1a2e676e0284f5430ea8bf38f4fb8a69c30", size = 626286, upload-time = "2026-04-09T11:24:47.952Z" },
+]
+
+[[package]]
 name = "lazy-loader"
 version = "0.5"
 source = { registry = "https://pypi.org/simple" }
@@ -1561,6 +1591,24 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/49/ac/21a1f8aa3777f5658576777ea76bfb124b702c520bbe90edf4ae9915eafa/lazy_loader-0.5.tar.gz", hash = "sha256:717f9179a0dbed357012ddad50a5ad3d5e4d9a0b8712680d4e687f5e6e6ed9b3", size = 15294, upload-time = "2026-03-06T15:45:09.054Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8a/a1/8d812e53a5da1687abb10445275d41a8b13adb781bbf7196ddbcf8d88505/lazy_loader-0.5-py3-none-any.whl", hash = "sha256:ab0ea149e9c554d4ffeeb21105ac60bed7f3b4fd69b1d2360a4add51b170b005", size = 8044, upload-time = "2026-03-06T15:45:07.668Z" },
+]
+
+[[package]]
+name = "libkvikio-cu12"
+version = "26.4.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5e/1a/237ad2d561e683eff68217c5b862d52f90ed4cb64d376681cb0f65a1f521/libkvikio_cu12-26.4.0-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:0c051a60322877785ce37f5b1229902a5af3099c2180dd20c68a27c8dc55b9cf", size = 2218685, upload-time = "2026-04-09T11:26:41.1Z" },
+    { url = "https://files.pythonhosted.org/packages/c6/15/62e5947e72aeeafdcaf8ebaf8e352ec505d445634514fd939b56c44cc467/libkvikio_cu12-26.4.0-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:1334b5210d3b05d760085cd3575af96cfe3dc2717065e8532bdcc7c9b195233b", size = 2367209, upload-time = "2026-04-09T11:20:56.055Z" },
+]
+
+[[package]]
+name = "libkvikio-cu13"
+version = "26.4.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/74/a6/146d2101afbb768e6aed5cca77822706355873b4cc69db17d9b7e74ed415/libkvikio_cu13-26.4.0-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:cadac4668d426d11637211f04714f3df0e4ac37a4bde603575f57efeacc1f652", size = 2218592, upload-time = "2026-04-09T11:25:55.48Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/d6/612a5015a719705d682b27f0075233068bc81d9ea38ba4bd5f3e21296bd4/libkvikio_cu13-26.4.0-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:3e0fd921efc7407f8319b4accbd4dc2c1ae65a05853d4e11d68b61e4f3013140", size = 2367571, upload-time = "2026-04-09T11:20:34.086Z" },
 ]
 
 [[package]]
@@ -1618,11 +1666,17 @@ docs = [
     { name = "sphinxcontrib-mermaid" },
     { name = "sphinxext-opengraph" },
 ]
-gpu = [
-    { name = "cupy-cuda12x" },
+gds = [
+    { name = "kvikio-cu13" },
 ]
-gpu-cuda13 = [
+gds-cuda12 = [
+    { name = "kvikio-cu12" },
+]
+gpu = [
     { name = "cupy-cuda13x" },
+]
+gpu-cuda12 = [
+    { name = "cupy-cuda12x" },
 ]
 
 [package.dev-dependencies]
@@ -1641,11 +1695,13 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "basicpy" },
-    { name = "cupy-cuda12x", marker = "extra == 'gpu'", specifier = ">=12.0.0" },
-    { name = "cupy-cuda13x", marker = "extra == 'gpu-cuda13'", specifier = ">=13.0.0" },
+    { name = "cupy-cuda12x", marker = "extra == 'gpu-cuda12'", specifier = ">=12.0.0" },
+    { name = "cupy-cuda13x", marker = "extra == 'gpu'", specifier = ">=13.0.0" },
     { name = "dask", specifier = ">=2024.10.0" },
     { name = "dipy" },
     { name = "hyperactive" },
+    { name = "kvikio-cu12", marker = "extra == 'gds-cuda12'" },
+    { name = "kvikio-cu13", marker = "extra == 'gds'" },
     { name = "linkify-it-py", marker = "extra == 'docs'", specifier = ">=2.1" },
     { name = "matplotlib" },
     { name = "myst-parser", marker = "extra == 'docs'", specifier = ">=5.0" },
@@ -1654,7 +1710,7 @@ requires-dist = [
     { name = "nibabel" },
     { name = "numcodecs" },
     { name = "numpy" },
-    { name = "ome-zarr", specifier = ">=0.9.0" },
+    { name = "ome-zarr", specifier = ">=0.16.0" },
     { name = "pandas" },
     { name = "pqdm" },
     { name = "pydata-sphinx-theme", marker = "extra == 'docs'", specifier = ">=0.17" },
@@ -1676,7 +1732,7 @@ requires-dist = [
     { name = "tqdm" },
     { name = "zarr", specifier = ">=3.0.10" },
 ]
-provides-extras = ["gpu", "gpu-cuda13", "docs"]
+provides-extras = ["gpu", "gpu-cuda12", "gds", "gds-cuda12", "docs"]
 
 [package.metadata.requires-dev]
 dev = [

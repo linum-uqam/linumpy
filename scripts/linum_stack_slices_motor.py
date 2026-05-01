@@ -288,6 +288,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "Default: none (use only automated transforms).",
     )
 
+    p.add_argument(
+        "--use_gpu",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use GPU acceleration for the Z-overlap NCC sweep when available [%(default)s].",
+    )
+
     add_overwrite_arg(p)
     return p
 
@@ -940,7 +947,9 @@ def main() -> None:
         else:
             # find_z_overlap expects resolution in µm for its internal calculation
             res_z_um = res_z_mm * 1000
-            overlap, corr = find_z_overlap(prev_vol, vol, args.slicing_interval_mm, args.search_range_mm, res_z_um)
+            overlap, corr = find_z_overlap(
+                prev_vol, vol, args.slicing_interval_mm, args.search_range_mm, res_z_um, use_gpu=args.use_gpu
+            )
             # Fall back to expected overlap when correlation is too low to trust
             if args.z_overlap_min_corr > 0 and corr < args.z_overlap_min_corr:
                 interval_voxels = int(args.slicing_interval_mm / res_z_mm)

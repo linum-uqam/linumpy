@@ -40,15 +40,21 @@ OME-Zarr is the canonical on-disk format. Two writers are provided:
 Common entry points:
 
 ```python
-from linumpy.io.zarr import read_omezarr, save_omezarr, OmeZarrWriter, AnalysisOmeZarrWriter
+from linumpy.io.zarr import read_omezarr, read_omezarr_array, save_omezarr, OmeZarrWriter, AnalysisOmeZarrWriter
 from linumpy.io.test_data import get_data
 from linumpy.io import slice_config        # slice_config.json reader/writer
 from linumpy.io.thorlabs import ThorImageOCT
 ```
 
-`read_omezarr(path, level=0)` returns a `(zarr.Array, voxel_size)` tuple. The
-voxel size is ordered to match the array axes (Z, Y, X for 3D volumes;
-Y, X for 2D mosaics).
+`read_omezarr(path, level=0)` returns a `(zarr.Array, voxel_size)` tuple (lazy).
+`read_omezarr_array(path, level=0, use_gpu=False)` is the high-level entry
+point: it materialises the requested level into memory and returns
+`(array, voxel_size)`. With ``use_gpu=False`` (default) the array is a
+``numpy.ndarray``; with ``use_gpu=True`` it dispatches through
+[`linumpy.gpu.zarr_io.read_zarr_to_gpu`](GPU_ACCELERATION.md) and returns a
+``cupy.ndarray`` (kvikio/GPUDirect Storage when available, otherwise the
+``zarr.config.enable_gpu`` fallback). Voxel size is ordered to match the array
+axes (Z, Y, X for 3D volumes; Y, X for 2D mosaics).
 
 See [Mosaic Grid Format](MOSAIC_GRID_FORMAT.md) and
 [Slice Config Feature](SLICE_CONFIG_FEATURE.md) for format details.
@@ -136,6 +142,9 @@ CuPy-backed versions of hot paths. Each public entry point either takes a
 * `gpu.registration`, `gpu.corrections` — GPU registration and correction
   passes used by `linum_estimate_transform.py`,
   `linum_normalize_intensities_per_slice.py`, etc.
+* `gpu.zarr_io` — high-level `read_zarr_to_gpu` dispatcher: picks the
+  fastest backend available (kvikio/GDS native → `zarr.config.enable_gpu`).
+* `gpu.kvikio_zarr` — kvikio / GPUDirect Storage backend for the dispatcher.
 
 See [GPU Acceleration](GPU_ACCELERATION.md) and [N4 GPU](N4_GPU.md).
 

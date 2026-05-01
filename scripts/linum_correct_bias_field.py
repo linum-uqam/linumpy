@@ -29,7 +29,7 @@ from linumpy.intensity.bias_field import (
     n4_correct_per_section,
 )
 from linumpy.intensity.normalization import apply_histogram_matching, apply_zprofile_smoothing
-from linumpy.io.zarr import AnalysisOmeZarrWriter, read_omezarr
+from linumpy.io.zarr import AnalysisOmeZarrWriter, read_omezarr_array
 
 logger = logging.getLogger(__name__)
 
@@ -210,12 +210,9 @@ def main() -> None:
 
     n_processes = parse_processes_arg(args.n_processes)
 
-    # Load volume
-    vol_da, res = read_omezarr(args.in_image, level=0)
-    vol = np.asarray(vol_da).astype(np.float32)
-    logger.info("Loaded volume %s from %s", vol.shape, args.in_image)
-
-    # Resolve GPU usage from --backend choice for non-N4 stages.
+    # Resolve GPU usage from --backend choice for non-N4 stages. We resolve
+    # this BEFORE reading so we can stream the volume directly into device
+    # memory through the GDS / zarr-gpu fast path when the GPU is in play.
     if args.backend == "gpu":
         use_gpu_pre = True
     elif args.backend == "auto":
@@ -224,6 +221,11 @@ def main() -> None:
         use_gpu_pre = GPU_AVAILABLE
     else:
         use_gpu_pre = False
+
+    # Load volume — onto GPU directly when use_gpu_pre, else host.
+    vol, res = read_omezarr_array(args.in_image, level=0, use_gpu=use_gpu_pre)
+    vol = vol.astype(np.float32)  # works on both numpy and cupy arrays
+    logger.info("Loaded volume %s from %s (gpu=%s)", vol.shape, args.in_image, use_gpu_pre)
 
     # Tissue mask (per serial section)
     mask = compute_tissue_mask(
@@ -263,7 +265,7 @@ def main() -> None:
     n4_kwargs = {
         "shrink_factor": args.shrink_factor,
         "n_iterations": args.n_iterations,
-        "voxel_size_mm": tuple(res),
+        "voxel_size_mm": (float(res[0]), float(res[1]), float(res[2])),
         "backend": args.backend,
     }
 
