@@ -39,7 +39,7 @@ dependencies = [
     "pqdm",
     "hyperactive",
     "basicpy",
-    "zarr>=3.0.10",
+    "zarr>=3.2.0",
     "ome-zarr>=0.16.0",
     "napari",
     "napari-ome-zarr",
@@ -61,9 +61,11 @@ gpu-cuda12 = [
 ]
 gds = [
     "kvikio-cu13",
+    "nvidia-nvcomp-cu13",
 ]
 gds-cuda12 = [
     "kvikio-cu12",
+    "nvidia-nvcomp-cu12",
 ]
 docs = [
     "sphinx>=9.1",
@@ -280,7 +282,7 @@ possibly-unresolved-reference = "error"
 # Optional GPU deps — not installed in the standard dev env.
 # Using replace-imports-with-any so downstream attribute/subscript access
 # on the imported module is typed as Any rather than causing cascading errors.
-replace-imports-with-any = ["cupy.**", "cupyx.**", "numba.**", "kvikio.**"]
+replace-imports-with-any = ["cupy.**", "cupyx.**", "numba.**", "kvikio.**", "nvidia.**"]
 
 # --- ty overrides ---
 
