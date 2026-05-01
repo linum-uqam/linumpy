@@ -61,7 +61,9 @@ def rescale(image: Any, scale: float | Sequence[float], order: int = 1, use_gpu:
         Rescaled image.
     """
     scale_tuple = tuple([float(scale)] * image.ndim) if isinstance(scale, (int, float)) else tuple(scale)
-    output_shape = tuple(round(s * sc) for s, sc in zip(image.shape, scale_tuple, strict=False))
+    # Clamp to >=1 so heavy downsampling of small axes (e.g. Z=5 by factor 0.1)
+    # doesn't produce a zero-sized output that triggers ZeroDivisionError downstream.
+    output_shape = tuple(max(1, round(s * sc)) for s, sc in zip(image.shape, scale_tuple, strict=False))
     return resize(image, output_shape, order=order, anti_aliasing=True, use_gpu=use_gpu)
 
 
@@ -163,7 +165,7 @@ def main() -> None:
     print(f"  Target resolution: {args.resolution} µm")
     print(f"  Scale factor: {scaling_factor}")
 
-    out_tile_shape = tuple(round(s * sc) for s, sc in zip(tile_shape, scaling_factor, strict=False))
+    out_tile_shape = tuple(max(1, round(s * sc)) for s, sc in zip(tile_shape, scaling_factor, strict=False))
 
     nx = vol.shape[1] // tile_shape[1]
     ny = vol.shape[2] // tile_shape[2]
