@@ -22,7 +22,6 @@ from tqdm import tqdm
 from linumpy.geometry.resampling import resolution_is_mm
 from linumpy.gpu import GPU_AVAILABLE, print_gpu_info
 from linumpy.gpu.interpolation import resize
-from linumpy.gpu.zarr_io import gpu_zarr_context
 from linumpy.io import OmeZarrWriter, read_omezarr
 
 
@@ -67,12 +66,8 @@ def rescale(image: Any, scale: float | Sequence[float], order: int = 1, use_gpu:
 
 
 def _read_tile(vol: Any, i: Any, j: Any, tile_shape: Any) -> Any:
-    """Read one tile from the input zarr array (I/O stage of the pipeline).
-
-    Returns whatever array type the zarr backend yields: NumPy by default, or
-    CuPy when the volume was opened inside :func:`gpu_zarr_context`.
-    """
-    return vol[:, i * tile_shape[1] : (i + 1) * tile_shape[1], j * tile_shape[2] : (j + 1) * tile_shape[2]]
+    """Read one tile from the input zarr array (I/O stage of the pipeline)."""
+    return np.asarray(vol[:, i * tile_shape[1] : (i + 1) * tile_shape[1], j * tile_shape[2] : (j + 1) * tile_shape[2]])
 
 
 def _run_pipelined(
@@ -95,10 +90,15 @@ def _run_pipelined(
     if not tile_iter:
         return
 
-    # Note: do NOT periodically call cp.get_default_memory_pool().free_all_blocks().
-    # All tiles are the same size, so the pool reuses GPU buffers across iterations.
-    # Flushing forces cudaMalloc on the next tile and stalls the GPU; CuPy already
-    # retries with free_all_blocks() automatically on OOM.
+    cp: Any = None
+    cupy_available = False
+    if use_gpu:
+        try:
+            import cupy as cp
+
+            cupy_available = True
+        except Exception:
+            pass
 
     with ThreadPoolExecutor(max_workers=1) as prefetch_executor:
         i0, j0 = tile_iter[0]
@@ -115,6 +115,9 @@ def _run_pipelined(
             out_zarr[
                 :, i * out_tile_shape[1] : (i + 1) * out_tile_shape[1], j * out_tile_shape[2] : (j + 1) * out_tile_shape[2]
             ] = resampled
+
+            if cupy_available and cp is not None and k % 10 == 9:
+                cp.get_default_memory_pool().free_all_blocks()
 
 
 def main() -> None:
@@ -169,24 +172,11 @@ def main() -> None:
     out_shape = (out_tile_shape[0], nx * out_tile_shape[1], ny * out_tile_shape[2])
     print(f"  Output shape: {out_shape} ({total_tiles} tiles)")
 
+    out_zarr = OmeZarrWriter(args.out_mosaic, out_shape, out_tile_shape, dtype=vol.dtype, overwrite=True)
+
     tile_iter = list(itertools.product(range(nx), range(ny)))
+    _run_pipelined(vol, out_zarr, tile_iter, tile_shape, out_tile_shape, scaling_factor, use_gpu)
 
-    if use_gpu:
-        # Open BOTH the input volume and the output writer inside the GPU zarr
-        # context. That way per-tile reads land directly on device and per-tile
-        # writes accept cupy arrays through zarr's GPU buffer prototype, so the
-        # resample loop is fully device-resident:
-        #   read tile -> cupy gaussian + zoom -> write cupy slice
-        with gpu_zarr_context():
-            vol_gpu, _ = read_omezarr(args.in_mosaic)
-            out_zarr = OmeZarrWriter(args.out_mosaic, out_shape, out_tile_shape, dtype=vol.dtype, overwrite=True)
-            _run_pipelined(vol_gpu, out_zarr, tile_iter, tile_shape, out_tile_shape, scaling_factor, use_gpu)
-    else:
-        out_zarr = OmeZarrWriter(args.out_mosaic, out_shape, out_tile_shape, dtype=vol.dtype, overwrite=True)
-        _run_pipelined(vol, out_zarr, tile_iter, tile_shape, out_tile_shape, scaling_factor, use_gpu)
-
-    # Pyramid build reads the just-written level0 back via dask; run it outside
-    # the GPU context so dask uses the normal numpy buffer prototype.
     print("Building pyramid...")
     out_res = [target_res] * 3
     out_zarr.finalize(out_res, args.n_levels)
