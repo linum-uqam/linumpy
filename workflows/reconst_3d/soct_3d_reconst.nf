@@ -516,10 +516,11 @@ process resample_mosaic_grid {
     script:
     def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
     def gpu_pin_block = Helpers.gpuPinBlock(params, "resample slice=${slice_id}")
+    def prefetch = (params.resample_prefetch ?: 4) as int
     """
     ${gpu_pin_block}
     linum_resample_mosaic_grid.py ${mosaic_grid} "mosaic_grid_z${slice_id}_resampled.ome.zarr" \
-        -r ${params.resolution} ${gpu_flag} --n_levels 0 -v
+        -r ${params.resolution} ${gpu_flag} --prefetch ${prefetch} --n_levels 0 -v
     """
 
     stub:
