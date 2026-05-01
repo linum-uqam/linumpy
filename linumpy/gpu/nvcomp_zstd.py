@@ -187,6 +187,11 @@ def register_nvcomp_zstd() -> bool:
 
     Idempotent. Returns True if registration succeeded (or was already done), False if the
     required GPU dependencies (``cupy``, ``nvidia.nvcomp``) are not importable.
+
+    Note that registration alone is not enough to make zarr use the GPU codec — zarr 3.2
+    selects the concrete class via ``zarr.config["codecs.zstd"]`` and the default points at
+    the CPU codec. Use :func:`gpu_zstd_config` (or rely on
+    :func:`linumpy.gpu.zarr_io.gpu_zarr_context`) to flip the config for a scoped block.
     """
     global _REGISTERED
     if _REGISTERED:
@@ -201,3 +206,13 @@ def register_nvcomp_zstd() -> bool:
     register_codec("zstd", NvcompZstdCodec)
     _REGISTERED = True
     return True
+
+
+def gpu_zstd_config() -> dict[str, str]:
+    """Return the zarr config overrides that route the ``zstd`` codec through nvCOMP.
+
+    Pass the result to ``zarr.config.set(...)`` to enable GPU-side zstd decoding for the
+    duration of the ``set`` context. Caller is responsible for calling
+    :func:`register_nvcomp_zstd` first (otherwise zarr cannot resolve the class name).
+    """
+    return {"codecs.zstd": "linumpy.gpu.nvcomp_zstd.NvcompZstdCodec"}
