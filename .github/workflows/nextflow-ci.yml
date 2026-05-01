@@ -41,26 +41,13 @@ jobs:
           sudo chmod +x /usr/local/bin/nf-test
 
       - name: Lint Nextflow files
-        # `nextflow lint` does not load Groovy classes from `lib/`, so it
-        # falsely reports `Helpers` as undefined wherever the workflow calls
-        # `Helpers.X(...)`. We strip ANSI colour codes from the output, drop
-        # those known false-positives, and re-derive the exit status.
+        # Pass -project-dir so that nextflow lint (26.04+) can resolve Groovy
+        # classes from lib/ (e.g. Helpers). Each workflow lives in its own
+        # subdirectory, so lint is invoked once per workflow.
         run: |
-          tmp=$(mktemp)
-          nextflow lint \
-            workflows/preproc/preproc_rawtiles.nf \
-            workflows/reconst_3d/soct_3d_reconst.nf \
-            workflows/reconst_2.5d/soct_2.5d_reconst.nf \
-            > "$tmp" 2>&1 || true
-          sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' "$tmp" \
-            | awk '/`Helpers` is not defined/ { skip = 3; next } skip > 0 { skip--; next } { print }' \
-            > "$tmp.filt"
-          cat "$tmp.filt"
-          if grep -qE '^Error ' "$tmp.filt"; then
-            echo "::error::nextflow lint reported errors (excluding Helpers false-positives)"
-            exit 1
-          fi
-          echo "Lint passed (Helpers false-positives ignored: lib/ classes are loaded at runtime but not by 'nextflow lint')."
+          nextflow lint -project-dir workflows/preproc workflows/preproc/preproc_rawtiles.nf
+          nextflow lint -project-dir workflows/reconst_3d workflows/reconst_3d/soct_3d_reconst.nf
+          nextflow lint -project-dir workflows/reconst_2.5d workflows/reconst_2.5d/soct_2.5d_reconst.nf
 
       - name: Validate Nextflow configs
         run: |

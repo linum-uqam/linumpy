@@ -17,7 +17,7 @@ process analyze_rotation_drift {
     publishDir "${params.output}/diagnostics/rotation_analysis", mode: 'copy'
 
     input:
-    path("register_pairwise/*")
+    path "register_pairwise/*"
 
     output:
     path "rotation_analysis/*"
@@ -92,8 +92,8 @@ process stack_motor_only {
     publishDir "${params.output}/diagnostics/motor_only_stack", mode: 'copy'
 
     input:
-    path("slices/*")
-    path(shifts_file)
+    path "slices/*"
+    path shifts_file
 
     output:
     path "motor_only_stack.ome.zarr"
@@ -112,8 +112,8 @@ process analyze_acquisition_rotation {
     publishDir "${params.output}/diagnostics/acquisition_rotation", mode: 'copy'
 
     input:
-    path(shifts_file)
-    path("register_pairwise/*")
+    path shifts_file
+    path "register_pairwise/*"
 
     output:
     path "acquisition_rotation_analysis/*"

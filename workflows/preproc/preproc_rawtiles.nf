@@ -1,130 +1,17 @@
 #!/usr/bin/env nextflow
 nextflow.enable.dsl = 2
 
-// Workflow Description
-// Convert raw S-OCT tiles into mosaic grids and xy shifts
-// Input: Directory containing raw data set tiles
-// Output: Mosaic grids and xy shifts
-//
-// Parameters are defined in nextflow.config
-
-process create_mosaic_grid {
-    publishDir "${params.output}", mode: 'link'  // Hard link: no duplication, file stays accessible
-    
-    input:
-        tuple val(slice_id), path(tiles)
-    output:
-        tuple val(slice_id), path("*.ome.zarr")
-    script:
-    String options = ""
-    options += params.fix_galvo_shift? "--fix_galvo_shift":"--no-fix_galvo_shift"
-    options += " "
-    options += params.fix_camera_shift? "--fix_camera_shift":"--no-fix_camera_shift"
-    options += " "
-    options += params.preprocess? "--preprocess":"--no-preprocess"
-    // Select GPU or CPU script based on use_gpu parameter
-    String gpu_opts = params.use_gpu ? "--use_gpu --galvo_threshold ${params.galvo_confidence_threshold}" : "--no-use_gpu"
-    """
-    linum_create_mosaic_grid_3d.py mosaic_grid_3d_z${slice_id}.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution} --sharding_factor ${params.sharding_factor} ${options} ${gpu_opts}
-    """
-
-    stub:
-    """
-    mkdir -p mosaic_grid_3d_z${slice_id}.ome.zarr
-    """
-}
-
-process generate_aip {
-    publishDir "${params.output}/aips", mode: 'copy'
-
-    input:
-        tuple val(slice_id), path(mosaic_grid)
-    output:
-        tuple val(slice_id), path("aip_z${slice_id}.png")
-    script:
-    String gpu_opts = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
-    """
-    linum_aip_png.py ${mosaic_grid} aip_z${slice_id}.png ${gpu_opts}
-    """
-
-    stub:
-    """
-    touch aip_z${slice_id}.png
-    """
-}
-
-process generate_mosaic_preview {
-    maxForks 1
-    publishDir "${params.output}/previews", mode: 'copy'
-
-    input:
-        tuple val(slice_id), path(mosaic_grid)
-    output:
-        path("mosaic_grid_z${slice_id}_preview.png")
-    script:
-    """
-    linum_screenshot_omezarr.py ${mosaic_grid} mosaic_grid_z${slice_id}_preview.png
-    """
-
-    stub:
-    """
-    touch mosaic_grid_z${slice_id}_preview.png
-    """
-}
-
-process estimate_xy_shifts_from_metadata {
-    cpus params.processes
-    publishDir "${params.output}", mode: 'copy'
-    input:
-        path(input_dir)
-    output:
-        path("shifts_xy.csv")
-    script:
-    """
-    linum_estimate_xy_shift_from_metadata.py ${input_dir} shifts_xy.csv --n_processes ${params.processes}
-    """
-
-    stub:
-    """
-    printf 'fixed_id,moving_id,x_shift,y_shift,x_shift_mm,y_shift_mm\n' > shifts_xy.csv
-    """
-}
-
-process generate_slice_config {
-    publishDir "${params.output}", mode: 'copy'
-    
-    input:
-        tuple path(shifts_file), path(input_dir)
-    
-    output:
-        path("slice_config.csv")
-    
-    script:
-    String galvo_opts = params.detect_galvo ? "--detect_galvo --tiles_dir ${input_dir} --galvo_threshold ${params.galvo_confidence_threshold}" : ""
-    String exclude_first_opt = params.exclude_first_slices > 0 ? "--exclude_first ${params.exclude_first_slices}" : "--exclude_first 0"
-    """
-    linum_generate_slice_config.py ${shifts_file} slice_config.csv --from_shifts ${exclude_first_opt} ${galvo_opts}
-    """
-
-    stub:
-    """
-    printf 'slice_id,use\n' > slice_config.csv
-    """
-}
-
 
 workflow {
-    if (params.use_old_folder_structure)
-    {
+    if (params.use_old_folder_structure) {
         inputSlices = channel.fromPath("${params.input}/tile_x*_y*_z*/", type: 'dir')
-                            .map{path -> tuple(path.toString().substring(path.toString().length() - 2), path)}
-                            .groupTuple()
+            .map { path -> tuple(path.toString().substring(path.toString().length() - 2), path) }
+            .groupTuple()
     }
-    else
-    {
+    else {
         inputSlices = channel.fromPath("${params.input}/**/tile_x*_y*_z*/", type: 'dir')
-                            .map{path -> tuple(path.toString().substring(path.toString().length() - 2), path)}
-                            .groupTuple()
+            .map { path -> tuple(path.toString().substring(path.toString().length() - 2), path) }
+            .groupTuple()
     }
     input_dir_channel = channel.fromPath("${params.input}", type: 'dir')
 
@@ -150,8 +37,127 @@ workflow {
     // Generate slice configuration file (for controlling which slices to use in reconstruction)
     if (params.generate_slice_config) {
         // Combine shifts file with input directory for optional galvo detection
-        slice_config_input = estimate_xy_shifts_from_metadata.out
-            .combine(input_dir_channel)
+        slice_config_input = estimate_xy_shifts_from_metadata.out.combine(input_dir_channel)
         generate_slice_config(slice_config_input)
     }
+}
+
+// Workflow Description
+// Convert raw S-OCT tiles into mosaic grids and xy shifts
+// Input: Directory containing raw data set tiles
+// Output: Mosaic grids and xy shifts
+//
+// Parameters are defined in nextflow.config
+
+process create_mosaic_grid {
+    publishDir "${params.output}", mode: 'link'
+
+    input:
+    tuple val(slice_id), path(tiles)
+
+    output:
+    tuple val(slice_id), path("*.ome.zarr")
+
+    script:
+    def options: String = ""
+    options += params.fix_galvo_shift ? "--fix_galvo_shift" : "--no-fix_galvo_shift"
+    options += " "
+    options += params.fix_camera_shift ? "--fix_camera_shift" : "--no-fix_camera_shift"
+    options += " "
+    options += params.preprocess ? "--preprocess" : "--no-preprocess"
+    // Select GPU or CPU script based on use_gpu parameter
+    def gpu_opts: String = params.use_gpu ? "--use_gpu --galvo_threshold ${params.galvo_confidence_threshold}" : "--no-use_gpu"
+    """
+    linum_create_mosaic_grid_3d.py mosaic_grid_3d_z${slice_id}.ome.zarr --from_tiles_list ${tiles} --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution} --sharding_factor ${params.sharding_factor} ${options} ${gpu_opts}
+    """
+
+    stub:
+    """
+    mkdir -p mosaic_grid_3d_z${slice_id}.ome.zarr
+    """
+}
+
+process generate_aip {
+    publishDir "${params.output}/aips", mode: 'copy'
+
+    input:
+    tuple val(slice_id), path(mosaic_grid)
+
+    output:
+    tuple val(slice_id), path("aip_z${slice_id}.png")
+
+    script:
+    def gpu_opts: String = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
+    """
+    linum_aip_png.py ${mosaic_grid} aip_z${slice_id}.png ${gpu_opts}
+    """
+
+    stub:
+    """
+    touch aip_z${slice_id}.png
+    """
+}
+
+process generate_mosaic_preview {
+    maxForks 1
+    publishDir "${params.output}/previews", mode: 'copy'
+
+    input:
+    tuple val(slice_id), path(mosaic_grid)
+
+    output:
+    path "mosaic_grid_z${slice_id}_preview.png"
+
+    script:
+    """
+    linum_screenshot_omezarr.py ${mosaic_grid} mosaic_grid_z${slice_id}_preview.png
+    """
+
+    stub:
+    """
+    touch mosaic_grid_z${slice_id}_preview.png
+    """
+}
+
+process estimate_xy_shifts_from_metadata {
+    cpus params.processes
+    publishDir "${params.output}", mode: 'copy'
+
+    input:
+    path input_dir
+
+    output:
+    path "shifts_xy.csv"
+
+    script:
+    """
+    linum_estimate_xy_shift_from_metadata.py ${input_dir} shifts_xy.csv --n_processes ${params.processes}
+    """
+
+    stub:
+    """
+    printf 'fixed_id,moving_id,x_shift,y_shift,x_shift_mm,y_shift_mm\n' > shifts_xy.csv
+    """
+}
+
+process generate_slice_config {
+    publishDir "${params.output}", mode: 'copy'
+
+    input:
+    tuple path(shifts_file), path(input_dir)
+
+    output:
+    path "slice_config.csv"
+
+    script:
+    def galvo_opts: String = params.detect_galvo ? "--detect_galvo --tiles_dir ${input_dir} --galvo_threshold ${params.galvo_confidence_threshold}" : ""
+    def exclude_first_opt: String = params.exclude_first_slices > 0 ? "--exclude_first ${params.exclude_first_slices}" : "--exclude_first 0"
+    """
+    linum_generate_slice_config.py ${shifts_file} slice_config.csv --from_shifts ${exclude_first_opt} ${galvo_opts}
+    """
+
+    stub:
+    """
+    printf 'slice_id,use\n' > slice_config.csv
+    """
 }
