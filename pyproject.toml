@@ -39,7 +39,7 @@ dependencies = [
     "hyperactive",
     "basicpy",
     "zarr>=3.0.10",
-    "ome-zarr>=0.9.0",
+    "ome-zarr>=0.16.0",
     "napari",
     "napari-ome-zarr",
     "pynrrd",
@@ -53,10 +53,16 @@ Repository = "https://github.com/linum-uqam/linumpy"
 
 [project.optional-dependencies]
 gpu = [
+    "cupy-cuda13x>=13.0.0",
+]
+gpu-cuda12 = [
     "cupy-cuda12x>=12.0.0",
 ]
-gpu-cuda13 = [
-    "cupy-cuda13x>=13.0.0",
+gds = [
+    "kvikio-cu13",
+]
+gds-cuda12 = [
+    "kvikio-cu12",
 ]
 docs = [
     "sphinx>=9.1",
@@ -270,7 +276,7 @@ possibly-unresolved-reference = "error"
 # Optional GPU deps — not installed in the standard dev env.
 # Using replace-imports-with-any so downstream attribute/subscript access
 # on the imported module is typed as Any rather than causing cascading errors.
-replace-imports-with-any = ["cupy.**", "cupyx.**", "numba.**"]
+replace-imports-with-any = ["cupy.**", "cupyx.**", "numba.**", "kvikio.**"]
 
 # --- ty overrides ---
 

@@ -180,7 +180,9 @@ def compute_tissue_mask(
     use_gpu : bool
         If True, run the dominant 3-D ``gaussian_filter`` on GPU via
         CuPy (Z-chunked for memory safety). Falls back to CPU silently
-        if CuPy is unavailable. Otsu and morphology stay on CPU.
+        if CuPy is unavailable. Otsu and morphology stay on CPU. When
+        *vol* is already a ``cupy.ndarray`` the GPU path is used
+        regardless and slabs are read with no host round-trip.
 
     Returns
     -------
@@ -191,7 +193,11 @@ def compute_tissue_mask(
     from skimage.filters import threshold_otsu
     from skimage.morphology import disk
 
-    if use_gpu:
+    from linumpy.gpu import is_cupy_array
+
+    # Cupy input always goes through the GPU path; the CPU fallback uses
+    # numpy/scipy ops that don't accept cupy arrays.
+    if use_gpu or is_cupy_array(vol):
         try:
             return _compute_tissue_mask_gpu(
                 vol,
@@ -202,7 +208,9 @@ def compute_tissue_mask(
                 z_closing_sections=z_closing_sections,
             )
         except ImportError:
-            pass  # CuPy missing -- fall back to CPU below.
+            if is_cupy_array(vol):
+                raise  # cupy installed but cupyx missing — surface clearly
+            # CuPy missing -- fall back to CPU below.
 
     # Anisotropic 3-D smoothing: stronger in XY, light in Z to preserve
     # oblique tissue boundaries without per-Z Otsu noise.

@@ -116,6 +116,7 @@ def find_tissue_interface(
     mask: np.ndarray | None = None,
     order: int = 1,
     detect_cutting_errors: bool = False,
+    use_gpu: bool = False,
 ) -> np.ndarray:
     """Detect the tissue interface.
 
@@ -135,6 +136,9 @@ def find_tissue_interface(
         Gaussian filter order.
     detect_cutting_errors : bool
         If True, detect and correct cutting artefacts.
+    use_gpu : bool
+        If True, use the GPU implementation when CuPy is available.
+        Ignored when ``mask`` is provided (the mask path stays on CPU).
 
     Returns
     -------
@@ -142,6 +146,21 @@ def find_tissue_interface(
         Tissue interface depth
 
     """
+    if use_gpu and mask is None:
+        from linumpy.gpu import GPU_AVAILABLE
+
+        if GPU_AVAILABLE:
+            from linumpy.gpu.interface import find_tissue_interface_gpu
+
+            return find_tissue_interface_gpu(
+                vol,
+                s_xy=s_xy,
+                s_z=s_z,
+                use_log=use_log,
+                order=order,
+                detect_cutting_errors=detect_cutting_errors,
+            )
+
     if use_log:
         vol_p = np.copy(vol)
         vol_p[vol > 0] = np.log(vol[vol > 0])

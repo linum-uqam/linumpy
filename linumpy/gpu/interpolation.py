@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from . import GPU_AVAILABLE, to_cpu
+from . import GPU_AVAILABLE, is_cupy_array, to_cpu
 
 
 def affine_transform(image: Any, matrix: Any, output_shape: Any = None, order: Any = 1, use_gpu: Any = True) -> Any:
@@ -44,15 +44,18 @@ def affine_transform(image: Any, matrix: Any, output_shape: Any = None, order: A
 
 
 def _affine_transform_gpu(image: Any, matrix: Any, output_shape: Any, order: Any) -> Any:
-    """GPU implementation of affine transform."""
+    """GPU implementation of affine transform. Device-preserving."""
     import cupy as cp
     from cupyx.scipy.ndimage import affine_transform as cp_affine
 
+    input_was_gpu = is_cupy_array(image)
     img_gpu = cp.asarray(image.astype(np.float32))
     matrix_gpu = cp.asarray(matrix.astype(np.float32))
 
     result = cp_affine(img_gpu, matrix_gpu, output_shape=output_shape, order=order)
 
+    if input_was_gpu:
+        return result
     return to_cpu(result)
 
 
@@ -90,15 +93,18 @@ def map_coordinates(image: Any, coordinates: Any, order: Any = 1, use_gpu: Any =
 
 
 def _map_coordinates_gpu(image: Any, coordinates: Any, order: Any) -> Any:
-    """GPU implementation of map_coordinates."""
+    """GPU implementation of map_coordinates. Device-preserving."""
     import cupy as cp
     from cupyx.scipy.ndimage import map_coordinates as cp_map
 
+    input_was_gpu = is_cupy_array(image)
     img_gpu = cp.asarray(image.astype(np.float32))
     coords_gpu = cp.asarray(coordinates.astype(np.float32))
 
     result = cp_map(img_gpu, coords_gpu, order=order)
 
+    if input_was_gpu:
+        return result
     return to_cpu(result)
 
 
@@ -138,11 +144,17 @@ def resize(image: Any, output_shape: Any, order: Any = 1, anti_aliasing: Any = T
 
 
 def _resize_gpu(image: Any, output_shape: Any, order: Any, anti_aliasing: Any) -> Any:
-    """GPU implementation of resize using zoom."""
+    """GPU implementation of resize using zoom.
+
+    Device-preserving: returns a CuPy array if *image* was already on device,
+    a NumPy array if *image* was on host. This avoids forcing a D->H copy when
+    callers want to keep tiles resident for downstream GPU compute / writes.
+    """
     import cupy as cp
     from cupyx.scipy.ndimage import gaussian_filter as cp_gaussian
     from cupyx.scipy.ndimage import zoom as cp_zoom
 
+    input_was_gpu = is_cupy_array(image)
     img_gpu = cp.asarray(image if image.dtype == np.float32 else image.astype(np.float32))
 
     # Scale factors: input/output for Gaussian sigma, output/input for zoom.
@@ -158,6 +170,8 @@ def _resize_gpu(image: Any, output_shape: Any, order: Any, anti_aliasing: Any) -
 
     result = cp_zoom(img_gpu, zoom_factors, order=order)
 
+    if input_was_gpu:
+        return result
     return to_cpu(result)
 
 

@@ -96,7 +96,12 @@ def enforce_z_consistency(
 
 
 def find_z_overlap(
-    fixed_vol: np.ndarray, moving_vol: np.ndarray, slicing_interval_mm: float, search_range_mm: float, resolution_um: float
+    fixed_vol: np.ndarray,
+    moving_vol: np.ndarray,
+    slicing_interval_mm: float,
+    search_range_mm: float,
+    resolution_um: float,
+    use_gpu: bool = False,
 ) -> tuple[int, float]:
     """Find optimal Z-overlap between consecutive slices using cross-correlation.
 
@@ -115,6 +120,8 @@ def find_z_overlap(
         Search range around expected position in mm.
     resolution_um : float
         Z resolution in microns per voxel.
+    use_gpu : bool
+        If True, run the NCC sweep on the GPU when CuPy is available.
 
     Returns
     -------
@@ -138,17 +145,29 @@ def find_z_overlap(
     y_slice = slice(margin, h - margin)
     x_slice = slice(margin, w - margin)
 
+    xp: Any = np
+    if use_gpu:
+        from linumpy.gpu import GPU_AVAILABLE
+
+        if GPU_AVAILABLE:
+            import cupy as cp
+
+            xp = cp
+
+    fixed_xp = xp.asarray(fixed_vol[-max_overlap:, y_slice, x_slice].astype(np.float32))
+    moving_xp = xp.asarray(moving_vol[:max_overlap, y_slice, x_slice].astype(np.float32))
+
     best_overlap = expected_overlap_vox
-    best_corr = -np.inf
+    best_corr = -float("inf")
 
     for overlap in range(min_overlap, max_overlap + 1):
-        fixed_region = fixed_vol[-overlap:, y_slice, x_slice]
-        moving_region = moving_vol[:overlap, y_slice, x_slice]
+        fixed_region = fixed_xp[-overlap:]
+        moving_region = moving_xp[:overlap]
 
         fixed_norm = (fixed_region - fixed_region.mean()) / (fixed_region.std() + 1e-8)
         moving_norm = (moving_region - moving_region.mean()) / (moving_region.std() + 1e-8)
 
-        corr = np.mean(fixed_norm * moving_norm)
+        corr = float((fixed_norm * moving_norm).mean())
         if corr > best_corr:
             best_corr = corr
             best_overlap = overlap

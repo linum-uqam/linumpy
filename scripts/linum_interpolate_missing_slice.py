@@ -71,6 +71,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "  zmorph   - z-aware morphing (respects serial-section geometry; recommended)\n"
         "  average  - Simple average of adjacent slices\n"
         "  weighted - Weighted average with distance falloff\n"
+        "\n"
         "[default: %(default)s]",
     )
     p.add_argument(
@@ -80,6 +81,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Blending method for combining warped slices:\n"
         "  linear - Equal 50/50 blend (may show edges)\n"
         "  gaussian - Feathered blend using distance transform (recommended)\n"
+        "\n"
         "[default: %(default)s]",
     )
     p.add_argument(

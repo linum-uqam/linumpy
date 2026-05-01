@@ -6,6 +6,8 @@ This module provides functions for normalizing OCT volume intensities
 based on agarose background detection.
 """
 
+from typing import Any
+
 import numpy as np
 
 
@@ -289,25 +291,38 @@ def apply_histogram_matching(
     use_gpu : bool
         If True, run the per-chunk matching loop on GPU via CuPy. Falls back
         to CPU silently if CuPy is unavailable. The volume itself is moved to
-        GPU one chunk at a time, so memory usage stays bounded.
+        GPU one chunk at a time, so memory usage stays bounded. When *vol* is
+        already a ``cupy.ndarray`` the GPU path is used regardless and slabs
+        are read with no host round-trip.
 
     Returns
     -------
     np.ndarray
         Histogram-matched volume.
     """
-    flat_all = vol.ravel()
-    ref_bins, ref_cdf, tissue_count = _build_tissue_cdf(flat_all, n_bins, tissue_threshold)
+    from linumpy.gpu import is_cupy_array
+
+    cupy_input = is_cupy_array(vol)
+
+    if cupy_input:
+        # Build the reference CDF on device so we don't D→H the whole volume.
+        ref_bins, ref_cdf, tissue_count = _build_tissue_cdf_gpu(vol, n_bins, tissue_threshold)
+    else:
+        flat_all = vol.ravel()
+        ref_bins, ref_cdf, tissue_count = _build_tissue_cdf(flat_all, n_bins, tissue_threshold)
     if tissue_count < 500:
-        return vol
+        from linumpy.gpu import to_cpu
+
+        return to_cpu(vol)
 
     bounds = _chunk_boundaries(vol.shape[0], n_serial_slices)
 
-    if use_gpu:
+    if cupy_input or use_gpu:
         try:
             return _apply_histogram_matching_gpu(vol, bounds, ref_bins, ref_cdf, n_bins, tissue_threshold)
         except ImportError:
-            pass
+            if cupy_input:
+                raise  # cupy is installed but cupyx missing — surface clearly
 
     out = np.empty_like(vol)
     for s, e in bounds:
@@ -315,6 +330,26 @@ def apply_histogram_matching(
         out[s:e] = _match_chunk_to_reference(chunk, ref_bins, ref_cdf, n_bins, tissue_threshold)
 
     return out
+
+
+def _build_tissue_cdf_gpu(vol: Any, n_bins: int, tissue_threshold: float) -> tuple[np.ndarray, np.ndarray, int]:
+    """GPU equivalent of :func:`_build_tissue_cdf` for a CuPy-resident volume.
+
+    Computes the histogram on device and returns small host-side arrays
+    so callers can keep the rest of their state on CPU.
+    """
+    import cupy as cp
+
+    lo = tissue_threshold + max(1e-6, tissue_threshold * 1e-6)
+    lo = min(lo, 1.0)
+    hist = cp.histogram(vol.ravel(), bins=n_bins, range=(lo, 1.0))[0]
+    edges = cp.linspace(lo, 1.0, n_bins + 1)
+    bin_centers = 0.5 * (edges[:-1] + edges[1:])
+    total = int(hist.sum().item())
+    cdf = cp.cumsum(hist).astype(cp.float64)
+    if cdf[-1] > 0:
+        cdf /= cdf[-1]
+    return cp.asnumpy(bin_centers), cp.asnumpy(cdf), total
 
 
 def _apply_histogram_matching_gpu(
@@ -330,7 +365,9 @@ def _apply_histogram_matching_gpu(
     Each chunk is moved to GPU, has its tissue CDF computed, an
     ``n_bins``-sized LUT built, and the per-voxel mapping applied.
     Result is moved back to CPU per chunk so the host array fills
-    incrementally without holding the whole volume on GPU.
+    incrementally without holding the whole volume on GPU. Accepts
+    either a host (numpy) volume or a device (cupy) volume; in the
+    cupy case ``cp.asarray`` is a no-op so no extra H→D copy occurs.
     """
     import cupy as cp
 
@@ -340,7 +377,10 @@ def _apply_histogram_matching_gpu(
     lo = tissue_threshold + max(1e-6, tissue_threshold * 1e-6)
     lo = min(lo, 1.0)
 
-    out = np.empty_like(vol)
+    # Always allocate the output on the host: the next pipeline stage
+    # (z-profile smoothing, N4) operates on numpy.
+    out = np.empty(vol.shape, dtype=np.float32)
+    cupy_input = isinstance(vol, cp.ndarray)
     for s, e in bounds:
         chunk_g = cp.asarray(vol[s:e], dtype=cp.float32)
         flat = chunk_g.ravel()
@@ -348,7 +388,7 @@ def _apply_histogram_matching_gpu(
         hist = cp.histogram(flat, bins=n_bins, range=(lo, 1.0))[0]
         tissue_count = int(hist.sum().item())
         if tissue_count < 500:
-            out[s:e] = vol[s:e]
+            out[s:e] = cp.asnumpy(vol[s:e]) if cupy_input else vol[s:e]
             continue
 
         edges = cp.linspace(lo, 1.0, n_bins + 1, dtype=cp.float32)
@@ -402,6 +442,12 @@ def apply_zprofile_smoothing(
         Volume with per-Z gain applied to tissue voxels.
     """
     from scipy.ndimage import gaussian_filter1d
+
+    from linumpy.gpu import to_cpu
+
+    # Pure-CPU op; pull cupy inputs to host so scipy/numpy can run unchanged.
+    vol = to_cpu(vol)
+    mask = to_cpu(mask)
 
     if sigma <= 0:
         return vol
