@@ -40,21 +40,36 @@ def _kvikio_native_mode_available() -> bool:
     """Return True iff kvikio is importable and not stuck in compat mode.
 
     kvikio always succeeds at import; the relevant question is whether
-    ``cufile.json`` (or env vars) allow native GDS. ``compat_mode`` returns a
-    ``CompatMode`` enum: ``OFF`` means native is forced/used, ``ON`` means
-    compat-only, ``AUTO`` means kvikio picks per-mount.
+    ``cufile.json`` (or env vars) allow native GDS. The API moved in kvikio
+    25.x → 26.x:
+
+    * Older: ``kvikio.defaults.compat_mode()`` → ``CompatMode`` enum
+      (``OFF``/``ON``/``AUTO``).
+    * 26.04+: ``kvikio.defaults.is_compat_mode_preferred()`` → ``bool``
+      (``True`` means kvikio will use the POSIX bounce-buffer path).
     """
     try:
         import kvikio  # noqa: F401
-        from kvikio.defaults import compat_mode
+        from kvikio import defaults
     except ImportError:
         return False
-    try:
-        mode = compat_mode()
-    except Exception:  # pragma: no cover - older kvikio variants
-        return False
-    name = getattr(mode, "name", str(mode)).upper()
-    return name in {"OFF", "AUTO"}
+    # Newer API first.
+    is_compat_pref = getattr(defaults, "is_compat_mode_preferred", None)
+    if callable(is_compat_pref):
+        try:
+            return not bool(is_compat_pref())
+        except Exception:  # pragma: no cover - hardware-dependent
+            return False
+    # Legacy enum API.
+    compat_mode = getattr(defaults, "compat_mode", None)
+    if callable(compat_mode):
+        try:
+            mode = compat_mode()
+        except Exception:  # pragma: no cover - older kvikio variants
+            return False
+        name = getattr(mode, "name", str(mode)).upper()
+        return name in {"OFF", "AUTO"}
+    return False
 
 
 def _array_is_kvikio_compatible(array_path: Path) -> bool:
