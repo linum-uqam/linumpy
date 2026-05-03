@@ -264,11 +264,24 @@ def n4_correct_gpu(
 
     # Spatial subsampling for fit (stride-subsample, on device).
     if shrink_factor > 1:
-        vol_small = vol_xp[::shrink_factor, ::shrink_factor, ::shrink_factor]
-        mask_small = mask_xp[::shrink_factor, ::shrink_factor, ::shrink_factor]
+        # Materialise the subsampled volume/mask as contiguous copies so we
+        # can release the full-resolution `mask_xp` (and any temporaries
+        # that share storage with it) during the fit loop.  The fit only
+        # touches the small arrays; `vol_xp` is kept live for the
+        # full-resolution evaluation pass at the bottom of the function.
+        vol_small = xp.ascontiguousarray(vol_xp[::shrink_factor, ::shrink_factor, ::shrink_factor])
+        mask_small = xp.ascontiguousarray(mask_xp[::shrink_factor, ::shrink_factor, ::shrink_factor])
     else:
         vol_small = vol_xp
         mask_small = mask_xp
+
+    # Free the full-resolution mask now -- only `mask_small` is used in the
+    # fit loop, and a fresh full mask is not needed for the evaluation pass.
+    del mask_xp
+    if on_gpu:
+        import cupy as _cp_free
+
+        _cp_free.get_default_memory_pool().free_all_blocks()
 
     log_v = xp.log(xp.maximum(vol_small, 1e-6)).astype(xp.float32)
 
@@ -355,7 +368,7 @@ def n4_correct_gpu(
     # at full volume size.  For large volumes that dwarfs GPU memory, so
     # we drop the fit-time intermediates first and stream the evaluation
     # in Z-tiles back to host.
-    del log_v, log_bias, weights, mask_small, mask_xp, vol_small, bases
+    del log_v, log_bias, weights, mask_small, vol_small, bases
     if on_gpu:
         import cupy as cp
 
