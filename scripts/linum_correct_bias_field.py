@@ -221,7 +221,9 @@ def main() -> None:
 
     # Load volume — onto GPU directly when use_gpu_pre, else host.
     vol, res = read_omezarr_array(args.in_image, level=0, use_gpu=use_gpu_pre)
-    vol = vol.astype(np.float32)  # works on both numpy and cupy arrays
+    # copy=False avoids doubling GPU memory when the array is already float32
+    # (the common case for mosaic grids).
+    vol = vol.astype(np.float32, copy=False)
     logger.info("Loaded volume %s from %s (gpu=%s)", vol.shape, args.in_image, use_gpu_pre)
 
     # Tissue mask (per serial section)
