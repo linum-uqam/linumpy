@@ -149,6 +149,33 @@ def _build_axis_basis(n_voxels: int, n_control: int, xp: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
+def bspline_fit_precompute(
+    bases: tuple[Any, Any, Any],
+) -> tuple[Any, Any, Any, Any, Any, Any, Any]:
+    """Build the iteration-invariant constants used by :func:`bspline_fit`.
+
+    The squared/cubed per-axis basis matrices and the separable per-voxel
+    denominator ``S(p) = (sum_c M_z[z,c]^2)(sum_c M_y[y,c]^2)(sum_c M_x[x,c]^2)``
+    depend only on *bases*, so callers that issue many fits at the same shape
+    (e.g. the N4 fitting loop) can build them once and pass them in via
+    :func:`bspline_fit`'s ``precomputed`` argument.
+
+    Returns ``(M_z2, M_y2, M_x2, M_z3, M_y3, M_x3, S)``.
+    """
+    M_z, M_y, M_x = bases
+    M_z2 = M_z * M_z
+    M_y2 = M_y * M_y
+    M_x2 = M_x * M_x
+    M_z3 = M_z2 * M_z
+    M_y3 = M_y2 * M_y
+    M_x3 = M_x2 * M_x
+    s_z = M_z2.sum(axis=1)
+    s_y = M_y2.sum(axis=1)
+    s_x = M_x2.sum(axis=1)
+    S = s_z[:, None, None] * s_y[None, :, None] * s_x[None, None, :]
+    return M_z2, M_y2, M_x2, M_z3, M_y3, M_x3, S
+
+
 def bspline_fit(
     values: np.ndarray,
     weights: np.ndarray | None,
@@ -158,6 +185,7 @@ def bspline_fit(
     use_gpu: bool = True,
     eps: float = 1e-8,
     bases: tuple[Any, Any, Any] | None = None,
+    precomputed: tuple[Any, Any, Any, Any, Any, Any, Any] | None = None,
 ) -> np.ndarray:
     """Fit a tensor-product cubic B-spline to scattered voxel samples.
 
@@ -183,6 +211,11 @@ def bspline_fit(
         ``n_control_points``.  When provided, skips the per-call build;
         useful when the caller (e.g. an N4 fitting level) issues many
         fits at the same shape.
+    precomputed : tuple of arrays, optional
+        Output of :func:`bspline_fit_precompute` for the same *bases*.
+        When provided, skips rebuilding the squared/cubed bases and the
+        separable denominator ``S`` -- a per-iteration full-volume
+        allocation in the N4 fit loop.
 
     Returns
     -------
@@ -228,19 +261,13 @@ def bspline_fit(
     #
     # Squared and cubed per-axis basis matrices fold the per-control-point
     # weight powers into separable contractions.  S(p) factorises as the
-    # product of per-axis sums of squared basis weights.
-    M_z2 = M_z * M_z
-    M_y2 = M_y * M_y
-    M_x2 = M_x * M_x
-    M_z3 = M_z2 * M_z
-    M_y3 = M_y2 * M_y
-    M_x3 = M_x2 * M_x
-
-    s_z = M_z2.sum(axis=1)  # (Nz,)
-    s_y = M_y2.sum(axis=1)  # (Ny,)
-    s_x = M_x2.sum(axis=1)  # (Nx,)
-    # Outer product on the host axis is fine; broadcasting builds S(p).
-    S = s_z[:, None, None] * s_y[None, :, None] * s_x[None, None, :]
+    # product of per-axis sums of squared basis weights.  These derive only
+    # from the bases, so an N4 fitting loop can build them once via
+    # :func:`bspline_fit_precompute` and pass them in.
+    if precomputed is None:
+        M_z2, M_y2, M_x2, M_z3, M_y3, M_x3, S = bspline_fit_precompute((M_z, M_y, M_x))
+    else:
+        M_z2, M_y2, M_x2, M_z3, M_y3, M_x3, S = precomputed
 
     psi = (w * vals) / xp.maximum(S, eps)  # (Z, Y, X)
 
