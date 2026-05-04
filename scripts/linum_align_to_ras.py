@@ -740,11 +740,25 @@ def create_alignment_preview(
         return vol[z, :, :], vol[:, y, :], vol[:, :, x]
 
     def get_display_range(vol: Any) -> Any:
-        """Get display range from non-zero values."""
-        nonzero = vol[vol > 0]
-        if len(nonzero) > 0:
-            return np.percentile(nonzero, [1, 99])
-        return 0, 1
+        """Get display range from tissue voxels.
+
+        The aligned volume is resampled with a non-zero default pixel value
+        (sitk's `SetDefaultPixelValue(bg_value)`), so plain `vol > 0` includes
+        the entire background floor and the resulting [1, 99] percentile is
+        dominated by background — clipping all real tissue to white. Estimate
+        the background floor from the 1st percentile of all voxels and
+        compute the display range from voxels strictly above that floor.
+        Zero-padded volumes (original / Allen template) are unchanged because
+        their floor is 0.
+        """
+        if vol.size == 0 or float(vol.max()) == 0.0:
+            return 0, 1
+        flat = vol.ravel()
+        floor = float(np.percentile(flat, 1))
+        tissue = flat[flat > floor + 1e-6]
+        if tissue.size == 0:
+            return 0, 1
+        return np.percentile(tissue, [1, 99])
 
     def find_content_center_slices(vol: Any) -> Any:
         """Find the slice with maximum content independently for each axis.
