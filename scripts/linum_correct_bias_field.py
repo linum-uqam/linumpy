@@ -19,6 +19,7 @@ import linumpy.config.threads  # noqa: F401
 
 import argparse
 import logging
+from typing import Any
 
 import numpy as np
 
@@ -264,7 +265,7 @@ def main() -> None:
     per_section_spline = args.spline_distance_mm if args.spline_distance_mm is not None else 2.0
     global_spline = args.spline_distance_mm if args.spline_distance_mm is not None else 10.0
 
-    n4_kwargs = {
+    n4_kwargs: dict[str, Any] = {
         "shrink_factor": args.shrink_factor,
         "n_iterations": args.n_iterations,
         "voxel_size_mm": (float(res[0]), float(res[1]), float(res[2])),
@@ -317,14 +318,16 @@ def main() -> None:
     else:
         working_vol = vol
 
-    # Drop the original input buffer before the (possibly large) global
-    # pass / save when the strength blend won't run.  In the in-place
-    # path ``working_vol is vol``, so this just drops the redundant
+    # The strength blend is the only consumer of the original input
+    # buffer below; keep an alias just for that branch and drop the
+    # primary ``vol`` name so the buffer can be released before the
+    # global pass when no blend is needed.  In the in-place per-section
+    # path ``working_vol is vol``, so this just drops a redundant
     # reference; in the per-section path it frees the original ~36 GB
-    # input buffer that's no longer needed.  Holding it through the
-    # global pass forces kcompactd0 to fight for THP-sized free regions.
-    if args.strength >= 1.0:
-        del vol
+    # input buffer.  Holding it through the global pass forces
+    # kcompactd0 to fight for THP-sized free regions.
+    vol_for_blend: np.ndarray | None = vol if args.strength < 1.0 else None
+    del vol
 
     if args.mode in ("global", "two_pass"):
         logger.info("Running global N4…")
@@ -346,10 +349,10 @@ def main() -> None:
     del working_vol
 
     # Strength blend
-    if args.strength < 1.0:
+    if vol_for_blend is not None:
         logger.info("Blending: strength=%.3f", args.strength)
-        corrected = args.strength * corrected + (1.0 - args.strength) * vol
-        del vol
+        corrected = args.strength * corrected + (1.0 - args.strength) * vol_for_blend
+        del vol_for_blend
 
     corrected = corrected.astype(np.float32, copy=False)
 
