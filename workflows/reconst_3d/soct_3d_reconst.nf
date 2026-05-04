@@ -1057,10 +1057,12 @@ process make_manual_align_package {
 // Stacking: assembles common-space slices into a 3D volume using motor positions
 // for XY placement, pairwise registration for rotation/translation refinement,
 // and correlation or physics-based Z-matching.
-// publishDir mode is conditional: 'symlink' when a downstream step will produce
-// the final output (preserves work-dir files for -resume); 'move' when this is last.
+// Always 'symlink': downstream stages (correct_bias_field, generate_report,
+// align_to_ras) may be enabled later with -resume, in which case 'move'
+// would strip companion files from the workdir and leave the resumed
+// run waiting on staged inputs that no longer exist.
 process stack {
-    publishDir { "${params.output}/${task.process}" }, mode: (params.correct_bias_field || params.align_to_ras_enabled) ? 'symlink' : 'move', saveAs: { fn -> fn.endsWith('.ome.zarr') ? null : fn }
+    publishDir { "${params.output}/${task.process}" }, mode: 'symlink', saveAs: { fn -> fn.endsWith('.ome.zarr') ? null : fn }
 
     input:
     tuple path("slices/*"), path(shifts_file), path("transforms/*"), path(slice_config), val(subject_name), val(slice_ids_str)
@@ -1093,11 +1095,16 @@ process stack {
 }
 
 // Post-stacking N4 bias field correction.
-// 'symlink' when align_to_ras follows; 'move' when this is the final output step.
+// Always 'symlink' so the work-dir files survive for downstream consumers
+// (generate_report, align_to_ras).  Using 'move' would silently strip the
+// .zip / .png companions from the workdir; if `align_to_ras_enabled` is
+// later flipped on with -resume, the cached `correct_bias_field` outputs
+// would reference vanished files and `align_to_ras` would queue forever
+// waiting for inputs that can never be staged.
 process correct_bias_field {
     cpus params.processes
 
-    publishDir { "${params.output}/${task.process}" }, mode: params.align_to_ras_enabled ? 'symlink' : 'move', saveAs: { fn -> fn.endsWith('.ome.zarr') ? null : fn }
+    publishDir { "${params.output}/${task.process}" }, mode: 'symlink', saveAs: { fn -> fn.endsWith('.ome.zarr') ? null : fn }
 
     input:
     tuple path(stacked_zarr), val(subject_name), val(n_slices), val(slice_ids_str)
