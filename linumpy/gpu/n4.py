@@ -213,6 +213,8 @@ def n4_correct_gpu(
     wiener_noise: float = 0.01,
     convergence_tol: float = 1e-3,
     use_gpu: bool = True,
+    out: np.ndarray | None = None,
+    bias_out: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """GPU-accelerated N4 bias field correction.
 
@@ -254,6 +256,16 @@ def n4_correct_gpu(
         this value.
     use_gpu : bool
         Use CuPy when available.
+    out : np.ndarray, optional
+        Destination buffer for the corrected output (full ``vol.shape``,
+        float32).  When provided, the streaming Z-tile loop writes
+        results directly into this buffer instead of allocating a fresh
+        array.  May safely alias the input ``vol`` (the host buffer is
+        not read after the initial H2D upload at function entry), saving
+        a full-volume float32 allocation on large mosaics.
+    bias_out : np.ndarray, optional
+        Destination buffer for the bias-field output, same shape and
+        dtype constraints as *out*.
 
     Returns
     -------
@@ -440,8 +452,18 @@ def n4_correct_gpu(
     bytes_per_z = full_shape[1] * full_shape[2] * 4 * 3
     z_tile = max(1, min(full_shape[0], tile_bytes_target // max(bytes_per_z, 1)))
 
-    corrected_host = np.empty(full_shape, dtype=np.float32)
-    bias_host = np.empty(full_shape, dtype=np.float32)
+    if out is None:
+        corrected_host = np.empty(full_shape, dtype=np.float32)
+    else:
+        if out.shape != full_shape or out.dtype != np.float32:
+            raise ValueError(f"out must be {full_shape} float32, got {out.shape} {out.dtype}")
+        corrected_host = out
+    if bias_out is None:
+        bias_host = np.empty(full_shape, dtype=np.float32)
+    else:
+        if bias_out.shape != full_shape or bias_out.dtype != np.float32:
+            raise ValueError(f"bias_out must be {full_shape} float32, got {bias_out.shape} {bias_out.dtype}")
+        bias_host = bias_out
 
     for z0 in range(0, full_shape[0], z_tile):
         z1 = min(z0 + z_tile, full_shape[0])

@@ -225,3 +225,41 @@ def test_n4_correct_cpu_gpu_agree():
     gpu, _ = n4_correct_gpu(vol, mask, shrink_factor=2, n_iterations=[10], use_gpu=True)
     rel_err = np.max(np.abs(cpu - gpu)) / max(float(np.max(np.abs(cpu))), 1e-6)
     assert rel_err < 1e-2, f"CPU/GPU divergence: rel_err={rel_err:.3e}"
+
+
+def test_n4_correct_gpu_out_buffers_alias_input():
+    """``out=vol`` overwrites the input host buffer in place, ``bias_out``
+    receives the bias field, and the result matches the non-aliased call."""
+    from linumpy.gpu.n4 import n4_correct_gpu
+
+    vol, _, mask = _make_synthetic_volume(shape=(20, 32, 32))
+    expected_corr, expected_bias = n4_correct_gpu(vol, mask, shrink_factor=2, n_iterations=[10], use_gpu=False)
+
+    vol_inout = vol.copy()
+    bias_buf = np.empty_like(vol_inout, dtype=np.float32)
+    corr_ret, bias_ret = n4_correct_gpu(
+        vol_inout,
+        mask,
+        shrink_factor=2,
+        n_iterations=[10],
+        use_gpu=False,
+        out=vol_inout,
+        bias_out=bias_buf,
+    )
+    # Returns must be the supplied buffers, not fresh allocations.
+    assert corr_ret is vol_inout
+    assert bias_ret is bias_buf
+    np.testing.assert_allclose(vol_inout, expected_corr, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(bias_buf, expected_bias, rtol=1e-5, atol=1e-5)
+
+
+def test_n4_correct_gpu_out_buffer_shape_mismatch_raises():
+    from linumpy.gpu.n4 import n4_correct_gpu
+
+    vol, _, mask = _make_synthetic_volume(shape=(20, 32, 32))
+    bad_out = np.empty((10, 10, 10), dtype=np.float32)
+    with pytest.raises(ValueError, match="out must be"):
+        n4_correct_gpu(vol, mask, shrink_factor=2, n_iterations=[5], use_gpu=False, out=bad_out)
+    bad_bias = np.empty(vol.shape, dtype=np.float64)
+    with pytest.raises(ValueError, match="bias_out must be"):
+        n4_correct_gpu(vol, mask, shrink_factor=2, n_iterations=[5], use_gpu=False, bias_out=bad_bias)

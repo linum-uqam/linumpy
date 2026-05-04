@@ -256,6 +256,8 @@ def n4_correct(
     spline_distance_mm: float = 10.0,
     voxel_size_mm: tuple[float, float, float] = (1.0, 1.0, 1.0),
     backend: str = "cpu",
+    out: np.ndarray | None = None,
+    bias_out: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Run N4 bias field correction on a 3-D volume.
 
@@ -284,6 +286,13 @@ def n4_correct(
         :func:`linumpy.gpu.n4.n4_correct_gpu` (CuPy-accelerated when CUDA is
         available, NumPy fallback otherwise).  ``"auto"`` picks ``"gpu"`` when
         CuPy + CUDA are available and ``"cpu"`` otherwise.
+    out, bias_out : np.ndarray, optional
+        Destination buffers (GPU backend only).  When provided, the
+        N4 driver writes its full-resolution outputs directly into
+        these buffers instead of allocating fresh arrays, saving up to
+        two full-volume float32 allocations.  ``out`` may safely alias
+        the input ``vol`` -- the host buffer is not read after the
+        initial H2D upload.
 
     Returns
     -------
@@ -311,7 +320,12 @@ def n4_correct(
             spline_distance_mm=spline_distance_mm,
             voxel_size_mm=voxel_size_mm,
             use_gpu=True,
+            out=out,
+            bias_out=bias_out,
         )
+
+    if out is not None or bias_out is not None:
+        raise ValueError("out / bias_out are only supported with backend='gpu'")
 
     vol_f32 = vol.astype(np.float32)
 
