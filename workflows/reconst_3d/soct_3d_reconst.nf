@@ -995,6 +995,7 @@ process correct_bias_field {
         --strength ${params.bias_strength} \
         --backend ${backend_flag} \
         --n_processes ${task.cpus} \
+        --verbose \
         ${hm_perz_flag} \
         ${tissue_thresh_flag} \
         ${zprofile_flag} \
