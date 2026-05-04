@@ -510,14 +510,25 @@ def apply_transform_to_zarr(
     if orientation_permutation is not None:
         vol = apply_orientation_transform(vol, orientation_permutation, orientation_flips)
         resolution = reorder_resolution(resolution, orientation_permutation)
+        # ``apply_orientation_transform`` returns a non-contiguous view.
+        # ``sitk.GetImageFromArray`` would internally call
+        # ``np.ascontiguousarray`` AND make its own SITK copy — that is
+        # two ~36 GB allocations on top of the still-live source.
+        # Materialise the contiguous buffer here and immediately drop the
+        # original so the SITK conversion only adds one full-volume copy.
+        vol = np.ascontiguousarray(vol)
 
     # Compute a tissue-representative background value on the numpy array
     # BEFORE allocating the (potentially large) SimpleITK float32 copy.  Using
     # this as the default pixel value avoids black borders that would skew
-    # downstream normalization and visualization.
-    nonzero_mask = vol > 0
-    bg_value = float(np.percentile(vol[nonzero_mask], 1)) if nonzero_mask.any() else 0.0
-    del nonzero_mask
+    # downstream normalization and visualization.  Subsample to keep the
+    # boolean-mask gather from allocating a multi-GB temp on a level-0 brain.
+    flat = vol.reshape(-1)
+    stride = max(1, flat.size // 10_000_000)  # cap sample at ~10M voxels
+    sample = flat[::stride]
+    nonzero_sample = sample[sample > 0]
+    bg_value = float(np.percentile(nonzero_sample, 1)) if nonzero_sample.size else 0.0
+    del flat, sample, nonzero_sample
 
     # Convert to SimpleITK
     vol_sitk = allen.numpy_to_sitk_image(vol, resolution, cast_dtype=np.float32)
@@ -542,12 +553,18 @@ def apply_transform_to_zarr(
     # GetArrayFromImage already yields numpy (Z, Y, X) matching our convention.
     update_pbar()
 
-    # Convert back to original dtype
+    # Convert back to original dtype.  Use ``copy=False`` so the no-op
+    # float32→float32 path does not allocate another full-volume buffer
+    # (~36 GB on a level-0 brain).  For integer targets, do rint/clip
+    # in place on the float32 buffer before the narrowing astype to
+    # avoid two extra full-volume temporaries.
     if np.issubdtype(original_dtype, np.integer):
         info = np.iinfo(original_dtype)
-        transformed = np.clip(np.rint(transformed), info.min, info.max).astype(original_dtype)
+        np.rint(transformed, out=transformed)
+        np.clip(transformed, info.min, info.max, out=transformed)
+        transformed = transformed.astype(original_dtype, copy=False)
     else:
-        transformed = transformed.astype(original_dtype)
+        transformed = transformed.astype(original_dtype, copy=False)
 
     # Write output
     writer = AnalysisOmeZarrWriter(
