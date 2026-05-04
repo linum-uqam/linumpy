@@ -461,23 +461,27 @@ def n4_correct_per_section(
         )
         n_processes = 1
 
-    work_items = [
-        (
-            vol[s:e].copy(),
-            mask[s:e].copy() if mask is not None else None,
-            kwargs,
-        )
-        for s, e in bounds
-    ]
-
     if n_processes == 1:
-        results = [_n4_section_worker(item) for item in work_items]
-    else:
-        with multiprocessing.Pool(processes=n_processes) as pool:
-            results = pool.map(_n4_section_worker, work_items)
+        # Serial fast path: write each section's output straight into a
+        # pre-allocated buffer.  Avoids the 76x ``.copy()`` of host slabs
+        # (~36 GB on a typical OCT mosaic) and the final ``np.concatenate``
+        # (another ~72 GB peak with both chunk lists alive).
+        corrected = np.empty_like(vol)
+        bias_field = np.empty_like(vol, dtype=np.float32)
+        for s, e in bounds:
+            chunk_mask = mask[s:e] if mask is not None else None
+            corr_chunk, bias_chunk = n4_correct(vol[s:e], chunk_mask, **kwargs)
+            corrected[s:e] = corr_chunk
+            bias_field[s:e] = bias_chunk
+            del corr_chunk, bias_chunk
+        return corrected, bias_field
+
+    # Parallel path: workers need pickled, independent slabs.
+    work_items = [(vol[s:e].copy(), mask[s:e].copy() if mask is not None else None, kwargs) for s, e in bounds]
+    with multiprocessing.Pool(processes=n_processes) as pool:
+        results = pool.map(_n4_section_worker, work_items)
 
     corrected_chunks, bias_chunks = zip(*results, strict=True)
-
     corrected = np.concatenate(corrected_chunks, axis=0)
     bias_field = np.concatenate(bias_chunks, axis=0)
     return corrected, bias_field

@@ -42,15 +42,16 @@ from linumpy.gpu.bspline import (
 # ---------------------------------------------------------------------------
 
 
-def _build_log_psf(n_bins: int, bin_width: float, fwhm: float, xp: Any) -> Any:
+def _build_log_psf(n_bins: int, bin_width: Any, fwhm: float, xp: Any) -> Any:
     """Return a centred Gaussian PSF over *n_bins* bins.
 
     Parameters
     ----------
     n_bins : int
         Histogram bin count.
-    bin_width : float
-        Histogram bin width in log-intensity units.
+    bin_width : float or 0-d array
+        Histogram bin width in log-intensity units.  May be a device
+        scalar so the caller can keep the bin range on-device.
     fwhm : float
         Full-width-half-maximum of the Gaussian PSF, log-intensity units.
     xp : module
@@ -117,20 +118,22 @@ def sharpen_residual(
     mask_xp = xp.ones_like(log_v_xp, dtype=xp.bool_) if mask is None else xp.asarray(mask, dtype=xp.bool_)
 
     # Compute masked min/max without materialising the masked subset
-    # (boolean indexing is a slow scatter-gather on GPU).  We use
-    # +/-inf sentinels outside the mask so reductions ignore them.
+    # (boolean indexing is a slow scatter-gather on GPU).  Sentinels
+    # outside the mask let the reductions ignore those voxels.
+    #
+    # Keep r_min/r_max as 0-d device tensors -- pulling them to host
+    # forces a stream sync that pins one CPU core in the N4 fit loop
+    # while the GPU drains.  Downstream ops (bin_width, bin_centres,
+    # PSF, bincount index) all accept device scalars.  An eps clamp on
+    # ``range`` covers the (production-vacuous) empty-mask /
+    # uniform-volume edge cases that previously needed CPU branches.
     pos_inf = xp.float32(np.inf)
     neg_inf = xp.float32(-np.inf)
-    r_min = float(xp.where(mask_xp, log_v_xp, pos_inf).min())
-    r_max = float(xp.where(mask_xp, log_v_xp, neg_inf).max())
-    if not np.isfinite(r_min) or not np.isfinite(r_max):
-        return log_v_xp if _is_gpu_array(log_v) else np.asarray(log_v).astype(np.float32)
-    if r_max - r_min < 1e-8:
-        # Degenerate distribution -- no sharpening possible.
-        return log_v_xp if _is_gpu_array(log_v) else np.asarray(log_v).astype(np.float32)
-
-    bin_width = (r_max - r_min) / float(n_bins - 1)
-    bin_centres = xp.linspace(r_min, r_max, n_bins, dtype=xp.float32)
+    r_min = xp.where(mask_xp, log_v_xp, pos_inf).min()
+    r_max = xp.where(mask_xp, log_v_xp, neg_inf).max()
+    r_range = xp.maximum(r_max - r_min, xp.float32(1e-6))
+    bin_width = r_range / xp.float32(n_bins - 1)
+    bin_centres = r_min + xp.arange(n_bins, dtype=xp.float32) * bin_width
 
     # Quantise the FULL volume once.  bin_idx_full feeds both the
     # weighted histogram (via bincount) AND the per-voxel LUT lookup,
@@ -341,8 +344,18 @@ def n4_correct_gpu(
     # (it is identical every iter for a given level).
     sharpen_mask_weights = weights
 
+    # Convergence is checked every CHECK_EVERY iterations (and on the
+    # last iter of each level).  Each check forces a host<-device sync
+    # for the bool() result; doing it every iter pins one CPU core at
+    # 100% in a launch/sync loop while the GPU sits intermittently idle
+    # waiting for Python to dispatch the next iter's kernels.  Checking
+    # less often lets us queue ~5 iters of kernels before each barrier.
+    check_every = 5
+    tol_sq = convergence_tol * convergence_tol
+
     for level in range(n_levels):
-        for _ in range(n_iterations[level]):
+        n_iter_level = n_iterations[level]
+        for i in range(n_iter_level):
             # current = log_v - log_bias  (small_vol-sized intermediate; the
             # CuPy memory pool reuses the slot every iteration).
             current = log_v - log_bias
@@ -383,16 +396,15 @@ def n4_correct_gpu(
             coeff_total += coeffs
             del coeffs
 
-            # Convergence: ||update|| / ||log_bias|| < tol.  Compute on
-            # device and issue a single D2H sync so each iteration of the
-            # fit loop has at most one host round-trip (instead of two
-            # ``float(xp.linalg.norm(...))`` calls).
-            update_sq = (update * update).sum()
-            del update
-            bias_sq = (log_bias * log_bias).sum()
-            converged = bool(xp.logical_and(bias_sq > 0, update_sq < (convergence_tol * convergence_tol) * bias_sq))
-            if converged:
-                break
+            do_check = ((i + 1) % check_every == 0) or ((i + 1) == n_iter_level)
+            if do_check:
+                update_sq = (update * update).sum()
+                del update
+                bias_sq = (log_bias * log_bias).sum()
+                if bool(xp.logical_and(bias_sq > 0, update_sq < tol_sq * bias_sq)):
+                    break
+            else:
+                del update
 
     # Evaluate the accumulated B-spline at full resolution directly,
     # using the same cubic basis as the coarse-grid fits.  This replaces
