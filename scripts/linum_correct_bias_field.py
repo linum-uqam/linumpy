@@ -75,8 +75,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--n_iterations",
         type=int,
         nargs="+",
-        default=[50, 50, 50, 50],
-        help="Max N4 iterations per fitting level.  Length of list = number of fitting levels. [%(default)s]",
+        default=None,
+        help=(
+            "Max N4 iterations per fitting level.  Length of list = number of fitting levels. "
+            "Defaults to the backend's own choice ([50, 50, 50, 50] for cpu, [25, 25, 25] for gpu)."
+        ),
     )
     p.add_argument(
         "--spline_distance_mm",
