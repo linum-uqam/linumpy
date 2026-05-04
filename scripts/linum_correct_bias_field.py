@@ -284,6 +284,10 @@ def main() -> None:
         )
         bias_field_combined = bias_ps
         working_vol = vol_ps
+        # Drop the per-section aliases so the global pass below does not have
+        # to keep two extra full-size float32 volumes alive (~72 GB on a
+        # 36 GB mosaic). bias_field_combined / working_vol still hold them.
+        del vol_ps, bias_ps
     else:
         working_vol = vol
 
@@ -295,7 +299,13 @@ def main() -> None:
             spline_distance_mm=global_spline,
             **n4_kwargs,
         )
-        bias_field_combined = bias_field_combined * bias_global if bias_field_combined is not None else bias_global
+        if bias_field_combined is not None:
+            # Combine in place to avoid a third 36 GB allocation during the
+            # multiply, then release bias_global immediately.
+            bias_field_combined *= bias_global
+            del bias_global
+        else:
+            bias_field_combined = bias_global
 
     corrected = working_vol
 
