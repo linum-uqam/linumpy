@@ -1112,7 +1112,9 @@ process correct_bias_field {
     def hm_perz_flag = params.bias_histogram_match_per_zplane ? "--histogram_match_per_zplane" : ""
     def tissue_thresh_flag = params.bias_tissue_threshold != null ? "--tissue_threshold ${params.bias_tissue_threshold}" : ""
     def zprofile_flag = params.bias_zprofile_smooth_sigma != null ? "--zprofile_smooth_sigma ${params.bias_zprofile_smooth_sigma}" : ""
+    def gpu_pin_block = Helpers.gpuPinBlock(params, "correct_bias_field ${subject_name}")
     """
+    ${gpu_pin_block}
     linum_correct_bias_field.py ${stacked_zarr} ${subject_name}.ome.zarr \
         ${n_slices_opt} \
         --mode ${params.bias_mode} \
