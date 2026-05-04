@@ -293,12 +293,37 @@ def main() -> None:
 
     if args.mode in ("global", "two_pass"):
         logger.info("Running global N4…")
-        working_vol, bias_global = n4_correct(
-            working_vol,
-            mask,
-            spline_distance_mm=global_spline,
-            **n4_kwargs,
+        # When the GPU backend is in play and ``working_vol`` already
+        # owns a full-resolution float32 buffer, alias it as the output
+        # destination so n4_correct_gpu does not allocate a fresh
+        # ``corrected_host`` (~one full-volume float32, ~80 GB on a
+        # large mosaic).  The host buffer is not read after the initial
+        # H2D upload.  Pre-allocate a separate ``bias_global`` buffer
+        # so the multiplicative combine into ``bias_field_combined``
+        # below stays well-defined.
+        gpu_inplace = (
+            args.backend in ("gpu", "auto")
+            and isinstance(working_vol, np.ndarray)
+            and working_vol.dtype == np.float32
+            and vol_for_blend is not working_vol
         )
+        if gpu_inplace:
+            bias_global = np.empty_like(working_vol, dtype=np.float32)
+            n4_correct(
+                working_vol,
+                mask,
+                spline_distance_mm=global_spline,
+                out=working_vol,
+                bias_out=bias_global,
+                **n4_kwargs,
+            )
+        else:
+            working_vol, bias_global = n4_correct(
+                working_vol,
+                mask,
+                spline_distance_mm=global_spline,
+                **n4_kwargs,
+            )
         if bias_field_combined is not None:
             # Combine in place to avoid a third 36 GB allocation during the
             # multiply, then release bias_global immediately.
