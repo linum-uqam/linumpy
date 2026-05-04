@@ -273,6 +273,11 @@ def main() -> None:
 
     # Correction passes
     bias_field_combined: np.ndarray | None = None
+    # If the strength blend won't run, the per-section pass can write its
+    # corrected output directly back into ``vol`` -- saves a full-size
+    # float32 buffer (~36 GB on a typical OCT mosaic) during the per-section
+    # pass and removes the matching kernel-compaction pressure.
+    can_overwrite_vol = args.strength >= 1.0
 
     if args.mode in ("per_section", "two_pass"):
         logger.info(
@@ -280,22 +285,46 @@ def main() -> None:
             args.n_serial_slices,
             n_processes,
         )
-        vol_ps, bias_ps = n4_correct_per_section(
-            vol,
-            n_serial_slices=args.n_serial_slices,
-            mask=mask,
-            n_processes=n_processes,
-            spline_distance_mm=per_section_spline,
-            **n4_kwargs,
-        )
-        bias_field_combined = bias_ps
-        working_vol = vol_ps
-        # Drop the per-section aliases so the global pass below does not have
-        # to keep two extra full-size float32 volumes alive (~72 GB on a
-        # 36 GB mosaic). bias_field_combined / working_vol still hold them.
-        del vol_ps, bias_ps
+        if can_overwrite_vol and n_processes == 1:
+            # Pre-allocate the bias buffer and pass `vol` as the corrected
+            # destination so per-section writes in place.
+            bias_field_combined = np.empty_like(vol, dtype=np.float32)
+            n4_correct_per_section(
+                vol,
+                n_serial_slices=args.n_serial_slices,
+                mask=mask,
+                n_processes=n_processes,
+                spline_distance_mm=per_section_spline,
+                out=vol,
+                bias_out=bias_field_combined,
+                **n4_kwargs,
+            )
+            working_vol = vol
+        else:
+            vol_ps, bias_ps = n4_correct_per_section(
+                vol,
+                n_serial_slices=args.n_serial_slices,
+                mask=mask,
+                n_processes=n_processes,
+                spline_distance_mm=per_section_spline,
+                **n4_kwargs,
+            )
+            bias_field_combined = bias_ps
+            working_vol = vol_ps
+            # Drop the per-section aliases so the global pass below does not
+            # have to keep two extra full-size float32 volumes alive.
+            del vol_ps, bias_ps
     else:
         working_vol = vol
+
+    # Drop the original input buffer before the (possibly large) global
+    # pass / save when the strength blend won't run.  In the in-place
+    # path ``working_vol is vol``, so this just drops the redundant
+    # reference; in the per-section path it frees the original ~36 GB
+    # input buffer that's no longer needed.  Holding it through the
+    # global pass forces kcompactd0 to fight for THP-sized free regions.
+    if args.strength >= 1.0:
+        del vol
 
     if args.mode in ("global", "two_pass"):
         logger.info("Running global N4…")
@@ -314,22 +343,28 @@ def main() -> None:
             bias_field_combined = bias_global
 
     corrected = working_vol
+    del working_vol
 
     # Strength blend
     if args.strength < 1.0:
         logger.info("Blending: strength=%.3f", args.strength)
         corrected = args.strength * corrected + (1.0 - args.strength) * vol
+        del vol
 
-    corrected = corrected.astype(np.float32)
+    corrected = corrected.astype(np.float32, copy=False)
 
-    # Zero out non-tissue voxels (suppress agarose)
+    # Zero out non-tissue voxels (suppress agarose).  In-place multiply
+    # by the boolean mask (broadcast-cast to 0.0/1.0) avoids the ~36 GB
+    # temporary that ``np.where(mask, corrected, 0)`` allocates.
     if args.zero_outside_mask:
         logger.info("Zeroing voxels outside tissue mask\u2026")
-        corrected = np.where(mask, corrected, 0.0).astype(np.float32)
+        corrected *= mask
+    del mask
 
     # Save output
     _save(corrected, args.out_image, res, args)
     logger.info("Saved corrected volume to %s", args.out_image)
+    del corrected
 
     # Optionally save bias field
     if args.save_bias_field is not None and bias_field_combined is not None:
