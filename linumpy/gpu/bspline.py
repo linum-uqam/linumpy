@@ -149,6 +149,8 @@ def _build_axis_basis(n_voxels: int, n_control: int, xp: Any) -> Any:
 
 def bspline_fit_precompute(
     bases: tuple[Any, Any, Any],
+    *,
+    eps: float = 1e-8,
 ) -> tuple[Any, Any, Any, Any, Any, Any, Any]:
     """Build the iteration-invariant constants used by :func:`bspline_fit`.
 
@@ -158,9 +160,12 @@ def bspline_fit_precompute(
     (e.g. the N4 fitting loop) can build them once and pass them in via
     :func:`bspline_fit`'s ``precomputed`` argument.
 
-    Returns ``(M_z2, M_y2, M_x2, M_z3, M_y3, M_x3, S)``.
+    Returns ``(M_z2, M_y2, M_x2, M_z3, M_y3, M_x3, S_safe)`` where
+    ``S_safe = maximum(S, eps)`` -- the per-iteration ``maximum`` against
+    *eps* is folded into the precompute.
     """
     M_z, M_y, M_x = bases
+    xp = get_array_module(use_gpu=_is_gpu_array(M_z))
     M_z2 = M_z * M_z
     M_y2 = M_y * M_y
     M_x2 = M_x * M_x
@@ -170,8 +175,13 @@ def bspline_fit_precompute(
     s_z = M_z2.sum(axis=1)
     s_y = M_y2.sum(axis=1)
     s_x = M_x2.sum(axis=1)
-    S = s_z[:, None, None] * s_y[None, :, None] * s_x[None, None, :]
-    return M_z2, M_y2, M_x2, M_z3, M_y3, M_x3, S
+    # Pre-clamp S to >= eps so :func:`bspline_fit` skips a per-call
+    # full-volume ``maximum`` op.
+    S_safe = xp.maximum(
+        s_z[:, None, None] * s_y[None, :, None] * s_x[None, None, :],
+        eps,
+    ).astype(xp.float32)
+    return M_z2, M_y2, M_x2, M_z3, M_y3, M_x3, S_safe
 
 
 def bspline_fit(
@@ -263,11 +273,11 @@ def bspline_fit(
     # from the bases, so an N4 fitting loop can build them once via
     # :func:`bspline_fit_precompute` and pass them in.
     if precomputed is None:
-        M_z2, M_y2, M_x2, M_z3, M_y3, M_x3, S = bspline_fit_precompute((M_z, M_y, M_x))
+        M_z2, M_y2, M_x2, M_z3, M_y3, M_x3, S_safe = bspline_fit_precompute((M_z, M_y, M_x), eps=eps)
     else:
-        M_z2, M_y2, M_x2, M_z3, M_y3, M_x3, S = precomputed
+        M_z2, M_y2, M_x2, M_z3, M_y3, M_x3, S_safe = precomputed
 
-    psi = (w * vals) / xp.maximum(S, eps)  # (Z, Y, X)
+    psi = (w * vals) / S_safe  # (Z, Y, X)
 
     # num[Cz, Cy, Cx] = sum_{z,y,x} M_z3[z,Cz] M_y3[y,Cy] M_x3[x,Cx] * psi
     num = xp.tensordot(psi, M_x3, axes=([2], [0]))  # (Nz, Ny, Cx)
