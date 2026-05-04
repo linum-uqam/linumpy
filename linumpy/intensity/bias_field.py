@@ -446,6 +446,13 @@ def n4_correct_per_section(
         effective_gpu = backend == "gpu"
 
     if effective_gpu and n_processes != 1:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "GPU N4 backend cannot be parallelised across processes (single device); "
+            "forcing n_processes=1 (was %d). Per-section sections will run serially on GPU.",
+            n_processes,
+        )
         n_processes = 1
 
     work_items = [
