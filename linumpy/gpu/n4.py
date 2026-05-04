@@ -345,6 +345,8 @@ def n4_correct_gpu(
 
     for level in range(n_levels):
         for _ in range(n_iterations[level]):
+            # current = log_v - log_bias  (small_vol-sized intermediate; the
+            # CuPy memory pool reuses the slot every iteration).
             current = log_v - log_bias
             sharpened = sharpen_residual(
                 current,
@@ -355,17 +357,23 @@ def n4_correct_gpu(
                 use_gpu=use_gpu,
                 mask_weights=sharpen_mask_weights,
             )
-            residual = xp.where(mask_small, current - sharpened, 0.0).astype(xp.float32)
+            # `weights == mask_small.astype(float32)`, so multiplying by it
+            # zeros the residual outside the mask without an extra
+            # ``xp.where`` call.
+            current -= sharpened
+            current *= weights
+            del sharpened
 
             coeffs = bspline_fit(
-                residual,
+                current,
                 weights=weights,
-                mask=mask_small,
+                mask=None,  # weights already encodes the mask
                 n_control_points=n_ctrl,
                 use_gpu=use_gpu,
                 bases=bases,
                 precomputed=fit_precomputed,
             )
+            del current
             update = bspline_evaluate(
                 coeffs,
                 target_shape=small_shape,
@@ -373,11 +381,19 @@ def n4_correct_gpu(
                 bases=bases,
             ).astype(xp.float32)
 
-            update_norm = float(xp.linalg.norm(update))
-            log_bias = log_bias + update
-            coeff_total = coeff_total + coeffs
-            bias_norm = float(xp.linalg.norm(log_bias))
-            if bias_norm > 0 and update_norm / bias_norm < convergence_tol:
+            log_bias += update
+            coeff_total += coeffs
+            del coeffs
+
+            # Convergence: ||update|| / ||log_bias|| < tol.  Compute on
+            # device and issue a single D2H sync so each iteration of the
+            # fit loop has at most one host round-trip (instead of two
+            # ``float(xp.linalg.norm(...))`` calls).
+            update_sq = (update * update).sum()
+            del update
+            bias_sq = (log_bias * log_bias).sum()
+            converged = bool(xp.logical_and(bias_sq > 0, update_sq < (convergence_tol * convergence_tol) * bias_sq))
+            if converged:
                 break
 
     # Evaluate the accumulated B-spline at full resolution directly,
