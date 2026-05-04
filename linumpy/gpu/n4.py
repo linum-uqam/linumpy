@@ -29,7 +29,13 @@ from typing import Any
 import numpy as np
 
 from linumpy.gpu import GPU_AVAILABLE, get_array_module
-from linumpy.gpu.bspline import _build_axis_basis, _is_gpu_array, bspline_evaluate, bspline_fit
+from linumpy.gpu.bspline import (
+    _build_axis_basis,
+    _is_gpu_array,
+    bspline_evaluate,
+    bspline_fit,
+    bspline_fit_precompute,
+)
 
 # ---------------------------------------------------------------------------
 # Histogram sharpening
@@ -66,6 +72,7 @@ def sharpen_residual(
     fwhm_log: float = 0.15,
     wiener_noise: float = 0.01,
     use_gpu: bool = True,
+    mask_weights: np.ndarray | None = None,
 ) -> np.ndarray:
     """Return the per-voxel sharpened log-intensity (LUT-mapped).
 
@@ -93,6 +100,10 @@ def sharpen_residual(
         deconvolution at the expense of sharpening.
     use_gpu : bool
         Use CuPy when available.
+    mask_weights : np.ndarray, optional
+        Float32 view of *mask* (``mask.astype(float32)``).  When provided,
+        skips the per-call cast -- a full-volume allocation that the N4
+        fit loop otherwise repeats every iteration.
 
     Returns
     -------
@@ -126,7 +137,7 @@ def sharpen_residual(
     # so we avoid a second pass over the volume and the
     # boolean-indexed copy of the masked subset.
     bin_idx_full = xp.clip(((log_v_xp - r_min) / bin_width + 0.5).astype(xp.int64), 0, n_bins - 1)
-    mask_w = mask_xp.astype(xp.float32)
+    mask_w = mask_xp.astype(xp.float32) if mask_weights is None else mask_weights
     hist = xp.bincount(bin_idx_full.reshape(-1), weights=mask_w.reshape(-1), minlength=n_bins).astype(xp.float32)
 
     # Gaussian PSF (centred); FFT-shift to align with FFT convention.
@@ -320,6 +331,16 @@ def n4_correct_gpu(
     # by upsampling the coarse field with a different kernel.
     coeff_total = xp.zeros(n_ctrl, dtype=xp.float32)
 
+    # The B-spline fit denominator S(p) and the squared/cubed per-axis basis
+    # matrices depend only on `bases`, which we hold fixed across all
+    # fitting levels.  Precompute them once so each iteration's
+    # bspline_fit call skips a small_vol-sized allocation of S plus six
+    # basis-power multiplies.
+    fit_precomputed = bspline_fit_precompute(bases)
+    # Reuse the float32 mask cast across iterations of sharpen_residual
+    # (it is identical every iter for a given level).
+    sharpen_mask_weights = weights
+
     for level in range(n_levels):
         for _ in range(n_iterations[level]):
             current = log_v - log_bias
@@ -330,6 +351,7 @@ def n4_correct_gpu(
                 fwhm_log=fwhm_log,
                 wiener_noise=wiener_noise,
                 use_gpu=use_gpu,
+                mask_weights=sharpen_mask_weights,
             )
             residual = xp.where(mask_small, current - sharpened, 0.0).astype(xp.float32)
 
@@ -340,6 +362,7 @@ def n4_correct_gpu(
                 n_control_points=n_ctrl,
                 use_gpu=use_gpu,
                 bases=bases,
+                precomputed=fit_precomputed,
             )
             update = bspline_evaluate(
                 coeffs,
@@ -366,7 +389,7 @@ def n4_correct_gpu(
     # at full volume size.  For large volumes that dwarfs GPU memory, so
     # we drop the fit-time intermediates first and stream the evaluation
     # in Z-tiles back to host.
-    del log_v, log_bias, weights, mask_small, vol_small, bases
+    del log_v, log_bias, weights, mask_small, vol_small, bases, fit_precomputed, sharpen_mask_weights
     if on_gpu:
         import cupy as cp
 
