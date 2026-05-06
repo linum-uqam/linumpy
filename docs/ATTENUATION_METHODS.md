@@ -33,6 +33,24 @@ The two improvements over Smith are:
 2. A per-A-line least-squares fit for $\hat\mu_E$ (Liu, Li) replacing
    Smith's log-gradient mean.
 
+## Implementation
+
+All four methods share a small set of helpers in
+`linumpy.intensity.attenuation`:
+
+- `_median_xy_filter(vol, k)` — pre-denoising
+- `_auto_tissue_mask(vol, zshift)` — water/tissue interface detection
+- `_lstsq_tail_slope(bot)` — vectorized per-A-line LSQ fit of $\ln I$
+  vs depth (replaces a Python loop)
+- `_exact_tail_C(i_max, mu_E, dz)` — Liu's $C$ via `np.expm1`
+- `_finalize_attenuation(attn, mask, fill_holes)` — NaN/mask cleanup
+
+The Vermeer core (cumsum + log over the full volume) optionally runs
+on CuPy via `use_gpu=True`; pass it through Smith / Liu / Li to
+accelerate the bottleneck on machines with a CUDA GPU. The CPU path is
+unchanged when `use_gpu=False` (the default) or when CuPy is not
+available.
+
 The Neubrand 2023 paper (J. Biomed. Opt. 28, 066001) is the reference
 for the *exact* form (Eq. 17 above). The widely circulated *linearized*
 form
