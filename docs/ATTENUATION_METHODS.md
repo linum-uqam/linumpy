@@ -156,3 +156,25 @@ and checks each runs end-to-end on a synthetic decay volume and
 reduces the depth drop (the `li` run is allowed to over-correct on
 the small 60-voxel synthetic since SNR-based truncation leaves too
 few voxels for a stable $\hat\mu_E$ fit at that size).
+
+## Real-data sweep
+
+Cropped 42×1832×988 OCT slice (10 µm/voxel axial), `--strength 0.3`,
+single-pass `linum_compensate_attenuation_inplace.py`. Drop % is the
+mean intensity drop between the top 1/8 and bottom 1/8 of the volume —
+zero would mean a perfectly flat axial profile.
+
+| Method  | Wall time | Top mean | Bottom mean | Residual drop |
+|---------|-----------|----------|-------------|---------------|
+| input   | —         | 9.8      | 5.9         | 40.16 %       |
+| smith   | 26.0 s    | 10.0     | 7.3         | 27.11 %       |
+| vermeer | 19.3 s    | 10.2     | 19.3        | −89.55 %      |
+| liu     | 23.0 s    | 10.1     | 9.1         |  9.33 %       |
+| li      | 23.3 s    | 10.1     | 9.2         |  8.93 %       |
+
+Liu and Li reduce the residual axial drop ~3× compared to Smith. The
+bare Vermeer estimator over-corrects (negative drop) because it
+assumes the signal beyond the volume is zero — the well-known
+finite-range bias the other three methods address. On this volume Li
+and Liu agree closely; Li's noise-floor handling pays off mostly when
+the deep portion of the A-line approaches the detector noise level.
