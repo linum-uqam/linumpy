@@ -20,9 +20,9 @@ computed and how the input is preconditioned.
 | Method | $C$ | Pre-processing | When to use |
 |---|---|---|---|
 | Vermeer 2014 | $0$ | Raw input | Reference / lower-bound on $\mu$. Severely overestimates $\mu$ in the bottom 10–20 % of the volume. |
-| Smith 2015 | $C \approx I[i_{\max}] / (2\,\hat\mu_E\,\Delta)$ | XY median filter | The default in linumpy historically; $\hat\mu_E$ comes from a log-gradient mean. |
+| Smith 2015 | $C \approx I[i_{\max}] / (2\,\hat\mu_E\,\Delta)$ | XY median filter | Legacy linumpy default; $\hat\mu_E$ comes from a log-gradient mean. Kept for reproducing past results. |
 | Liu 2019 | $C = I[i_{\max}] / (\exp(2\,\hat\mu_E\,\Delta) - 1)$ | XY median filter, per-A-line LSQ tail fit for $\hat\mu_E$ | Drop-in replacement for Smith. The exact denominator avoids the linearization error and matches the geometric tail integral exactly. |
-| Li 2020 | Same as Liu, but on the noise-subtracted, SNR-truncated A-line | Noise-floor subtraction + per-A-line truncation when SNR drops below `snr_threshold_db` (default 6 dB) | Use when the signal floor is non-negligible (most real OCT data). Truncates each A-line individually so the bottom voxels do not pollute the estimate. |
+| **Li 2020** *(current default)* | Same as Liu, but on the noise-subtracted, SNR-truncated A-line | Noise-floor subtraction + per-A-line truncation when SNR drops below `snr_threshold_db` (default 6 dB) | **Default.** Handles the non-negligible noise floor present in real OCT data. Truncates each A-line individually so the bottom voxels do not pollute the estimate. |
 
 The two improvements over Smith are:
 
@@ -81,12 +81,17 @@ adjust the constants in the function body for your setup.
 
 ```bash
 linum_compensate_attenuation_inplace.py input.ome.zarr output.ome.zarr \
-    --method {vermeer,smith,liu,li}      # default: smith (legacy)
+    --method {li,liu,smith,vermeer}      # default: li (Li 2020)
     --strength 0.3                       # 1.0 = textbook formula; <1 attenuates
     --k 10                               # XY median filter (voxels); 0 disables
     --zshift 3                           # voxels under interface to skip
     --min_bias 0.05                      # cap maximum gain at 1/min_bias
 ```
+
+The Nextflow pipeline forwards the choice through
+`params.compensate_attenuation_method` (see
+`workflows/reconst_3d/nextflow.config`); set it per-subject in
+`<subject>/nextflow.config` if a different method is needed.
 
 ### Why `--strength` is needed
 
@@ -170,7 +175,7 @@ zero would mean a perfectly flat axial profile.
 | smith   | 26.0 s    | 10.0     | 7.3         | 27.11 %       |
 | vermeer | 19.3 s    | 10.2     | 19.3        | −89.55 %      |
 | liu     | 23.0 s    | 10.1     | 9.1         |  9.33 %       |
-| li      | 23.3 s    | 10.1     | 9.2         |  8.93 %       |
+| **li**  | 23.3 s    | 10.1     | 9.2         |  **8.93 %**   |
 
 Liu and Li reduce the residual axial drop ~3× compared to Smith. The
 bare Vermeer estimator over-corrects (negative drop) because it
@@ -178,3 +183,40 @@ assumes the signal beyond the volume is zero — the well-known
 finite-range bias the other three methods address. On this volume Li
 and Liu agree closely; Li's noise-floor handling pays off mostly when
 the deep portion of the A-line approaches the detector noise level.
+
+## Default choice and why
+
+The pipeline default is **Li 2020** (`--method li`,
+`compensate_attenuation_method = 'li'` in the Nextflow config). The
+rationale, in order of importance:
+
+1. **Lowest residual axial drop** in the real-data sweep above
+   (8.93 % vs Smith's 27.11 %, a ~3× reduction at the same
+   `--strength`).
+2. **Robust to the detector noise floor.** Real OCT A-lines do not
+   decay to zero — they asymptote to the detector noise (~$10^{-3}$
+   of the surface intensity in the test volume). Liu's exact-form
+   $C$ already prevents the deep blow-up Vermeer suffers from, but
+   it still includes the noise tail in $\hat\mu_E$. Li adds two
+   cheap safeguards: subtract an estimate of the noise floor before
+   the slope fit, and cut each A-line at the depth where its SNR
+   drops below 6 dB. The result is that $\hat\mu_E$ is fit only on
+   voxels that actually carry signal.
+3. **Marginal cost over Liu.** On the test volume the wall time was
+   23.3 s (Li) vs 23.0 s (Liu) — the noise / SNR pre-pass is a
+   fraction of the cumulative-sum cost, which dominates either way.
+4. **Backwards-compatible escape hatches.** Smith remains available
+   for reproducing legacy outputs; Vermeer is kept as a reference;
+   `--strength` still scales the correction so the practical gain on
+   any specific dataset can be tuned without changing methods.
+
+When Li is *not* the right default:
+
+* **Very short A-lines** (a few dozen voxels) — SNR-based truncation
+  leaves too few samples for a stable $\hat\mu_E$ fit. Use `liu` or
+  `smith` instead. The synthetic 60-voxel CLI test
+  (`test_method_dispatch`) explicitly exempts `li` from the strict
+  flatness assertion for this reason.
+* **Reproducing a previous reconstruction** — set
+  `compensate_attenuation_method = 'smith'` in the per-subject
+  `nextflow.config`.
