@@ -165,7 +165,14 @@ workflow {
     // Stage 3: Corrections
     beam_profile_correction(stitched_slices)
     crop_interface(beam_profile_correction.out.corrected)
-    normalize(crop_interface.out.cropped)
+    if (params.compensate_attenuation_enabled) {
+        compensate_attenuation(crop_interface.out.cropped)
+        attn_corrected = compensate_attenuation.out.compensated
+    }
+    else {
+        attn_corrected = crop_interface.out.cropped
+    }
+    normalize(attn_corrected)
 
     // Stage 3.5: Auto slice quality assessment (optional). Generates a
     // slice_config.csv that marks degraded slices; an existing static
@@ -715,6 +722,27 @@ process crop_interface {
     stub:
     """
     mkdir -p slice_z${slice_id}_crop_interface.ome.zarr
+    """
+}
+
+process compensate_attenuation {
+    input:
+    tuple val(slice_id), path(image)
+
+    output:
+    tuple val(slice_id), path("slice_z${slice_id}_attn_corr.ome.zarr"), emit: compensated
+
+    script:
+    """
+    linum_compensate_attenuation_inplace.py ${image} "slice_z${slice_id}_attn_corr.ome.zarr" \
+        --min_bias ${params.compensate_attenuation_min_bias} \
+        --mask_smoothing_sigma ${params.compensate_attenuation_mask_sigma} \
+        --n_levels 0
+    """
+
+    stub:
+    """
+    mkdir -p slice_z${slice_id}_attn_corr.ome.zarr
     """
 }
 
