@@ -86,6 +86,8 @@ def test_flattens_synthetic_exponential_decay(script_runner, tmp_path):
             "linum_compensate_attenuation_inplace.py",
             str(input_path),
             str(output_path),
+            "--method",
+            "smith",
             "--strength",
             "1.0",
             "--n_levels",

@@ -735,6 +735,7 @@ process compensate_attenuation {
     script:
     """
     linum_compensate_attenuation_inplace.py ${image} "slice_z${slice_id}_attn_corr.ome.zarr" \
+        --method ${params.compensate_attenuation_method} \
         --min_bias ${params.compensate_attenuation_min_bias} \
         --mask_smoothing_sigma ${params.compensate_attenuation_mask_sigma} \
         --n_levels 0

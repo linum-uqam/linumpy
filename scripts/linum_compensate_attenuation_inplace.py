@@ -102,12 +102,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--method",
         choices=METHODS,
-        default="smith",
-        help="Depth-resolved attenuation estimator. ``smith`` reproduces the\n"
-        "previous behaviour. ``liu`` uses the exact-form regularization\n"
-        "(Liu 2019); ``li`` adds noise-floor subtraction and SNR-based\n"
-        "A-line truncation (Li 2020). ``vermeer`` is the bare estimator\n"
-        "with no regularization. [%(default)s]",
+        default="li",
+        help="Depth-resolved attenuation estimator. ``li`` (default) adds\n"
+        "noise-floor subtraction and SNR-based A-line truncation on top\n"
+        "of the Liu 2019 exact-form regularization, and produces the\n"
+        "flattest axial profile on real OCT data. ``liu`` is the same\n"
+        "without noise handling. ``smith`` reproduces the historical\n"
+        "linumpy behaviour. ``vermeer`` is the bare estimator with no\n"
+        "regularization. [%(default)s]",
     )
     p.add_argument("--n_levels", type=int, default=0, help="Pyramid levels in the output. [%(default)s]")
     return p
