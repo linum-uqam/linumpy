@@ -102,6 +102,7 @@ docs = [
 "linum_clip_percentile.py" = "scripts.linum_clip_percentile:main"
 "linum_compare_stitching.py" = "scripts.diagnostics.linum_compare_stitching:main"
 "linum_compensate_attenuation.py" = "scripts.linum_compensate_attenuation:main"
+"linum_compensate_attenuation_inplace.py" = "scripts.linum_compensate_attenuation_inplace:main"
 "linum_compensate_illumination.py" = "scripts.linum_compensate_illumination:main"
 "linum_compensate_psf_from_model.py" = "scripts.linum_compensate_psf_from_model:main"
 "linum_compensate_psf_model_free.py" = "scripts.linum_compensate_psf_model_free:main"
