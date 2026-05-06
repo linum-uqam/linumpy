@@ -695,13 +695,11 @@ def create_alignment_preview(
         vol_original = apply_orientation_transform(vol_original, orientation_permutation, orientation_flips)
         orig_res = reorder_resolution(tuple(orig_res), orientation_permutation)
 
-    # apply_orientation_transform yields linumpy convention (S, R, A): dim0=S,
-    # dim1=R, dim2=A. The aligned and Allen-template volumes below are in
-    # standard RAS -- numpy (S, A, R): dim0=S, dim1=A, dim2=R. Permute the
-    # original to (S, A, R) here so all three columns share one convention and
-    # a single set of "Axial / Coronal / Sagittal" labels applies uniformly.
-    vol_original = np.transpose(vol_original, (0, 2, 1))
-    orig_res = (orig_res[0], orig_res[2], orig_res[1])
+    # apply_orientation_transform yields the linumpy convention (S, A, R)
+    # matching the Allen RAS+ template: dim0=S, dim1=A, dim2=R.  Both the
+    # aligned and Allen-template volumes below already use the same numpy
+    # ordering, so all three columns share one convention and a single set
+    # of "Axial / Coronal / Sagittal" labels applies uniformly.
     update_pbar()
 
     # Load aligned volume from output file, or compute it
@@ -806,20 +804,22 @@ def create_alignment_preview(
     )
 
     for row, plane_name in enumerate(plane_names):
-        # Original - use .T for row 0 (XY plane) to match display convention
-        data = orig_slices[row].T if row == 0 else orig_slices[row][::-1, :]
-        axes[row, 0].imshow(data, cmap="gray", origin="lower", vmin=orig_vmin, vmax=orig_vmax)
+        # All three columns share the same convention (S, A, R).  With
+        # origin="lower", row 0 is rendered at the bottom of the figure, so:
+        #   axial    rows=A → Posterior at bottom, Anterior up
+        #   coronal  rows=S → Inferior at bottom,  Superior up
+        #   sagittal rows=S → Inferior at bottom,  Superior up
+        # No transpose or row reversal is needed.
+        axes[row, 0].imshow(orig_slices[row], cmap="gray", origin="lower", vmin=orig_vmin, vmax=orig_vmax)
         axes[row, 0].set_title(f"Original - {plane_name}")
         axes[row, 0].axis("off")
 
         # Aligned
-        data = aligned_slices[row].T if row == 0 else aligned_slices[row][::-1, :]
-        axes[row, 1].imshow(data, cmap="gray", origin="lower", vmin=align_vmin, vmax=align_vmax)
+        axes[row, 1].imshow(aligned_slices[row], cmap="gray", origin="lower", vmin=align_vmin, vmax=align_vmax)
         axes[row, 1].set_title(f"Aligned - {plane_name}")
         axes[row, 1].axis("off")
 
-        data = allen_slices[row].T if row == 0 else allen_slices[row][::-1, :]
-        axes[row, 2].imshow(data, cmap="gray", origin="lower", vmin=allen_vmin, vmax=allen_vmax)
+        axes[row, 2].imshow(allen_slices[row], cmap="gray", origin="lower", vmin=allen_vmin, vmax=allen_vmax)
         axes[row, 2].set_title(f"Allen {allen_resolution}µm - {plane_name}")
         axes[row, 2].axis("off")
 
@@ -914,40 +914,42 @@ def create_orientation_preview(
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
     fig.suptitle(
         f"Orientation Preview -- {subtitle}\n"
-        f"Shape: {vol.shape}  |  After corrections: dim0=S (Superior), dim1=R (Right), dim2=A (Anterior)",
+        f"Shape: {vol.shape}  |  After corrections: dim0=S (Superior), dim1=A (Anterior), dim2=R (Right)",
         fontsize=11,
     )
 
     # After apply_orientation_transform the volume is in linumpy convention
-    # (S, R, A): dim0=S (Superior), dim1=R (Right), dim2=A (Anterior).
+    # (S, A, R): dim0=S (Superior), dim1=A (Anterior), dim2=R (Right).
     # Slicing → anatomical plane:
-    #   vol[z, :, :]   fixes S → AXIAL    (rows=R, cols=A)
-    #   vol[:, y, :]   fixes R → SAGITTAL (rows=S, cols=A)
-    #   vol[:, :, x]   fixes A → CORONAL  (rows=S, cols=R)
-    # `.T` on the axial view + row reversal on the others orients the figure
-    # so Superior is up and Right/Anterior point in the natural directions.
-    axes[0].imshow(vol[z_mid, :, :].T, cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
+    #   vol[z, :, :]   fixes S → AXIAL    (rows=A, cols=R)
+    #   vol[:, y, :]   fixes A → CORONAL  (rows=S, cols=R)
+    #   vol[:, :, x]   fixes R → SAGITTAL (rows=S, cols=A)
+    # We use origin="lower" so that row 0 sits at the bottom of the figure;
+    # for the axial panel this places Posterior at bottom (Anterior up), and
+    # for coronal/sagittal it places Inferior at bottom (Superior up).  No
+    # row reversal is needed -- it would invert this and flip S↔I.
+    axes[0].imshow(vol[z_mid, :, :], cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
     axes[0].set_title(f"Axial  (dim0=S={z_mid})")
-    axes[0].set_xlabel("dim1=R  (← L    R →)")
-    axes[0].set_ylabel("dim2=A  (← P    A →)")
+    axes[0].set_xlabel("dim2=R  (← L    R →)")
+    axes[0].set_ylabel("dim1=A  (← P    A →)")
 
-    axes[1].imshow(vol[::-1, y_mid, :], cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
-    axes[1].set_title(f"Sagittal  (dim1=R={y_mid})")
-    axes[1].set_xlabel("dim2=A  (← P    A →)")
+    axes[1].imshow(vol[:, y_mid, :], cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
+    axes[1].set_title(f"Coronal  (dim1=A={y_mid})")
+    axes[1].set_xlabel("dim2=R  (← L    R →)")
     axes[1].set_ylabel("dim0=S  (← I    S →)")
 
-    axes[2].imshow(vol[::-1, :, x_mid], cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
-    axes[2].set_title(f"Coronal  (dim2=A={x_mid})")
-    axes[2].set_xlabel("dim1=R  (← L    R →)")
+    axes[2].imshow(vol[:, :, x_mid], cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
+    axes[2].set_title(f"Sagittal  (dim2=R={x_mid})")
+    axes[2].set_xlabel("dim1=A  (← P    A →)")
     axes[2].set_ylabel("dim0=S  (← I    S →)")
 
     _debug_log(
         "create_orientation_preview: slicing decisions",
         vol_shape=list(vol.shape),
         panels=[
-            {"axes": 0, "slice": f"vol[{z_mid}, :, :].T", "fixed_axis": "dim0=S", "plane": "Axial"},
-            {"axes": 1, "slice": f"vol[::-1, {y_mid}, :]", "fixed_axis": "dim1=R", "plane": "Sagittal"},
-            {"axes": 2, "slice": f"vol[::-1, :, {x_mid}]", "fixed_axis": "dim2=A", "plane": "Coronal"},
+            {"axes": 0, "slice": f"vol[{z_mid}, :, :]", "fixed_axis": "dim0=S", "plane": "Axial"},
+            {"axes": 1, "slice": f"vol[:, {y_mid}, :]", "fixed_axis": "dim1=A", "plane": "Coronal"},
+            {"axes": 2, "slice": f"vol[:, :, {x_mid}]", "fixed_axis": "dim2=R", "plane": "Sagittal"},
         ],
     )
 
