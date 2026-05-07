@@ -1,21 +1,18 @@
-# -*- coding: utf-8 -*-
-
-"""
-Methods to download data from the Allen Institute
-"""
+"""Methods to download data from the Allen Institute."""
 
 from pathlib import Path
 
-import SimpleITK as sitk
 import requests
+import SimpleITK as sitk
 from tqdm import tqdm
 
 AVAILABLE_RESOLUTIONS = [10, 25, 50, 100]
 
 
 def download_template(resolution: int, cache: bool = True, cache_dir: str = ".data/") -> sitk.Image:
-    """Download a 3D average mouse brain
-    Parameters
+    """Download a 3D average mouse brain.
+
+    Parameters.
     ----------
     resolution
         Allen template resolution in micron. Must be 10, 25, 50 or 100.
@@ -23,6 +20,7 @@ def download_template(resolution: int, cache: bool = True, cache_dir: str = ".da
         Keep the downloaded volume in cache
     cache_dir
         Cache directory
+
     Returns
     -------
     Allen average mouse brain.

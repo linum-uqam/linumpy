@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
-"""
-Convert OCT raw binary data to nifti
-"""
+"""Convert OCT raw binary data to nifti."""
 
 # Configure thread limits before numpy/scipy imports
 import linumpy._thread_config  # noqa: F401
@@ -18,17 +15,14 @@ from linumpy.microscope.oct import OCT
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input",
-                   help="Input OCT directory. This should contain image_*.bin and info.txt files")
-    p.add_argument("output",
-                   help="Output nifti filename")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("input", help="Input OCT directory. This should contain image_*.bin and info.txt files")
+    p.add_argument("output", help="Output nifti filename")
 
     return p
 
 
-def main():
+def main() -> None:
     parser = _build_arg_parser()
     args = parser.parse_args()
 
@@ -51,8 +45,8 @@ def main():
     vol = np.moveaxis(vol, (0, 1, 2), (2, 0, 1))
 
     # Prepare the affine matrix
-    res_x_um = oct.info['width'] / oct.info['nx']
-    res_y_um = oct.info['height'] / oct.info['ny']
+    res_x_um = oct.info["width"] / oct.info["nx"]
+    res_y_um = oct.info["height"] / oct.info["ny"]
     res_z_um = 3.5  # TODO: add the axial resolution to the oct scan info file.
     affine = np.eye(4)
     affine[0, 0] = res_x_um

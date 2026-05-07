@@ -1,37 +1,33 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
-"""Stitch a 3D mosaic grid.
-"""
+"""Stitch a 3D mosaic grid."""
 
 import argparse
 from pathlib import Path
 
 import numpy as np
 
-from linumpy.io.zarr import read_omezarr, OmeZarrWriter
+from linumpy.io.zarr import OmeZarrWriter, read_omezarr
 from linumpy.stitching.mosaic_grid import addVolumeToMosaic
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_volume",
-                   help="Full path to a 3D mosaic grid volume.")
-    p.add_argument("input_transform",
-                   help="Transform file (.npy format)")
-    p.add_argument("output_volume",
-                   help="Stitched mosaic filename (zarr)")
-    p.add_argument("--blending_method", type=str,
-                   default="diffusion",
-                   choices=["none", "average", "diffusion"],
-                   help="Blending method. (default=%(default)s)")
-    p.add_argument("--complex_input", default=False,
-                   help="If the input is complex data (default=%(default)s)")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("input_volume", help="Full path to a 3D mosaic grid volume.")
+    p.add_argument("input_transform", help="Transform file (.npy format)")
+    p.add_argument("output_volume", help="Stitched mosaic filename (zarr)")
+    p.add_argument(
+        "--blending_method",
+        type=str,
+        default="diffusion",
+        choices=["none", "average", "diffusion"],
+        help="Blending method. (default=%(default)s)",
+    )
+    p.add_argument("--complex_input", default=False, help="If the input is complex data (default=%(default)s)")
     return p
 
 
-def main():
+def main() -> None:
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -70,9 +66,13 @@ def main():
     mosaic_shape = [volume.shape[0], int(posx_max - posx_min), int(posy_max - posy_min)]
 
     # Stitch the mosaic
-    writer = OmeZarrWriter(output_file, mosaic_shape, chunk_shape=(100, 100, 100),
-                           dtype=np.complex64 if args.complex_input else np.float32,
-                           overwrite=True)
+    writer = OmeZarrWriter(
+        output_file,
+        mosaic_shape,
+        chunk_shape=(100, 100, 100),
+        dtype=np.complex64 if args.complex_input else np.float32,
+        overwrite=True,
+    )
     for i in range(nx):
         for j in range(ny):
             # Compute the tile position in the input
@@ -88,8 +88,7 @@ def main():
             pos = positions[i * ny + j]
             pos[0] -= posx_min
             pos[1] -= posy_min
-            addVolumeToMosaic(tile, pos, writer,
-                              blendingMethod=blending_method)
+            addVolumeToMosaic(tile, pos, writer, blendingMethod=blending_method)
 
     writer.finalize(resolution)
 

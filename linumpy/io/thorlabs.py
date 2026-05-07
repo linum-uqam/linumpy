@@ -1,5 +1,5 @@
 """
-ThorOCT Module
+ThorOCT Module.
 
 This module provides the ThorOCT class for handling OCT data from ThorLabs PSOCT microscopes.
 It includes methods to load, process, and extract metadata and polarization data from compressed
@@ -7,9 +7,10 @@ files, as well as utility functions for preprocessing and tile extraction.
 """
 
 import gc
-from pathlib import Path
 import zipfile
+from pathlib import Path
 from xml.dom.minidom import parse
+
 import numpy as np
 
 
@@ -17,7 +18,8 @@ class PreprocessingConfig:
     """
     Configuration for preprocessing OCT data.
 
-    Attributes:
+    Attributes
+    ----------
         return_complex (bool):
             If True, return the raw complex data.
             If False, return its magnitude instead.
@@ -46,12 +48,14 @@ class ThorOCT:
     A class for handling OCT data from ThorLabs PSOCT microscopes. It provides methods to load,
     process, and extract metadata and data from compressed files.
 
-    Parameters:
+    Parameters
+    ----------
         path (str): Path to the compressed data file.
         compressed_data (zipfile.ZipFile): ZipFile object containing the data.
         config (PreprocessingConfig): Configuration for preprocessing.
-            
-    Attributes:
+
+    Attributes
+    ----------
         first_polarization (np.ndarray): Data for the first polarization.
         second_polarization (np.ndarray): Data for the second polarization.
         size_x (int): X-dimension size of the data.
@@ -64,18 +68,13 @@ class ThorOCT:
 
     def __init__(
         self,
-        path: str = None,
-        compressed_data: zipfile.ZipFile = None,
+        path: str | None = None,
+        compressed_data: zipfile.ZipFile | None = None,
         config: PreprocessingConfig = None,
-    ):
-        """
-        Initialize the ThorOCT object.
-
-        """
+    ) -> None:
+        """Initialize the ThorOCT object."""
         self.path = path
-        self.compressed_data = compressed_data or (
-            zipfile.ZipFile(path) if path else None
-        )
+        self.compressed_data = compressed_data or (zipfile.ZipFile(path) if path else None)
         self.first_polarization = None
         self.second_polarization = None
         self.size_x = None
@@ -90,7 +89,8 @@ class ThorOCT:
         """
         Load the data from the compressed file and extract the header and the complex data.
 
-        Raises:
+        Raises
+        ------
             ValueError: If no valid data source is provided.
         """
         if not self.compressed_data:
@@ -111,7 +111,8 @@ class ThorOCT:
         """
         Loads and returns the OCT header metadata.
 
-        Raises:
+        Raises
+        ------
             FileNotFoundError: If the header file is not found in the compressed data.
         """
         try:
@@ -126,7 +127,8 @@ class ThorOCT:
         """
         Extract dimensions and resolution values from the OCT header.
 
-        Raises:
+        Raises
+        ------
             ValueError: If the header has not been loaded.
         """
         if not self.header:
@@ -165,12 +167,14 @@ class ThorOCT:
         """
         Load the polarization data from the compressed file.
 
-        Parameters:
+        Parameters
+        ----------
             return_complex (bool): Whether to load complex data.
             erase_polarization_2 (bool): Whether to skip loading polarization 2 data.
             erase_polarization_1 (bool): Whether to skip loading polarization 1 data.
 
-        Raises:
+        Raises
+        ------
             FileNotFoundError: If required polarization data files are missing.
         """
         try:
@@ -197,7 +201,8 @@ class ThorOCT:
         Parameters:
             data (np.ndarray): The input 3D array (SizeZ, SizeX, SizeY).
 
-        Returns:
+        Returns
+        -------
             np.ndarray: The 3D array with tiles stacked along the y-axis.
         """
         # Ensure the number of tiles is divisible by ascan_averaging_value
@@ -211,9 +216,7 @@ class ThorOCT:
             stacked_tile = np.concatenate(
                 data[i : i + self.ascan_averaging_value],
                 axis=0,  # Stack along the z-axis
-            )[
-                ::-1
-            ]  # Reverse the stacking order so the last tile appears on top
+            )[::-1]  # Reverse the stacking order so the last tile appears on top
             stacked_data.append(stacked_tile)
 
         # Combine all stacked tiles into a single array
@@ -228,28 +231,27 @@ class ThorOCT:
         self.size_y = stacked_data.shape[1]
         return stacked_data
 
-    def _crop_z(
-        self, data: np.ndarray, index1: int = 320, index2: int = 750
-    ) -> np.ndarray:
+    def _crop_z(self, data: np.ndarray, index1: int = 320, index2: int = 750) -> np.ndarray:
         """
         Crops the 3D volume along the Z-axis and keeps the data between the specified indices.
 
-        Parameters:
+        Parameters
+        ----------
             data (np.ndarray): The input 3D array (SizeX, SizeY, SizeZ).
             index1 (int): The starting Z index for cropping (inclusive).
             index2 (int): The ending Z index for cropping (exclusive).
 
-        Returns:
+        Returns
+        -------
             np.ndarray: The cropped 3D array.
 
-        Raises:
+        Raises
+        ------
             ValueError: If indices are invalid.
         """
         # Ensure valid indices
         if index1 < 0 or index2 > data.shape[2] or index1 >= index2:
-            raise ValueError(
-                f"Invalid indices: index1={index1}, index2={index2}, data shape={data.shape}"
-            )
+            raise ValueError(f"Invalid indices: index1={index1}, index2={index2}, data shape={data.shape}")
 
         # Perform the crop
         cropped_data = data[:, :, index1:index2]
@@ -261,16 +263,16 @@ class ThorOCT:
         """
         Load the raw data from the specified file and return it as a NumPy array.
 
-        Parameters:
+        Parameters
+        ----------
             file (str): File path in the compressed data.
 
-        Returns:
+        Returns
+        -------
             np.ndarray: Raw complex data array.
         """
         with self.compressed_data.open(file) as f:
-            raw_data = np.frombuffer(f.read(), dtype=np.complex64).reshape(
-                (self.size_x, self.size_y, self.size_z), order="C"
-            )
+            raw_data = np.frombuffer(f.read(), dtype=np.complex64).reshape((self.size_x, self.size_y, self.size_z), order="C")
         return raw_data
 
     def _preprocess_data(
@@ -280,10 +282,12 @@ class ThorOCT:
         """
         Preprocess the data, including cropping, stacking, and converting to magnitude.
 
-        Parameters:
+        Parameters
+        ----------
             data (np.ndarray): Input complex data array.
 
-        Returns:
+        Returns
+        -------
             np.ndarray: Preprocessed data array.
         """
         # Perform cropping
@@ -305,10 +309,12 @@ class ThorOCT:
         """
         Load raw data from the file and preprocess it.
 
-        Parameters:
+        Parameters
+        ----------
             file (str): File path in the compressed data.
 
-        Returns:
+        Returns
+        -------
             np.ndarray: Fully processed data array.
         """
         raw_data = self._load_raw_data(file)
@@ -316,19 +322,22 @@ class ThorOCT:
         return processed_data
 
     @staticmethod
-    def extract_positions_from_scan(scan_file_path: str = None):
+    def extract_positions_from_scan(scan_file_path: str | None = None):
         """
         Extracts the raw and index x, y positions from the .scan file.
 
-        Parameters:
+        Parameters
+        ----------
         - scan_file_path: Path to the .scan file.
-        Returns:
+
+        Returns
+        -------
         - tuple: A tuple containing two lists - index positions and raw positions.
         """
         raw_positions = []
 
         if scan_file_path:
-            with open(file=scan_file_path, mode="r", encoding="utf-8") as file:
+            with open(file=scan_file_path, encoding="utf-8") as file:
                 lines = file.readlines()
 
                 # Find the start of the positions section
@@ -342,11 +351,10 @@ class ThorOCT:
                         continue
 
                     # If in the positions section, extract x, y values
-                    if positions_section:
-                        if line:  # Ignore empty lines
-                            # Split by comma and convert to float
-                            x, y = map(float, line.split(","))
-                            raw_positions.append((x, y, 0))
+                    if positions_section and line:  # Ignore empty lines
+                        # Split by comma and convert to float
+                        x, y = map(float, line.split(","))
+                        raw_positions.append((x, y, 0))
 
         # Remap x: sort unique x values in ascending order
         unique_x = np.unique([pos[0] for pos in raw_positions])
@@ -355,9 +363,7 @@ class ThorOCT:
 
         # Remap y: sort unique y values in descending order
         unique_y = np.unique([pos[1] for pos in raw_positions])
-        sorted_y_desc = np.sort(unique_y)[
-            ::-1
-        ]  # Flip order to preserve top-down layout
+        sorted_y_desc = np.sort(unique_y)[::-1]  # Flip order to preserve top-down layout
         y_map = {val: idx for idx, val in enumerate(sorted_y_desc)}
 
         # Create a new list of tuples with remapped x and y, z remains unchanged
@@ -370,24 +376,25 @@ class ThorOCT:
         """
         Get the .scan file and all .oct files from the tiles_directory.
 
-        Parameters:
+        Parameters
+        ----------
         - tiles_directory: Path to the directory containing the OCT tiles.
         - number_of_angles: Number of acquisition angles.
 
-        Returns:
+        Returns
+        -------
         - positions: positions of the tiles in 3d
         - grouped_files: list of file paths ordered by angles.
 
-        Raises:
+        Raises
+        ------
         - ValueError: If the directory or required files are missing.
         """
         # Convert the tiles_directory to a Path object
         tiles_path = Path(tiles_directory)
 
         if not tiles_path.is_dir():
-            raise ValueError(
-                f"Provided path '{tiles_directory}' is not a valid directory."
-            )
+            raise ValueError(f"Provided path '{tiles_directory}' is not a valid directory.")
 
         # Initialize variables to store the results
         scan_file = None
@@ -409,13 +416,9 @@ class ThorOCT:
             raise ValueError("Warning: No .oct files found in the directory.")
 
         for i, oct_file in enumerate(oct_files):
-            angle_index = (
-                i % number_of_angles
-            )  # Determine the angle based on file index
+            angle_index = i % number_of_angles  # Determine the angle based on file index
             grouped_files[angle_index].append(oct_file)
-        print(
-            f"File Count for Angle index = {angle_index + 1}: {len(grouped_files[angle_index])}"
-        )
+        print(f"File Count for Angle index = {angle_index + 1}: {len(grouped_files[angle_index])}")
         print("Processing the following Files:")
         for file in grouped_files[0]:
             print(f"  - {file}")
@@ -423,6 +426,6 @@ class ThorOCT:
 
     @staticmethod
     def orient_volume_psoct(vol: np.ndarray) -> np.ndarray:
-        """Transforms the volume to RAS orientation"""
+        """Transforms the volume to RAS orientation."""
         vol = vol.transpose(2, 0, 1)
         return vol

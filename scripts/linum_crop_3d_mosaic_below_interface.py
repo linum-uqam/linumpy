@@ -1,58 +1,66 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 Crop a 3D OME-Zarr volume to a specified depth below the water/tissue interface.
 
-This script loads a 3D OME-Zarr volume, detects the water/tissue interface per (Y,X) then crops the 
+This script loads a 3D OME-Zarr volume, detects the water/tissue interface per (Y,X) then crops the
 volume to a specified depth *below* the interface. The script can also crop the data before the
 water/tissue interface. The cropped volume is saved as a new OME-Zarr file.
 """
 
 import argparse
 from pathlib import Path
-import numpy as np
+
 import dask.array as da
+import numpy as np
 import zarr
-from linumpy.io.zarr import read_omezarr, save_omezarr, create_tempstore
-from scipy.ndimage import gaussian_filter1d, gaussian_filter
+from scipy.ndimage import gaussian_filter, gaussian_filter1d
+
+from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_zarr",
-                   help="Path to the input 3D OME-Zarr OCT volume")
-    p.add_argument("output_zarr",
-                   help="Path to the output 3D OME-Zarr *cropped* volume",)
-    p.add_argument("--sigma_xy", type=float, default=3.0,
-                   help="Gaussian smoothing sigma in X and Y before interface detection [%(default)s]")
-    p.add_argument("--sigma_z", type=float, default=2.0,
-                   help="Gaussian smoothing sigma in Z before interface detection [%(default)s]")
-    p.add_argument("--use_log", action="store_true",
-                   help="Apply log transform before gradient detection")
-    p.add_argument("--depth", type=int, default=300,
-                   help="Target depth in um [%(default)s]")
-    p.add_argument("--crop_before_interface", action="store_true",
-                   help='If set, also crop the volume before the interface.')
-    p.add_argument("--pad_after", action='store_true',
-                   help='If set, pad the volume such that its depth below interface'
-                        ' is equal to `depth`.')
-    p.add_argument('--percentile_max', type=float,
-                   help='Values above the ith percentile will be clipped *prior\n'
-                        'to finding the interface*. Original values will\n'
-                        'remain in output clipped volume (range [0-100]).')
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("input_zarr", help="Path to the input 3D OME-Zarr OCT volume")
+    p.add_argument(
+        "output_zarr",
+        help="Path to the output 3D OME-Zarr *cropped* volume",
+    )
+    p.add_argument(
+        "--sigma_xy",
+        type=float,
+        default=3.0,
+        help="Gaussian smoothing sigma in X and Y before interface detection [%(default)s]",
+    )
+    p.add_argument(
+        "--sigma_z", type=float, default=2.0, help="Gaussian smoothing sigma in Z before interface detection [%(default)s]"
+    )
+    p.add_argument("--use_log", action="store_true", help="Apply log transform before gradient detection")
+    p.add_argument("--depth", type=int, default=300, help="Target depth in um [%(default)s]")
+    p.add_argument("--crop_before_interface", action="store_true", help="If set, also crop the volume before the interface.")
+    p.add_argument(
+        "--pad_after",
+        action="store_true",
+        help="If set, pad the volume such that its depth below interface is equal to `depth`.",
+    )
+    p.add_argument(
+        "--percentile_max",
+        type=float,
+        help="Values above the ith percentile will be clipped *prior\n"
+        "to finding the interface*. Original values will\n"
+        "remain in output clipped volume (range [0-100]).",
+    )
     return p
 
 
-def main():
+def main() -> None:
     args = _build_arg_parser().parse_args()
     input_path = Path(args.input_zarr)
     output_path = Path(args.output_zarr)
 
     # Load volume
     vol, res = read_omezarr(input_path, level=0)
-    print('Loaded volume shape:', vol.shape)
+    print("Loaded volume shape:", vol.shape)
     resolution_um = res[0] * 1000
 
     # vol is (Z, X, Y); reorient to (X, Y, Z) for xyzcorr functions
@@ -62,8 +70,8 @@ def main():
         vol_f = np.clip(vol_f, None, np.percentile(vol_f, args.percentile_max))
 
     # compute the derivative along z to find the average tissue depth
-    pad_width = int(np.round(args.sigma_z*4))
-    vol_padded = np.pad(vol_f, ((0, 0), (0, 0), (pad_width, 0)), mode='wrap')
+    pad_width = int(np.round(args.sigma_z * 4))
+    vol_padded = np.pad(vol_f, ((0, 0), (0, 0), (pad_width, 0)), mode="wrap")
     vol_padded = gaussian_filter(vol_padded, (args.sigma_xy, args.sigma_xy, 0))
     dz = gaussian_filter1d(vol_padded, sigma=args.sigma_z, axis=-1, order=1)
     avg_dz = np.sum(dz, axis=(0, 1))
@@ -72,21 +80,17 @@ def main():
     print(f"Average surface depth: {avg_iface} voxels")
 
     # Compute number of Z-slices for desired depth (um / um-per-voxel)
-    depth_px = int(round(args.depth / resolution_um))
+    depth_px = round(args.depth / resolution_um)
     print(f"Cropping depth: {depth_px} voxels ({args.depth} um)")
 
     # Compute end index for cropping
     surface_idx = max(0, min(avg_iface, vol.shape[0] - 1))
     end_idx = surface_idx + depth_px
     if end_idx > vol.shape[0]:
-        if args.pad_after:
-            out_shape = (end_idx, vol.shape[1], vol.shape[2])
-        else:
-            out_shape = vol.shape
+        out_shape = (end_idx, vol.shape[1], vol.shape[2]) if args.pad_after else vol.shape
         store = create_tempstore()
-        out_vol = zarr.open(store, mode="w", shape=out_shape,
-                            dtype=np.float32, chunks=vol.chunks)
-        out_vol[:vol.shape[0]] = vol[:]
+        out_vol = zarr.open(store, mode="w", shape=out_shape, dtype=np.float32, chunks=vol.chunks)
+        out_vol[: vol.shape[0]] = vol[:]
         vol = out_vol
 
     # Crop volume along Z axis

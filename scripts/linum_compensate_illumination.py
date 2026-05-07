@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
-"""Uses the BaSiC algorithm to estimate and compensate illumination inhomogeneities in a mosaic grid"""
+"""Uses the BaSiC algorithm to estimate and compensate illumination inhomogeneities in a mosaic grid."""
 
 # Configure thread limits before numpy/scipy imports
 import linumpy._thread_config  # noqa: F401
@@ -9,8 +8,8 @@ import linumpy._thread_config  # noqa: F401
 import argparse
 from pathlib import Path
 
-import SimpleITK as sitk
 import numpy as np
+import SimpleITK as sitk
 
 from linumpy.stitching.mosaic_grid import MosaicGrid
 
@@ -22,30 +21,38 @@ log_epsilon = 1e-8
 
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_image",
-                   help="Full path to a 2D mosaic grid image.")
-    p.add_argument("output_image", nargs='?', default=None,
-                   help="Full path to a 2D mosaic grid image with the fixed illumination. If not provided, a new file with the same name as the input + `_compensated` suffix will be created.")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("input_image", help="Full path to a 2D mosaic grid image.")
+    p.add_argument(
+        "output_image",
+        nargs="?",
+        default=None,
+        help="Full path to a 2D mosaic grid image with the fixed illumination. If not provided, a new file with the same name as the input + `_compensated` suffix will be created.",
+    )
     p.add_argument("--flatfield", required=True, help="Full path to precomputed flatfield")
     p.add_argument("--darkfield", required=True, help="Full path to precomputed darkfield ")
-    p.add_argument("-t", "--tile_shape", nargs="+", type=int, default=400,
-                   help="Tile shape in pixel. You can provide both the row and col shape if different. Additional "
-                        "shapes will be ignored. (default=%(default)s)")
+    p.add_argument(
+        "-t",
+        "--tile_shape",
+        nargs="+",
+        type=int,
+        default=400,
+        help="Tile shape in pixel. You can provide both the row and col shape if different. Additional "
+        "shapes will be ignored. (default=%(default)s)",
+    )
     return p
 
 
-def main():
+def main() -> None:
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
 
     # Parameters
     input_file = Path(args.input_image)
-    if args.output_image is not None :
+    if args.output_image is not None:
         output_file = Path(args.output_image)
-    else :
+    else:
         output_file = input_file.parent / Path(input_file.stem + "_compensated" + input_file.suffix)
     flatfield_file = Path(args.flatfield)
     darkfield_file = Path(args.darkfield)
@@ -76,8 +83,7 @@ def main():
     # Apply shading correction.
     # epsilon = 1e-6
     epsilon = 0.0
-    clip = True
-    for tile, pos in zip(tiles, tile_pos):
+    for tile, pos in zip(tiles, tile_pos, strict=False):
         if np.all(tile == 0):  # Ignoring empty tiles
             continue
         fixed_tile = (tile.astype(np.float64) - darkfield) / (flatfield + epsilon)
@@ -94,6 +100,7 @@ def main():
     # Save the output
     output_file.parent.mkdir(exist_ok=True, parents=True)
     sitk.WriteImage(sitk.GetImageFromArray(fixed_image), str(output_file))
+
 
 if __name__ == "__main__":
     main()

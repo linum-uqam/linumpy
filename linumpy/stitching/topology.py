@@ -1,12 +1,9 @@
 #! /usr/bin/env python
-# -*- coding: utf-8 -*-
-""" This module uses graph theory to describe and interact with the mosaic topology.
+"""This module uses graph theory to describe and interact with the mosaic topology.
 
 .. moduleauthor:: Joël Lefebvre <joel.lefebvre@polymtl.ca>
 
 """
-
-import sys
 
 import networkx as nx
 import numpy as np
@@ -15,7 +12,8 @@ import SimpleITK as sitk
 
 def generate_default(nX, nY):
     """Generates a default topology where all tiles in mosaic are nodes and all neighbor relation is an edge.
-    Parameters
+
+    Parameters.
     ----------
     nX: int
         Number of tiles in X direction.
@@ -37,8 +35,8 @@ def generate_default(nX, nY):
     # Creating vertices
     xx, yy = np.meshgrid(list(range(nX)), list(range(nY)))
     vPos = {"x": xx.ravel(), "y": yy.ravel()}
-    nPosX = dict()
-    nPosY = dict()
+    nPosX = {}
+    nPosY = {}
     for ii in range(nX * nY):
         nPosX[ii] = vPos["x"][ii]
         nPosY[ii] = vPos["y"][ii]
@@ -82,7 +80,7 @@ def generate_default(nX, nY):
 
 
 def generate_graphFromEdges(sources, targets):
-    """Generates a graph for a list of source and target nodes
+    """Generates a graph for a list of source and target nodes.
 
     :param sources: List of source node position.
     :param targets: List of target node position.
@@ -104,7 +102,7 @@ def generate_graphFromEdges(sources, targets):
 
 
 def remove_agarose(topo, tissueMask):
-    """Remove agarose nodes from the mosaic topology
+    """Remove agarose nodes from the mosaic topology.
 
     :param topo: NetworkX graph object describing the mosaic topology
     :param tissueMask: (m, n) bool ndarray of the tissue mask for this slice.
@@ -112,7 +110,7 @@ def remove_agarose(topo, tissueMask):
 
     """
     agarosePos = np.where(tissueMask == 0)
-    agaroseIds = list()
+    agaroseIds = []
     for ii in range(len(agarosePos[0])):
         this_pos = (agarosePos[0][ii], agarosePos[1][ii])
         agaroseIds.append(_pos2id(topo, this_pos))
@@ -131,8 +129,8 @@ def topoIterator(topo, root=(1, 1), method="dfs"):
     :returns: sourceList, targetList : Lists of source and target node positions.
 
     """
-    sourceList = list()
-    targetList = list()
+    sourceList = []
+    targetList = []
 
     # Find the edge corresponding to position = root
     idx = _pos2id(topo, root)
@@ -193,9 +191,9 @@ def _pos2id(topo, pos):
 
     """
     # Find the edge corresponding to position
-    nList = list()
-    xx = list()
-    yy = list()
+    nList = []
+    xx = []
+    yy = []
 
     # Extracting the node x positions
     for this_node, this_x in list(nx.get_node_attributes(topo, "x").items()):
@@ -246,10 +244,6 @@ def keepLargestCCInMask(mask):
             largestLabelSize = lstats.GetCount(iCC)
 
     # Only keeping the laster connected component in this image
-    output = sitk.LabelMapMask(
-        sitk.LabelImageToLabelMap(labels), vol, label=largestLabel
-    )
+    output = sitk.LabelMapMask(sitk.LabelImageToLabelMap(labels), vol, label=largestLabel)
 
     return sitk.GetArrayFromImage(output)
-
-    pass

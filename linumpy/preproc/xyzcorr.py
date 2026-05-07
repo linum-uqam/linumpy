@@ -1,27 +1,29 @@
 #! /usr/bin/env python
-# -*- coding: utf-8 -*-
-""" Collection of functions to fix spatial-related artefacts in raw data """
+"""Collection of functions to fix spatial-related artefacts in raw data."""
+
 import itertools
 
 import numpy as np
 import SimpleITK as sitk
 from scipy.interpolate import interp1d
 from scipy.ndimage import (
+    binary_closing,
+    binary_fill_holes,
     gaussian_filter,
     gaussian_filter1d,
     gaussian_gradient_magnitude,
-    uniform_filter, median_filter,
+    label,
+    median_filter,
+    uniform_filter,
 )
-from scipy.ndimage import label
-from scipy.ndimage import binary_closing, binary_fill_holes
 from scipy.optimize import curve_fit
 from scipy.signal import argrelmax
 from skimage.filters import threshold_li, threshold_otsu
 from skimage.morphology import dilation, disk
 
 
-def cropVolume(vol, xlim=[0, -1], ylim=[0, -1], zlim=[0, -1]):
-    """Crops the given volume according to the range given as input
+def cropVolume(vol, xlim=None, ylim=None, zlim=None):
+    """Crops the given volume according to the range given as input.
 
     Parameters
     ----------
@@ -44,6 +46,12 @@ def cropVolume(vol, xlim=[0, -1], ylim=[0, -1], zlim=[0, -1]):
     * xlim=[0,-1] means that the whole volume in the x dimension will be returned.
 
     """
+    if zlim is None:
+        zlim = [0, -1]
+    if ylim is None:
+        ylim = [0, -1]
+    if xlim is None:
+        xlim = [0, -1]
     nx, ny = vol.shape[:2]
     xlim = list(xlim)
     ylim = list(ylim)
@@ -57,14 +65,14 @@ def cropVolume(vol, xlim=[0, -1], ylim=[0, -1], zlim=[0, -1]):
         nz = vol.shape[2]
         if zlim[1] == -1:
             zlim[1] = nz
-        return vol[xlim[0]: xlim[1], ylim[0]: ylim[1], zlim[0]: zlim[1]]
+        return vol[xlim[0] : xlim[1], ylim[0] : ylim[1], zlim[0] : zlim[1]]
 
     elif vol.ndim == 2:
-        return vol[xlim[0]: xlim[1], ylim[0]: ylim[1]]
+        return vol[xlim[0] : xlim[1], ylim[0] : ylim[1]]
 
 
 def resampleITK(vol, newshape, interpolator="linear"):
-    """Resamples a volume / image using ITK
+    """Resamples a volume / image using ITK.
 
     Parameters
     ----------
@@ -98,10 +106,9 @@ def resampleITK(vol, newshape, interpolator="linear"):
     else:
         isBool = False
 
-    if vol.ndim == 3:
-        if vol.shape[2] == 1:
-            vol = np.squeeze(vol, axis=(2,))
-            newshape = newshape[0:2]
+    if vol.ndim == 3 and vol.shape[2] == 1:
+        vol = np.squeeze(vol, axis=(2,))
+        newshape = newshape[0:2]
 
     if vol.ndim == 2:
         nx, ny = vol.shape
@@ -115,15 +122,9 @@ def resampleITK(vol, newshape, interpolator="linear"):
         nx, ny, nz = vol.shape
         ox, oy, oz = newshape
         resample.SetSize([oz, oy, ox])
-        resample.SetOutputSpacing(
-            [(nz - 1) / float(oz), (ny - 1) / float(oy), (nx - 1) / float(ox)]
-        )
-        if (
-                nx / float(ox) > 1 or ny / float(oy) > 1 or nz / float(oz) > 1
-        ):  # Smoothing if downsampling
-            vol = gaussian_filter(
-                vol, sigma=[nx / float(2 * ox), ny / float(2 * oy), nz / float(2 * oz)]
-            )
+        resample.SetOutputSpacing([(nz - 1) / float(oz), (ny - 1) / float(oy), (nx - 1) / float(ox)])
+        if nx / float(ox) > 1 or ny / float(oy) > 1 or nz / float(oz) > 1:  # Smoothing if downsampling
+            vol = gaussian_filter(vol, sigma=[nx / float(2 * ox), ny / float(2 * oy), nz / float(2 * oz)])
 
     if interpolator == "NN":
         resample.SetInterpolator(sitk.sitkNearestNeighbor)
@@ -146,7 +147,7 @@ def resampleITK(vol, newshape, interpolator="linear"):
 
 
 def shrink(vol, spacing=(1.0, 1.0, 1.0), res=(10.0, 10.0, 10.0)):
-    """Shrink volume up to a given resolution (in each dimension)
+    """Shrink volume up to a given resolution (in each dimension).
 
     Parameters
     ----------
@@ -174,9 +175,7 @@ def shrink(vol, spacing=(1.0, 1.0, 1.0), res=(10.0, 10.0, 10.0)):
     )
 
     # Apply a gaussian filter first
-    vol = gaussian_filter(
-        vol, sigma=(rx / (4.0 * dx), ry / (4.0 * dy), rz / (4.0 * dz))
-    )
+    vol = gaussian_filter(vol, sigma=(rx / (4.0 * dx), ry / (4.0 * dy), rz / (4.0 * dz)))
 
     # Creating a resampling filter using Sitk
     img = sitk.GetImageFromArray(vol)
@@ -193,14 +192,14 @@ def shrink(vol, spacing=(1.0, 1.0, 1.0), res=(10.0, 10.0, 10.0)):
 
 
 def cropZ0WholeSlice(
-        vol,
-        dz=20.0,
-        nz=200.0,
-        voxdim=(1, 1, 1),
-        z0=None,
-        verbose=False,
-        mask=None,
-        returnZ0=False,
+    vol,
+    dz=20.0,
+    nz=200.0,
+    voxdim=(1, 1, 1),
+    z0=None,
+    verbose=False,
+    mask=None,
+    returnZ0=False,
 ):
     """Crop whole slice in the z direction.
 
@@ -217,14 +216,10 @@ def cropZ0WholeSlice(
     ndarray
         Cropped array
     """
-    volshape = vol.shape
-
     if z0 is None:
         # Computing tissue mask
         if mask is not None:
-            mask = vol.std(axis=2) > threshold_otsu(
-                vol.std(axis=2)
-            )  # Using otsu on A-line intensity std
+            mask = vol.std(axis=2) > threshold_otsu(vol.std(axis=2))  # Using otsu on A-line intensity std
             mask = binary_fill_holes(binary_closing(mask))  # Closing and filling holes
         else:
             mask = np.ones(vol.shape[0:2], dtype=bool)
@@ -260,13 +255,8 @@ def cropZ0WholeSlice(
     zmax = np.floor((zmin * voxdim[2] + nz) / (1.0 * voxdim[2])).astype(int)
 
     if verbose:
-        print(
-            (
-                    "Crop limits are : [%.2f, %.2f] microns"
-                    % (zmin * voxdim[2], zmax * voxdim[2])
-            )
-        )
-        print(("Crop limits are : [%d, %d] pixels" % (zmin, zmax)))
+        print(f"Crop limits are : [{zmin * voxdim[2]:.2f}, {zmax * voxdim[2]:.2f}] microns")
+        print("Crop limits are : [%d, %d] pixels" % (zmin, zmax))
 
     # Cropping
     if returnZ0:
@@ -276,7 +266,7 @@ def cropZ0WholeSlice(
 
 
 def findTissueDepth(vol, zmin=15, zmax=100, agaroseIntensity=5000):
-    """Detects the tissue interface depth in given volume
+    """Detects the tissue interface depth in given volume.
 
     This algorithm first segments the volume into tissue vs background(agarose) using
     the Li thresholding method and user-defined agarose intensity value. It then
@@ -297,7 +287,7 @@ def findTissueDepth(vol, zmin=15, zmax=100, agaroseIntensity=5000):
         Agarose mean intensity value used to restrict analysis to tissue voxels
 
     Returns
-    ------
+    -------
     int
         Tissue interface depth
 
@@ -324,7 +314,7 @@ def findTissueDepth(vol, zmin=15, zmax=100, agaroseIntensity=5000):
 
         # Labeling features and keeping the largest
         im_label, num_features = label(im)
-        hist = list()
+        hist = []
         for i in range(num_features):
             hist.append(np.sum(im_label == i))
         mainFeature = np.argmax(hist[1:]) + 1
@@ -333,7 +323,7 @@ def findTissueDepth(vol, zmin=15, zmax=100, agaroseIntensity=5000):
         # Find edges based on morphological dilation
         edges = dilation(im, disk(3)) - im
         edges[:, 0:zmin] = 0  # We don't want top slices
-        edges[:, zmax: edges.shape[1]] = 0  # We don't want bottom slices either
+        edges[:, zmax : edges.shape[1]] = 0  # We don't want bottom slices either
         z_profile = edges.sum(axis=0)
         peaks = argrelmax(z_profile, order=20)
         if len(peaks[0]) > 0:
@@ -344,7 +334,7 @@ def findTissueDepth(vol, zmin=15, zmax=100, agaroseIntensity=5000):
 
 
 def getInterfaceDepthFromMask(vol):
-    """Computes the interface depths from a 3D tissue mask
+    """Computes the interface depths from a 3D tissue mask.
 
     Parameters
     ----------
@@ -367,9 +357,7 @@ def getInterfaceDepthFromMask(vol):
     return depths
 
 
-def findTissueInterface(
-        vol, s_xy=15, s_z=2, useLog=True, mask=None, order=1, detectCuttingErrors=False
-):
+def findTissueInterface(vol, s_xy=15, s_z=2, useLog=True, mask=None, order=1, detectCuttingErrors=False):
     """Detects the tissue interface.
 
     Parameters
@@ -402,9 +390,7 @@ def findTissueInterface(
             for y in range(vol_p.shape[1]):
                 mask_Aline = mask[x, y, :]
                 Aline = vol_p[x, y, :]
-                vol_g[x, y, mask_Aline] = gaussian_filter1d(
-                    Aline[mask_Aline], s_z, order=order
-                )
+                vol_g[x, y, mask_Aline] = gaussian_filter1d(Aline[mask_Aline], s_z, order=order)
     else:
         vol_g = gaussian_filter1d(vol_p, s_z, order=order)
     z0 = np.ceil(vol_g.argmax(axis=2) + s_z * 0.5).astype(int)
@@ -421,9 +407,7 @@ def findTissueInterface(
 
 def maskUnderInterface(vol, interface, returnMask=False):
     nx, ny, nz = vol.shape
-    _, _, zz = np.meshgrid(
-        list(range(nx)), list(range(ny)), list(range(nz)), indexing="ij"
-    )
+    _, _, zz = np.meshgrid(list(range(nx)), list(range(ny)), list(range(nz)), indexing="ij")
     interface_3d = np.tile(np.reshape(interface, (nx, ny, 1)), (1, 1, nz))
     mask = zz >= interface_3d
     if returnMask:
@@ -433,10 +417,10 @@ def maskUnderInterface(vol, interface, returnMask=False):
 
 
 def findCuttingPlane(vol, z0map, agarose_mean, agarose_std):
-    """Find the cutting plane using agarose segmentation
+    """Find the cutting plane using agarose segmentation.
 
     Parameters
-    ==========
+    ----------
     vol : ndarray
 
     z0map : ndarray
@@ -446,7 +430,7 @@ def findCuttingPlane(vol, z0map, agarose_mean, agarose_std):
     agarose_std : float
 
     Returns
-    =======
+    -------
     popt
 
     detectedInterface : ndarray
@@ -477,14 +461,12 @@ def findCuttingPlane(vol, z0map, agarose_mean, agarose_std):
     popt, _ = curve_fit(_plane, xdata, ydata)
 
     # Getting surface fit array
-    xx, yy = np.meshgrid(
-        list(range(vol.shape[0])), list(range(vol.shape[1])), indexing="ij"
-    )
+    xx, yy = np.meshgrid(list(range(vol.shape[0])), list(range(vol.shape[1])), indexing="ij")
     detectedInterface = xx * popt[0] + yy * popt[1] + popt[2]
 
     # Choosing z range for stitching
     z0 = (
-            np.round(detectedInterface.max()) + 5
+        np.round(detectedInterface.max()) + 5
     )  # Making sure we are 5*6.5 = 32.5 microns below the interface (this is assuming that the cut was ok)
 
     return popt, detectedInterface, z0
@@ -521,9 +503,7 @@ def removeZ0Outliers(z0map):
         return z0map
 
 
-def applyInterfaceCorrection(
-        vol, interface
-):  # TODO: Test this algorithm to make sure it works well.
+def applyInterfaceCorrection(vol, interface):  # TODO: Test this algorithm to make sure it works well.
     """Apply interface depth correction using linear interpolation.
 
     :param vol: (ndarray) containing the volume to fix.
@@ -542,17 +522,16 @@ def applyInterfaceCorrection(
             z = interface[x, y]
             realZ = np.linspace(-z, -z + nz, nz)
             newZ = list(range(int(nz - zRange)))
-            zInterp = interp1d(
-                realZ, vol[x, y, :], fill_value=0, bounds_error=False, kind="quadratic"
-            )
+            zInterp = interp1d(realZ, vol[x, y, :], fill_value=0, bounds_error=False, kind="quadratic")
             fixedVol[x, y, :] = zInterp(newZ)
 
     return fixedVol
 
 
 def fitInterface(interface, method="linear", returnCenter=False):
-    """Fit a model on the given interface
-    Parameters
+    """Fit a model on the given interface.
+
+    Parameters.
     ----------
     interface : ndarray
 
@@ -561,9 +540,7 @@ def fitInterface(interface, method="linear", returnCenter=False):
     """
     xdata = np.where(interface)
     ydata = np.ravel(interface)
-    xx, yy = np.meshgrid(
-        list(range(interface.shape[0])), list(range(interface.shape[1])), indexing="ij"
-    )
+    xx, yy = np.meshgrid(list(range(interface.shape[0])), list(range(interface.shape[1])), indexing="ij")
     if method == "linear":
         popt, _ = curve_fit(_plane, xdata, ydata)
 
@@ -577,35 +554,26 @@ def fitInterface(interface, method="linear", returnCenter=False):
         a, b, c, d, e, f, g, h = popt
         xx = xx - g
         yy = yy - h
-        fittedInterface = a * xx + b * yy + c * xx * yy + d * xx ** 2 + e * yy ** 2 + f
+        fittedInterface = a * xx + b * yy + c * xx * yy + d * xx**2 + e * yy**2 + f
         center = (g, h)
 
     elif method == "gauss":
-        f = (
-            lambda x, a, b, c, d, e, f: np.exp(
-                -((x[0] - a) ** 2) / (2.0 * b ** 2.0)
-                - (x[1] - c) ** 2 / (2.0 * d ** 2.0)
-            )
-                                        * e
-                                        + f
-        )
+
+        def f(x, a, b, c, d, e, f):
+            return np.exp(-((x[0] - a) ** 2) / (2.0 * b**2.0) - (x[1] - c) ** 2 / (2.0 * d**2.0)) * e + f
+
         popt, _ = curve_fit(f, xdata, ydata)
         a, b, c, d, e, f = popt
-        fittedInterface = (
-                np.exp(
-                    -((xx - a) ** 2) / (2.0 * b ** 2.0) - (yy - c) ** 2 / (2.0 * d ** 2.0)
-                )
-                * e
-                + f
-        )
+        fittedInterface = np.exp(-((xx - a) ** 2) / (2.0 * b**2.0) - (yy - c) ** 2 / (2.0 * d**2.0)) * e + f
         center = (a, c)
 
     elif method == "sph":
-        f = lambda x, a, b, c: c * (((x[0] - a) ** 2 + (x[1] - b) ** 2) ** 2.0) / 8.0
+
+        def f(x, a, b, c):
+            return c * (((x[0] - a) ** 2 + (x[1] - b) ** 2) ** 2.0) / 8.0
+
         popt, _ = curve_fit(f, xdata, ydata)
-        fittedInterface = (
-                popt[2] * (((xx - popt[0]) ** 2 + (yy - popt[1]) ** 2) ** 2.0) / 8.0
-        )
+        fittedInterface = popt[2] * (((xx - popt[0]) ** 2 + (yy - popt[1]) ** 2) ** 2.0) / 8.0
         center = (popt[0], popt[1])
 
     if returnCenter:
@@ -618,16 +586,12 @@ def fitInterface(interface, method="linear", returnCenter=False):
 def quadraticInterface(pos, a, b, c, d, e, f, g, h):
     x = pos[0] - g
     y = pos[1] - h
-    return a * x + b * y + c * x * y + d * x ** 2 + e * y ** 2 + f
+    return a * x + b * y + c * x * y + d * x**2 + e * y**2 + f
 
 
 def getQuadraticInterface(popt, volshape=(512, 512, 120)):
-    xx, yy = np.meshgrid(
-        list(range(volshape[0])), list(range(volshape[1])), indexing="ij"
-    )
-    tmp = quadraticInterface(
-        [xx[:], yy[:]], popt[0], popt[1], popt[2], popt[3], popt[4], popt[5]
-    )
+    xx, yy = np.meshgrid(list(range(volshape[0])), list(range(volshape[1])), indexing="ij")
+    tmp = quadraticInterface([xx[:], yy[:]], popt[0], popt[1], popt[2], popt[3], popt[4], popt[5])
     interface = np.zeros([volshape[0], volshape[1]])
     interface[xx[:], yy[:]] = tmp
     return interface
@@ -669,7 +633,7 @@ def linearHomogeneousProfile(z, z0, dz, I0, Ib, sigma):
 
 
 def estimateLHProfileParameters(vol, s=25):
-    """Estimates the linear-homogeneous intensity profile parameters
+    """Estimates the linear-homogeneous intensity profile parameters.
 
     Parameters
     ----------
@@ -698,21 +662,15 @@ def estimateLHProfileParameters(vol, s=25):
     """
     nx, ny, _ = vol.shape
     vol_p = np.log(vol + 1.1)  # 1.1 factor is to prevent log of 0
-    vol_p = uniform_filter(
-        vol_p, (s, s, 0)
-    )  # Averaging intensities over a small XY neigborhood
-    vol_f = gaussian_filter1d(
-        vol_p, sigma=1, axis=2
-    )  # Smoothing the intensity profiles in Z
-    vol_g = gaussian_gradient_magnitude(
-        vol_p, [0, 0, 1]
-    )  # TODO: Computing gradient in z direction only ?
+    vol_p = uniform_filter(vol_p, (s, s, 0))  # Averaging intensities over a small XY neigborhood
+    vol_f = gaussian_filter1d(vol_p, sigma=1, axis=2)  # Smoothing the intensity profiles in Z
+    vol_g = gaussian_gradient_magnitude(vol_p, [0, 0, 1])  # TODO: Computing gradient in z direction only ?
 
     # Finding max gradient position
     z0 = vol_g.argmax(axis=2)
 
     xx, yy = np.meshgrid(list(range(nx)), list(range(ny)), indexing="ij")
-    I_gmax = vol_p[xx, yy, z0]
+    vol_p[xx, yy, z0]
 
     test = np.zeros(vol_p.shape)
     test[xx, yy, z0] = 1
@@ -742,10 +700,7 @@ def estimateLHProfileParameters(vol, s=25):
             zlist_min = indices[0][indices[0] < this_z0]
             zlist_max = indices[0][indices[0] > this_z0]
 
-            if len(zlist_min) > 0 and len(zlist_max) > 0:
-                this_dz = zlist_max[0] - zlist_min[-1]
-            else:
-                this_dz = 1
+            this_dz = zlist_max[0] - zlist_min[-1] if len(zlist_min) > 0 and len(zlist_max) > 0 else 1
             if len(zlist_max) > 0:
                 this_z0 = zlist_max[0]
 
@@ -756,10 +711,7 @@ def estimateLHProfileParameters(vol, s=25):
             this_I0 = I[this_z0]
             this_sigma = -np.median(I_g[this_z0::])
 
-            if (this_z0 == 0) or (this_z0 - this_dz <= 0):
-                this_Ib = 1
-            else:
-                this_Ib = np.median(I[0: this_z0 - this_dz])
+            this_Ib = 1 if this_z0 == 0 or this_z0 - this_dz <= 0 else np.median(I[0 : this_z0 - this_dz])
 
             z0[x, y] = this_z0
             dz[x, y] = this_dz
@@ -772,13 +724,15 @@ def estimateLHProfileParameters(vol, s=25):
 
 def detect_galvo_shift(aip: np.ndarray, n_pixel_return: int = 40) -> int:
     """Detects the galvo shift in the AIP.
-    Parameters
+
+    Parameters.
     ----------
     aip : ndarray
         AIP of the OCT volume containing both the image and the galvo return. This assumes that the first axis is the
         A-line axis, and the second axis is the B-scan axis, and the average was taken over the depth axis.
     n_pixel_return : int
         Number of pixels used for the galvo returns.
+
     Returns
     -------
     int
@@ -798,7 +752,7 @@ def detect_galvo_shift(aip: np.ndarray, n_pixel_return: int = 40) -> int:
     # If we find the right shift, both the beginning and the end of galvo return will result in high differences
     similarities = []
     for s in range(len(profile) - n_pixel_return):
-        foo = (differences[s] * differences[s + n_pixel_return])
+        foo = differences[s] * differences[s + n_pixel_return]
         similarities.append(foo)
 
     shift = np.argmax(similarities)
@@ -806,10 +760,10 @@ def detect_galvo_shift(aip: np.ndarray, n_pixel_return: int = 40) -> int:
 
     return shift
 
-def fix_galvo_shift(vol: np.ndarray, shift: int=0, axis:int=1) -> np.ndarray:
+
+def fix_galvo_shift(vol: np.ndarray, shift: int = 0, axis: int = 1) -> np.ndarray:
     """Fix the galvo shift in an OCT volume."""
     if shift == 0:
         return vol
     else:
         return np.roll(vol, shift, axis=axis)
-
