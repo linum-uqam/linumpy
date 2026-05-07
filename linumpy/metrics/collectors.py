@@ -53,10 +53,7 @@ def collect_normalization_metrics(
         metrics.add_info("input_volume", str(input_path), "Input volume path")
     metrics.add_info("output_volume", str(output_path), "Output volume path")
     metrics.add_info("volume_shape", list(vol_normalized.shape), "Volume shape")
-
-    if params:
-        for key, val in params.items():
-            metrics.add_info(key, val, f"Parameter: {key}")
+    metrics.add_params(params)
 
     # Agarose mask metrics
     agarose_coverage = float(np.sum(agarose_mask)) / agarose_mask.size
@@ -79,9 +76,7 @@ def collect_normalization_metrics(
         threshold_name="std_background",
     )
 
-    metrics.save(f"{output_path.stem}_metrics.json")
-    metrics.log_issues()
-    return metrics
+    return metrics.finalize(f"{output_path.stem}_metrics.json")
 
 
 def collect_xy_transform_metrics(
@@ -135,10 +130,7 @@ def collect_xy_transform_metrics(
         metrics.add_info("n_tiles_x", int(n_tiles_x), "Number of tiles in X direction")
     if n_tiles_y is not None:
         metrics.add_info("n_tiles_y", int(n_tiles_y), "Number of tiles in Y direction")
-
-    if params:
-        for key, val in params.items():
-            metrics.add_info(key, val, f"Parameter: {key}")
+    metrics.add_params(params)
 
     # Transform metrics
     metrics.add_metric("tile_pairs_used", tile_pairs_used, description="Number of tile pairs used for estimation")
@@ -199,9 +191,7 @@ def collect_xy_transform_metrics(
                 description="Estimated accumulated random positioning error across mosaic",
             )
 
-    metrics.save()
-    metrics.log_issues()
-    return metrics
+    return metrics.finalize()
 
 
 def collect_pairwise_registration_metrics(
@@ -255,10 +245,7 @@ def collect_pairwise_registration_metrics(
     if moving_path:
         metrics.add_info("moving_volume", str(moving_path), "Path to moving volume")
     metrics.add_info("best_z_offset", int(best_z_index), "Best matching z-index in fixed volume")
-
-    if params:
-        for key, val in params.items():
-            metrics.add_info(key, val, f"Parameter: {key}")
+    metrics.add_params(params)
 
     translation_magnitude = float(np.sqrt(tx**2 + ty**2))
 
@@ -309,9 +296,7 @@ def collect_pairwise_registration_metrics(
         custom_thresholds={"warning": 0.4, "error": 0.3, "higher_is_better": True},
     )
 
-    metrics.save()
-    metrics.log_issues()
-    return metrics
+    return metrics.finalize()
 
 
 def collect_interface_crop_metrics(
@@ -390,9 +375,7 @@ def collect_interface_crop_metrics(
 
     metrics.add_info("padding_needed", padding_needed, "Whether padding was required")
 
-    metrics.save(f"{output_path.stem}_metrics.json")
-    metrics.log_issues()
-    return metrics
+    return metrics.finalize(f"{output_path.stem}_metrics.json")
 
 
 def collect_psf_compensation_metrics(
@@ -457,9 +440,7 @@ def collect_psf_compensation_metrics(
     else:
         metrics.add_metric("profile_quality", "good", description="PSF profile appears reasonable")
 
-    metrics.save(f"{output_path.stem}_metrics.json")
-    metrics.log_issues()
-    return metrics
+    return metrics.finalize(f"{output_path.stem}_metrics.json")
 
 
 def collect_stack_metrics(
@@ -573,9 +554,7 @@ def collect_stack_metrics(
                 "Histogram of overlap source decisions",
             )
 
-    metrics.save(f"{output_path.stem}_metrics.json")
-    metrics.log_issues()
-    return metrics
+    return metrics.finalize(f"{output_path.stem}_metrics.json")
 
 
 def collect_quality_assessment_metrics(
@@ -621,9 +600,7 @@ def collect_quality_assessment_metrics(
             "Slices below the quality threshold",
         )
 
-    metrics.save("slice_quality_assessment_metrics.json")
-    metrics.log_issues()
-    return metrics
+    return metrics.finalize("slice_quality_assessment_metrics.json")
 
 
 def collect_rehoming_metrics(
@@ -646,9 +623,7 @@ def collect_rehoming_metrics(
     if max_correction_mm is not None:
         metrics.add_info("max_correction_mm", float(max_correction_mm), "Largest absolute correction applied (mm)")
 
-    metrics.save("rehoming_detection_metrics.json")
-    metrics.log_issues()
-    return metrics
+    return metrics.finalize("rehoming_detection_metrics.json")
 
 
 def collect_auto_exclude_metrics(
@@ -671,9 +646,7 @@ def collect_auto_exclude_metrics(
     metrics.add_info("z_corr_threshold", float(z_corr_threshold), "Z-correlation threshold used")
     metrics.add_info("consecutive_threshold", int(consecutive_threshold), "Minimum cluster length")
 
-    metrics.save("auto_exclude_metrics.json")
-    metrics.log_issues()
-    return metrics
+    return metrics.finalize("auto_exclude_metrics.json")
 
 
 def collect_common_space_metrics(
@@ -708,9 +681,7 @@ def collect_common_space_metrics(
             )
             metrics.add_info("max_refine_discrepancy_px", float(np.max(arr)), "Maximum motor-vs-image discrepancy (px)")
 
-    metrics.save("common_space_alignment_metrics.json")
-    metrics.log_issues()
-    return metrics
+    return metrics.finalize("common_space_alignment_metrics.json")
 
 
 def collect_slice_interpolation_metrics(
@@ -736,9 +707,7 @@ def collect_slice_interpolation_metrics(
     if method_counts:
         metrics.add_info("method_counts", dict(method_counts), "Histogram of interpolation methods used")
 
-    metrics.save("slice_interpolation_metrics.json")
-    metrics.log_issues()
-    return metrics
+    return metrics.finalize("slice_interpolation_metrics.json")
 
 
 def collect_stitch_3d_metrics(
@@ -795,6 +764,4 @@ def collect_stitch_3d_metrics(
         "overlap_reduction", float(overlap_reduction), description="Fraction of pixels removed by stitching (overlap)"
     )
 
-    metrics.save(f"{output_path.stem}_metrics.json")
-    metrics.log_issues()
-    return metrics
+    return metrics.finalize(f"{output_path.stem}_metrics.json")

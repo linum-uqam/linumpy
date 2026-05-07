@@ -163,6 +163,19 @@ class PipelineMetrics:
         """
         self.metrics[name] = {"value": value, "description": description, "status": "info"}
 
+    def add_params(self, params: dict | None) -> None:
+        """Record each entry of ``params`` as an info field. No-op if ``params`` is falsy."""
+        if not params:
+            return
+        for key, val in params.items():
+            self.add_info(key, val, f"Parameter: {key}")
+
+    def finalize(self, filename: str | None = None) -> PipelineMetrics:
+        """Save metrics, log warnings/errors, and return self."""
+        self.save(filename)
+        self.log_issues()
+        return self
+
     def get_overall_status(self) -> str:
         """
         Get overall status based on all metrics.
