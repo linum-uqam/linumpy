@@ -161,6 +161,11 @@ def sort_steps(aggregated: dict) -> dict:
     return dict(sorted(aggregated.items(), key=lambda x: step_key(x[0])))
 
 
+def slug(name: str) -> str:
+    """Slugify a string for use as an HTML id."""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
 def extract_slice_id(source_file: str) -> str:
     """Extract a meaningful slice identifier from a source file path."""
     path = Path(source_file)
@@ -1008,7 +1013,7 @@ def _render_interpolation_section_html(
     if n_failed > 0 and count > 0:
         status = "warning" if n_failed < count else "error"
 
-    html = '\n    <div class="diag-section">\n'
+    html = '\n    <div class="diag-section" id="interpolation">\n'
     html += "        <h2>Slice Interpolation</h2>\n"
     html += (
         '        <p style="color:#555;font-size:0.9em;">'
@@ -1588,6 +1593,105 @@ def generate_html_report(
         }}
         .diag-kv-table td:first-child {{ color: #555; font-weight: 500; width: 40%; }}
         .diag-kv-table td:last-child  {{ color: #333; font-family: monospace; }}
+
+        /* Sticky top navigation */
+        .topnav {{
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(255,255,255,0.96);
+            backdrop-filter: blur(6px);
+            border-bottom: 1px solid #dee2e6;
+            margin: -20px -20px 20px;
+            padding: 8px 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        }}
+        .topnav-inner {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px 12px;
+            align-items: center;
+            font-size: 0.85em;
+            max-width: 1160px;
+            margin: 0 auto;
+        }}
+        .topnav-label {{
+            font-weight: 600;
+            color: #495057;
+            margin-right: 4px;
+        }}
+        .topnav a {{
+            color: #3d4db7;
+            text-decoration: none;
+            padding: 2px 6px;
+            border-radius: 3px;
+            white-space: nowrap;
+        }}
+        .topnav a:hover {{ background: #f0f4ff; }}
+        .topnav a .nav-dot {{
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            margin-right: 4px;
+            vertical-align: middle;
+        }}
+
+        /* Section anchor offset for sticky nav */
+        :target {{ scroll-margin-top: 60px; }}
+        section[id], details[id] {{ scroll-margin-top: 60px; }}
+
+        /* Step accordion (details replaces div) */
+        details.step-section {{ padding: 0; }}
+        details.step-section > summary.step-header {{
+            cursor: pointer;
+            user-select: none;
+            list-style: none;
+            padding: 16px 20px;
+            margin: 0;
+            border-bottom: none;
+        }}
+        details.step-section[open] > summary.step-header {{
+            border-bottom: 1px solid #eee;
+            padding-bottom: 12px;
+        }}
+        details.step-section > summary.step-header::-webkit-details-marker {{ display: none; }}
+        details.step-section > summary.step-header::after {{
+            content: "▾";
+            color: #999;
+            margin-left: 12px;
+            transition: transform 0.2s;
+        }}
+        details.step-section:not([open]) > summary.step-header::after {{
+            transform: rotate(-90deg);
+        }}
+        details.step-section > *:not(summary) {{
+            margin-left: 20px;
+            margin-right: 20px;
+        }}
+        details.step-section > *:last-child {{
+            margin-bottom: 20px;
+        }}
+        details.step-section[data-status="error"]   {{ border-left: 4px solid #dc3545; }}
+        details.step-section[data-status="warning"] {{ border-left: 4px solid #ffc107; }}
+        details.step-section[data-status="ok"]      {{ border-left: 4px solid #28a745; }}
+
+        /* Print stylesheet */
+        @media print {{
+            body {{ background: white; max-width: none; padding: 0; font-size: 10pt; }}
+            .topnav {{ display: none; }}
+            .header {{ background: #444 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+            .summary, .trends-section, .diag-section, details.step-section {{
+                box-shadow: none;
+                border: 1px solid #ccc;
+                page-break-inside: avoid;
+            }}
+            details:not([open]) {{ display: block; }}
+            details > summary::after, details > summary::before {{ display: none !important; }}
+            details > *:not(summary) {{ display: block !important; }}
+            .image-gallery {{ max-height: none; overflow: visible; }}
+            a {{ color: inherit; text-decoration: none; }}
+        }}
     </style>
 </head>
 <body>
@@ -1596,7 +1700,9 @@ def generate_html_report(
         <div class="timestamp">Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</div>
     </div>
 
-    <div class="summary">
+__TOPNAV_PLACEHOLDER__
+
+    <div class="summary" id="summary">
         <h2>Summary</h2>
         <div class="summary-status" style="background-color: {get_status_color(overall_status)};">
             {overall_message}
@@ -1629,7 +1735,7 @@ def generate_html_report(
     # Overview images in the summary section
     overview_imgs = images.get("overview", [])
     if overview_imgs:
-        html += '    <div class="summary" style="padding-top:10px;">\n'
+        html += '    <div class="summary" id="overview" style="padding-top:10px;">\n'
         html += '        <div class="section-label">Volume Overview</div>\n'
         html += '        <div class="overview-container">\n'
         for p in overview_imgs:
@@ -1648,7 +1754,7 @@ def generate_html_report(
     # Slice configuration summary section
     if slice_config_summary:
         sc = slice_config_summary
-        html += '\n    <div class="summary" style="padding-top:10px;">\n'
+        html += '\n    <div class="summary" id="slice-config" style="padding-top:10px;">\n'
         html += '        <div class="section-label">Slice Configuration</div>\n'
         html += f'        <p style="color:#555;font-size:0.9em;">Source: <code>{sc["source"]}</code></p>\n'
         html += '        <div class="summary-stats">\n'
@@ -1682,7 +1788,7 @@ def generate_html_report(
     # Cross-slice trends section
     if trends:
         colors = ["#4a90d9", "#e67e22", "#27ae60", "#8e44ad", "#c0392b"]
-        html += '\n    <div class="trends-section">\n'
+        html += '\n    <div class="trends-section" id="trends">\n'
         html += "        <h2>Cross-Slice Trends</h2>\n"
         html += (
             '        <p style="color:#555;font-size:0.9em;">'
@@ -1714,13 +1820,13 @@ def generate_html_report(
         quality_metrics, info_fields = separate_metrics_by_type(metrics_list)
 
         html += f"""
-    <div class="step-section">
-        <div class="step-header">
+    <details class="step-section" id="step-{slug(step_name)}" data-status="{step_status}" open>
+        <summary class="step-header">
             <span class="step-title">{STEP_DISPLAY_NAMES.get(step_name, step_name.replace("_", " ").title())}</span>
             <span class="status-badge" style="background-color: {get_status_color(step_status)};">
                 {summary["count"]} items &mdash; {step_status.upper()}
             </span>
-        </div>
+        </summary>
 """
         if description:
             html += f'        <div class="step-description">{description}</div>\n'
@@ -1888,7 +1994,7 @@ def generate_html_report(
                     step_imgs, mode=image_mode, category=preview_category, max_width=max_thumb_width
                 )
 
-        html += "    </div>\n"
+        html += "    </details>\n"
 
     # Slice interpolation section (only if interpolation happened)
     if interpolation:
@@ -1896,7 +2002,7 @@ def generate_html_report(
 
     # Diagnostics section (only if diagnostic data was found)
     if diagnostics:
-        html += '\n    <div class="diag-section">\n'
+        html += '\n    <div class="diag-section" id="diagnostics">\n'
         html += "        <h2>Diagnostic Outputs</h2>\n"
         html += (
             '        <p style="color:#555;font-size:0.9em;">'
@@ -1953,6 +2059,34 @@ def generate_html_report(
 </body>
 </html>
 """
+
+    # Build the sticky top navigation now that all sections are known.
+    nav_links: list[str] = [
+        f'<a href="#summary"><span class="nav-dot" style="background:{get_status_color(overall_status)};"></span>Summary</a>'
+    ]
+    if overview_imgs:
+        nav_links.append('<a href="#overview">Overview</a>')
+    if slice_config_summary:
+        nav_links.append('<a href="#slice-config">Slice Config</a>')
+    if trends:
+        nav_links.append('<a href="#trends">Trends</a>')
+    for step_name, metrics_list in aggregated.items():
+        step_status_nav = get_step_status(metrics_list)
+        label = STEP_DISPLAY_NAMES.get(step_name, step_name.replace("_", " ").title())
+        nav_links.append(
+            f'<a href="#step-{slug(step_name)}">'
+            f'<span class="nav-dot" style="background:{get_status_color(step_status_nav)};"></span>'
+            f"{label}</a>"
+        )
+    if interpolation:
+        nav_links.append('<a href="#interpolation">Interpolation</a>')
+    if diagnostics:
+        nav_links.append('<a href="#diagnostics">Diagnostics</a>')
+    nav_html = (
+        '    <nav class="topnav"><div class="topnav-inner">'
+        '<span class="topnav-label">Jump to:</span>' + "".join(nav_links) + "</div></nav>\n"
+    )
+    html = html.replace("__TOPNAV_PLACEHOLDER__", nav_html)
     return html
 
 
