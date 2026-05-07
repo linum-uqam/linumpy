@@ -58,6 +58,7 @@ from linumpy.gpu.image_quality import (
 )
 from linumpy.io import slice_config as slice_config_io
 from linumpy.io.zarr import read_omezarr
+from linumpy.metrics import collect_quality_assessment_metrics
 from linumpy.metrics.image_quality import (
     assess_slice_quality,
     detect_calibration_slice,
@@ -391,6 +392,12 @@ def main() -> None:
     if not args.report_only:
         write_slice_config_with_quality(output_file, slice_ids, quality_results, list(exclude_ids), existing_config)
         print(f"\nSlice configuration written to: {output_file}")
+        collect_quality_assessment_metrics(
+            output_path=output_file,
+            quality_results=quality_results,
+            excluded_ids=list(exclude_ids),
+            min_quality=float(args.min_quality),
+        )
 
     if exclude_ids:
         print(f"\nExcluded slice IDs: {sorted(exclude_ids)}")

@@ -12,6 +12,7 @@ import linumpy.config.threads  # noqa: F401
 
 import argparse
 import base64
+import contextlib
 import io as _io
 import json
 import re
@@ -36,40 +37,61 @@ from linumpy.metrics import aggregate_metrics, compute_summary_statistics
 
 # Logical pipeline step ordering
 STEP_ORDER = [
+    "slice_quality_assessment",
     "stitch_3d",
+    "stitch_3d_refined",
+    "rehoming_detection",
     "xy_transform_estimation",
     "normalize_intensities",
     "psf_compensation",
     "crop_interface",
     "pairwise_registration",
+    "auto_exclude",
+    "common_space_alignment",
+    "slice_interpolation",
     "stack_slices",
 ]
 
 # Human-readable display names (step_name → display label)
 STEP_DISPLAY_NAMES = {
+    "slice_quality_assessment": "Slice Quality Assessment",
     "stitch_3d": "Stitch 3D",
+    "stitch_3d_refined": "Stitch 3D (refined)",
+    "rehoming_detection": "Rehoming Detection",
     "xy_transform_estimation": "XY Transform Estimation",
     "normalize_intensities": "Normalize Intensities",
     "psf_compensation": "PSF Compensation",
     "crop_interface": "Crop Interface",
     "pairwise_registration": "Pairwise Registration",
+    "auto_exclude": "Auto-Exclude Slices",
+    "common_space_alignment": "Common-Space Alignment",
+    "slice_interpolation": "Slice Interpolation",
     "stack_slices": "Stack Slices",
 }
 
 # Human-readable descriptions for pipeline steps
 STEP_DESCRIPTIONS = {
+    "slice_quality_assessment": "Scores each slice (SSIM, edges, variance) and proposes exclusions.",
     "stitch_3d": "Stitches individual mosaic tiles into a single 2D slice.",
+    "stitch_3d_refined": (
+        "Stitches mosaic tiles using refined per-pair shift estimates (rotation, overlap fraction, scan/stage angles)."
+    ),
+    "rehoming_detection": "Detects and corrects motor rehoming events in the per-slice XY shifts.",
     "xy_transform_estimation": "Estimates the affine transformation for tile overlap correction.",
     "normalize_intensities": "Normalizes per-slice intensities using agarose background.",
     "psf_compensation": "Compensates for beam profile / PSF attenuation along the optical axis.",
     "crop_interface": "Detects and crops the tissue-agarose interface.",
     "pairwise_registration": "Registers consecutive serial sections to align the 3D volume.",
+    "auto_exclude": "Auto-excludes clusters of consecutive low-quality pairwise registrations.",
+    "common_space_alignment": "Brings every slice into common space using motor + image-based refinement.",
+    "slice_interpolation": "Reconstructs missing or low-quality slices by interpolating from neighbours.",
     "stack_slices": "Stacks registered slices into the final 3D volume.",
 }
 
 # Maps pipeline step_name → image category shown in that step section
 STEP_PREVIEW_CATEGORY = {
     "stitch_3d": "stitch_preview",
+    "stitch_3d_refined": "stitch_preview",
     "pairwise_registration": "common_space_preview",
 }
 
@@ -662,6 +684,98 @@ def discover_diagnostic_data(input_dir: Path) -> dict[str, dict]:
     return diagnostics
 
 
+def discover_slice_config_summary(input_dir: Path) -> dict | None:
+    """Find the deepest-enriched ``slice_config.csv`` and summarise it.
+
+    Looks (in priority order) at:
+
+    1. ``slice_config_final.csv`` at the top level (promoted by update_files.sh);
+    2. ``interpolate_missing_slice/`` (post-finalise CSVs);
+    3. ``auto_exclude_slices/``;
+    4. ``detect_rehoming_events/``;
+    5. ``auto_assess_quality/``;
+    6. ``input_dir`` itself.
+
+    Returns ``None`` when no slice_config CSV is found.
+    """
+    from linumpy.io import slice_config as slice_config_io
+
+    candidates: list[Path] = []
+    top_final = input_dir / "slice_config_final.csv"
+    if top_final.exists():
+        candidates.append(top_final)
+    for sub in (
+        "interpolate_missing_slice",
+        "auto_exclude_slices",
+        "detect_rehoming_events",
+        "auto_assess_quality",
+    ):
+        d = input_dir / sub
+        if d.is_dir():
+            csvs = sorted(d.glob("slice_config*.csv"))
+            if csvs:
+                # Prefer "_final" variants, else most-recently modified.
+                csvs.sort(key=lambda p: (0 if "final" in p.name else 1, -p.stat().st_mtime))
+                candidates.append(csvs[0])
+    candidates.extend(sorted(input_dir.glob("slice_config*.csv")))
+
+    if not candidates:
+        return None
+
+    chosen = candidates[0]
+    try:
+        rows = slice_config_io.read(chosen)
+    except Exception:
+        return None
+    if not rows:
+        return None
+
+    def _is_truthy(value: object) -> bool:
+        return str(value).strip().lower() in ("true", "1", "yes", "y", "t")
+
+    n_total = len(rows)
+    n_use_true = sum(1 for r in rows.values() if str(r.get("use", "true")).strip().lower() in ("true", "1", "yes", "y", "t"))
+    n_use_false = n_total - n_use_true
+    n_auto_excluded = sum(1 for r in rows.values() if _is_truthy(r.get("auto_excluded")))
+    n_interpolated = sum(1 for r in rows.values() if _is_truthy(r.get("interpolated")))
+    n_interp_failed = sum(1 for r in rows.values() if _is_truthy(r.get("interpolation_failed")))
+    n_rehomed = sum(1 for r in rows.values() if _is_truthy(r.get("rehomed")))
+    n_rehoming_unreliable = sum(
+        1
+        for r in rows.values()
+        if "rehoming_reliable" in r and str(r.get("rehoming_reliable")).strip() in ("0", "false", "False")
+    )
+
+    reasons: dict[str, int] = {}
+    for r in rows.values():
+        reason = str(r.get("exclude_reason") or r.get("auto_exclude_reason") or "").strip()
+        if reason:
+            reasons[reason] = reasons.get(reason, 0) + 1
+
+    quality_scores: list[float] = []
+    for r in rows.values():
+        raw = r.get("quality_score")
+        if raw in (None, ""):
+            continue
+        with contextlib.suppress(TypeError, ValueError):
+            quality_scores.append(float(raw))
+
+    return {
+        "source": str(chosen),
+        "n_total": n_total,
+        "n_use_true": n_use_true,
+        "n_use_false": n_use_false,
+        "n_auto_excluded": n_auto_excluded,
+        "n_interpolated": n_interpolated,
+        "n_interpolation_failed": n_interp_failed,
+        "n_rehomed": n_rehomed,
+        "n_rehoming_unreliable": n_rehoming_unreliable,
+        "reasons": reasons,
+        "quality_score_mean": float(np.mean(quality_scores)) if quality_scores else None,
+        "quality_score_min": float(np.min(quality_scores)) if quality_scores else None,
+    }
+
+
 def discover_images(
     input_dir: Path, overview_png: Path | None = None, annotated_png: Path | None = None
 ) -> dict[str, list[Path]]:
@@ -697,7 +811,13 @@ def discover_images(
 
     # Auto-detect overview from stack output directories if not provided via CLI
     if not images["overview"]:
-        for stack_dir_name in ("stack_motor", "stack", "correct_bias_field", "normalize_z_intensity"):
+        for stack_dir_name in (
+            "align_to_ras",
+            "normalize_z_intensity",
+            "correct_bias_field",
+            "stack_motor",
+            "stack",
+        ):
             d = input_dir / stack_dir_name
             if d.exists():
                 pngs = sorted(d.glob("*.png"))
@@ -1083,6 +1203,7 @@ def generate_html_report(
     trends: dict | None = None,
     diagnostics: dict | None = None,
     interpolation: dict | None = None,
+    slice_config_summary: dict | None = None,
 ) -> str:
     """Generate an HTML report from aggregated metrics."""
     aggregated = sort_steps(aggregated)
@@ -1524,6 +1645,40 @@ def generate_html_report(
             )
         html += "        </div>\n    </div>\n"
 
+    # Slice configuration summary section
+    if slice_config_summary:
+        sc = slice_config_summary
+        html += '\n    <div class="summary" style="padding-top:10px;">\n'
+        html += '        <div class="section-label">Slice Configuration</div>\n'
+        html += f'        <p style="color:#555;font-size:0.9em;">Source: <code>{sc["source"]}</code></p>\n'
+        html += '        <div class="summary-stats">\n'
+        cells = [
+            (sc["n_total"], "Total slices"),
+            (sc["n_use_true"], "Used"),
+            (sc["n_use_false"], "Excluded"),
+            (sc["n_auto_excluded"], "Auto-excluded"),
+            (sc["n_interpolated"], "Interpolated"),
+            (sc["n_interpolation_failed"], "Interpolation failed"),
+            (sc["n_rehomed"], "Rehomed"),
+            (sc["n_rehoming_unreliable"], "Rehoming unreliable"),
+        ]
+        for value, label in cells:
+            html += (
+                f'            <div class="stat-box">'
+                f'<div class="stat-value">{value}</div>'
+                f'<div class="stat-label">{label}</div></div>\n'
+            )
+        html += "        </div>\n"
+        if sc.get("quality_score_mean") is not None:
+            html += (
+                f'        <p style="color:#555;font-size:0.9em;">Quality score: '
+                f"mean={sc['quality_score_mean']:.3f}, min={sc['quality_score_min']:.3f}</p>\n"
+            )
+        if sc.get("reasons"):
+            reasons_str = ", ".join(f"{k}={v}" for k, v in sorted(sc["reasons"].items()))
+            html += f'        <p style="color:#555;font-size:0.9em;">Exclusion reasons: {reasons_str}</p>\n'
+        html += "    </div>\n"
+
     # Cross-slice trends section
     if trends:
         colors = ["#4a90d9", "#e67e22", "#27ae60", "#8e44ad", "#c0392b"]
@@ -1806,6 +1961,7 @@ def generate_text_report(
     title: str,
     verbose: bool = False,
     interpolation: dict | None = None,
+    slice_config_summary: dict | None = None,
 ) -> str:
     """Generate a plain text report from aggregated metrics."""
     aggregated = sort_steps(aggregated)
@@ -1829,6 +1985,26 @@ def generate_text_report(
             "",
         )
     )
+
+    if slice_config_summary:
+        sc = slice_config_summary
+        lines.extend(
+            (
+                "SLICE CONFIGURATION",
+                "-" * 70,
+                f"  Source: {sc['source']}",
+                f"  Total: {sc['n_total']}  Used: {sc['n_use_true']}  Excluded: {sc['n_use_false']}",
+                f"  Auto-excluded: {sc['n_auto_excluded']}  "
+                f"Interpolated: {sc['n_interpolated']}  Interp. failed: {sc['n_interpolation_failed']}",
+                f"  Rehomed: {sc['n_rehomed']}  Rehoming unreliable: {sc['n_rehoming_unreliable']}",
+            )
+        )
+        if sc.get("quality_score_mean") is not None:
+            lines.append(f"  Quality score: mean={sc['quality_score_mean']:.3f} min={sc['quality_score_min']:.3f}")
+        if sc.get("reasons"):
+            reasons_str = ", ".join(f"{k}={v}" for k, v in sorted(sc["reasons"].items()))
+            lines.append(f"  Exclusion reasons: {reasons_str}")
+        lines.append("")
 
     for step_name, metrics_list in aggregated.items():
         summary = compute_summary_statistics(metrics_list)
@@ -1980,6 +2156,11 @@ def main() -> None:
         if output_format == "zip" and not args.no_images and interpolation.get("images"):
             images["diag_interpolate_missing_slice"] = list(interpolation["images"])
 
+    # Discover slice_config summary (deepest-enriched slice_config CSV)
+    slice_config_summary = discover_slice_config_summary(input_dir)
+    if slice_config_summary:
+        print(f"Found slice_config summary: {slice_config_summary['source']}")
+
     # Discover diagnostic outputs
     diagnostics = discover_diagnostic_data(input_dir)
     if diagnostics:
@@ -2006,6 +2187,7 @@ def main() -> None:
             trends=trends or None,
             diagnostics=diagnostics or None,
             interpolation=interpolation,
+            slice_config_summary=slice_config_summary,
         )
         if output_format == "zip":
             if output_file.suffix.lower() != ".zip":
@@ -2014,7 +2196,13 @@ def main() -> None:
         else:
             Path(output_file).write_text(report)
     else:
-        report = generate_text_report(aggregated, args.title, args.verbose, interpolation=interpolation)
+        report = generate_text_report(
+            aggregated,
+            args.title,
+            args.verbose,
+            interpolation=interpolation,
+            slice_config_summary=slice_config_summary,
+        )
         Path(output_file).write_text(report)
 
     print(f"Report saved to: {output_file}")

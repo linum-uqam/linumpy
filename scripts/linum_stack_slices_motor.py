@@ -1177,34 +1177,36 @@ def main() -> None:
 
         logger.debug("  Slice %s: z=[%s:%s], xy=[%s:%s, %s:%s]", slice_id, z_start, z_end, dst_y0, dst_y1, dst_x0, dst_x1)
 
-    # Save per-slice stacking decisions
+    # Build per-slice stacking decisions (also fed into the metrics collector)
+    decisions = []
+    for match in z_matches:
+        sid = match["moving_id"]
+        has_tfm = sid in registration_transforms and registration_transforms[sid] is not None
+        conf = registration_transforms[sid][3] if has_tfm else None
+        # Determine overlap source
+        if args.use_expected_overlap:
+            overlap_src = "expected"
+        elif has_tfm:
+            overlap_src = "registration"
+        else:
+            overlap_src = "correlation"
+        decisions.append(
+            {
+                "slice_id": sid,
+                "fixed_id": match["fixed_id"],
+                "transform_loaded": has_tfm,
+                "transform_source": "manual" if sid in manual_override_ids else "automated",
+                "manual_override": sid in manual_override_ids,
+                "confidence": round(conf, 4) if conf is not None else "",
+                "overlap_source": overlap_src,
+                "overlap_voxels": match["overlap_voxels"],
+                "blend_overlap_voxels": match.get("blend_overlap_voxels", match["overlap_voxels"]),
+                "correlation": round(match["correlation"], 4),
+            }
+        )
+    decisions_df = pd.DataFrame(decisions)
     if args.output_stacking_decisions:
-        decisions = []
-        for match in z_matches:
-            sid = match["moving_id"]
-            has_tfm = sid in registration_transforms and registration_transforms[sid] is not None
-            conf = registration_transforms[sid][3] if has_tfm else None
-            # Determine overlap source
-            if args.use_expected_overlap:
-                overlap_src = "expected"
-            elif has_tfm:
-                overlap_src = "registration"
-            else:
-                overlap_src = "correlation"
-            decisions.append(
-                {
-                    "slice_id": sid,
-                    "fixed_id": match["fixed_id"],
-                    "transform_loaded": has_tfm,
-                    "transform_source": "manual" if sid in manual_override_ids else "automated",
-                    "confidence": round(conf, 4) if conf is not None else "",
-                    "overlap_source": overlap_src,
-                    "overlap_voxels": match["overlap_voxels"],
-                    "blend_overlap_voxels": match.get("blend_overlap_voxels", match["overlap_voxels"]),
-                    "correlation": round(match["correlation"], 4),
-                }
-            )
-        pd.DataFrame(decisions).to_csv(args.output_stacking_decisions, index=False)
+        decisions_df.to_csv(args.output_stacking_decisions, index=False)
         logger.info("Stacking decisions saved to %s", args.output_stacking_decisions)
 
     # Finalize with pyramid
@@ -1213,6 +1215,7 @@ def main() -> None:
 
     # Collect metrics
     z_offsets = np.array([m["overlap_voxels"] for m in z_matches])
+    z_matches_df = pd.DataFrame(z_matches)
     collect_stack_metrics(
         output_shape=output_shape,
         z_offsets=z_offsets,
@@ -1221,6 +1224,8 @@ def main() -> None:
         output_path=output_path,
         blend_enabled=args.blend,
         normalize_enabled=False,
+        z_matches_df=z_matches_df,
+        decisions_df=decisions_df,
     )
 
     logger.info("Done! Output saved to %s", output_path)

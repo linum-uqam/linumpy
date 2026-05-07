@@ -51,6 +51,7 @@ import pandas as pd
 
 from linumpy.cli.args import add_overwrite_arg, assert_output_exists
 from linumpy.io import slice_config as slice_config_io
+from linumpy.metrics import collect_rehoming_metrics
 from linumpy.stack_alignment.filter import correct_tile_offset_shifts, filter_outlier_shifts
 
 
@@ -365,6 +366,17 @@ def main() -> None:
 
     shifts_after.to_csv(args.out_shifts, index=False)
     print(f"Corrected shifts written to {args.out_shifts}")
+
+    shift_mag_after_arr = np.asarray(shift_mag_after, dtype=float)
+    max_correction_mm = float(np.max(shift_mag_after_arr)) if shift_mag_after_arr.size > 0 else 0.0
+    collect_rehoming_metrics(
+        output_path=Path(args.out_shifts),
+        n_total_transitions=len(shifts_before),
+        tile_corrected_indices=list(tile_corrected_indices),
+        spike_corrected_indices=list(corrected_indices),
+        n_unreliable=n_unreliable,
+        max_correction_mm=max_correction_mm,
+    )
 
     if args.slice_config_out:
         if not args.slice_config_in:
