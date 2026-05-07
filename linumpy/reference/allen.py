@@ -94,12 +94,22 @@ def download_template(resolution: int, cache: bool = True, cache_dir: str = ".da
 def download_template_ras_aligned(resolution: int, cache: bool = True, cache_dir: str = ".data/") -> sitk.Image:
     """Download a 3D average mouse brain and align it to RAS+ orientation.
 
-    The Allen CCF v3 template is stored in PIR orientation
-    (SITK axes ``(X, Y, Z) = (AP, DV, ML)`` with ``+X = Posterior``,
-    ``+Y = Inferior``, ``+Z = Right``).  Converting to RAS+
-    (``+X = Right``, ``+Y = Anterior``, ``+Z = Superior``) requires
-    ``PermuteAxes((2, 0, 1))`` followed by flipping **both** the Y and Z
-    axes (I → S and P → A).
+    The Allen CCF v3 ``average_template_<res>.nrrd`` is described by Allen as
+    being in **ASL** orientation: "first (x) axis is anterior-to-posterior,
+    second (y) axis is superior-to-inferior, third (z) axis is left-to-right"
+    (see the ABC Atlas CCF tutorial). That convention names each axis by where
+    index 0 is anatomically and is identical to **PIR** under the NIfTI /
+    radiology convention used elsewhere in linumpy (where each letter names the
+    direction the axis points *toward*): SITK ``(X, Y, Z) = (AP, DV, ML)`` with
+    ``+X = Posterior``, ``+Y = Inferior``, ``+Z = Right``. Both names describe
+    the same voxel layout -- empirically verified on the cached nrrd: olfactory
+    bulbs sit at low SITK X (axis 0 starts Anterior), DV bands run along SITK Y
+    (axis 1 starts Superior), and ML symmetry is along SITK Z (axis 2 starts
+    Left).
+
+    Converting to RAS+ (``+X = Right``, ``+Y = Anterior``, ``+Z = Superior``)
+    requires ``PermuteAxes((2, 0, 1))`` followed by flipping **both** the Y
+    and Z axes (I → S and P → A).
 
     Parameters
     ----------
@@ -123,7 +133,7 @@ def download_template_ras_aligned(resolution: int, cache: bool = True, cache_dir
     vol.SetOrigin([0.0, 0.0, 0.0])
     vol.SetDirection([1, 0, 0, 0, 1, 0, 0, 0, 1])
 
-    # Convert PIR → RAS:
+    # Convert PIR (== Allen "ASL") → RAS:
     #   PermuteAxes((2, 0, 1)) maps (P, I, R) → (R, P, I)
     #   Flip Y (P → A) and Z (I → S) to reach (R, A, S).
     vol = sitk.PermuteAxes(vol, (2, 0, 1))

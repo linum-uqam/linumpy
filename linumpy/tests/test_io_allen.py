@@ -6,6 +6,8 @@ tests offline and lets us verify that ``download_template_ras_aligned`` really
 produces a RAS+ volume (``+X = Right``, ``+Y = Anterior``, ``+Z = Superior``).
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 import SimpleITK as sitk
@@ -162,6 +164,75 @@ class TestNumpyToSitkImage:
         original = arr.copy()
         allen.numpy_to_sitk_image(arr, spacing=(1.0, 1.0, 1.0), cast_dtype=np.float32)
         np.testing.assert_array_equal(arr, original)
+
+
+# ---------------------------------------------------------------------------
+# Real Allen template -- regression test against the cached nrrd
+# ---------------------------------------------------------------------------
+
+
+# Allen ships ``average_template_<res>.nrrd`` in what its docs call **ASL**
+# (axis 0 starts Anterior, axis 1 Superior, axis 2 Left -- each axis named by
+# where index 0 is anatomically). Under the NIfTI/radiology convention used
+# elsewhere in linumpy the same layout is **PIR** (each axis named by the
+# direction it points toward). The legacy informatics-archive nrrd that
+# ``download_template`` fetches and the newer ABC-Atlas ``average_template_10``
+# share this layout. Anatomical landmarks for a sanity check (verified on the
+# 100 µm cached file, voxel-count threshold > 50):
+#   * SITK X axis (numpy dim 2) length 132 -- olfactory bulb tip at low index
+#     (~28 k voxels in a 20-slab) versus cerebellum at high index (~69 k).
+#   * SITK Y axis (numpy dim 1) length 80 -- DV; Inferior at low, Superior high.
+#   * SITK Z axis (numpy dim 0) length 114 -- ML; near-symmetric L/R.
+ALLEN_NRRD_100UM = Path(".data") / "allen_template_100um.nrrd"
+
+
+@pytest.mark.skipif(
+    not ALLEN_NRRD_100UM.is_file(),
+    reason=f"Allen template not cached at {ALLEN_NRRD_100UM}; skip real-NRRD regression test",
+)
+class TestRealAllenTemplateOrientation:
+    """Lock down RAS conversion of the actual Allen 100 µm template.
+
+    These checks run only when the nrrd is already cached locally so the
+    test stays offline-friendly. They guard against silent regressions in
+    ``download_template_ras_aligned``: if a future change to the permute /
+    flip recipe (or to upstream Allen file orientation) leaves the volume
+    in some other configuration, the anatomical-landmark assertions below
+    will fail loudly.
+    """
+
+    def test_raw_template_is_pir_aka_asl(self):
+        """The raw nrrd really has Anterior at low SITK X (PIR == Allen 'ASL')."""
+        vol = sitk.ReadImage(str(ALLEN_NRRD_100UM))
+        assert vol.GetSize() == (132, 80, 114)
+        arr = sitk.GetArrayFromImage(vol)  # numpy (Z, Y, X) = (ML, DV, AP)
+        # numpy axis 2 == SITK X == AP. Olfactory tip = LOW index, cerebellum = HIGH.
+        front = (arr[:, :, 10:30] > 50).sum()  # anterior end
+        back = (arr[:, :, -30:-10] > 50).sum()  # posterior end
+        assert front < back, f"Raw nrrd is not PIR/ASL (anterior tip {front} should be smaller than posterior {back})"
+        # numpy axis 0 == SITK Z == ML: should be roughly symmetric.
+        left = (arr[10:30, :, :] > 50).sum()
+        right = (arr[-30:-10, :, :] > 50).sum()
+        assert left == pytest.approx(right, rel=0.10), f"ML asymmetry too large: L={left} R={right}"
+
+    def test_ras_aligned_has_anterior_at_high_dim1(self):
+        """After RAS reorientation, +dim1 must point toward Anterior."""
+        ras = allen.download_template_ras_aligned(100)
+        # RAS+ numpy ordering is (S, A, R): dim0=S, dim1=A, dim2=R.
+        assert ras.GetSize() == (114, 132, 80)
+        arr = sitk.GetArrayFromImage(ras)
+        assert arr.shape == (80, 132, 114)
+        front = (arr[:, -30:-10, :] > 50).sum()  # +A end (anterior tip / olfactory)
+        back = (arr[:, 10:30, :] > 50).sum()  # -A end (posterior / cerebellum)
+        assert front < back, f"+dim1 is not Anterior (anterior tip {front} >= posterior {back})"
+
+    def test_ras_aligned_is_left_right_symmetric(self):
+        """Numpy dim2 (+R) should be roughly mirror-symmetric in mass."""
+        ras = allen.download_template_ras_aligned(100)
+        arr = sitk.GetArrayFromImage(ras)
+        left = (arr[:, :, 10:30] > 50).sum()
+        right = (arr[:, :, -30:-10] > 50).sum()
+        assert left == pytest.approx(right, rel=0.10), f"L/R asymmetry too large: L={left} R={right}"
 
 
 # ---------------------------------------------------------------------------
