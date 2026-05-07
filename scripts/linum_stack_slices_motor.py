@@ -862,6 +862,9 @@ def main() -> None:
         # Check if we have registration-derived Z-indices
         fixed_z = None
         moving_z = None
+        # Tracks whether the correlation-based Z-overlap was overridden by the
+        # min_corr fallback (only relevant in the correlation branch below).
+        correlation_fallback_used = False
         if slice_id in registration_transforms and registration_transforms[slice_id] is not None:
             _, fixed_z, moving_z, _ = registration_transforms[slice_id]
 
@@ -950,7 +953,12 @@ def main() -> None:
             overlap, corr = find_z_overlap(
                 prev_vol, vol, args.slicing_interval_mm, args.search_range_mm, res_z_um, use_gpu=args.use_gpu
             )
-            # Fall back to expected overlap when correlation is too low to trust
+            # Fall back to expected overlap when correlation is too low to trust.
+            # Preserve the measured correlation in the CSV so a sensible
+            # min_corr threshold can be derived from real numbers; signal the
+            # fallback via the dedicated `correlation_fallback_used` flag and
+            # the `correlation_fallback` overlap_source instead of zeroing
+            # corr (which would be indistinguishable from a zero-NCC match).
             if args.z_overlap_min_corr > 0 and corr < args.z_overlap_min_corr:
                 interval_voxels = int(args.slicing_interval_mm / res_z_mm)
                 crop_z = args.moving_z_first_index or 0
@@ -965,7 +973,7 @@ def main() -> None:
                     overlap,
                 )
                 overlap = fallback_overlap
-                corr = 0.0
+                correlation_fallback_used = True
             blend_overlap = overlap
             moving_z = args.moving_z_first_index  # Use default
 
@@ -977,6 +985,7 @@ def main() -> None:
                 "blend_overlap_voxels": blend_overlap,
                 "moving_z_start": moving_z,  # Z-index in moving volume where to start
                 "correlation": corr,
+                "correlation_fallback_used": correlation_fallback_used,
             }
         )
 
@@ -1183,11 +1192,17 @@ def main() -> None:
         sid = match["moving_id"]
         has_tfm = sid in registration_transforms and registration_transforms[sid] is not None
         conf = registration_transforms[sid][3] if has_tfm else None
-        # Determine overlap source
+        # Determine overlap source.  The correlation branch reports
+        # "correlation_fallback" when the measured NCC was below
+        # `z_overlap_min_corr` and the script reverted to the slicing-interval
+        # estimate -- so the CSV preserves the measured `correlation` value
+        # while still flagging which pairs were not trusted.
         if args.use_expected_overlap:
             overlap_src = "expected"
         elif has_tfm:
             overlap_src = "registration"
+        elif match.get("correlation_fallback_used"):
+            overlap_src = "correlation_fallback"
         else:
             overlap_src = "correlation"
         decisions.append(
