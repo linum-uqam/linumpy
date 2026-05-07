@@ -7,9 +7,11 @@ Notes
 - jpg output should only be used for visualization purposes due to loss of data from the 8bit conversion.
 """
 
+# Configure thread limits before numpy/scipy imports
+import linumpy.config.threads  # noqa: F401
+
 import argparse
 import json
-import multiprocessing
 import shutil
 from pathlib import Path
 
@@ -19,11 +21,12 @@ import zarr
 from pqdm.processes import pqdm
 from skimage.transform import resize
 
-from linumpy import reconstruction
+from linumpy.cli.args import get_available_cpus
 from linumpy.microscope.oct import OCT
+from linumpy.mosaic import discovery as reconstruction
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("tiles_directory", help="Full path to a directory containing the tiles to process")
     p.add_argument("output_file", help="Full path to the output file (jpg, tiff, or zarr)")
@@ -32,30 +35,28 @@ def _build_arg_parser():
         "--resolution",
         type=float,
         default=-1,
-        help="Output isotropic resolution in micron per pixel. (Use -1 to keep the original resolution). (default=%(default)s)",
+        help="Output isotropic resolution in micron per pixel. (Use -1 to keep the original resolution). [%(default)s]",
     )
-    p.add_argument("-z", "--slice", type=int, default=0, help="Slice to process (default=%(default)s)")
+    p.add_argument("-z", "--slice", type=int, default=0, help="Slice to process [%(default)s]")
     p.add_argument(
         "--n_cpus",
         type=int,
         default=-1,
-        help="Number of CPUs to use for parallel processing (default=%(default)s). If -1, all CPUs - 1 are used.",
+        help="Number of CPUs to use for parallel processing [%(default)s]. If -1, all CPUs - 1 are used.",
     )
-    p.add_argument("--normalize", action="store_true", help="Normalize the mosaic (default=%(default)s)")
-    p.add_argument(
-        "--saturation", type=float, default=99.9, help="Saturation value for the normalization (default=%(default)s)"
-    )
-    p.add_argument("-c", "--config", type=str, default=None, help="JSON mosaic configuration file (default=%(default)s)")
+    p.add_argument("--normalize", action="store_true", help="Normalize the mosaic [%(default)s]")
+    p.add_argument("--saturation", type=float, default=99.9, help="Saturation value for the normalization [%(default)s]")
+    p.add_argument("-c", "--config", type=str, default=None, help="JSON mosaic configuration file [%(default)s]")
 
     return p
 
 
-def get_volume(filename: str, config: dict | None = None) -> np.ndarray:
+def get_volume(filename: Path, config: dict | None = None) -> np.ndarray:
     """Load and preprocess an OCT volume.
 
     Parameters
     ----------
-    filename : str
+    filename : Path
         Path to the OCT file
     config : dict
         Loading and preprocessing configuration. The expected keys are :
@@ -114,12 +115,17 @@ def process_tile(params: dict) -> None:
 
 
 def main() -> None:
+    """Run function."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
 
     # Load the JSON config file
-    mosaic_config = json.load(open(args.config)) if args.config is not None else {}
+    if args.config is not None:
+        with Path(args.config).open() as f:
+            mosaic_config = json.load(f)
+    else:
+        mosaic_config = {}
 
     # Parameters
     tiles_directory = Path(args.tiles_directory)
@@ -130,7 +136,7 @@ def main() -> None:
     output_resolution = args.resolution
     n_cpus = args.n_cpus
     if n_cpus == -1:
-        n_cpus = multiprocessing.cpu_count() - 2
+        n_cpus = get_available_cpus()
 
     # Analyze the tiles
     tiles, tiles_pos = reconstruction.get_tiles_ids(tiles_directory, z=z)
@@ -171,31 +177,31 @@ def main() -> None:
         tile_pos_px.append((rmin, rmax, cmin, cmax))
 
     # Create the zarr persistent array
-    mosaic = zarr.open(zarr_file, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=tile_size)
+    mosaic = zarr.open_array(zarr_file, mode="w", shape=mosaic_shape, dtype=np.float32, chunks=tile_size)
 
     # Create a params dictionary for every tile
-    params = []
-    for i in range(len(tiles)):
-        params.append(
-            {
-                "file": tiles[i],
-                "tile_pos_px": tile_pos_px[i],
-                "tile_size": tile_size,
-                "mosaic": mosaic,
-                "config": mosaic_config,
-            }
-        )
+    params = [
+        {
+            "file": tiles[i],
+            "tile_pos_px": tile_pos_px[i],
+            "tile_size": tile_size,
+            "mosaic": mosaic,
+            "config": mosaic_config,
+        }
+        for i in range(len(tiles))
+    ]
 
     # Process the tiles in parallel
     pqdm(params, process_tile, n_jobs=n_cpus, desc="Processing tiles")
 
     # Normalize the mosaic
     if args.normalize:
-        imin = np.min(mosaic)
-        imax = np.percentile(mosaic, args.saturation)
-        mosaic = (mosaic - imin) / (imax - imin)
-        mosaic[mosaic < 0] = 0
-        mosaic[mosaic > 1] = 1
+        mosaic_data = np.asarray(mosaic[:])
+        imin = np.min(mosaic_data)
+        imax = np.percentile(mosaic_data, args.saturation)
+        normalized = (mosaic_data - imin) / (imax - imin)
+        normalized = np.clip(normalized, 0, 1)
+        mosaic[:] = normalized
 
     # Convert the mosaic to a tiff file
     if output_file.suffix == ".tiff":
@@ -204,13 +210,12 @@ def main() -> None:
         shutil.rmtree(zarr_file)
 
     if output_file.suffix == ".jpg":
-        imin = np.min(mosaic)
-        imax = np.percentile(mosaic, args.saturation)
-        mosaic = (mosaic - imin) / (imax - imin)
-        mosaic[mosaic < 0] = 0
-        mosaic[mosaic > 1] = 1
-        mosaic = (mosaic * 255).astype(np.uint8)
-        img = mosaic[:]
+        mosaic_data = np.asarray(mosaic[:])
+        imin = np.min(mosaic_data)
+        imax = np.percentile(mosaic_data, args.saturation)
+        mosaic_norm = (mosaic_data - imin) / (imax - imin)
+        mosaic_norm = np.clip(mosaic_norm, 0, 1)
+        img = (mosaic_norm * 255).astype(np.uint8)
         io.imsave(output_file, img)
         shutil.rmtree(zarr_file)
 

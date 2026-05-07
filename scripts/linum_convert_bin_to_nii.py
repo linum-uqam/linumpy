@@ -3,7 +3,7 @@
 """Convert OCT raw binary data to nifti."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 from pathlib import Path
@@ -14,15 +14,16 @@ import numpy as np
 from linumpy.microscope.oct import OCT
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input", help="Input OCT directory. This should contain image_*.bin and info.txt files")
-    p.add_argument("output", help="Output nifti filename")
+    p.add_argument("input", type=Path, help="Input OCT directory. This should contain image_*.bin and info.txt files")
+    p.add_argument("output", type=Path, help="Output nifti filename")
 
     return p
 
 
 def main() -> None:
+    """Run the binary-to-NIfTI conversion script."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 

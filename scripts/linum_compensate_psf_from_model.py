@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
+"""Compensate PSF blurring using a parametric model."""
+
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
+from pathlib import Path
 
 import numpy as np
 
 from linumpy.io.zarr import read_omezarr, save_omezarr
-from linumpy.psf.psf_estimator import extract_psfParametersFromMosaic, get_3dPSF
+from linumpy.psf.extract import extract_psf_parameters_from_mosaic
+from linumpy.psf.synthetic import synthesize_3d_psf
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser()
-    p.add_argument("in_zarr", help="Input stitched 3D slice (OME-zarr).")
-    p.add_argument("out_zarr", help="Output volume corrected for beam PSF (OME-zarr).")
-    p.add_argument("--out_psf", help="Optional output PSF filename.")
+    p.add_argument("in_zarr", type=Path, help="Input stitched 3D slice (OME-zarr).")
+    p.add_argument("out_zarr", type=Path, help="Output volume corrected for beam PSF (OME-zarr).")
+    p.add_argument("--out_psf", type=Path, help="Optional output PSF filename.")
     p.add_argument("--nz", type=int, default=25, help='The "nz" first voxels belonging to background [%(default)s].')
     p.add_argument("--n_profiles", type=int, default=10, help="Number of intensity profiles to use [%(default)s].")
     p.add_argument("--n_iterations", type=int, default=15, help="Number of iterations [%(default)s].")
@@ -23,21 +27,22 @@ def _build_arg_parser():
 
 
 def main() -> None:
+    """Run the model-based PSF compensation script."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 
     # 1. load stitched tissue slice
     vol, res = read_omezarr(args.in_zarr, level=0)
     chunks = vol.chunks
-    vol = np.moveaxis(vol, (0, 1, 2), (2, 1, 0))
+    vol = np.moveaxis(np.asarray(vol), (0, 1, 2), (2, 1, 0))
     res = res[::-1]
     res_axial_microns = res[2] * 1000
 
     # 2. estimate psf
-    zf, zr = extract_psfParametersFromMosaic(
-        vol, nProfiles=args.n_profiles, res=res_axial_microns, f=args.smooth, nIterations=args.n_iterations
+    zf, zr = extract_psf_parameters_from_mosaic(
+        vol, n_profiles=args.n_profiles, res=res_axial_microns, f=args.smooth, n_iterations=args.n_iterations
     )
-    psf_3d = get_3dPSF(zf, zr, res_axial_microns, vol.shape)
+    psf_3d = synthesize_3d_psf(zf, zr, res_axial_microns, vol.shape)
 
     # Compensate by the PSF
     background = np.mean(vol[..., : args.nz])

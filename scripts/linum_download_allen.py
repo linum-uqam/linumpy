@@ -2,17 +2,20 @@
 
 """Download the Allen mouse brain template, and setting the correct RAS+ direction and spacing."""
 
+# Configure thread limits before numpy/scipy imports
+import linumpy.config.threads  # noqa: F401
+
 import argparse
 from pathlib import Path
 
 import SimpleITK as sitk
 
-from linumpy.io import allen
+from linumpy.reference import allen
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("output", help="Output nifti filename")
+    p.add_argument("output", type=Path, help="Output nifti filename")
     p.add_argument(
         "-r",
         "--resolution",
@@ -26,6 +29,7 @@ def _build_arg_parser():
 
 
 def main() -> None:
+    """Run the Allen Brain Atlas download script."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 
@@ -50,6 +54,11 @@ def main() -> None:
     vol = sitk.PermuteAxes(vol, (2, 0, 1))
     vol = sitk.Flip(vol, (False, False, True))
     vol.SetDirection([1, 0, 0, 0, 1, 0, 0, 0, 1])
+
+    # Match the pipeline output dtype ([0, 1] float32) so both volumes
+    # display on the same intensity scale in ITK-SNAP / napari.
+    vol = sitk.Cast(vol, sitk.sitkFloat32)
+    vol = sitk.RescaleIntensity(vol, 0.0, 1.0)
 
     # Save the volume
     sitk.WriteImage(vol, str(output))
