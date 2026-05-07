@@ -738,6 +738,9 @@ process compensate_attenuation {
         --method ${params.compensate_attenuation_method} \
         --min_bias ${params.compensate_attenuation_min_bias} \
         --mask_smoothing_sigma ${params.compensate_attenuation_mask_sigma} \
+        --k ${params.compensate_attenuation_k} \
+        --zshift ${params.compensate_attenuation_zshift} \
+        --strength ${params.compensate_attenuation_strength} \
         --n_levels 0
     """
 
