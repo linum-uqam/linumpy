@@ -47,11 +47,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--use_darkfield",
-        default=True,
+        default=False,
         action=argparse.BooleanOptionalAction,
         help="Estimate a per-tile darkfield (additive offset) in addition to\n"
-        "the flatfield. Recommended for OCT where small per-tile DC offsets\n"
-        "otherwise leak into the flatfield estimate. [%(default)s]",
+        "the flatfield. Disabled by default: on OCT data BaSiC tends to fit\n"
+        "a darkfield larger than typical signal (because ~20%% of voxels are\n"
+        "exact zeros from out-of-tile padding), which causes transform() to\n"
+        "produce mostly negative values that then get clipped to 0,\n"
+        "zeroing the whole volume. [%(default)s]",
     )
     p.add_argument(
         "--fit_max_samples",
