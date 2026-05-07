@@ -215,12 +215,12 @@ workflow {
 
     bring_to_common_space(common_space_input)
 
-    slices_common_space = bring_to_common_space.out
+    slices_common_space = bring_to_common_space.out.aligned
         .flatten()
         .toSortedList { a, b -> a.getName() <=> b.getName() }
 
     if (params.common_space_preview) {
-        preview_input = bring_to_common_space.out
+        preview_input = bring_to_common_space.out.aligned
             .flatten()
             .map { f -> Helpers.toSliceTuple(f) }
         generate_common_space_preview(preview_input)
@@ -782,6 +782,7 @@ process detect_rehoming_events {
     path "shifts_xy_clean.csv", emit: corrected_shifts
     path "slice_config.csv", optional: true, emit: slice_config
     path "diagnostics/*", optional: true, emit: diagnostics
+    path "*_metrics.json", optional: true, emit: metrics
 
     script:
     def diag_arg = params.rehoming_diagnostics ? "--diagnostics diagnostics" : ""
@@ -814,6 +815,7 @@ process auto_assess_quality {
 
     output:
     path "slice_config.csv", emit: slice_config
+    path "*_metrics.json", optional: true, emit: metrics
 
     script:
     def update_args = existing_slice_config.name != 'NO_SLICE_CONFIG'
@@ -840,7 +842,8 @@ process bring_to_common_space {
     tuple path("inputs/*"), path("shifts_xy.csv"), path(slice_config)
 
     output:
-    path "*.ome.zarr"
+    path "*.ome.zarr", emit: aligned
+    path "*_metrics.json", optional: true, emit: metrics
 
     script:
     def slice_config_arg = slice_config.name != 'NO_SLICE_CONFIG' ? "--slice_config ${slice_config}" : ""
@@ -947,6 +950,7 @@ process finalise_interpolation {
 
     output:
     path "slice_config_final.csv"
+    path "*_metrics.json", optional: true, emit: metrics
 
     script:
     """
@@ -1035,6 +1039,7 @@ process auto_exclude_slices {
 
     output:
     path "slice_config.csv", emit: slice_config
+    path "*_metrics.json", optional: true, emit: metrics
 
     script:
     """

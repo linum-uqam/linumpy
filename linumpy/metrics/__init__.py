@@ -708,6 +708,8 @@ def collect_stack_metrics(
     output_path: Path,
     blend_enabled: bool = False,
     normalize_enabled: bool = False,
+    z_matches_df: Any = None,
+    decisions_df: Any = None,
 ) -> PipelineMetrics:
     """
     Collect metrics for slice stacking step.
@@ -728,6 +730,11 @@ def collect_stack_metrics(
         Whether blending was enabled.
     normalize_enabled : bool
         Whether normalization was enabled.
+    z_matches_df : pandas.DataFrame, optional
+        Per-pair z-match diagnostics with at least a ``correlation`` column.
+    decisions_df : pandas.DataFrame, optional
+        Per-slice stacking decisions with optional columns
+        ``transform_loaded``, ``manual_override``, ``overlap_source``.
 
     Returns
     -------
@@ -766,7 +773,208 @@ def collect_stack_metrics(
         threshold_name="z_offset_range",
     )
 
+    if z_matches_df is not None and len(z_matches_df) > 0 and "correlation" in z_matches_df.columns:
+        corr = np.asarray(z_matches_df["correlation"], dtype=float)
+        corr = corr[np.isfinite(corr)]
+        if corr.size > 0:
+            metrics.add_info("num_z_match_pairs", int(corr.size), "Number of evaluated z-match pairs")
+            metrics.add_metric(
+                "mean_z_correlation",
+                float(np.mean(corr)),
+                description="Mean correlation across z-match pairs",
+                threshold_name="correlation",
+            )
+            metrics.add_metric(
+                "min_z_correlation",
+                float(np.min(corr)),
+                description="Minimum correlation across z-match pairs",
+                threshold_name="correlation",
+            )
+            metrics.add_info("max_z_correlation", float(np.max(corr)), "Maximum correlation across z-match pairs")
+
+    if decisions_df is not None and len(decisions_df) > 0:
+        if "transform_loaded" in decisions_df.columns:
+            loaded = decisions_df["transform_loaded"].astype(bool)
+            metrics.add_info("n_transform_loaded", int(loaded.sum()), "Slices where pairwise transform was loaded")
+            metrics.add_info("n_transform_missing", int((~loaded).sum()), "Slices where pairwise transform was unavailable")
+        if "manual_override" in decisions_df.columns:
+            metrics.add_info(
+                "n_manual_override",
+                int(decisions_df["manual_override"].astype(bool).sum()),
+                "Slices with a manual stacking override",
+            )
+        if "overlap_source" in decisions_df.columns:
+            counts = decisions_df["overlap_source"].astype(str).value_counts().to_dict()
+            metrics.add_info(
+                "overlap_source_counts",
+                {str(k): int(v) for k, v in counts.items()},
+                "Histogram of overlap source decisions",
+            )
+
     metrics.save(f"{output_path.stem}_metrics.json")
+    metrics.log_issues()
+    return metrics
+
+
+def collect_quality_assessment_metrics(
+    output_path: Path,
+    quality_results: dict[int, dict[str, Any]],
+    excluded_ids: list[int],
+    min_quality: float,
+) -> PipelineMetrics:
+    """Collect aggregate metrics for the slice-quality assessment step.
+
+    Parameters
+    ----------
+    output_path : Path
+        Path to the slice_config CSV that was written.
+    quality_results : dict
+        Mapping ``slice_id -> per-slice quality dict`` (with at least an
+        ``overall`` field).
+    excluded_ids : list of int
+        Slices marked as excluded by the quality assessment.
+    min_quality : float
+        Threshold used to flag low-quality slices.
+    """
+    output_path = Path(output_path)
+    metrics = PipelineMetrics("slice_quality_assessment", str(output_path.parent))
+
+    metrics.add_info("output_file", str(output_path), "Slice config CSV with quality stamps")
+    metrics.add_info("min_quality_threshold", float(min_quality), "Quality cutoff used")
+    metrics.add_info("num_slices", len(quality_results), "Slices evaluated")
+    metrics.add_info("num_excluded", len(excluded_ids), "Slices excluded by this stage")
+    metrics.add_info("excluded_slice_ids", sorted(int(s) for s in excluded_ids), "IDs of excluded slices")
+
+    overalls = np.array(
+        [float(q.get("overall", 0.0)) for q in quality_results.values() if q.get("has_data", True)],
+        dtype=float,
+    )
+    if overalls.size > 0:
+        metrics.add_metric("mean_quality", float(np.mean(overalls)), description="Mean per-slice quality score")
+        metrics.add_metric("min_quality", float(np.min(overalls)), description="Minimum per-slice quality score")
+        metrics.add_info("max_quality", float(np.max(overalls)), "Maximum per-slice quality score")
+        metrics.add_info(
+            "n_below_threshold",
+            int(np.sum(overalls < min_quality)) if min_quality > 0 else 0,
+            "Slices below the quality threshold",
+        )
+
+    metrics.save("slice_quality_assessment_metrics.json")
+    metrics.log_issues()
+    return metrics
+
+
+def collect_rehoming_metrics(
+    output_path: Path,
+    n_total_transitions: int,
+    tile_corrected_indices: list[int],
+    spike_corrected_indices: list[int],
+    n_unreliable: int,
+    max_correction_mm: float | None = None,
+) -> PipelineMetrics:
+    """Collect aggregate metrics for the rehoming-detection step."""
+    output_path = Path(output_path)
+    metrics = PipelineMetrics("rehoming_detection", str(output_path.parent))
+
+    metrics.add_info("output_shifts", str(output_path), "Corrected shifts CSV")
+    metrics.add_info("n_total_transitions", int(n_total_transitions), "Total pairwise transitions evaluated")
+    metrics.add_info("n_tile_corrected", len(tile_corrected_indices), "Pass 1 tile-FOV multiple corrections applied")
+    metrics.add_info("n_spike_corrected", len(spike_corrected_indices), "Pass 2 self-cancelling spike corrections applied")
+    metrics.add_info("n_unreliable", int(n_unreliable), "Transitions still flagged reliable=0 after correction")
+    if max_correction_mm is not None:
+        metrics.add_info("max_correction_mm", float(max_correction_mm), "Largest absolute correction applied (mm)")
+
+    metrics.save("rehoming_detection_metrics.json")
+    metrics.log_issues()
+    return metrics
+
+
+def collect_auto_exclude_metrics(
+    output_path: Path,
+    num_total_slices: int,
+    excluded_ids: list[int],
+    cluster_count: int,
+    z_corr_threshold: float,
+    consecutive_threshold: int,
+) -> PipelineMetrics:
+    """Collect aggregate metrics for the auto-exclude step."""
+    output_path = Path(output_path)
+    metrics = PipelineMetrics("auto_exclude", str(output_path.parent))
+
+    metrics.add_info("output_slice_config", str(output_path), "Slice config CSV stamped with auto_excluded")
+    metrics.add_info("num_total_slices", int(num_total_slices), "Total slices considered")
+    metrics.add_info("num_auto_excluded", len(excluded_ids), "Slices auto-excluded by this stage")
+    metrics.add_info("auto_excluded_slice_ids", sorted(int(s) for s in excluded_ids), "IDs of auto-excluded slices")
+    metrics.add_info("num_clusters", int(cluster_count), "Number of consecutive low-z_corr clusters detected")
+    metrics.add_info("z_corr_threshold", float(z_corr_threshold), "Z-correlation threshold used")
+    metrics.add_info("consecutive_threshold", int(consecutive_threshold), "Minimum cluster length")
+
+    metrics.save("auto_exclude_metrics.json")
+    metrics.log_issues()
+    return metrics
+
+
+def collect_common_space_metrics(
+    output_dir: Path,
+    n_selected_slices: int,
+    n_excluded_slices: int,
+    n_unreliable: int,
+    n_refined_image_based: int,
+    n_refined_rejected: int,
+    refine_discrepancies_px: list[float] | None = None,
+) -> PipelineMetrics:
+    """Collect aggregate metrics for the common-space alignment step."""
+    output_dir = Path(output_dir)
+    metrics = PipelineMetrics("common_space_alignment", str(output_dir))
+
+    metrics.add_info("output_dir", str(output_dir), "Aligned mosaics directory")
+    metrics.add_info("n_selected_slices", int(n_selected_slices), "Slices retained for alignment")
+    metrics.add_info("n_excluded_slices", int(n_excluded_slices), "Slices excluded by slice config")
+    metrics.add_info("n_unreliable", int(n_unreliable), "Transitions flagged reliable=0 in shifts file")
+    metrics.add_info("n_refined_image_based", int(n_refined_image_based), "Unreliable transitions refined via registration")
+    metrics.add_info("n_refined_rejected", int(n_refined_rejected), "Image-based refinements rejected (NCC/discrepancy)")
+
+    if refine_discrepancies_px:
+        arr = np.asarray(refine_discrepancies_px, dtype=float)
+        arr = arr[np.isfinite(arr)]
+        if arr.size > 0:
+            metrics.add_metric(
+                "mean_refine_discrepancy_px",
+                float(np.mean(arr)),
+                unit="px",
+                description="Mean discrepancy between motor and image-based estimates",
+            )
+            metrics.add_info("max_refine_discrepancy_px", float(np.max(arr)), "Maximum motor-vs-image discrepancy (px)")
+
+    metrics.save("common_space_alignment_metrics.json")
+    metrics.log_issues()
+    return metrics
+
+
+def collect_slice_interpolation_metrics(
+    output_path: Path,
+    n_fragments: int,
+    interpolated_ids: list[str],
+    failed_ids: list[str],
+    fallback_reasons: dict[str, int] | None = None,
+    method_counts: dict[str, int] | None = None,
+) -> PipelineMetrics:
+    """Collect aggregate metrics for the slice-interpolation finalise step."""
+    output_path = Path(output_path)
+    metrics = PipelineMetrics("slice_interpolation", str(output_path.parent))
+
+    metrics.add_info("output_slice_config", str(output_path), "Final slice config CSV")
+    metrics.add_info("n_fragments", int(n_fragments), "Number of per-slice fragments merged")
+    metrics.add_info("n_interpolated", len(interpolated_ids), "Slices successfully reconstructed")
+    metrics.add_info("n_failed", len(failed_ids), "Slices where interpolation failed")
+    metrics.add_info("interpolated_slice_ids", sorted(interpolated_ids), "IDs of interpolated slices")
+    metrics.add_info("failed_slice_ids", sorted(failed_ids), "IDs of slices that could not be interpolated")
+    if fallback_reasons:
+        metrics.add_info("fallback_reasons", dict(fallback_reasons), "Histogram of interpolation fallback reasons")
+    if method_counts:
+        metrics.add_info("method_counts", dict(method_counts), "Histogram of interpolation methods used")
+
+    metrics.save("slice_interpolation_metrics.json")
     metrics.log_issues()
     return metrics
 
