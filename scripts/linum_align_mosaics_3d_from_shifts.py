@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Using xy shifts file, bring all mosaics in `in_mosaics_dir` to a common space. Each
+Using xy shifts file, bring all mosaics in `in_mosaics_dir` to a common space. Each.
+
 volume is resampled to a common shape and its content is translated following the
 transforms in xy shifts. All transformed mosaics are saved to `out_directory`.
 
@@ -9,12 +10,11 @@ When slices are skipped, their shifts are accumulated to maintain proper alignme
 """
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import csv
 import re
-from os.path import join as pjoin
 from os.path import split as psplit
 from pathlib import Path
 
@@ -22,17 +22,17 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 
+from linumpy.cli.args import add_overwrite_arg, assert_output_exists
+from linumpy.imaging.transform import apply_xy_shift
 from linumpy.io.zarr import read_omezarr, save_omezarr
-from linumpy.shifts.utils import build_cumulative_shifts
-from linumpy.utils.io import add_overwrite_arg, assert_output_exists
-from linumpy.utils_images import apply_xy_shift
+from linumpy.stack_alignment.io import build_cumulative_shifts
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("in_mosaics_dir", help="Directory containing mosaics to bring to common space.")
-    p.add_argument("in_shifts", help="Spreadsheet containing xy shifts (.csv).")
-    p.add_argument("out_directory", help="Output directory containing the aligned mosaics.")
+    p.add_argument("in_mosaics_dir", type=Path, help="Directory containing mosaics to bring to common space.")
+    p.add_argument("in_shifts", type=Path, help="Spreadsheet containing xy shifts (.csv).")
+    p.add_argument("out_directory", type=Path, help="Output directory containing the aligned mosaics.")
     p.add_argument(
         "--slice_config",
         default=None,
@@ -74,10 +74,10 @@ def _build_arg_parser():
     return p
 
 
-def load_slice_config(config_path):
+def load_slice_config(config_path: Path) -> set[int]:
     """Load slice configuration and return set of slice IDs to use."""
     slices_to_use = set()
-    with open(config_path) as f:
+    with Path(config_path).open() as f:
         reader = csv.DictReader(f)
         for row in reader:
             slice_id = int(row["slice_id"])
@@ -87,8 +87,13 @@ def load_slice_config(config_path):
     return slices_to_use
 
 
-def _replace_with_local_median(df, idx, window, skip_mask=None):
+def _replace_with_local_median(df: pd.DataFrame, idx: int, window: int, skip_mask: dict | None = None) -> dict | None:
     pos = df.index.get_loc(idx)
+    if not isinstance(pos, int):
+        if not isinstance(pos, np.integer):
+            msg = f"Expected integer index location, got {type(pos)}"
+            raise TypeError(msg)
+        pos = int(pos)
     neighbor_vals_x = []
     neighbor_vals_y = []
     neighbor_vals_px_x = []
@@ -118,7 +123,8 @@ def _replace_with_local_median(df, idx, window, skip_mask=None):
     return result
 
 
-def handle_excluded_slice_shifts(shifts_df, excluded_slice_ids, mode="keep", window=2):
+def handle_excluded_slice_shifts(shifts_df: pd.DataFrame, excluded_slice_ids: list[int] | set[int], mode: str = "keep", window: int = 2) -> pd.DataFrame:
+    """Handle shifts involving excluded slices by zeroing or interpolating."""
     if not excluded_slice_ids or mode == "keep":
         return shifts_df
 
@@ -176,7 +182,7 @@ def handle_excluded_slice_shifts(shifts_df, excluded_slice_ids, mode="keep", win
     return df
 
 
-def compute_common_shape(mosaic_files, slice_ids, cumsum_shifts):
+def compute_common_shape(mosaic_files: dict, slice_ids: list, cumsum_shifts: dict) -> tuple:
     """
     Compute the common shape needed to fit all aligned mosaics.
 
@@ -221,7 +227,7 @@ def compute_common_shape(mosaic_files, slice_ids, cumsum_shifts):
     return nx, ny, x0, y0
 
 
-def _estimate_shift_by_registration(fixed_path, moving_path):
+def _estimate_shift_by_registration(fixed_path: Path, moving_path: Path) -> tuple:
     """Estimate the XY shift between two 3D mosaics via 2-D phase cross-correlation.
 
     Computes a max-projection over the central 20 % of Z-slices for each
@@ -249,7 +255,7 @@ def _estimate_shift_by_registration(fixed_path, moving_path):
     fixed_data = np.array(fixed_vol)
     moving_data = np.array(moving_vol)
 
-    def _proj(arr):
+    def _proj(arr: np.ndarray) -> np.ndarray:
         nz = arr.shape[0]
         z0 = max(0, nz // 2 - max(1, nz // 10))
         z1 = min(nz, nz // 2 + max(1, nz // 10))
@@ -262,7 +268,7 @@ def _estimate_shift_by_registration(fixed_path, moving_path):
     h = max(fixed_proj.shape[0], moving_proj.shape[0])
     w = max(fixed_proj.shape[1], moving_proj.shape[1])
 
-    def _pad(arr, th, tw):
+    def _pad(arr: np.ndarray, th: int, tw: int) -> np.ndarray:
         ph = th - arr.shape[0]
         pw = tw - arr.shape[1]
         return np.pad(arr, ((ph // 2, ph - ph // 2), (pw // 2, pw - pw // 2)))
@@ -291,6 +297,7 @@ def _estimate_shift_by_registration(fixed_path, moving_path):
 
 
 def main() -> None:
+    """Run the 3D mosaic alignment from shifts script."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 
@@ -419,7 +426,7 @@ def main() -> None:
         img, res = read_omezarr(mosaic_file)
 
         # Load image data
-        img_data = img[:]
+        img_data = np.asarray(img[:])
 
         # Reference array shape is (Z, height, width) = (Z, ny, nx)
         reference = np.zeros((img_data.shape[0], ny, nx), dtype=img_data.dtype)
@@ -442,7 +449,7 @@ def main() -> None:
         aligned = apply_xy_shift(img_data, reference, -dx_shifted, -dy_shifted)
 
         _, filename = psplit(mosaic_file)
-        outfile = pjoin(args.out_directory, filename)
+        outfile = Path(args.out_directory) / filename
         save_omezarr(da.from_array(aligned), outfile, res, chunks=img.chunks)
 
         print(

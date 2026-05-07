@@ -8,14 +8,14 @@ from pathlib import Path
 import numpy as np
 
 from linumpy.io.zarr import OmeZarrWriter, read_omezarr
-from linumpy.stitching.mosaic_grid import addVolumeToMosaic
+from linumpy.mosaic.grid import add_volume_to_mosaic
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_volume", help="Full path to a 3D mosaic grid volume.")
-    p.add_argument("input_transform", help="Transform file (.npy format)")
-    p.add_argument("output_volume", help="Stitched mosaic filename (zarr)")
+    p.add_argument("input_volume", type=Path, help="Full path to a 3D mosaic grid volume.")
+    p.add_argument("input_transform", type=Path, help="Transform file (.npy format)")
+    p.add_argument("output_volume", type=Path, help="Stitched mosaic filename (zarr)")
     p.add_argument(
         "--blending_method",
         type=str,
@@ -28,6 +28,7 @@ def _build_arg_parser():
 
 
 def main() -> None:
+    """Run the 3D stitching script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -68,7 +69,7 @@ def main() -> None:
     # Stitch the mosaic
     writer = OmeZarrWriter(
         output_file,
-        mosaic_shape,
+        tuple(mosaic_shape),
         chunk_shape=(100, 100, 100),
         dtype=np.complex64 if args.complex_input else np.float32,
         overwrite=True,
@@ -80,15 +81,15 @@ def main() -> None:
             rmax = (i + 1) * tile_shape[1]
             cmin = j * tile_shape[2]
             cmax = (j + 1) * tile_shape[2]
-            tile = volume[:, rmin:rmax, cmin:cmax]
+            tile = np.asarray(volume[:, rmin:rmax, cmin:cmax])
             if np.any(tile < 0.0):
-                tile -= tile.min()  # Ensure no negative values in the tile
+                tile -= tile.min()
 
             # Get the position within the mosaic
             pos = positions[i * ny + j]
             pos[0] -= posx_min
             pos[1] -= posy_min
-            addVolumeToMosaic(tile, pos, writer, blendingMethod=blending_method)
+            add_volume_to_mosaic(tile, pos, writer, blending_method=blending_method)
 
     writer.finalize(resolution)
 

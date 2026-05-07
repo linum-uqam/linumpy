@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+"""Convert a NIfTI volume axis ordering from XYZ to ZYX."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 from pathlib import Path
@@ -13,22 +14,24 @@ import numpy as np
 """
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_image", help="Full path to a .nii image, with axis in XYZ order.")
-    p.add_argument("output_image", help="Full path to the output .nii image, with axis in ZYX order")
-    p.add_argument("--resolution_xy", type=float, default=3.0, help="Lateral (xy) resolution in micron. (default=%(default)s)")
-    p.add_argument("--resolution_z", type=float, default=200, help="Axial (z) resolution in microns. (default=%(default)s)")
+    p.add_argument("input_image", type=Path, help="Full path to a .nii image, with axis in XYZ order.")
+    p.add_argument("output_image", type=Path, help="Full path to the output .nii image, with axis in ZYX order")
+    p.add_argument("--resolution_xy", type=float, default=3.0, help="Lateral (xy) resolution in micron. [%(default)s]")
+    p.add_argument("--resolution_z", type=float, default=200, help="Axial (z) resolution in microns. [%(default)s]")
     return p
 
 
 def main() -> None:
+    """Run the axis reordering script from XYZ to ZYX."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
 
     # Load the input image
     img = nib.load(Path(args.input_image))
+    assert isinstance(img, nib.Nifti1Image)
     img_array = img.get_fdata()
     print("input array dimension :", np.shape(img_array))
     # Check the number of dimensions
