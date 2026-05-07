@@ -741,6 +741,7 @@ process compensate_attenuation {
         --k ${params.compensate_attenuation_k} \
         --zshift ${params.compensate_attenuation_zshift} \
         --strength ${params.compensate_attenuation_strength} \
+        --snr_threshold_db ${params.compensate_attenuation_snr_threshold_db} \
         --n_levels 0
     """
 

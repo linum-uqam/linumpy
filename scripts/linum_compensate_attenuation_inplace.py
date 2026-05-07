@@ -111,6 +111,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "linumpy behaviour. ``vermeer`` is the bare estimator with no\n"
         "regularization. [%(default)s]",
     )
+    p.add_argument(
+        "--snr_threshold_db",
+        type=float,
+        default=6.0,
+        help="Per-voxel SNR threshold (dB) for A-line truncation in the ``li`` method.\n"
+        "Voxels where signal / noise_floor < 10^(snr_threshold_db/10) are excluded\n"
+        "from the attenuation fit. 6 dB is the Li 2020 paper value. [%(default)s]",
+    )
     p.add_argument("--n_levels", type=int, default=0, help="Pyramid levels in the output. [%(default)s]")
     return p
 
@@ -159,6 +167,7 @@ def main() -> None:
             res=res_axial_microns,
             fill_holes=True,
             zshift=args.zshift,
+            snr_threshold_db=args.snr_threshold_db,
         )
     else:  # vermeer
         # The bare Vermeer estimator returns 1/cm directly; reuse smith's
