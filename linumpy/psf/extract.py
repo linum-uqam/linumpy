@@ -15,20 +15,18 @@ from linumpy.intensity.psf_model import confocal_psf, fit_tissue_confocal_model
 #
 # Defaults / known objectives:
 #   * 3X objective .................. zr_0 ≈ 610 µm (current default)
-#   * 10X Mitutoyo M Plan Apo NIR ... NOT YET CALIBRATED
+#   * 10X Mitutoyo M Plan Apo NIR ... zr_0 ≈ 1060 µm (empirical, see below)
 #
 # The 10X configuration uses a Mitutoyo M Plan Apo NIR 10X (NA = 0.26, WD =
-# 30.5 mm) with a water immersion cap around the objective. Phantom
-# characterisation (linum-microscopes-soct/psf_analysis.ipynb) gives the
-# *axial coherence FWHM* (~15 µm, set by the source bandwidth) and the axial
-# pixel size, but NOT the confocal Rayleigh length, which is a separate
-# quantity governed by the focusing optics. As a rough Gaussian-beam estimate
-# zr ≈ π·n·w0² / λ with w0 ≈ λ/(π·NA) yields ~8 µm for NA = 0.26, n = 1.33,
-# λ = 1.31 µm — but the empirical 3X default (610 µm) is larger than the same
-# formula predicts, so the 10X initial value should be obtained by fitting on
-# a real 10X mosaic before being baked in here. Until then, callers using a
-# 10X objective should pass a measured/tuned ``zr_0`` via
-# ``linum_compensate_psf_from_model.py --zr_initial``.
+# 30.5 mm) with a water immersion cap around the objective. As a rough
+# Gaussian-beam estimate zr ≈ π·n·w0² / λ with w0 ≈ λ/(π·NA) yields ~8 µm for
+# NA = 0.26, n = 1.33, λ = 1.31 µm — but in practice the model fits a
+# slowly-varying axial envelope rather than the diffraction-limited beam
+# waist. Empirical multi-seed fit on sub-19 / slice_z27 (10 µm/voxel,
+# stitched mosaic, seeds zr_0 ∈ {50, 100, 200, 400, 610}) converged to
+# zr ∈ [935, 1145] µm with median ≈ 1060 µm (zf clamped to 0). Callers
+# using a 10X objective should pass ``--zr_initial 1060`` (or a value
+# refitted on their own data) to ``linum_compensate_psf_from_model.py``.
 def extract_psf_parameters_from_mosaic(
     vol: np.ndarray,
     f: float = 0.01,
