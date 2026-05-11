@@ -70,6 +70,11 @@ def main() -> None:
         n_iterations=args.n_iterations,
         zr_0=args.zr_initial,
     )
+    print(
+        f"[psf_fit] axial_res_um={res_axial_microns:.3f}  zr_initial={args.zr_initial:.2f}  "
+        f"zf={zf:.3f}  zr={zr:.3f}  (focal depth and Rayleigh length in micron)",
+        flush=True,
+    )
     psf_3d = synthesize_3d_psf(zf, zr, res_axial_microns, vol.shape)
 
     # Compensate by the PSF
