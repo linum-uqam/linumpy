@@ -7,13 +7,11 @@ The default initial Rayleigh length (``--zr_initial 610`` µm) is tuned for a
 3x objective.
 
 For the 10x objective (Mitutoyo M Plan Apo NIR 10X, NA = 0.26, WD = 30.5 mm,
-used with a water immersion cap), the confocal Rayleigh length has not yet
-been characterised. Phantom calibration (linum-microscopes-soct/
-psf_analysis.ipynb) constrains the axial coherence FWHM (~15 µm) and the
-axial pixel size, but those are independent of ``zr_0`` (which governs the
-focal-depth-dependent broadening, not the bandwidth-limited axial response).
-Until a 10x value is fitted from real data, pass a measured
-``--zr_initial`` rather than relying on the 3x default.
+used with a water immersion cap) an empirical multi-seed fit on sub-19 /
+slice_z27 (10 µm/voxel, stitched mosaic) gave ``zr ≈ 1060 µm`` (median over
+seeds ∈ {50, 100, 200, 400, 610}; range 935-1145 µm). When processing 10x
+data pass ``--zr_initial 1060`` (or a value refitted on your own data)
+rather than relying on the 3x default.
 """
 
 # Configure thread limits before numpy/scipy imports
@@ -43,8 +41,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=float,
         default=610.0,
         help="Initial Rayleigh length in micron used to bootstrap the confocal-PSF fit.\n"
-        "Default is calibrated for a 3x objective; for other objectives (e.g. 10x)\n"
-        "supply a measured estimate. [%(default)s]",
+        "Default is calibrated for a 3x objective; for the 10x Mitutoyo M Plan Apo NIR\n"
+        "objective use ~1060 (empirical, sub-19/slice_z27). [%(default)s]",
     )
     return p
 
