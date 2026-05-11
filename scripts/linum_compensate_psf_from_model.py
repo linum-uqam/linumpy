@@ -1,5 +1,20 @@
 #!/usr/bin/env python3
-"""Compensate PSF blurring using a parametric model."""
+"""Compensate PSF blurring using a parametric model.
+
+Notes
+-----
+The default initial Rayleigh length (``--zr_initial 610`` µm) is tuned for a
+3x objective.
+
+For the 10x objective (Mitutoyo M Plan Apo NIR 10X, NA = 0.26, WD = 30.5 mm,
+used with a water immersion cap), the confocal Rayleigh length has not yet
+been characterised. Phantom calibration (linum-microscopes-soct/
+psf_analysis.ipynb) constrains the axial coherence FWHM (~15 µm) and the
+axial pixel size, but those are independent of ``zr_0`` (which governs the
+focal-depth-dependent broadening, not the bandwidth-limited axial response).
+Until a 10x value is fitted from real data, pass a measured
+``--zr_initial`` rather than relying on the 3x default.
+"""
 
 # Configure thread limits before numpy/scipy imports
 import linumpy.config.threads  # noqa: F401
@@ -15,7 +30,7 @@ from linumpy.psf.synthetic import synthesize_3d_psf
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser()
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("in_zarr", type=Path, help="Input stitched 3D slice (OME-zarr).")
     p.add_argument("out_zarr", type=Path, help="Output volume corrected for beam PSF (OME-zarr).")
     p.add_argument("--out_psf", type=Path, help="Optional output PSF filename.")
@@ -23,6 +38,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--n_profiles", type=int, default=10, help="Number of intensity profiles to use [%(default)s].")
     p.add_argument("--n_iterations", type=int, default=15, help="Number of iterations [%(default)s].")
     p.add_argument("--smooth", type=float, default=0.01, help="Smoothing factor as a fraction of volume depth [%(default)s].")
+    p.add_argument(
+        "--zr_initial",
+        type=float,
+        default=610.0,
+        help="Initial Rayleigh length in micron used to bootstrap the confocal-PSF fit.\n"
+        "Default is calibrated for a 3x objective; for other objectives (e.g. 10x)\n"
+        "supply a measured estimate. [%(default)s]",
+    )
     return p
 
 
@@ -40,7 +63,12 @@ def main() -> None:
 
     # 2. estimate psf
     zf, zr = extract_psf_parameters_from_mosaic(
-        vol, n_profiles=args.n_profiles, res=res_axial_microns, f=args.smooth, n_iterations=args.n_iterations
+        vol,
+        n_profiles=args.n_profiles,
+        res=res_axial_microns,
+        f=args.smooth,
+        n_iterations=args.n_iterations,
+        zr_0=args.zr_initial,
     )
     psf_3d = synthesize_3d_psf(zf, zr, res_axial_microns, vol.shape)
 

@@ -10,8 +10,25 @@ from linumpy.geometry.interface import find_tissue_interface
 from linumpy.intensity.psf_model import confocal_psf, fit_tissue_confocal_model
 
 
-# TODO: Fine-tune default values for 10x microscope or give heuristic
-# for fixing them.
+# NOTE: ``zr_0`` is an *initial* Rayleigh length (microns) used to bootstrap
+# the confocal-PSF fit; the iterative refinement updates it from the data.
+#
+# Defaults / known objectives:
+#   * 3X objective .................. zr_0 ≈ 610 µm (current default)
+#   * 10X Mitutoyo M Plan Apo NIR ... NOT YET CALIBRATED
+#
+# The 10X configuration uses a Mitutoyo M Plan Apo NIR 10X (NA = 0.26, WD =
+# 30.5 mm) with a water immersion cap around the objective. Phantom
+# characterisation (linum-microscopes-soct/psf_analysis.ipynb) gives the
+# *axial coherence FWHM* (~15 µm, set by the source bandwidth) and the axial
+# pixel size, but NOT the confocal Rayleigh length, which is a separate
+# quantity governed by the focusing optics. As a rough Gaussian-beam estimate
+# zr ≈ π·n·w0² / λ with w0 ≈ λ/(π·NA) yields ~8 µm for NA = 0.26, n = 1.33,
+# λ = 1.31 µm — but the empirical 3X default (610 µm) is larger than the same
+# formula predicts, so the 10X initial value should be obtained by fitting on
+# a real 10X mosaic before being baked in here. Until then, callers using a
+# 10X objective should pass a measured/tuned ``zr_0`` via
+# ``linum_compensate_psf_from_model.py --zr_initial``.
 def extract_psf_parameters_from_mosaic(
     vol: np.ndarray,
     f: float = 0.01,
@@ -31,7 +48,8 @@ def extract_psf_parameters_from_mosaic(
     n_profiles : int
         Number of intensity profile to use.
     zr_0 : float
-        Initial Rayleigh length to use in micron (default=%(default)s for a 3X objective)
+        Initial Rayleigh length in micron. Default ``610`` is calibrated for a
+        3X objective. For other objectives (e.g. 10X) pass a measured value.
     res : float
         Z resolution (in micron).
     n_iterations : int
