@@ -576,7 +576,9 @@ process fix_illumination {
     """
     linum_fix_illumination_3d.py ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" \
         --n_processes ${params.processes} \
-        --percentile_max ${params.clip_percentile_upper} ${gpu_flag} --n_levels 0
+        --percentile_max ${params.clip_percentile_upper} ${gpu_flag} --n_levels 0 \
+        --fit_max_samples ${params.fix_illum_fit_max_samples} \
+        --max_iterations ${params.fix_illum_max_iterations}
     """
 
     stub:
