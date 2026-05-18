@@ -163,8 +163,14 @@ workflow {
     }
 
     // Stage 3: Corrections
-    beam_profile_correction(stitched_slices)
-    crop_interface(beam_profile_correction.out.corrected)
+    if (params.compensate_psf_enabled) {
+        beam_profile_correction(stitched_slices)
+        psf_corrected = beam_profile_correction.out.corrected
+    }
+    else {
+        psf_corrected = stitched_slices
+    }
+    crop_interface(psf_corrected)
     if (params.compensate_attenuation_enabled) {
         compensate_attenuation(crop_interface.out.cropped)
         attn_corrected = compensate_attenuation.out.compensated
@@ -690,10 +696,16 @@ process beam_profile_correction {
     path ("*_metrics.json"), optional: true, emit: metrics
 
     script:
-    """
-    linum_compensate_psf_model_free.py ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" \
-        --percentile_max ${params.clip_percentile_upper} --n_levels 0
-    """
+    if (params.compensate_psf_method == 'model')
+        """
+        linum_compensate_psf_from_model.py ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" \
+            --zr_initial ${params.compensate_psf_zr_initial}
+        """
+    else
+        """
+        linum_compensate_psf_model_free.py ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" \
+            --percentile_max ${params.clip_percentile_upper} --n_levels 0
+        """
 
     stub:
     """
