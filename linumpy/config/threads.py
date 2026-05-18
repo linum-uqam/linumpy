@@ -45,7 +45,8 @@ def _available_cpus() -> int:
     ``sched_setaffinity`` and cgroup CPU limits, falling back to
     ``os.cpu_count()`` and finally to 1.
     """
-    return os.process_cpu_count() or os.cpu_count() or 1
+    proc_count = getattr(os, "process_cpu_count", None)
+    return (proc_count and proc_count()) or os.cpu_count() or 1
 
 
 def get_max_threads() -> int:
