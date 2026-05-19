@@ -698,8 +698,17 @@ process beam_profile_correction {
     script:
     if (params.compensate_psf_method == 'model')
         """
+        set +e
         linum_compensate_psf_from_model.py ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" \
             --zr_initial ${params.compensate_psf_zr_initial}
+        rc=\$?
+        set -e
+        if [ \$rc -ne 0 ]; then
+            echo "compensate_psf_from_model failed (rc=\$rc) for slice z${slice_id}; falling back to model_free" >&2
+            rm -rf "slice_z${slice_id}_axial_corr.ome.zarr"
+            linum_compensate_psf_model_free.py ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" \
+                --percentile_max ${params.clip_percentile_upper} --n_levels 0
+        fi
         """
     else
         """
