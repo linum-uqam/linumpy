@@ -573,12 +573,14 @@ process fix_illumination {
 
     script:
     def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
+    def darkfield_flag = params.fix_illum_darkfield ? "--use_darkfield" : "--no-use_darkfield"
     """
     linum_fix_illumination_3d.py ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" \
         --n_processes ${params.processes} \
         --percentile_max ${params.clip_percentile_upper} ${gpu_flag} --n_levels 0 \
         --fit_max_samples ${params.fix_illum_fit_max_samples} \
-        --max_iterations ${params.fix_illum_max_iterations}
+        --max_iterations ${params.fix_illum_max_iterations} \
+        ${darkfield_flag}
     """
 
     stub:
