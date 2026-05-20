@@ -423,6 +423,8 @@ def n4_correct_per_section(
     mask: np.ndarray | None = None,
     *,
     n_processes: int = 1,
+    out: np.ndarray | None = None,
+    bias_out: np.ndarray | None = None,
     **kwargs: Any,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Run N4 bias field correction independently on each serial section.
@@ -442,6 +444,14 @@ def n4_correct_per_section(
         Boolean tissue mask (Z, Y, X).  Sliced alongside *vol*.
     n_processes : int
         Number of parallel worker processes.  1 runs serially.
+    out : np.ndarray, optional
+        Destination buffer for the corrected output (serial path only).
+        When provided, must match ``vol.shape`` and ``np.float32`` dtype;
+        may alias *vol* itself to overwrite the input in place.  Saves a
+        full-volume float32 allocation on large mosaics.
+    bias_out : np.ndarray, optional
+        Destination buffer for the bias field output (serial path only),
+        same shape and dtype constraints as *out*.
     **kwargs
         Extra keyword arguments forwarded to :func:`n4_correct`
         (e.g. ``shrink_factor``, ``spline_distance_mm``).
@@ -475,23 +485,46 @@ def n4_correct_per_section(
         )
         n_processes = 1
 
-    work_items = [
-        (
-            vol[s:e].copy(),
-            mask[s:e].copy() if mask is not None else None,
-            kwargs,
-        )
-        for s, e in bounds
-    ]
-
     if n_processes == 1:
-        results = [_n4_section_worker(item) for item in work_items]
-    else:
-        with multiprocessing.Pool(processes=n_processes) as pool:
-            results = pool.map(_n4_section_worker, work_items)
+        # Serial fast path: write each section's output straight into a
+        # (caller- or function-allocated) destination buffer.  Avoids
+        # the 76x ``.copy()`` of host slabs (~36 GB on a typical OCT
+        # mosaic) and the final ``np.concatenate`` (another ~72 GB peak
+        # with both chunk lists alive).  Callers can pass *out=vol* to
+        # overwrite the input in place when they no longer need it,
+        # halving host memory pressure on the per-section pass.
+        if out is None:
+            corrected = np.empty_like(vol, dtype=np.float32)
+        else:
+            if out.shape != vol.shape or out.dtype != np.float32:
+                raise ValueError(f"out must be {vol.shape} float32, got {out.shape} {out.dtype}")
+            corrected = out
+        if bias_out is None:
+            bias_field = np.empty_like(vol, dtype=np.float32)
+        else:
+            if bias_out.shape != vol.shape or bias_out.dtype != np.float32:
+                raise ValueError(f"bias_out must be {vol.shape} float32, got {bias_out.shape} {bias_out.dtype}")
+            bias_field = bias_out
+        for s, e in bounds:
+            chunk_mask = mask[s:e] if mask is not None else None
+            # ``n4_correct`` performs a synchronous H2D upload of the slab
+            # at entry, so it is safe to overwrite ``vol[s:e]`` (which
+            # may alias ``corrected[s:e]`` when ``out is vol``) once the
+            # call returns -- the GPU side already holds its own copy.
+            corr_chunk, bias_chunk = n4_correct(vol[s:e], chunk_mask, **kwargs)
+            corrected[s:e] = corr_chunk
+            bias_field[s:e] = bias_chunk
+            del corr_chunk, bias_chunk
+        return corrected, bias_field
+
+    # Parallel path: workers need pickled, independent slabs.
+    if out is not None or bias_out is not None:
+        raise ValueError("out / bias_out are only supported with n_processes=1")
+    work_items = [(vol[s:e].copy(), mask[s:e].copy() if mask is not None else None, kwargs) for s, e in bounds]
+    with multiprocessing.Pool(processes=n_processes) as pool:
+        results = pool.map(_n4_section_worker, work_items)
 
     corrected_chunks, bias_chunks = zip(*results, strict=True)
-
     corrected = np.concatenate(corrected_chunks, axis=0)
     bias_field = np.concatenate(bias_chunks, axis=0)
     return corrected, bias_field
