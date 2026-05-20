@@ -192,6 +192,7 @@ nextflow run soct_3d_reconst.nf \
 | `enable_cpu_limits` | `true` | Enable CPU limiting |
 | `max_cpus` | `16` | Maximum CPUs to use (0 = no limit) |
 | `reserved_cpus` | `4` | CPUs reserved for system overhead |
+| `scratch_dir` | `true` | Per-task scratch location for Nextflow's `scratch` directive. `true` stages each task into `$TMPDIR` and rsyncs outputs back (default Nextflow behaviour); `false` runs directly in the work directory (no double-write, no /tmp pressure); a string path stages tasks into `<path>/<task-uuid>` (use when /tmp is small but a faster local filesystem has room). On hosts where /tmp and the work dir share a physical disk, prefer `false`. |
 
 #### Resolution & Basic Settings
 
@@ -201,6 +202,12 @@ nextflow run soct_3d_reconst.nf \
 | `clip_percentile_upper` | `99.9` | Upper percentile for intensity clipping |
 | `fix_curvature_enabled` | `false` | Detect and compensate focal curvature artifacts |
 | `fix_illum_enabled` | `true` | Fix illumination inhomogeneity (BaSiCPy algorithm) |
+| `fix_illum_fit_max_samples` | `2000` | Max tile samples for BaSiC flatfield estimation (higher = better fit, more memory) |
+| `fix_illum_max_iterations` | `500` | Max BaSiC optimizer iterations (higher = better convergence, slower) |
+| `fix_illum_darkfield` | `false` | Also fit a per-tile additive darkfield. Disabled by default: out-of-tile zero padding can make BaSiC fit a darkfield > signal and zero the volume. Enable when residual tile waffle pattern persists after flatfield correction. |
+| `compensate_psf_enabled` | `true` | Run axial PSF / beam-profile correction (after stitching, before interface crop) |
+| `compensate_psf_method` | `'model_free'` | PSF estimator: `'model_free'` (default; agarose-region axial profile, no optics assumptions) or `'model'` (confocal-PSF parametric fit; uses `compensate_psf_zr_initial`) |
+| `compensate_psf_zr_initial` | `1060.0` | Initial Rayleigh length (µm) for the parametric PSF fit. Only used when `compensate_psf_method = 'model'`. The default is the empirical value for the 10× Mitutoyo objective. |
 | `crop_interface_out_depth` | `600` | Maximum tissue depth after interface crop (µm) |
 
 
@@ -325,7 +332,7 @@ and correlation or physics-based Z-matching.
 |-----------|---------|-------------|
 | `transform_confidence_high` | `0.6` | Above this: full transform applied |
 | `transform_confidence_low` | `0.3` | Between low and high: rotation-only; below low: skipped |
-| `z_overlap_min_corr` | `0.5` | Fall back to expected Z-overlap below this NCC score |
+| `z_overlap_min_corr` | `0.5` | Fall back to expected Z-overlap below this NCC score. The fallback is recorded in `output/stack/stacking_decisions.csv` as `overlap_source = 'correlation_fallback'` and a boolean `correlation_fallback_used` column captures the original (sub-threshold) NCC. |
 | `blend_z_refine_min_confidence` | `0.5` | Min confidence to run blend Z-refinement (else use expected overlap) |
 
 **Transform gating:**
