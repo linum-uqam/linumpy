@@ -313,12 +313,13 @@ class Helpers {
      * regardless. Setting `CUDA_VISIBLE_DEVICES` in the shell hides the other
      * cards from the process so no library can route around the choice.
      *
-     * The returned snippet maintains per-GPU active-slot counters under
-     * /tmp guarded by `flock`. On entry it picks the GPU with the fewest
-     * running forks; on shell exit (`trap ... EXIT`) it decrements that
-     * slot. This balances better than `slice_id % gpu_count` (which can
-     * give 3/1 splits when concurrent slices share parity) and better than
-     * a simple round-robin counter (which ignores fork-completion order).
+     * The returned snippet maintains per-GPU PID directories under /tmp guarded
+     * by `flock`. On entry it prunes dead PIDs, picks the GPU with the fewest
+     * live forks, and registers `$$` in that GPU's directory. On shell exit
+     * (`trap ... EXIT`) it removes its own PID file. SIGKILL skips the trap, so
+     * the dead-PID prune at next acquire reclaims any leaked slot — this matters
+     * because OOM-kills (exit 137) used to leave slots permanently incremented,
+     * skewing the load balancer toward the surviving GPU.
      *
      * Pass `params` and a short `tag` used for the per-task log line.
      * When `params.use_gpu` is false this returns an empty string.
@@ -328,24 +329,31 @@ class Helpers {
         def n = params.gpu_count as int
         return """
         UID_=\$(id -u)
-        GPU_LOCK=/tmp/linumpy_nf_gpu_slots_\${UID_}.lock
-        GPU_SLOT_PREFIX=/tmp/linumpy_nf_gpu_slot_\${UID_}_
+        GPU_DIR=/tmp/linumpy_nf_gpu_slots_\${UID_}
+        mkdir -p \$GPU_DIR
+        for i in \$(seq 0 \$((${n} - 1))); do mkdir -p \$GPU_DIR/\$i; done
         _gpu_acquire() {
-            exec 9>\$GPU_LOCK
+            exec 9>\$GPU_DIR/.lock
             flock 9
-            local best=0 best_n=999999 i n
+            local best=0 best_n=999999 i n_alive pid_file pid
             for i in \$(seq 0 \$((${n} - 1))); do
-                n=\$(cat \${GPU_SLOT_PREFIX}\$i 2>/dev/null || echo 0)
-                if [ "\$n" -lt "\$best_n" ]; then best=\$i; best_n=\$n; fi
+                n_alive=0
+                for pid_file in \$GPU_DIR/\$i/*; do
+                    [ -f "\$pid_file" ] || continue
+                    pid=\$(basename "\$pid_file")
+                    if kill -0 "\$pid" 2>/dev/null; then
+                        n_alive=\$((n_alive + 1))
+                    else
+                        rm -f "\$pid_file"
+                    fi
+                done
+                if [ "\$n_alive" -lt "\$best_n" ]; then best=\$i; best_n=\$n_alive; fi
             done
-            echo \$((best_n + 1)) > \${GPU_SLOT_PREFIX}\$best
+            : > \$GPU_DIR/\$best/\$\$
             echo \$best
         }
         _gpu_release() {
-            exec 9>\$GPU_LOCK
-            flock 9
-            local n=\$(cat \${GPU_SLOT_PREFIX}\$1 2>/dev/null || echo 1)
-            echo \$((n - 1)) > \${GPU_SLOT_PREFIX}\$1
+            rm -f \$GPU_DIR/\$1/\$\$
         }
         export CUDA_VISIBLE_DEVICES=\$(_gpu_acquire)
         trap "_gpu_release \$CUDA_VISIBLE_DEVICES" EXIT
