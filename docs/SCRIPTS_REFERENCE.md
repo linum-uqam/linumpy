@@ -163,10 +163,16 @@ linum_fix_illumination_3d.py <input.ome.zarr> <output.ome.zarr> \
 
 ### linum_detect_focal_curvature.py
 
-Detect and correct focal plane curvature.
+Detect and correct focal plane curvature in a 3D mosaic.
 
 ```bash
-linum_detect_focal_curvature.py <input.ome.zarr> <output.ome.zarr>
+linum_detect_focal_curvature.py <input.ome.zarr> <output.ome.zarr> \
+    [--n_levels <n>] \
+    [--n_processes <n>] \
+    [--block_size <n>] \
+    [--use_log] \
+    [--use_gpu] \
+    [--verbose]
 ```
 
 ### linum_compensate_illumination.py
@@ -187,11 +193,38 @@ linum_estimate_illumination.py <input> <output_profile>
 
 ### linum_compensate_attenuation.py
 
-Compensate for signal attenuation with depth.
+Compensate for signal attenuation with depth using a precomputed bias field.
 
 ```bash
-linum_compensate_attenuation.py <input> <output>
+linum_compensate_attenuation.py <input.ome.zarr> <bias.ome.zarr> <output.ome.zarr>
 ```
+
+### linum_compensate_attenuation_inplace.py
+
+Per-slice depth-attenuation compensation from a single OME-Zarr volume. Computes the Vermeer 2014 (or Liu 2019 / Li 2020) attenuation map and applies the gain in one pass. This is the script invoked by the Nextflow reconstruction workflow.
+
+```bash
+linum_compensate_attenuation_inplace.py <input.ome.zarr> <output.ome.zarr> \
+    [--method {li,liu,smith,vermeer}] \
+    [--strength <0.0-1.0>] \
+    [--k <voxels>] \
+    [--zshift <voxels>] \
+    [--snr_threshold_db <dB>] \
+    [--min_bias <float>] \
+    [--mask_smoothing_sigma <float>] \
+    [--n_levels <n>]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--method` | `li` | Depth-resolved estimator: `li` (Li 2020, default — noise-floor subtraction + SNR-based A-line truncation on top of Liu 2019), `liu` (Liu 2019 exact form), `smith` (legacy linumpy default), `vermeer` (bare estimator, no regularization). See `docs/ATTENUATION_METHODS.md`. |
+| `--strength` | `0.3` | Multiplicative scale on the optical-depth correction (0..1). 1.0 = textbook Vermeer formula; <1 attenuates the correction. ~0.30 yields a near-flat depth profile on cropped 600 µm brain slices. |
+| `--k` | `10` | XY median-filter kernel (voxels) applied before the Vermeer fit. `0` disables denoising. |
+| `--zshift` | `3` | Voxels under the water/tissue interface to ignore when fitting the exponential tail. Smaller values keep more of the shallow tissue. |
+| `--snr_threshold_db` | `6.0` | Per-voxel SNR threshold (dB) for A-line truncation in `li`. Voxels with SNR below this are excluded from the fit. |
+| `--min_bias` | `0.05` | Floor applied to the bias field before division. Caps the maximum gain at `1/min_bias` and prevents noise amplification in deep voxels. |
+| `--mask_smoothing_sigma` | `2.0` | Gaussian sigma (XY voxels) for the Otsu tissue mask. |
+| `--n_levels` | `0` | Pyramid levels in the output (0 = single resolution). |
 
 ### linum_compute_attenuation.py
 
@@ -220,11 +253,17 @@ linum_compensate_psf_model_free.py <input.ome.zarr> <output.ome.zarr> \
 
 ### linum_compensate_psf_from_model.py
 
-PSF compensation using a model.
+Fit a confocal-PSF parametric model (focal depth + Rayleigh length) on a few axial profiles, then divide each A-line by the synthesized 3D PSF.
 
 ```bash
-linum_compensate_psf_from_model.py <input> <output> <psf_model>
+linum_compensate_psf_from_model.py <input.ome.zarr> <output.ome.zarr> \
+    [--zr_initial <µm>] \
+    [--percentile_max <p>]
 ```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--zr_initial` | `610` | Initial Rayleigh length seed (µm) for the fit. Use `1060` for the 10× Mitutoyo objective on the current rig. Sensitive to acquisition geometry — refit per instrument when in doubt (see script docstring). |
 
 ### linum_clip_percentile.py
 
