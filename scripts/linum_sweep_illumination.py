@@ -1,0 +1,544 @@
+#!/usr/bin/env python3
+r"""Parameter sweep tool for illumination-correction tuning.
+
+Runs the BaSiC-based illumination correction for every combination of the
+supplied parameters and writes a labelled PNG for each configuration, so the
+effect of each choice is immediately visible without re-running the full
+pipeline.
+
+Sweep mode (default)
+--------------------
+Corrects only the selected Z-slice (``--z_slice``) for each config.  The full
+Z stack is still used to *fit* the model (pooled-tile approach), but only one
+plane is written, making each config fast.
+
+AIP mode (``--aip``)
+--------------------
+In addition to the single-slice preview, the correction is applied to the
+full volume and a grid of Average Intensity Projections (AIPs) is saved.
+AIPs are computed in slabs of ``--aip_slab_size`` Z-planes, giving one image
+per slab per config.  For a volume with Z=55 and slab_size=5 this yields 11
+AIP columns showing how the correction quality changes with depth.
+
+Output files
+------------
+For each config the following PNGs are written to ``output_dir``:
+
+- ``c{N}_p{pmax}_{df}_s{samples}_i{iters}_z{z}.png``
+  Four panels: RAW slice | CORRECTED slice | flatfield | darkfield (if used).
+- ``c{N}_..._aips.png`` (only with ``--aip``)
+  Two-row grid: top row = RAW slab AIPs, bottom row = CORRECTED slab AIPs.
+
+A ``sweep_summary.csv`` with fit diagnostics is written to ``output_dir``.
+
+Example
+-------
+::
+
+    linum_sweep_illumination.py mosaic_grid_z25_focal_fix.ome.zarr sweep/ \\
+        --percentile_max none,99.0,99.5,99.9 \\
+        --use_darkfield true,false \\
+        --darkfield_percentile 2,5,10 \\
+        --fit_max_samples 2000,8000 \\
+        --max_iterations 500 \\
+        --aip
+"""
+
+import linumpy.config.threads  # noqa: F401
+
+import argparse
+import csv
+import itertools
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+from basicpy import BaSiC
+from tqdm.auto import tqdm
+
+from linumpy.io.zarr import read_omezarr
+
+# ---------------------------------------------------------------------------
+# Tile helpers (mirror of linum_fix_illumination_3d, kept local to avoid
+# importing a script as a module)
+# ---------------------------------------------------------------------------
+
+
+def _split_into_tiles(plane: np.ndarray, tile_shape: tuple[int, int]) -> np.ndarray:
+    ty, tx = tile_shape
+    ny, nx = plane.shape[0] // ty, plane.shape[1] // tx
+    tiles = np.empty((ny * nx, ty, tx), dtype=plane.dtype)
+    for i in range(ny):
+        for j in range(nx):
+            tiles[i * nx + j] = plane[i * ty : (i + 1) * ty, j * tx : (j + 1) * tx]
+    return tiles
+
+
+def _assemble_from_tiles(tiles: np.ndarray, plane_shape: tuple[int, int], tile_shape: tuple[int, int]) -> np.ndarray:
+    ty, tx = tile_shape
+    ny, nx = plane_shape[0] // ty, plane_shape[1] // tx
+    out = np.zeros(plane_shape, dtype=tiles.dtype)
+    for i in range(ny):
+        for j in range(nx):
+            out[i * ty : (i + 1) * ty, j * tx : (j + 1) * tx] = tiles[i * nx + j]
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Core correction for one parameter configuration
+# ---------------------------------------------------------------------------
+
+
+def run_one_config(
+    vol: np.ndarray,
+    tile_shape: tuple[int, int],
+    *,
+    percentile_max: float | None,
+    use_darkfield: bool,
+    darkfield_percentile: float,
+    fit_max_samples: int,
+    max_iterations: int,
+    smoothness_flatfield: float | None,
+    working_size: int | None,
+    apply_z: list[int],
+) -> tuple[dict[int, np.ndarray], np.ndarray, np.ndarray | None, dict]:
+    """Fit BaSiC on the pooled Z-tile stack and apply the model to ``apply_z``.
+
+    Returns
+    -------
+    corrected : dict mapping z-index -> corrected (float32, clipped >= 0)
+    flatfield : (ty, tx) float32 array
+    darkfield : (ty, tx) float32 array or None
+    stats     : dict with fit diagnostics
+    """
+    n_axial = vol.shape[0]
+    plane_shape: tuple[int, int] = (vol.shape[1], vol.shape[2])
+    tiles_per_plane = (plane_shape[0] // tile_shape[0]) * (plane_shape[1] // tile_shape[1])
+
+    fit_max_eff = max(fit_max_samples, tiles_per_plane)
+    n_planes = min(n_axial, max(1, fit_max_eff // tiles_per_plane))
+    fit_z = np.arange(n_axial) if n_planes >= n_axial else np.linspace(0, n_axial - 1, n_planes, dtype=int)
+
+    pool_parts = [_split_into_tiles(vol[int(z)], tile_shape) for z in fit_z]
+    pool = np.concatenate(pool_parts, axis=0)
+    del pool_parts
+
+    # drop out-of-tile zero-padded grid positions
+    keep = np.mean(pool != 0, axis=(1, 2)) > 0.5
+    pool = pool[keep]
+    n_fit = pool.shape[0]
+    if n_fit == 0:
+        msg = "No non-empty tiles in fit pool."
+        raise RuntimeError(msg)
+
+    if percentile_max is not None:
+        pool = np.clip(pool, None, float(np.percentile(pool, percentile_max)))
+
+    if use_darkfield:
+        darkfield: np.ndarray | None = np.percentile(pool, darkfield_percentile, axis=0).astype(np.float32)
+        assert darkfield is not None
+        pool = np.clip(pool - darkfield[None], 0.0, None)
+    else:
+        darkfield = None
+
+    basic_kwargs: dict = {"get_darkfield": False, "max_iterations": max_iterations}
+    if smoothness_flatfield is not None:
+        basic_kwargs["smoothness_flatfield"] = smoothness_flatfield
+    if working_size is not None:
+        basic_kwargs["working_size"] = working_size
+    opt = BaSiC(**basic_kwargs)
+    opt.fit(pool)
+    del pool
+
+    flatfield = np.asarray(opt.flatfield, dtype=np.float32)
+    if np.isnan(flatfield).any() or flatfield.max() <= 0:
+        msg = f"BaSiC flatfield diverged: min={flatfield.min():.4g} max={flatfield.max():.4g}"
+        raise RuntimeError(msg)
+
+    ff = flatfield[None]
+    df_tile = darkfield[None] if darkfield is not None else None
+
+    def _apply(tiles: np.ndarray) -> np.ndarray:
+        x = tiles.astype(np.float32, copy=False)
+        if df_tile is not None:
+            x = x - df_tile
+        return x / ff
+
+    corrected: dict[int, np.ndarray] = {}
+    for z in tqdm(apply_z, desc="  Applying", leave=False):
+        plane = vol[z]
+        tiles = _split_into_tiles(plane, tile_shape)
+        empty_mask = np.all(tiles == 0, axis=(1, 2))
+        c = _apply(tiles)
+        if empty_mask.any():
+            c[empty_mask] = 0.0
+        c = np.nan_to_num(c, nan=0.0, posinf=0.0, neginf=0.0)
+        corrected[z] = np.clip(_assemble_from_tiles(c, plane_shape, tile_shape), 0.0, None)
+
+    df = darkfield  # local alias for stats
+    stats: dict = {
+        "n_fit_tiles": n_fit,
+        "ff_min": float(flatfield.min()),
+        "ff_max": float(flatfield.max()),
+        "ff_mean": float(flatfield.mean()),
+        "df_min": float(df.min()) if df is not None else None,
+        "df_max": float(df.max()) if df is not None else None,
+        "df_mean": float(df.mean()) if df is not None else None,
+        "smoothness_flatfield": smoothness_flatfield,
+        "working_size": working_size,
+    }
+    return corrected, flatfield, darkfield, stats
+
+
+# ---------------------------------------------------------------------------
+# Visualisation helpers
+# ---------------------------------------------------------------------------
+
+
+def _display_vmax(arr: np.ndarray, p: float = 99.9) -> float:
+    pos = arr[arr > 0]
+    return float(np.percentile(pos, p)) if pos.size > 0 else 1.0
+
+
+def _save_slice_comparison(
+    raw_plane: np.ndarray,
+    corr_plane: np.ndarray,
+    flatfield: np.ndarray,
+    darkfield: np.ndarray | None,
+    out_path: str,
+    title: str,
+) -> None:
+    """Save RAW | CORRECTED | flatfield [| darkfield] in one figure."""
+    ncols = 4 if darkfield is not None else 3
+    fig, axes = plt.subplots(1, ncols, figsize=(6 * ncols, 6), facecolor="black")
+    fig.suptitle(title, color="white", fontsize=8)
+
+    for ax in axes:
+        ax.set_axis_off()
+        ax.set_facecolor("black")
+
+    axes[0].imshow(raw_plane, cmap="magma", vmin=0, vmax=_display_vmax(raw_plane))
+    axes[0].set_title("RAW", color="white", fontsize=9)
+
+    axes[1].imshow(corr_plane, cmap="magma", vmin=0, vmax=_display_vmax(corr_plane))
+    axes[1].set_title("CORRECTED", color="white", fontsize=9)
+
+    axes[2].imshow(flatfield, cmap="viridis")
+    axes[2].set_title(f"Flatfield [{flatfield.min():.3f}, {flatfield.max():.3f}]", color="white", fontsize=9)
+
+    if darkfield is not None:
+        axes[3].imshow(darkfield, cmap="inferno")
+        axes[3].set_title(f"Darkfield [{darkfield.min():.2f}, {darkfield.max():.2f}]", color="white", fontsize=9)
+
+    plt.tight_layout()
+    fig.savefig(out_path, facecolor="black", dpi=150)
+    plt.close(fig)
+
+
+def _save_aip_grid(
+    raw_vol: np.ndarray,
+    corr_vol: np.ndarray,
+    slab_size: int,
+    out_path: str,
+    title: str,
+) -> None:
+    """Save a two-row grid: top = RAW slab AIPs, bottom = CORRECTED slab AIPs."""
+    n_z = corr_vol.shape[0]
+    starts = list(range(0, n_z, slab_size))
+    n_slabs = len(starts)
+
+    fig, axes = plt.subplots(2, n_slabs, figsize=(max(n_slabs * 3, 6), 8), facecolor="black")
+    fig.suptitle(title, color="white", fontsize=8)
+
+    # ensure 2-D indexing for single-slab edge case
+    axes = np.asarray(axes).reshape(2, n_slabs)
+
+    for col, z0 in enumerate(starts):
+        z1 = min(z0 + slab_size, n_z)
+        raw_aip = raw_vol[z0:z1].mean(axis=0)
+        corr_aip = corr_vol[z0:z1].mean(axis=0)
+
+        for row, (aip, label) in enumerate([(raw_aip, "RAW"), (corr_aip, "CORR")]):
+            axes[row, col].imshow(aip, cmap="magma", vmin=0, vmax=_display_vmax(aip))
+            axes[row, col].set_title(f"{label} z{z0}-{z1 - 1}", color="white", fontsize=7)
+            axes[row, col].set_axis_off()
+            axes[row, col].set_facecolor("black")
+
+    plt.tight_layout()
+    fig.savefig(out_path, facecolor="black", dpi=150)
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Argument parsing helpers
+# ---------------------------------------------------------------------------
+
+
+def _parse_float_none_list(s: str) -> list[float | None]:
+    result: list[float | None] = []
+    for tok in s.split(","):
+        tok = tok.strip()
+        result.append(None if tok.lower() == "none" else float(tok))
+    return result
+
+
+def _parse_bool_list(s: str) -> list[bool]:
+    result = []
+    for tok in s.split(","):
+        tok = tok.strip().lower()
+        if tok in ("true", "1", "yes"):
+            result.append(True)
+        elif tok in ("false", "0", "no"):
+            result.append(False)
+        else:
+            msg = f"Cannot parse bool value: {tok!r}. Use true/false."
+            raise ValueError(msg)
+    return result
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("input_zarr", help="Input mosaic-grid OME-Zarr (focal-fix or raw).")
+    p.add_argument("output_dir", help="Directory where sweep results are written (created if absent).")
+
+    # sweep axes - comma-separated lists -> cartesian product
+    p.add_argument(
+        "--percentile_max",
+        default="99.9",
+        help="Comma-sep upper-clip percentile values applied to the fit pool\n"
+        "('none' = no clip).  E.g. 'none,99.0,99.5,99.9'  [%(default)s]",
+    )
+    p.add_argument(
+        "--use_darkfield",
+        default="true,false",
+        help="Comma-sep: true and/or false.  E.g. 'true,false'  [%(default)s]",
+    )
+    p.add_argument(
+        "--darkfield_percentile",
+        default="5",
+        help="Comma-sep per-pixel percentile for darkfield estimation\n"
+        "(only used when use_darkfield=true).  E.g. '2,5,10'  [%(default)s]",
+    )
+    p.add_argument(
+        "--fit_max_samples",
+        default="2000",
+        help="Comma-sep max tile samples drawn for the BaSiC fit.  [%(default)s]",
+    )
+    p.add_argument(
+        "--max_iterations",
+        default="500",
+        help="Comma-sep BaSiC iteration counts.  [%(default)s]",
+    )
+    p.add_argument(
+        "--smoothness_flatfield",
+        default="none",
+        help="Comma-sep BaSiC regularization strength for the flatfield.\n"
+        "Higher = smoother flatfield (less tile-edge noise but may miss\n"
+        "real spatial variation). 'none' lets BaSiC auto-select (~0.1).\n"
+        "E.g. 'none,0.01,0.05,0.1,0.5'  [%(default)s]",
+    )
+    p.add_argument(
+        "--working_size",
+        default="none",
+        help="Comma-sep internal BaSiC resize dimension (pixels).\n"
+        "Smaller = faster but less spatial detail in the flatfield.\n"
+        "'none' keeps BaSiC default (128). Try '64,128'.  [%(default)s]",
+    )
+
+    # output control
+    p.add_argument(
+        "--z_slice",
+        type=int,
+        help="Z index for the single-slice preview. Default: centre of volume.",
+    )
+    p.add_argument(
+        "--aip",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        help="Also apply correction to the full volume and save a slab-AIP\n"
+        "grid showing depth-wise correction quality.  [%(default)s]",
+    )
+    p.add_argument(
+        "--aip_slab_size",
+        type=int,
+        default=5,
+        help="Number of Z-planes per AIP slab.  For Z=30, slab_size=5 → 6 projections.  [%(default)s]",
+    )
+    p.add_argument(
+        "--level",
+        type=int,
+        default=0,
+        help="OME-Zarr pyramid level to load (0 = full resolution).  [%(default)s]",
+    )
+    return p
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+def main() -> None:
+    """Run the illumination-parameter sweep."""
+    p = _build_arg_parser()
+    args = p.parse_args()
+
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── load volume once ────────────────────────────────────────────────────
+    print(f"Loading {args.input_zarr} (level {args.level})…")
+    vol_lazy, _ = read_omezarr(Path(args.input_zarr), level=args.level)
+    tile_shape: tuple[int, int] = (int(vol_lazy.chunks[1]), int(vol_lazy.chunks[2]))
+    print(f"  shape={vol_lazy.shape}  tile={tile_shape}  dtype={vol_lazy.dtype}")
+    print("  Reading into RAM…")
+    vol: np.ndarray = np.asarray(vol_lazy).astype(np.float32)
+
+    n_axial = vol.shape[0]
+    z_slice = args.z_slice if args.z_slice is not None else n_axial // 2
+    print(f"  Z preview slice: {z_slice}  (use --z_slice N to override)")
+
+    # ── build sweep grid ────────────────────────────────────────────────────
+    try:
+        p_maxes = _parse_float_none_list(args.percentile_max)
+        use_darks = _parse_bool_list(args.use_darkfield)
+        df_percs = [float(x) for x in args.darkfield_percentile.split(",")]
+        fit_samps = [int(x) for x in args.fit_max_samples.split(",")]
+        max_iters = [int(x) for x in args.max_iterations.split(",")]
+        smooth_ffs = _parse_float_none_list(args.smoothness_flatfield)
+        working_sizes = _parse_float_none_list(args.working_size)
+    except ValueError as exc:
+        p.error(str(exc))
+
+    raw_grid = list(itertools.product(p_maxes, use_darks, df_percs, fit_samps, max_iters, smooth_ffs, working_sizes))
+
+    # de-duplicate: when use_darkfield=False, df_percentile is irrelevant
+    seen: set[tuple] = set()
+    configs: list[tuple] = []
+    for c in raw_grid:
+        pmax, use_dark, df_p, samp, iters, smooth_ff, ws = c
+        key = (pmax, use_dark, df_p if use_dark else "N/A", samp, iters, smooth_ff, ws)
+        if key not in seen:
+            seen.add(key)
+            configs.append(c)
+
+    n_slabs = (n_axial + args.aip_slab_size - 1) // args.aip_slab_size
+    print(f"\nSweep: {len(configs)} unique configurations")
+    if args.aip:
+        print(f"AIP mode ON: {n_slabs} slabs x {args.aip_slab_size} Z-planes")
+
+    summary_rows: list[dict] = []
+
+    for idx, (pmax, use_dark, df_p, samp, iters, smooth_ff, ws) in enumerate(configs, start=1):
+        pmax_s = f"p{pmax:.1f}" if pmax is not None else "pNone"
+        df_s = f"_df{df_p:.0f}" if use_dark else "_nodf"
+        sm_s = f"_sm{smooth_ff:.3f}" if smooth_ff is not None else ""
+        ws_s = f"_ws{int(ws)}" if ws is not None else ""
+        label = f"c{idx:03d}_{pmax_s}{df_s}_s{samp}_i{iters}{sm_s}{ws_s}"
+        desc = (
+            f"pmax={pmax}  dark={use_dark}  dfp={df_p if use_dark else '-'}  "
+            f"samples={samp}  iters={iters}  smooth={smooth_ff}  ws={ws}"
+        )
+        print(f"\n[{idx}/{len(configs)}] {label}")
+        print(f"  {desc}")
+
+        apply_z = list(range(n_axial)) if args.aip else [z_slice]
+
+        try:
+            corrected, flatfield, darkfield, stats = run_one_config(
+                vol,
+                tile_shape,
+                percentile_max=pmax,
+                use_darkfield=use_dark,
+                darkfield_percentile=df_p,
+                fit_max_samples=samp,
+                max_iterations=iters,
+                smoothness_flatfield=smooth_ff,
+                working_size=int(ws) if ws is not None else None,
+                apply_z=apply_z,
+            )
+        except Exception as exc:
+            print(f"  FAILED: {exc}")
+            summary_rows.append(
+                {
+                    "config": label,
+                    "status": "FAILED",
+                    "error": str(exc),
+                    "pmax": pmax,
+                    "use_darkfield": use_dark,
+                    "df_percentile": df_p,
+                    "fit_max_samples": samp,
+                    "max_iterations": iters,
+                    "n_fit_tiles": "",
+                    "ff_min": "",
+                    "ff_max": "",
+                    "df_min": "",
+                    "df_max": "",
+                    "slice_nonzero": "",
+                    "slice_max": "",
+                }
+            )
+            continue
+
+        # ── single-slice preview ─────────────────────────────────────────────
+        ff_range = f"ff=[{stats['ff_min']:.3f},{stats['ff_max']:.3f}]"
+        df_range = f"  df=[{stats['df_min']:.2f},{stats['df_max']:.2f}]" if use_dark else ""
+        title = f"{label}  z={z_slice}  {ff_range}{df_range}  fit_tiles={stats['n_fit_tiles']}"
+
+        slice_path = str(out_dir / f"{label}_z{z_slice:03d}.png")
+        _save_slice_comparison(vol[z_slice], corrected[z_slice], flatfield, darkfield, slice_path, title=title)
+        print(f"  → {Path(slice_path).name}")
+
+        # ── AIP grid ─────────────────────────────────────────────────────────
+        if args.aip:
+            corr_stack = np.stack([corrected[z] for z in range(n_axial)], axis=0)
+            aip_path = str(out_dir / f"{label}_aips.png")
+            _save_aip_grid(
+                vol,
+                corr_stack,
+                args.aip_slab_size,
+                aip_path,
+                title=f"{label}  slab={args.aip_slab_size}px  ({n_axial} Z-planes → {n_slabs} projections)",
+            )
+            print(f"  → {Path(aip_path).name}")
+
+        summary_rows.append(
+            {
+                "config": label,
+                "status": "OK",
+                "error": "",
+                "pmax": pmax,
+                "use_darkfield": use_dark,
+                "df_percentile": df_p,
+                "fit_max_samples": samp,
+                "max_iterations": iters,
+                "smoothness_flatfield": smooth_ff,
+                "working_size": ws,
+                "n_fit_tiles": stats["n_fit_tiles"],
+                "ff_min": round(stats["ff_min"], 4),
+                "ff_max": round(stats["ff_max"], 4),
+                "df_min": round(stats["df_min"], 4) if stats["df_min"] is not None else "",
+                "df_max": round(stats["df_max"], 4) if stats["df_max"] is not None else "",
+                "slice_nonzero": round(float(np.mean(corrected[z_slice] > 0)), 4),
+                "slice_max": round(float(corrected[z_slice].max()), 2),
+            }
+        )
+
+    # ── summary CSV ──────────────────────────────────────────────────────────
+    csv_path = out_dir / "sweep_summary.csv"
+    if summary_rows:
+        with csv_path.open("w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(summary_rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(summary_rows)
+
+    n_ok = sum(1 for r in summary_rows if r["status"] == "OK")
+    n_fail = sum(1 for r in summary_rows if r["status"] == "FAILED")
+    print(f"\nDone.  {n_ok} OK, {n_fail} failed.  Summary → {csv_path}")
+
+
+if __name__ == "__main__":
+    main()
