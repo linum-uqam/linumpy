@@ -580,6 +580,8 @@ process fix_illumination {
         --percentile_max ${params.clip_percentile_upper} ${gpu_flag} --n_levels 0 \
         --fit_max_samples ${params.fix_illum_fit_max_samples} \
         --max_iterations ${params.fix_illum_max_iterations} \
+        --darkfield_percentile ${params.fix_illum_darkfield_percentile} \
+        --smoothness_flatfield ${params.fix_illum_smoothness_flatfield} \
         ${darkfield_flag}
     """
 

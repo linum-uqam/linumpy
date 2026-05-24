@@ -72,6 +72,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "fit_max_samples * tile_shape * 4 bytes. [%(default)s]",
     )
     p.add_argument(
+        "--smoothness_flatfield",
+        type=float,
+        default=1.0,
+        help="BaSiC regularization weight for the flatfield (higher = smoother,\n"
+        "less spatial detail). BaSiCPy default is 1.0. Lower values (e.g. 0.05)\n"
+        "allow the flatfield to capture finer spatial structure at the cost of\n"
+        "overfitting noise. [%(default)s]",
+    )
+    p.add_argument(
         "--use_gpu",
         default=True,
         action=argparse.BooleanOptionalAction,
@@ -190,7 +199,7 @@ def main() -> None:
         f"Fitting BaSiC (flatfield only; darkfield_pre_subtracted={args.use_darkfield}) on "
         f"{fit_pool_arr.shape[0]} tile samples drawn from {len(fit_z)} / {n_axial} axial planes."
     )
-    optimizer = BaSiC(get_darkfield=False, max_iterations=args.max_iterations)
+    optimizer = BaSiC(get_darkfield=False, max_iterations=args.max_iterations, smoothness_flatfield=args.smoothness_flatfield)
     optimizer.fit(fit_pool_arr)
     del fit_pool_arr
 
