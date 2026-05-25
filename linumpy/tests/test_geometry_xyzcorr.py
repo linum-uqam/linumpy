@@ -151,3 +151,20 @@ def test_detect_interface_z_no_wrap_artifact():
     vol += rng.random((n_x, n_y, n_z)).astype(np.float32) * 2.0
     result = detect_interface_z(vol, sigma_xy=1.0, sigma_z=1.0)
     assert result > 5, f"Interface falsely detected near z=0 ({result}), expected near {interface_z}"
+
+
+def test_detect_interface_z_deep_artifact_clamped():
+    """Interface must NOT be detected past halfway even when intensity rises near the end.
+
+    This is the failure mode observed in sub-22 slices z39-z46, where imaging
+    artifacts caused the gradient to peak near z=52/55.  With max_depth_fraction=0.5
+    the returned interface must be within the first half of the volume.
+    """
+    n_z, n_x, n_y = 55, 20, 20
+    vol = np.zeros((n_x, n_y, n_z), dtype=np.float32)
+    # Simulate artifact: intensity rises steeply near the very end of the volume
+    vol[:, :, 50:] = 800.0
+    rng = np.random.default_rng(99)
+    vol += rng.random((n_x, n_y, n_z)).astype(np.float32) * 5.0
+    result = detect_interface_z(vol, sigma_xy=1.0, sigma_z=1.0, max_depth_fraction=0.5)
+    assert result < n_z // 2, f"Interface detected past halfway ({result} >= {n_z // 2})"

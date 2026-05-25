@@ -56,6 +56,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "remain in output clipped volume (range [0-100]).",
     )
     p.add_argument("--n_levels", type=int, default=5, help="Number of levels in pyramid representation. [%(default)s]")
+    p.add_argument(
+        "--max_interface_depth_fraction",
+        type=float,
+        default=0.5,
+        help="Restrict interface search to the first fraction of the Z axis.\n"
+        "OCT tissue/water interface is always near the top of the A-scan;\n"
+        "values past this fraction are treated as detection failures. [%(default)s]",
+    )
     return p
 
 
@@ -79,6 +87,7 @@ def main() -> None:
         sigma_z=args.sigma_z,
         crop_before_interface=args.crop_before_interface,
         percentile_clip=args.percentile_max if args.percentile_max is not None else None,
+        max_interface_depth_fraction=args.max_interface_depth_fraction,
     )
     print(f"Average surface depth: {avg_iface} voxels")
 

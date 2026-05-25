@@ -183,6 +183,7 @@ def crop_below_interface(
     sigma_z: float = 2.0,
     crop_before_interface: bool = False,
     percentile_clip: float | None = None,
+    max_interface_depth_fraction: float = 0.5,
 ) -> tuple[np.ndarray, int]:
     """Crop an OME-Zarr volume to a specified depth below the tissue interface.
 
@@ -205,6 +206,9 @@ def crop_below_interface(
         If True, also crop the volume above the detected interface.
     percentile_clip : float or None
         If provided, clip values above this percentile before interface detection.
+    max_interface_depth_fraction : float
+        Passed to :func:`detect_interface_z`.  Restricts interface search to
+        the first fraction of the Z axis.  Default 0.5.
 
     Returns
     -------
@@ -222,7 +226,9 @@ def crop_below_interface(
     if percentile_clip is not None:
         vol_xyz = np.clip(vol_xyz, None, np.percentile(vol_xyz, percentile_clip))
 
-    avg_iface = detect_interface_z(vol_xyz, sigma_xy=sigma_xy, sigma_z=sigma_z)
+    avg_iface = detect_interface_z(
+        vol_xyz, sigma_xy=sigma_xy, sigma_z=sigma_z, max_depth_fraction=max_interface_depth_fraction
+    )
 
     depth_px = round(depth_um / resolution_um)
     surface_idx = max(0, min(avg_iface, vol_zxy.shape[0] - 1))
