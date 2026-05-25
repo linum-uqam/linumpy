@@ -90,6 +90,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "params.tile_fov_mm in the Nextflow config. [%(default)s]",
     )
     p.add_argument(
+        "--per_z_fit",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        help="Fit a separate BaSiC flatfield model for each axial (Z/depth) plane\n"
+        "using only tiles from that plane. This captures depth-dependent\n"
+        "illumination variation caused by focal curvature. When disabled (default)\n"
+        "a single model is fit across all Z planes (faster, less tile jitter). [%(default)s]",
+    )
+    p.add_argument(
         "--use_gpu",
         default=True,
         action=argparse.BooleanOptionalAction,
@@ -169,115 +178,170 @@ def main() -> None:
         msg = f"Tile shape {tile_shape} does not fit in plane shape {plane_shape}."
         raise ValueError(msg)
 
-    # Choose which axial planes to draw fit samples from. Pool across Z so the
-    # flatfield is informed by N_axial * tiles_per_plane samples instead of just
-    # tiles_per_plane (which was severely under-constraining the model and
-    # producing a different flatfield per axial plane -> tile-period banding
-    # after attenuation correction).
-    fit_max_samples = max(args.fit_max_samples, tiles_per_plane)
-    n_planes_for_fit = min(n_axial, max(1, fit_max_samples // tiles_per_plane))
-    fit_z = np.arange(n_axial) if n_planes_for_fit >= n_axial else np.linspace(0, n_axial - 1, n_planes_for_fit, dtype=int)
+    def _filter_tiles(tiles: np.ndarray) -> np.ndarray:
+        """Remove all-zero padding tiles from a (N, ty, tx) stack."""
+        keep = np.mean(tiles != 0, axis=(1, 2)) > 0.5
+        return tiles[keep]
 
-    fit_pool = []
-    for z in tqdm(fit_z, desc="Loading fit samples"):
-        plane = np.asarray(vol[int(z)])
-        if is_complex:
-            plane = np.abs(plane).astype(np.float64)
-        fit_pool.append(_split_into_tiles(plane, tile_shape))
-    fit_pool_arr = np.concatenate(fit_pool, axis=0)
-    del fit_pool
+    def _prep_fit_pool(tiles_arr: np.ndarray, darkfield_ref: np.ndarray | None) -> np.ndarray:
+        """Clip at percentile_max and subtract darkfield_ref if provided."""
+        if args.percentile_max is not None:
+            p_upper = np.percentile(tiles_arr, args.percentile_max)
+            tiles_arr = np.clip(tiles_arr, None, p_upper)
+        if darkfield_ref is not None:
+            tiles_arr = np.clip(tiles_arr - darkfield_ref[None, :, :], 0.0, None)
+        return tiles_arr
 
-    # Drop out-of-tile zero-padded slots. In our mosaic_grid format a missing
-    # tile position is filled with exact zeros; if those get into BaSiC's fit
-    # pool they bias the flat/darkfield estimate so the model ends up subtracting
-    # the median signal away (negative -> clipped -> entire volume zeroed).
-    n_before_filter = fit_pool_arr.shape[0]
-    nonzero_frac = np.mean(fit_pool_arr != 0, axis=(1, 2))
-    keep = nonzero_frac > 0.5
-    fit_pool_arr = fit_pool_arr[keep]
-    print(
-        f"Filtered fit pool: {n_before_filter} -> {fit_pool_arr.shape[0]} tiles "
-        f"(dropped {n_before_filter - fit_pool_arr.shape[0]} all-zero/padding tiles)."
-    )
-    if fit_pool_arr.shape[0] == 0:
-        msg = "No non-empty tiles available for BaSiC fit; mosaic grid is empty."
-        raise RuntimeError(msg)
+    def _fit_basic(tiles_arr: np.ndarray) -> np.ndarray | None:
+        """Fit BaSiC on tiles_arr; return flatfield or None on failure."""
+        opt = BaSiC(get_darkfield=False, max_iterations=args.max_iterations, smoothness_flatfield=args.smoothness_flatfield)
+        opt.fit(tiles_arr)
+        ff = np.asarray(opt.flatfield)
+        if np.isnan(ff).any() or ff.max() <= 0:
+            return None
+        return ff
 
-    if args.percentile_max is not None:
-        p_upper = np.percentile(fit_pool_arr, args.percentile_max)
-        fit_pool_arr = np.clip(fit_pool_arr, None, p_upper)
+    def _apply_flatfield(tiles: np.ndarray, ff: np.ndarray, df: np.ndarray | None) -> np.ndarray:
+        x = tiles.astype(np.float32, copy=False)
+        if df is not None:
+            x = x - df[None, :, :]
+        return x / ff[None, :, :]
 
-    # Estimate darkfield first (per-pixel low percentile of the non-empty
-    # tile pool), subtract, then fit BaSiC on the residual for the flatfield.
-    # BaSiC's own get_darkfield=True diverges to NaN on OCT data, so we do not
-    # use it.
-    if args.use_darkfield:
-        darkfield = np.percentile(fit_pool_arr, args.darkfield_percentile, axis=0).astype(np.float32)
-        fit_pool_arr = np.clip(fit_pool_arr - darkfield[None, :, :], 0.0, None)
-        print(
-            f"Estimated darkfield (p{args.darkfield_percentile}): "
-            f"min={darkfield.min():.4g} max={darkfield.max():.4g} mean={darkfield.mean():.4g}"
-        )
-    else:
-        darkfield = None
-
-    print(
-        f"Fitting BaSiC (flatfield only; darkfield_pre_subtracted={args.use_darkfield}) on "
-        f"{fit_pool_arr.shape[0]} tile samples drawn from {len(fit_z)} / {n_axial} axial planes."
-    )
-    optimizer = BaSiC(get_darkfield=False, max_iterations=args.max_iterations, smoothness_flatfield=args.smoothness_flatfield)
-    optimizer.fit(fit_pool_arr)
-    del fit_pool_arr
-
-    flatfield = np.asarray(optimizer.flatfield)
-    if np.isnan(flatfield).any() or flatfield.max() <= 0:
-        msg = f"BaSiC flatfield fit failed (min={flatfield.min()}, max={flatfield.max()}). Refusing to proceed."
-        raise RuntimeError(msg)
-    ff_stats = f"flatfield: min={flatfield.min():.4g} max={flatfield.max():.4g} mean={flatfield.mean():.4g}"
-    df_stats = (
-        f"darkfield: min={darkfield.min():.4g} max={darkfield.max():.4g} mean={darkfield.mean():.4g}"
-        if darkfield is not None
-        else "darkfield: disabled"
-    )
-    print(f"Fit done. {ff_stats}  {df_stats}")
-
-    # Apply the model to every axial plane
-    # rather than optimizer.transform(): BaSiC's transform also re-fits a
-    # per-image baseline which is inappropriate here (tiles are spatial
-    # patches of one image, not a time series), and we want to use our own
-    # darkfield estimate rather than BaSiC's (which diverges on OCT data).
     temp_store = create_tempstore(suffix=".zarr")
     vol_output = zarr.open(temp_store, mode="w", shape=vol.shape, dtype=vol.dtype, chunks=vol.chunks)
-    ff = flatfield[None, :, :].astype(np.float32)
-    df = darkfield[None, :, :].astype(np.float32) if darkfield is not None else None
 
-    def _apply(tiles_abs: np.ndarray) -> np.ndarray:
-        x = tiles_abs.astype(np.float32, copy=False)
-        if df is not None:
-            x = x - df
-        return x / ff
+    if not args.per_z_fit:
+        # ── Global fit: pool tiles from all axial planes, fit once ──────────
+        # This avoids per-plane jitter that causes tile-period banding after
+        # attenuation correction, at the cost of ignoring depth-dependent
+        # illumination variation due to focal curvature.
+        fit_max_samples = max(args.fit_max_samples, tiles_per_plane)
+        n_planes_for_fit = min(n_axial, max(1, fit_max_samples // tiles_per_plane))
+        fit_z = np.arange(n_axial) if n_planes_for_fit >= n_axial else np.linspace(0, n_axial - 1, n_planes_for_fit, dtype=int)
 
-    for z in tqdm(range(n_axial), desc="Applying flatfield"):
-        plane = np.asarray(vol[z])
-        if is_complex:
-            real_tiles = _split_into_tiles(plane.real.astype(np.float64), tile_shape)
-            imag_tiles = _split_into_tiles(plane.imag.astype(np.float64), tile_shape)
-            sign_real = np.sign(real_tiles)
-            sign_imag = np.sign(imag_tiles)
-            real_corr = _apply(np.abs(real_tiles)) * sign_real
-            imag_corr = _apply(np.abs(imag_tiles)) * sign_imag
-            tiles_corrected = real_corr + 1j * imag_corr
+        fit_pool = []
+        for z in tqdm(fit_z, desc="Loading fit samples"):
+            plane = np.asarray(vol[int(z)])
+            if is_complex:
+                plane = np.abs(plane).astype(np.float64)
+            fit_pool.append(_split_into_tiles(plane, tile_shape))
+        fit_pool_arr = np.concatenate(fit_pool, axis=0)
+        del fit_pool
+
+        n_before_filter = fit_pool_arr.shape[0]
+        fit_pool_arr = _filter_tiles(fit_pool_arr)
+        print(
+            f"Filtered fit pool: {n_before_filter} -> {fit_pool_arr.shape[0]} tiles "
+            f"(dropped {n_before_filter - fit_pool_arr.shape[0]} all-zero/padding tiles)."
+        )
+        if fit_pool_arr.shape[0] == 0:
+            msg = "No non-empty tiles available for BaSiC fit; mosaic grid is empty."
+            raise RuntimeError(msg)
+
+        if args.use_darkfield:
+            darkfield = np.percentile(fit_pool_arr, args.darkfield_percentile, axis=0).astype(np.float32)
+            print(
+                f"Estimated darkfield (p{args.darkfield_percentile}): "
+                f"min={darkfield.min():.4g} max={darkfield.max():.4g} mean={darkfield.mean():.4g}"
+            )
         else:
-            tiles = _split_into_tiles(plane, tile_shape)
-            empty_mask = np.all(tiles == 0, axis=(1, 2))
-            tiles_corrected = _apply(tiles)
-            if empty_mask.any():
-                tiles_corrected[empty_mask] = 0.0
+            darkfield = None
 
-        if np.isnan(tiles_corrected).any():
-            tiles_corrected = np.nan_to_num(tiles_corrected, nan=0.0, posinf=0.0, neginf=0.0)
+        fit_pool_arr = _prep_fit_pool(fit_pool_arr, darkfield)
 
-        vol_output[z] = _assemble_from_tiles(tiles_corrected, plane_shape, tile_shape, background=plane).astype(vol.dtype)
+        print(
+            f"Fitting BaSiC (global; darkfield_pre_subtracted={args.use_darkfield}) on "
+            f"{fit_pool_arr.shape[0]} tile samples drawn from {len(fit_z)} / {n_axial} axial planes."
+        )
+        flatfield = _fit_basic(fit_pool_arr)
+        del fit_pool_arr
+        if flatfield is None:
+            msg = "BaSiC flatfield fit failed. Refusing to proceed."
+            raise RuntimeError(msg)
+
+        ff_stats = f"flatfield: min={flatfield.min():.4g} max={flatfield.max():.4g} mean={flatfield.mean():.4g}"
+        df_stats = (
+            f"darkfield: min={darkfield.min():.4g} max={darkfield.max():.4g} mean={darkfield.mean():.4g}"
+            if darkfield is not None
+            else "darkfield: disabled"
+        )
+        print(f"Fit done. {ff_stats}  {df_stats}")
+
+        for z in tqdm(range(n_axial), desc="Applying flatfield"):
+            plane = np.asarray(vol[z])
+            if is_complex:
+                real_tiles = _split_into_tiles(plane.real.astype(np.float64), tile_shape)
+                imag_tiles = _split_into_tiles(plane.imag.astype(np.float64), tile_shape)
+                sign_real = np.sign(real_tiles)
+                sign_imag = np.sign(imag_tiles)
+                real_corr = _apply_flatfield(np.abs(real_tiles), flatfield, darkfield) * sign_real
+                imag_corr = _apply_flatfield(np.abs(imag_tiles), flatfield, darkfield) * sign_imag
+                tiles_corrected = real_corr + 1j * imag_corr
+            else:
+                tiles = _split_into_tiles(plane, tile_shape)
+                empty_mask = np.all(tiles == 0, axis=(1, 2))
+                tiles_corrected = _apply_flatfield(tiles, flatfield, darkfield)
+                if empty_mask.any():
+                    tiles_corrected[empty_mask] = 0.0
+
+            if np.isnan(tiles_corrected).any():
+                tiles_corrected = np.nan_to_num(tiles_corrected, nan=0.0, posinf=0.0, neginf=0.0)
+
+            vol_output[z] = _assemble_from_tiles(tiles_corrected, plane_shape, tile_shape, background=plane).astype(vol.dtype)
+
+    else:
+        # ── Per-Z fit: fit a separate BaSiC model per axial (depth) plane ───
+        # Captures depth-dependent illumination variation caused by focal
+        # curvature.  Each plane's tile pool is used for both the darkfield
+        # estimate and the flatfield fit.  Planes with too few non-empty tiles
+        # (e.g. near the bottom of the tissue) fall back to the uncorrected
+        # plane.
+        print(f"Per-Z BaSiC fit: {n_axial} planes, {tiles_per_plane} tiles/plane ({tiles_per_plane} tile samples per fit).")
+        min_tiles_for_fit = max(4, tiles_per_plane // 4)
+
+        for z in tqdm(range(n_axial), desc="Per-Z fit+apply"):
+            plane = np.asarray(vol[z])
+            plane_abs = np.abs(plane).astype(np.float64) if is_complex else plane
+
+            tiles = _split_into_tiles(plane_abs, tile_shape)
+            tiles_fit = _filter_tiles(tiles)
+
+            if tiles_fit.shape[0] < min_tiles_for_fit:
+                # Too sparse — copy plane unchanged and continue
+                vol_output[z] = plane
+                continue
+
+            if args.use_darkfield:
+                darkfield_z = np.percentile(tiles_fit, args.darkfield_percentile, axis=0).astype(np.float32)
+            else:
+                darkfield_z = None
+
+            tiles_fit = _prep_fit_pool(tiles_fit.astype(np.float32), darkfield_z)
+
+            flatfield_z = _fit_basic(tiles_fit)
+            if flatfield_z is None:
+                # Fit failed — copy plane unchanged
+                vol_output[z] = plane
+                continue
+
+            if is_complex:
+                real_tiles = _split_into_tiles(plane.real.astype(np.float64), tile_shape)
+                imag_tiles = _split_into_tiles(plane.imag.astype(np.float64), tile_shape)
+                sign_real = np.sign(real_tiles)
+                sign_imag = np.sign(imag_tiles)
+                real_corr = _apply_flatfield(np.abs(real_tiles), flatfield_z, darkfield_z) * sign_real
+                imag_corr = _apply_flatfield(np.abs(imag_tiles), flatfield_z, darkfield_z) * sign_imag
+                tiles_corrected = real_corr + 1j * imag_corr
+            else:
+                empty_mask = np.all(tiles == 0, axis=(1, 2))
+                tiles_corrected = _apply_flatfield(tiles.astype(np.float32), flatfield_z, darkfield_z)
+                if empty_mask.any():
+                    tiles_corrected[empty_mask] = 0.0
+
+            if np.isnan(tiles_corrected).any():
+                tiles_corrected = np.nan_to_num(tiles_corrected, nan=0.0, posinf=0.0, neginf=0.0)
+
+            vol_output[z] = _assemble_from_tiles(tiles_corrected, plane_shape, tile_shape, background=plane).astype(vol.dtype)
 
     out_dask = da.from_zarr(vol_output)
     # Sanity-check the corrected volume before saving. A collapsed (~all-zero)

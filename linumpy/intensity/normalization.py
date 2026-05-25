@@ -22,8 +22,10 @@ def normalize_volume(
     Each z-slice is clipped at its per-slice percentile cap and agarose-median
     floor, then the agarose floor is subtracted per slice (so background goes
     to exactly 0).  The entire volume is then divided by a single global
-    divisor (the maximum per-slice tissue span across all slices), so relative
-    inter-section brightness is preserved.
+    divisor (the 90th-percentile per-slice tissue span), so relative
+    inter-section brightness is largely preserved while outlier slices
+    (e.g. bright surface / specular-reflection layers) do not compress the rest
+    of the volume to near-zero values.
 
     Parameters
     ----------
@@ -54,8 +56,16 @@ def normalize_volume(
     # Subtract per-slice agarose floor so background voxels become exactly 0
     vol = vol - background_thresholds[:, None, None]
 
-    # Single global divisor: preserves relative inter-section brightness
-    global_max = float((pmax - background_thresholds).max())
+    # Single global divisor: preserves relative inter-section brightness.
+    # Use the 90th percentile of per-slice spans rather than the maximum so that
+    # outlier slices (e.g. bright surface / specular-reflection layers) do not
+    # compress the rest of the volume to near-zero values.  The top ~10% of
+    # slices will be clipped to ≥1.0 before the final float32 cast, which is
+    # harmless in practice.
+    spans = pmax - background_thresholds
+    global_max = float(np.percentile(spans, 90))
+    if global_max <= 0:
+        global_max = float(spans.max())
     if global_max > 0:
         vol = vol / global_max
 

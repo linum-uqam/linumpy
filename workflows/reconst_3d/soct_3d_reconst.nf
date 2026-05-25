@@ -575,6 +575,7 @@ process fix_illumination {
     def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
     def darkfield_flag = params.fix_illum_darkfield ? "--use_darkfield" : "--no-use_darkfield"
     def tile_fov_flag = params.tile_fov_mm != null ? "--tile_fov_mm ${params.tile_fov_mm}" : ""
+    def per_z_fit_flag = params.fix_illum_per_z_fit ? "--per_z_fit" : "--no-per_z_fit"
     """
     linum_fix_illumination_3d.py ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" \
         --n_processes ${params.processes} \
@@ -584,7 +585,8 @@ process fix_illumination {
         --darkfield_percentile ${params.fix_illum_darkfield_percentile} \
         --smoothness_flatfield ${params.fix_illum_smoothness_flatfield} \
         ${tile_fov_flag} \
-        ${darkfield_flag}
+        ${darkfield_flag} \
+        ${per_z_fit_flag}
     """
 
     stub:
