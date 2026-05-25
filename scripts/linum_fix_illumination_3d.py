@@ -81,6 +81,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "overfitting noise. [%(default)s]",
     )
     p.add_argument(
+        "--tile_fov_mm",
+        type=float,
+        default=0.0,
+        help="Acquisition tile field-of-view in millimetres. When > 0, the tile\n"
+        "size for BaSiC is computed as round(tile_fov_mm / pixel_size_mm)\n"
+        "instead of using the zarr chunk size. Use the same value as\n"
+        "params.tile_fov_mm in the Nextflow config. [%(default)s]",
+    )
+    p.add_argument(
         "--use_gpu",
         default=True,
         action=argparse.BooleanOptionalAction,
@@ -103,12 +112,22 @@ def _split_into_tiles(plane: np.ndarray, tile_shape: tuple[int, int]) -> np.ndar
     return tiles
 
 
-def _assemble_from_tiles(tiles: np.ndarray, plane_shape: tuple[int, int], tile_shape: tuple[int, int]) -> np.ndarray:
-    """Inverse of `_split_into_tiles`: stitch tiles back into a (Y, X) plane."""
+def _assemble_from_tiles(
+    tiles: np.ndarray,
+    plane_shape: tuple[int, int],
+    tile_shape: tuple[int, int],
+    background: np.ndarray | None = None,
+) -> np.ndarray:
+    """Inverse of `_split_into_tiles`: stitch tiles back into a (Y, X) plane.
+
+    Pixels outside the last complete tile row/column (remainder when
+    plane_shape is not divisible by tile_shape) are filled with *background*
+    when provided, otherwise with zeros.
+    """
     ty, tx = tile_shape
     ny = plane_shape[0] // ty
     nx = plane_shape[1] // tx
-    out = np.zeros(plane_shape, dtype=tiles.dtype)
+    out = np.zeros(plane_shape, dtype=tiles.dtype) if background is None else np.array(background, dtype=tiles.dtype)
     for i in range(ny):
         for j in range(nx):
             out[i * ty : (i + 1) * ty, j * tx : (j + 1) * tx] = tiles[i * nx + j]
@@ -133,8 +152,15 @@ def main() -> None:
     vol, resolution = read_omezarr(input_zarr, level=0)
     n_axial = vol.shape[0]
     plane_shape = vol.shape[1:]
-    tile_shape = tuple(vol.chunks[1:])
     is_complex = np.iscomplexobj(vol[0])
+
+    if args.tile_fov_mm > 0:
+        pixel_size_mm = float(resolution[1])
+        tile_px = round(args.tile_fov_mm / pixel_size_mm)
+        tile_shape: tuple[int, int] = (tile_px, tile_px)
+        print(f"tile_fov_mm={args.tile_fov_mm}: tile_size_px={tile_px} (pixel_size={pixel_size_mm}mm/px)")
+    else:
+        tile_shape = tuple(vol.chunks[1:])
 
     ny = plane_shape[0] // tile_shape[0]
     nx = plane_shape[1] // tile_shape[1]
@@ -251,7 +277,7 @@ def main() -> None:
         if np.isnan(tiles_corrected).any():
             tiles_corrected = np.nan_to_num(tiles_corrected, nan=0.0, posinf=0.0, neginf=0.0)
 
-        vol_output[z] = _assemble_from_tiles(tiles_corrected, plane_shape, tile_shape).astype(vol.dtype)
+        vol_output[z] = _assemble_from_tiles(tiles_corrected, plane_shape, tile_shape, background=plane).astype(vol.dtype)
 
     out_dask = da.from_zarr(vol_output)
     # Sanity-check the corrected volume before saving. A collapsed (~all-zero)
