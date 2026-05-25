@@ -108,6 +108,7 @@ def run_one_config(
     apply_z: list[int],
     per_z_fit: bool = False,
     darkfield_smooth_sigma: float = 0.0,
+    darkfield_z_window: int = 0,
     n_workers: int = 1,
 ) -> tuple[dict[int, np.ndarray], np.ndarray, np.ndarray | None, dict]:
     """Fit BaSiC and apply the model to ``apply_z``.
@@ -211,11 +212,23 @@ def run_one_config(
             if tiles_fit.shape[0] < min_tiles:
                 return z, fallback, None, None, 0
 
-            df_z: np.ndarray | None = (
-                np.percentile(tiles_fit, darkfield_percentile, axis=0).astype(np.float32) if use_darkfield else None
-            )
-            if df_z is not None and darkfield_smooth_sigma > 0:
-                df_z = gaussian_filter(df_z, sigma=darkfield_smooth_sigma).astype(np.float32)
+            if use_darkfield:
+                if darkfield_z_window > 0:
+                    z_range = range(max(0, z - darkfield_z_window), min(n_axial, z + darkfield_z_window + 1))
+                    df_parts = []
+                    for zz in z_range:
+                        t = _split_into_tiles(vol[zz], tile_shape)
+                        ok = np.mean(t != 0, axis=(1, 2)) > 0.5
+                        df_parts.append(t[ok].astype(np.float32))
+                    df_pool = np.concatenate(df_parts, axis=0)
+                    df_z: np.ndarray | None = np.percentile(df_pool, darkfield_percentile, axis=0).astype(np.float32)
+                    del df_pool
+                else:
+                    df_z = np.percentile(tiles_fit, darkfield_percentile, axis=0).astype(np.float32)
+                if darkfield_smooth_sigma > 0:
+                    df_z = gaussian_filter(df_z, sigma=darkfield_smooth_sigma).astype(np.float32)
+            else:
+                df_z = None
             ff_z = _fit_basic_on(_prep(tiles_fit, df_z))
             if ff_z is None:
                 return z, fallback, None, None, 0
@@ -425,6 +438,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "'none' or 0 disables smoothing. E.g. 'none,1.5,3.0'  [%(default)s]",
     )
     p.add_argument(
+        "--darkfield_z_window",
+        default="0",
+        help="Comma-sep integer(s): number of neighbouring Z planes to include in the\n"
+        "darkfield estimation pool (per_z_fit=true only). 0 = current plane only.\n"
+        "1 = include z-1 and z+1, tripling the sample count. E.g. '0,1,2'  [%(default)s]",
+    )
+    p.add_argument(
         "--tile_fov_mm",
         type=float,
         default=0.0,
@@ -510,21 +530,43 @@ def main() -> None:
         working_sizes = _parse_float_none_list(args.working_size)
         per_z_fits = _parse_bool_list(args.per_z_fit)
         df_smooth_sigmas = _parse_float_none_list(args.darkfield_smooth_sigma)
+        df_z_windows = [int(x) for x in args.darkfield_z_window.split(",")]
     except ValueError as exc:
         p.error(str(exc))
 
     raw_grid = list(
         itertools.product(
-            p_maxes, use_darks, df_percs, fit_samps, max_iters, smooth_ffs, working_sizes, per_z_fits, df_smooth_sigmas
+            p_maxes,
+            use_darks,
+            df_percs,
+            fit_samps,
+            max_iters,
+            smooth_ffs,
+            working_sizes,
+            per_z_fits,
+            df_smooth_sigmas,
+            df_z_windows,
         )
     )
 
-    # de-duplicate: when use_darkfield=False, df_percentile and df_smooth_sigma are irrelevant
+    # de-duplicate: when use_darkfield=False, df_percentile, df_smooth_sigma, and df_z_window are irrelevant
+    # when per_z_fit=False, df_z_window is irrelevant
     seen: set[tuple] = set()
     configs: list[tuple] = []
     for c in raw_grid:
-        pmax, use_dark, df_p, samp, iters, smooth_ff, ws, per_z, df_sig = c
-        key = (pmax, use_dark, df_p if use_dark else "N/A", samp, iters, smooth_ff, ws, per_z, df_sig if use_dark else "N/A")
+        pmax, use_dark, df_p, samp, iters, smooth_ff, ws, per_z, df_sig, df_zw = c
+        key = (
+            pmax,
+            use_dark,
+            df_p if use_dark else "N/A",
+            samp,
+            iters,
+            smooth_ff,
+            ws,
+            per_z,
+            df_sig if use_dark else "N/A",
+            df_zw if (use_dark and per_z) else "N/A",
+        )
         if key not in seen:
             seen.add(key)
             configs.append(c)
@@ -536,17 +578,19 @@ def main() -> None:
 
     summary_rows: list[dict] = []
 
-    for idx, (pmax, use_dark, df_p, samp, iters, smooth_ff, ws, per_z, df_sig) in enumerate(configs, start=1):
+    for idx, (pmax, use_dark, df_p, samp, iters, smooth_ff, ws, per_z, df_sig, df_zw) in enumerate(configs, start=1):
         pmax_s = f"p{pmax:.1f}" if pmax is not None else "pNone"
         df_s = f"_df{df_p:.0f}" if use_dark else "_nodf"
         sm_s = f"_sm{smooth_ff:.3f}" if smooth_ff is not None else ""
         ws_s = f"_ws{int(ws)}" if ws is not None else ""
         pz_s = "_perz" if per_z else "_global"
         dfsig_s = f"_dfsig{df_sig:.2f}" if (df_sig is not None and df_sig > 0) else ""
-        label = f"c{idx:03d}_{pmax_s}{df_s}_s{samp}_i{iters}{sm_s}{ws_s}{pz_s}{dfsig_s}"
+        dfzw_s = f"_dfzw{df_zw}" if (per_z and use_dark and df_zw > 0) else ""
+        label = f"c{idx:03d}_{pmax_s}{df_s}_s{samp}_i{iters}{sm_s}{ws_s}{pz_s}{dfsig_s}{dfzw_s}"
         desc = (
             f"pmax={pmax}  dark={use_dark}  dfp={df_p if use_dark else '-'}  "
-            f"samples={samp}  iters={iters}  smooth={smooth_ff}  ws={ws}  per_z_fit={per_z}  df_smooth_sigma={df_sig}"
+            f"samples={samp}  iters={iters}  smooth={smooth_ff}  ws={ws}  per_z_fit={per_z}  "
+            f"df_smooth_sigma={df_sig}  df_z_window={df_zw if (per_z and use_dark) else '-'}"
         )
         print(f"\n[{idx}/{len(configs)}] {label}")
         print(f"  {desc}")
@@ -567,6 +611,7 @@ def main() -> None:
                 apply_z=apply_z,
                 per_z_fit=per_z,
                 darkfield_smooth_sigma=df_sig if df_sig is not None else 0.0,
+                darkfield_z_window=df_zw,
                 n_workers=args.n_workers,
             )
         except Exception as exc:
@@ -583,6 +628,7 @@ def main() -> None:
                     "max_iterations": iters,
                     "per_z_fit": per_z,
                     "darkfield_smooth_sigma": df_sig,
+                    "darkfield_z_window": df_zw,
                     "n_fit_tiles": "",
                     "ff_min": "",
                     "ff_max": "",
@@ -630,6 +676,7 @@ def main() -> None:
                 "working_size": ws,
                 "per_z_fit": per_z,
                 "darkfield_smooth_sigma": df_sig,
+                "darkfield_z_window": df_zw,
                 "n_fit_tiles": stats["n_fit_tiles"],
                 "ff_min": round(stats["ff_min"], 4),
                 "ff_max": round(stats["ff_max"], 4),

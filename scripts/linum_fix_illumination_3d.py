@@ -108,6 +108,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "Reduces pixel-level noise in the per-pixel percentile estimate. 0 disables. [%(default)s]",
     )
     p.add_argument(
+        "--darkfield_z_window",
+        type=int,
+        default=0,
+        help="Number of neighbouring Z planes to include in the darkfield estimation pool\n"
+        "(per_z_fit only). 0 = current plane only. 1 = z-1, z, z+1 (3x more samples).\n"
+        "Darkfield (camera offset) is stable across Z, so neighbours are valid samples. [%(default)s]",
+    )
+    p.add_argument(
         "--use_gpu",
         default=True,
         action=argparse.BooleanOptionalAction,
@@ -323,7 +331,20 @@ def main() -> None:
                 return z, plane
 
             if args.use_darkfield:
-                darkfield_z = np.percentile(tiles_fit, args.darkfield_percentile, axis=0).astype(np.float32)
+                if args.darkfield_z_window > 0:
+                    z_range = range(max(0, z - args.darkfield_z_window), min(n_axial, z + args.darkfield_z_window + 1))
+                    df_parts = []
+                    for zz in z_range:
+                        p_nb = np.asarray(vol[zz])
+                        p_nb_abs = np.abs(p_nb).astype(np.float64) if is_complex else p_nb
+                        t = _split_into_tiles(p_nb_abs, tile_shape)
+                        ok = np.mean(t != 0, axis=(1, 2)) > 0.5
+                        df_parts.append(t[ok].astype(np.float32))
+                    df_pool = np.concatenate(df_parts, axis=0)
+                    darkfield_z = np.percentile(df_pool, args.darkfield_percentile, axis=0).astype(np.float32)
+                    del df_pool
+                else:
+                    darkfield_z = np.percentile(tiles_fit, args.darkfield_percentile, axis=0).astype(np.float32)
                 if args.darkfield_smooth_sigma > 0:
                     darkfield_z = gaussian_filter(darkfield_z, sigma=args.darkfield_smooth_sigma).astype(np.float32)
             else:
