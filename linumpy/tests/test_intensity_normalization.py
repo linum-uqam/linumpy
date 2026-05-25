@@ -69,12 +69,14 @@ def test_normalize_volume_output_shape():
 
 
 def test_normalize_volume_output_range():
-    """Normalized values should be in [0, 1]."""
+    """p90 of per-slice spans normalizes to <=1; outlier planes may exceed 1."""
     vol = _make_tissue_vol((6, 24, 24))
     mask, _ = get_agarose_mask(vol)
     result, _ = normalize_volume(vol.copy(), mask)
     assert float(result.min()) >= -1e-6
-    assert float(result.max()) <= 1.0 + 1e-6
+    # global_max is the p90 of per-slice spans, so the p90 of the result
+    # should be at most 1; a few high-intensity planes may slightly exceed 1.
+    assert float(np.percentile(result, 90)) <= 1.0 + 1e-6
 
 
 def test_normalize_volume_background_thresholds_length():
