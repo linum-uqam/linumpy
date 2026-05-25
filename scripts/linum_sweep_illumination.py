@@ -49,6 +49,7 @@ import linumpy.config.threads  # noqa: F401
 import argparse
 import csv
 import itertools
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import matplotlib
@@ -105,6 +106,7 @@ def run_one_config(
     working_size: int | None,
     apply_z: list[int],
     per_z_fit: bool = False,
+    n_workers: int = 1,
 ) -> tuple[dict[int, np.ndarray], np.ndarray, np.ndarray | None, dict]:
     """Fit BaSiC and apply the model to ``apply_z``.
 
@@ -195,38 +197,39 @@ def run_one_config(
         darkfield = None
         n_fit = 0
 
-        for z in tqdm(apply_z, desc="  Per-Z fit+apply", leave=False):
+        def _process_plane(z: int) -> tuple[int, np.ndarray, np.ndarray | None, np.ndarray | None, int]:
             plane = vol[z]
             tiles = _split_into_tiles(plane, tile_shape)
             keep = np.mean(tiles != 0, axis=(1, 2)) > 0.5
             tiles_fit = tiles[keep].astype(np.float32)
+            fallback = np.clip(_assemble_from_tiles(tiles.astype(np.float32), plane_shape, tile_shape), 0.0, None)
 
             if tiles_fit.shape[0] < min_tiles:
-                corrected[z] = np.clip(_assemble_from_tiles(tiles.astype(np.float32), plane_shape, tile_shape), 0.0, None)
-                continue
+                return z, fallback, None, None, 0
 
             df_z: np.ndarray | None = (
                 np.percentile(tiles_fit, darkfield_percentile, axis=0).astype(np.float32) if use_darkfield else None
             )
-            tiles_prepped = _prep(tiles_fit, df_z)
-            ff_z = _fit_basic_on(tiles_prepped)
-
+            ff_z = _fit_basic_on(_prep(tiles_fit, df_z))
             if ff_z is None:
-                corrected[z] = np.clip(_assemble_from_tiles(tiles.astype(np.float32), plane_shape, tile_shape), 0.0, None)
-                continue
-
-            # Store representative FF/DF from the first successful fit
-            if flatfield is None:
-                flatfield = ff_z
-                darkfield = df_z
-                n_fit = tiles_fit.shape[0]
+                return z, fallback, None, None, 0
 
             empty_mask = np.all(tiles == 0, axis=(1, 2))
             c = _apply_ff(tiles.astype(np.float32), ff_z, df_z)
             if empty_mask.any():
                 c[empty_mask] = 0.0
             c = np.nan_to_num(c, nan=0.0, posinf=0.0, neginf=0.0)
-            corrected[z] = np.clip(_assemble_from_tiles(c, plane_shape, tile_shape), 0.0, None)
+            return z, np.clip(_assemble_from_tiles(c, plane_shape, tile_shape), 0.0, None), ff_z, df_z, tiles_fit.shape[0]
+
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            plane_futures = [executor.submit(_process_plane, z) for z in apply_z]
+            for fut in tqdm(as_completed(plane_futures), total=len(apply_z), desc="  Per-Z fit+apply", leave=False):
+                z_idx, plane_result, ff_z, df_z, n = fut.result()
+                corrected[z_idx] = plane_result
+                if ff_z is not None and flatfield is None:
+                    flatfield = ff_z
+                    darkfield = df_z
+                    n_fit = n
 
         if flatfield is None:
             msg = "Per-Z fit: no plane had enough tiles for a successful BaSiC fit."
@@ -415,6 +418,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Acquisition tile field-of-view in mm.  When > 0, overrides the\n"
         "chunk-derived tile size (same as pipeline param tile_fov_mm).  [%(default)s]",
     )
+    p.add_argument(
+        "--n_workers",
+        type=int,
+        default=1,
+        help="Parallel workers for per-Z fitting (per_z_fit=true only).\n"
+        "Each worker runs an independent BaSiC fit; set to number of available\n"
+        "CPU cores for maximum throughput. Has no effect for global fits.  [%(default)s]",
+    )
 
     # output control
     p.add_argument(
@@ -538,6 +549,7 @@ def main() -> None:
                 working_size=int(ws) if ws is not None else None,
                 apply_z=apply_z,
                 per_z_fit=per_z,
+                n_workers=args.n_workers,
             )
         except Exception as exc:
             print(f"  FAILED: {exc}")

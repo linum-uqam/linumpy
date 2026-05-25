@@ -12,6 +12,7 @@ GPU acceleration is used through BaSiCPy (PyTorch backend) when available.
 import linumpy.config.threads  # noqa: F401
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import dask.array as da
@@ -298,8 +299,10 @@ def main() -> None:
         # plane.
         print(f"Per-Z BaSiC fit: {n_axial} planes, {tiles_per_plane} tiles/plane ({tiles_per_plane} tile samples per fit).")
         min_tiles_for_fit = max(4, tiles_per_plane // 4)
+        n_workers = args.n_processes if args.n_processes and args.n_processes > 0 else 1
+        print(f"  Using {n_workers} parallel worker(s).")
 
-        for z in tqdm(range(n_axial), desc="Per-Z fit+apply"):
+        def _process_plane_perz(z: int) -> tuple[int, np.ndarray]:
             plane = np.asarray(vol[z])
             plane_abs = np.abs(plane).astype(np.float64) if is_complex else plane
 
@@ -307,9 +310,7 @@ def main() -> None:
             tiles_fit = _filter_tiles(tiles)
 
             if tiles_fit.shape[0] < min_tiles_for_fit:
-                # Too sparse — copy plane unchanged and continue
-                vol_output[z] = plane
-                continue
+                return z, plane
 
             if args.use_darkfield:
                 darkfield_z = np.percentile(tiles_fit, args.darkfield_percentile, axis=0).astype(np.float32)
@@ -317,12 +318,10 @@ def main() -> None:
                 darkfield_z = None
 
             tiles_fit = _prep_fit_pool(tiles_fit.astype(np.float32), darkfield_z)
-
             flatfield_z = _fit_basic(tiles_fit)
+
             if flatfield_z is None:
-                # Fit failed — copy plane unchanged
-                vol_output[z] = plane
-                continue
+                return z, plane
 
             if is_complex:
                 real_tiles = _split_into_tiles(plane.real.astype(np.float64), tile_shape)
@@ -341,7 +340,13 @@ def main() -> None:
             if np.isnan(tiles_corrected).any():
                 tiles_corrected = np.nan_to_num(tiles_corrected, nan=0.0, posinf=0.0, neginf=0.0)
 
-            vol_output[z] = _assemble_from_tiles(tiles_corrected, plane_shape, tile_shape, background=plane).astype(vol.dtype)
+            return z, _assemble_from_tiles(tiles_corrected, plane_shape, tile_shape, background=plane).astype(vol.dtype)
+
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            futures = {executor.submit(_process_plane_perz, z): z for z in range(n_axial)}
+            for fut in tqdm(as_completed(futures), total=n_axial, desc="Per-Z fit+apply"):
+                z_idx, corrected_plane = fut.result()
+                vol_output[z_idx] = corrected_plane
 
     out_dask = da.from_zarr(vol_output)
     # Sanity-check the corrected volume before saving. A collapsed (~all-zero)
