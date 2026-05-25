@@ -681,8 +681,7 @@ process generate_stitch_preview {
 
     script:
     """
-    linum_screenshot_omezarr.py ${stitched_slice} "slice_z${slice_id}_stitched.png" \
-        --z_slice 0
+    linum_screenshot_omezarr.py ${stitched_slice} "slice_z${slice_id}_stitched.png"
     """
 
     stub:

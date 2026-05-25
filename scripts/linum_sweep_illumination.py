@@ -104,13 +104,17 @@ def run_one_config(
     smoothness_flatfield: float | None,
     working_size: int | None,
     apply_z: list[int],
+    per_z_fit: bool = False,
 ) -> tuple[dict[int, np.ndarray], np.ndarray, np.ndarray | None, dict]:
-    """Fit BaSiC on the pooled Z-tile stack and apply the model to ``apply_z``.
+    """Fit BaSiC and apply the model to ``apply_z``.
+
+    When ``per_z_fit=False`` (default) fits on the pooled Z-tile stack.
+    When ``per_z_fit=True`` fits a separate model per plane in ``apply_z``.
 
     Returns
     -------
     corrected : dict mapping z-index -> corrected (float32, clipped >= 0)
-    flatfield : (ty, tx) float32 array
+    flatfield : (ty, tx) float32 array (representative, from first successful fit)
     darkfield : (ty, tx) float32 array or None
     stats     : dict with fit diagnostics
     """
@@ -118,67 +122,117 @@ def run_one_config(
     plane_shape: tuple[int, int] = (vol.shape[1], vol.shape[2])
     tiles_per_plane = (plane_shape[0] // tile_shape[0]) * (plane_shape[1] // tile_shape[1])
 
-    fit_max_eff = max(fit_max_samples, tiles_per_plane)
-    n_planes = min(n_axial, max(1, fit_max_eff // tiles_per_plane))
-    fit_z = np.arange(n_axial) if n_planes >= n_axial else np.linspace(0, n_axial - 1, n_planes, dtype=int)
+    def _fit_basic_on(pool_arr: np.ndarray) -> np.ndarray | None:
+        basic_kwargs: dict = {"get_darkfield": False, "max_iterations": max_iterations}
+        if smoothness_flatfield is not None:
+            basic_kwargs["smoothness_flatfield"] = smoothness_flatfield
+        if working_size is not None:
+            basic_kwargs["working_size"] = working_size
+        opt = BaSiC(**basic_kwargs)
+        opt.fit(pool_arr)
+        ff = np.asarray(opt.flatfield, dtype=np.float32)
+        if np.isnan(ff).any() or ff.max() <= 0:
+            return None
+        return ff
 
-    pool_parts = [_split_into_tiles(vol[int(z)], tile_shape) for z in fit_z]
-    pool = np.concatenate(pool_parts, axis=0)
-    del pool_parts
-
-    # drop out-of-tile zero-padded grid positions
-    keep = np.mean(pool != 0, axis=(1, 2)) > 0.5
-    pool = pool[keep]
-    n_fit = pool.shape[0]
-    if n_fit == 0:
-        msg = "No non-empty tiles in fit pool."
-        raise RuntimeError(msg)
-
-    if percentile_max is not None:
-        pool = np.clip(pool, None, float(np.percentile(pool, percentile_max)))
-
-    if use_darkfield:
-        darkfield: np.ndarray | None = np.percentile(pool, darkfield_percentile, axis=0).astype(np.float32)
-        assert darkfield is not None
-        pool = np.clip(pool - darkfield[None], 0.0, None)
-    else:
-        darkfield = None
-
-    basic_kwargs: dict = {"get_darkfield": False, "max_iterations": max_iterations}
-    if smoothness_flatfield is not None:
-        basic_kwargs["smoothness_flatfield"] = smoothness_flatfield
-    if working_size is not None:
-        basic_kwargs["working_size"] = working_size
-    opt = BaSiC(**basic_kwargs)
-    opt.fit(pool)
-    del pool
-
-    flatfield = np.asarray(opt.flatfield, dtype=np.float32)
-    if np.isnan(flatfield).any() or flatfield.max() <= 0:
-        msg = f"BaSiC flatfield diverged: min={flatfield.min():.4g} max={flatfield.max():.4g}"
-        raise RuntimeError(msg)
-
-    ff = flatfield[None]
-    df_tile = darkfield[None] if darkfield is not None else None
-
-    def _apply(tiles: np.ndarray) -> np.ndarray:
+    def _apply_ff(tiles: np.ndarray, ff: np.ndarray, df: np.ndarray | None) -> np.ndarray:
         x = tiles.astype(np.float32, copy=False)
-        if df_tile is not None:
-            x = x - df_tile
-        return x / ff
+        if df is not None:
+            x = x - df[None]
+        return x / ff[None]
+
+    def _prep(tiles_arr: np.ndarray, df: np.ndarray | None) -> np.ndarray:
+        if percentile_max is not None:
+            tiles_arr = np.clip(tiles_arr, None, float(np.percentile(tiles_arr, percentile_max)))
+        if df is not None:
+            tiles_arr = np.clip(tiles_arr - df[None], 0.0, None)
+        return tiles_arr
 
     corrected: dict[int, np.ndarray] = {}
-    for z in tqdm(apply_z, desc="  Applying", leave=False):
-        plane = vol[z]
-        tiles = _split_into_tiles(plane, tile_shape)
-        empty_mask = np.all(tiles == 0, axis=(1, 2))
-        c = _apply(tiles)
-        if empty_mask.any():
-            c[empty_mask] = 0.0
-        c = np.nan_to_num(c, nan=0.0, posinf=0.0, neginf=0.0)
-        corrected[z] = np.clip(_assemble_from_tiles(c, plane_shape, tile_shape), 0.0, None)
 
-    df = darkfield  # local alias for stats
+    if not per_z_fit:
+        # ── Global fit ───────────────────────────────────────────────────────
+        fit_max_eff = max(fit_max_samples, tiles_per_plane)
+        n_planes = min(n_axial, max(1, fit_max_eff // tiles_per_plane))
+        fit_z = np.arange(n_axial) if n_planes >= n_axial else np.linspace(0, n_axial - 1, n_planes, dtype=int)
+
+        pool_parts = [_split_into_tiles(vol[int(z)], tile_shape) for z in fit_z]
+        pool = np.concatenate(pool_parts, axis=0)
+        del pool_parts
+
+        keep = np.mean(pool != 0, axis=(1, 2)) > 0.5
+        pool = pool[keep]
+        n_fit = pool.shape[0]
+        if n_fit == 0:
+            msg = "No non-empty tiles in fit pool."
+            raise RuntimeError(msg)
+
+        darkfield: np.ndarray | None = (
+            np.percentile(pool, darkfield_percentile, axis=0).astype(np.float32) if use_darkfield else None
+        )
+        pool = _prep(pool, darkfield)
+
+        flatfield = _fit_basic_on(pool)
+        del pool
+        if flatfield is None:
+            msg = f"BaSiC flatfield diverged: fit on {n_fit} tiles."
+            raise RuntimeError(msg)
+
+        for z in tqdm(apply_z, desc="  Applying", leave=False):
+            plane = vol[z]
+            tiles = _split_into_tiles(plane, tile_shape)
+            empty_mask = np.all(tiles == 0, axis=(1, 2))
+            c = _apply_ff(tiles, flatfield, darkfield)
+            if empty_mask.any():
+                c[empty_mask] = 0.0
+            c = np.nan_to_num(c, nan=0.0, posinf=0.0, neginf=0.0)
+            corrected[z] = np.clip(_assemble_from_tiles(c, plane_shape, tile_shape), 0.0, None)
+
+    else:
+        # ── Per-Z fit ────────────────────────────────────────────────────────
+        min_tiles = max(4, tiles_per_plane // 4)
+        flatfield = None
+        darkfield = None
+        n_fit = 0
+
+        for z in tqdm(apply_z, desc="  Per-Z fit+apply", leave=False):
+            plane = vol[z]
+            tiles = _split_into_tiles(plane, tile_shape)
+            keep = np.mean(tiles != 0, axis=(1, 2)) > 0.5
+            tiles_fit = tiles[keep].astype(np.float32)
+
+            if tiles_fit.shape[0] < min_tiles:
+                corrected[z] = np.clip(_assemble_from_tiles(tiles.astype(np.float32), plane_shape, tile_shape), 0.0, None)
+                continue
+
+            df_z: np.ndarray | None = (
+                np.percentile(tiles_fit, darkfield_percentile, axis=0).astype(np.float32) if use_darkfield else None
+            )
+            tiles_prepped = _prep(tiles_fit, df_z)
+            ff_z = _fit_basic_on(tiles_prepped)
+
+            if ff_z is None:
+                corrected[z] = np.clip(_assemble_from_tiles(tiles.astype(np.float32), plane_shape, tile_shape), 0.0, None)
+                continue
+
+            # Store representative FF/DF from the first successful fit
+            if flatfield is None:
+                flatfield = ff_z
+                darkfield = df_z
+                n_fit = tiles_fit.shape[0]
+
+            empty_mask = np.all(tiles == 0, axis=(1, 2))
+            c = _apply_ff(tiles.astype(np.float32), ff_z, df_z)
+            if empty_mask.any():
+                c[empty_mask] = 0.0
+            c = np.nan_to_num(c, nan=0.0, posinf=0.0, neginf=0.0)
+            corrected[z] = np.clip(_assemble_from_tiles(c, plane_shape, tile_shape), 0.0, None)
+
+        if flatfield is None:
+            msg = "Per-Z fit: no plane had enough tiles for a successful BaSiC fit."
+            raise RuntimeError(msg)
+
+    df = darkfield  # alias for stats
     stats: dict = {
         "n_fit_tiles": n_fit,
         "ff_min": float(flatfield.min()),
@@ -347,6 +401,20 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "Smaller = faster but less spatial detail in the flatfield.\n"
         "'none' keeps BaSiC default (128). Try '64,128'.  [%(default)s]",
     )
+    p.add_argument(
+        "--per_z_fit",
+        default="false",
+        help="Comma-sep: true and/or false.  When true, fits a separate BaSiC\n"
+        "model per Z plane instead of a single global model.\n"
+        "E.g. 'true,false'  [%(default)s]",
+    )
+    p.add_argument(
+        "--tile_fov_mm",
+        type=float,
+        default=0.0,
+        help="Acquisition tile field-of-view in mm.  When > 0, overrides the\n"
+        "chunk-derived tile size (same as pipeline param tile_fov_mm).  [%(default)s]",
+    )
 
     # output control
     p.add_argument(
@@ -391,8 +459,14 @@ def main() -> None:
 
     # ── load volume once ────────────────────────────────────────────────────
     print(f"Loading {args.input_zarr} (level {args.level})…")
-    vol_lazy, _ = read_omezarr(Path(args.input_zarr), level=args.level)
-    tile_shape: tuple[int, int] = (int(vol_lazy.chunks[1]), int(vol_lazy.chunks[2]))
+    vol_lazy, resolution = read_omezarr(Path(args.input_zarr), level=args.level)
+    if args.tile_fov_mm > 0:
+        pixel_size_mm = float(resolution[1])
+        tile_px = round(args.tile_fov_mm / pixel_size_mm)
+        tile_shape: tuple[int, int] = (tile_px, tile_px)
+        print(f"tile_fov_mm={args.tile_fov_mm}: tile_size_px={tile_px} (pixel_size={pixel_size_mm:.4f}mm/px)")
+    else:
+        tile_shape = (int(vol_lazy.chunks[1]), int(vol_lazy.chunks[2]))
     print(f"  shape={vol_lazy.shape}  tile={tile_shape}  dtype={vol_lazy.dtype}")
     print("  Reading into RAM…")
     vol: np.ndarray = np.asarray(vol_lazy).astype(np.float32)
@@ -410,17 +484,20 @@ def main() -> None:
         max_iters = [int(x) for x in args.max_iterations.split(",")]
         smooth_ffs = _parse_float_none_list(args.smoothness_flatfield)
         working_sizes = _parse_float_none_list(args.working_size)
+        per_z_fits = _parse_bool_list(args.per_z_fit)
     except ValueError as exc:
         p.error(str(exc))
 
-    raw_grid = list(itertools.product(p_maxes, use_darks, df_percs, fit_samps, max_iters, smooth_ffs, working_sizes))
+    raw_grid = list(
+        itertools.product(p_maxes, use_darks, df_percs, fit_samps, max_iters, smooth_ffs, working_sizes, per_z_fits)
+    )
 
     # de-duplicate: when use_darkfield=False, df_percentile is irrelevant
     seen: set[tuple] = set()
     configs: list[tuple] = []
     for c in raw_grid:
-        pmax, use_dark, df_p, samp, iters, smooth_ff, ws = c
-        key = (pmax, use_dark, df_p if use_dark else "N/A", samp, iters, smooth_ff, ws)
+        pmax, use_dark, df_p, samp, iters, smooth_ff, ws, per_z = c
+        key = (pmax, use_dark, df_p if use_dark else "N/A", samp, iters, smooth_ff, ws, per_z)
         if key not in seen:
             seen.add(key)
             configs.append(c)
@@ -432,15 +509,16 @@ def main() -> None:
 
     summary_rows: list[dict] = []
 
-    for idx, (pmax, use_dark, df_p, samp, iters, smooth_ff, ws) in enumerate(configs, start=1):
+    for idx, (pmax, use_dark, df_p, samp, iters, smooth_ff, ws, per_z) in enumerate(configs, start=1):
         pmax_s = f"p{pmax:.1f}" if pmax is not None else "pNone"
         df_s = f"_df{df_p:.0f}" if use_dark else "_nodf"
         sm_s = f"_sm{smooth_ff:.3f}" if smooth_ff is not None else ""
         ws_s = f"_ws{int(ws)}" if ws is not None else ""
-        label = f"c{idx:03d}_{pmax_s}{df_s}_s{samp}_i{iters}{sm_s}{ws_s}"
+        pz_s = "_perz" if per_z else "_global"
+        label = f"c{idx:03d}_{pmax_s}{df_s}_s{samp}_i{iters}{sm_s}{ws_s}{pz_s}"
         desc = (
             f"pmax={pmax}  dark={use_dark}  dfp={df_p if use_dark else '-'}  "
-            f"samples={samp}  iters={iters}  smooth={smooth_ff}  ws={ws}"
+            f"samples={samp}  iters={iters}  smooth={smooth_ff}  ws={ws}  per_z_fit={per_z}"
         )
         print(f"\n[{idx}/{len(configs)}] {label}")
         print(f"  {desc}")
@@ -459,6 +537,7 @@ def main() -> None:
                 smoothness_flatfield=smooth_ff,
                 working_size=int(ws) if ws is not None else None,
                 apply_z=apply_z,
+                per_z_fit=per_z,
             )
         except Exception as exc:
             print(f"  FAILED: {exc}")
@@ -472,6 +551,7 @@ def main() -> None:
                     "df_percentile": df_p,
                     "fit_max_samples": samp,
                     "max_iterations": iters,
+                    "per_z_fit": per_z,
                     "n_fit_tiles": "",
                     "ff_min": "",
                     "ff_max": "",
@@ -517,6 +597,7 @@ def main() -> None:
                 "max_iterations": iters,
                 "smoothness_flatfield": smooth_ff,
                 "working_size": ws,
+                "per_z_fit": per_z,
                 "n_fit_tiles": stats["n_fit_tiles"],
                 "ff_min": round(stats["ff_min"], 4),
                 "ff_max": round(stats["ff_max"], 4),
