@@ -58,6 +58,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from basicpy import BaSiC
+from scipy.ndimage import gaussian_filter
 from tqdm.auto import tqdm
 
 from linumpy.io.zarr import read_omezarr
@@ -106,6 +107,7 @@ def run_one_config(
     working_size: int | None,
     apply_z: list[int],
     per_z_fit: bool = False,
+    darkfield_smooth_sigma: float = 0.0,
     n_workers: int = 1,
 ) -> tuple[dict[int, np.ndarray], np.ndarray, np.ndarray | None, dict]:
     """Fit BaSiC and apply the model to ``apply_z``.
@@ -172,6 +174,8 @@ def run_one_config(
         darkfield: np.ndarray | None = (
             np.percentile(pool, darkfield_percentile, axis=0).astype(np.float32) if use_darkfield else None
         )
+        if darkfield is not None and darkfield_smooth_sigma > 0:
+            darkfield = gaussian_filter(darkfield, sigma=darkfield_smooth_sigma).astype(np.float32)
         pool = _prep(pool, darkfield)
 
         flatfield = _fit_basic_on(pool)
@@ -210,6 +214,8 @@ def run_one_config(
             df_z: np.ndarray | None = (
                 np.percentile(tiles_fit, darkfield_percentile, axis=0).astype(np.float32) if use_darkfield else None
             )
+            if df_z is not None and darkfield_smooth_sigma > 0:
+                df_z = gaussian_filter(df_z, sigma=darkfield_smooth_sigma).astype(np.float32)
             ff_z = _fit_basic_on(_prep(tiles_fit, df_z))
             if ff_z is None:
                 return z, fallback, None, None, 0
@@ -412,6 +418,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "E.g. 'true,false'  [%(default)s]",
     )
     p.add_argument(
+        "--darkfield_smooth_sigma",
+        default="none",
+        help="Comma-sep Gaussian sigma(s) for spatially smoothing the estimated darkfield.\n"
+        "Reduces pixel-level noise in the per-pixel percentile estimate.\n"
+        "'none' or 0 disables smoothing. E.g. 'none,1.5,3.0'  [%(default)s]",
+    )
+    p.add_argument(
         "--tile_fov_mm",
         type=float,
         default=0.0,
@@ -496,19 +509,22 @@ def main() -> None:
         smooth_ffs = _parse_float_none_list(args.smoothness_flatfield)
         working_sizes = _parse_float_none_list(args.working_size)
         per_z_fits = _parse_bool_list(args.per_z_fit)
+        df_smooth_sigmas = _parse_float_none_list(args.darkfield_smooth_sigma)
     except ValueError as exc:
         p.error(str(exc))
 
     raw_grid = list(
-        itertools.product(p_maxes, use_darks, df_percs, fit_samps, max_iters, smooth_ffs, working_sizes, per_z_fits)
+        itertools.product(
+            p_maxes, use_darks, df_percs, fit_samps, max_iters, smooth_ffs, working_sizes, per_z_fits, df_smooth_sigmas
+        )
     )
 
-    # de-duplicate: when use_darkfield=False, df_percentile is irrelevant
+    # de-duplicate: when use_darkfield=False, df_percentile and df_smooth_sigma are irrelevant
     seen: set[tuple] = set()
     configs: list[tuple] = []
     for c in raw_grid:
-        pmax, use_dark, df_p, samp, iters, smooth_ff, ws, per_z = c
-        key = (pmax, use_dark, df_p if use_dark else "N/A", samp, iters, smooth_ff, ws, per_z)
+        pmax, use_dark, df_p, samp, iters, smooth_ff, ws, per_z, df_sig = c
+        key = (pmax, use_dark, df_p if use_dark else "N/A", samp, iters, smooth_ff, ws, per_z, df_sig if use_dark else "N/A")
         if key not in seen:
             seen.add(key)
             configs.append(c)
@@ -520,16 +536,17 @@ def main() -> None:
 
     summary_rows: list[dict] = []
 
-    for idx, (pmax, use_dark, df_p, samp, iters, smooth_ff, ws, per_z) in enumerate(configs, start=1):
+    for idx, (pmax, use_dark, df_p, samp, iters, smooth_ff, ws, per_z, df_sig) in enumerate(configs, start=1):
         pmax_s = f"p{pmax:.1f}" if pmax is not None else "pNone"
         df_s = f"_df{df_p:.0f}" if use_dark else "_nodf"
         sm_s = f"_sm{smooth_ff:.3f}" if smooth_ff is not None else ""
         ws_s = f"_ws{int(ws)}" if ws is not None else ""
         pz_s = "_perz" if per_z else "_global"
-        label = f"c{idx:03d}_{pmax_s}{df_s}_s{samp}_i{iters}{sm_s}{ws_s}{pz_s}"
+        dfsig_s = f"_dfsig{df_sig:.2f}" if (df_sig is not None and df_sig > 0) else ""
+        label = f"c{idx:03d}_{pmax_s}{df_s}_s{samp}_i{iters}{sm_s}{ws_s}{pz_s}{dfsig_s}"
         desc = (
             f"pmax={pmax}  dark={use_dark}  dfp={df_p if use_dark else '-'}  "
-            f"samples={samp}  iters={iters}  smooth={smooth_ff}  ws={ws}  per_z_fit={per_z}"
+            f"samples={samp}  iters={iters}  smooth={smooth_ff}  ws={ws}  per_z_fit={per_z}  df_smooth_sigma={df_sig}"
         )
         print(f"\n[{idx}/{len(configs)}] {label}")
         print(f"  {desc}")
@@ -549,6 +566,7 @@ def main() -> None:
                 working_size=int(ws) if ws is not None else None,
                 apply_z=apply_z,
                 per_z_fit=per_z,
+                darkfield_smooth_sigma=df_sig if df_sig is not None else 0.0,
                 n_workers=args.n_workers,
             )
         except Exception as exc:
@@ -564,6 +582,7 @@ def main() -> None:
                     "fit_max_samples": samp,
                     "max_iterations": iters,
                     "per_z_fit": per_z,
+                    "darkfield_smooth_sigma": df_sig,
                     "n_fit_tiles": "",
                     "ff_min": "",
                     "ff_max": "",
@@ -610,6 +629,7 @@ def main() -> None:
                 "smoothness_flatfield": smooth_ff,
                 "working_size": ws,
                 "per_z_fit": per_z,
+                "darkfield_smooth_sigma": df_sig,
                 "n_fit_tiles": stats["n_fit_tiles"],
                 "ff_min": round(stats["ff_min"], 4),
                 "ff_max": round(stats["ff_max"], 4),

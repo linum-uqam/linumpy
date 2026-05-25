@@ -19,6 +19,7 @@ import dask.array as da
 import numpy as np
 import zarr
 from basicpy import BaSiC
+from scipy.ndimage import gaussian_filter
 from tqdm.auto import tqdm
 
 from linumpy.cli.args import add_processes_arg
@@ -98,6 +99,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "using only tiles from that plane. This captures depth-dependent\n"
         "illumination variation caused by focal curvature. When disabled (default)\n"
         "a single model is fit across all Z planes (faster, less tile jitter). [%(default)s]",
+    )
+    p.add_argument(
+        "--darkfield_smooth_sigma",
+        type=float,
+        default=0.0,
+        help="Gaussian sigma for spatially smoothing the estimated darkfield image.\n"
+        "Reduces pixel-level noise in the per-pixel percentile estimate. 0 disables. [%(default)s]",
     )
     p.add_argument(
         "--use_gpu",
@@ -241,8 +249,10 @@ def main() -> None:
 
         if args.use_darkfield:
             darkfield = np.percentile(fit_pool_arr, args.darkfield_percentile, axis=0).astype(np.float32)
+            if args.darkfield_smooth_sigma > 0:
+                darkfield = gaussian_filter(darkfield, sigma=args.darkfield_smooth_sigma).astype(np.float32)
             print(
-                f"Estimated darkfield (p{args.darkfield_percentile}): "
+                f"Estimated darkfield (p{args.darkfield_percentile}, sigma={args.darkfield_smooth_sigma}): "
                 f"min={darkfield.min():.4g} max={darkfield.max():.4g} mean={darkfield.mean():.4g}"
             )
         else:
@@ -314,6 +324,8 @@ def main() -> None:
 
             if args.use_darkfield:
                 darkfield_z = np.percentile(tiles_fit, args.darkfield_percentile, axis=0).astype(np.float32)
+                if args.darkfield_smooth_sigma > 0:
+                    darkfield_z = gaussian_filter(darkfield_z, sigma=args.darkfield_smooth_sigma).astype(np.float32)
             else:
                 darkfield_z = None
 
