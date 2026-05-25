@@ -109,11 +109,18 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--darkfield_z_window",
-        type=int,
+        type=lambda v: -1 if v.strip().lower() == "all" else int(v),
         default=0,
         help="Number of neighbouring Z planes to include in the darkfield estimation pool\n"
-        "(per_z_fit only). 0 = current plane only. 1 = z-1, z, z+1 (3x more samples).\n"
-        "Darkfield (camera offset) is stable across Z, so neighbours are valid samples. [%(default)s]",
+        "(per_z_fit only). 0 = current plane only. 1 = z+-1 (3x tiles). 'all' = every\n"
+        "Z plane (physically valid: darkfield is depth-independent). [%(default)s]",
+    )
+    p.add_argument(
+        "--flatfield_smooth_sigma",
+        type=float,
+        default=0.0,
+        help="Gaussian sigma for smoothing the BaSiC flatfield after fitting.\n"
+        "Suppresses residual high-frequency tile-period noise in the flatfield. 0 disables. [%(default)s]",
     )
     p.add_argument(
         "--use_gpu",
@@ -216,6 +223,8 @@ def main() -> None:
         ff = np.asarray(opt.flatfield)
         if np.isnan(ff).any() or ff.max() <= 0:
             return None
+        if args.flatfield_smooth_sigma > 0:
+            ff = gaussian_filter(ff.astype(np.float32), sigma=args.flatfield_smooth_sigma).astype(np.float32)
         return ff
 
     def _apply_flatfield(tiles: np.ndarray, ff: np.ndarray, df: np.ndarray | None) -> np.ndarray:
@@ -331,8 +340,16 @@ def main() -> None:
                 return z, plane
 
             if args.use_darkfield:
-                if args.darkfield_z_window > 0:
-                    z_range = range(max(0, z - args.darkfield_z_window), min(n_axial, z + args.darkfield_z_window + 1))
+                if args.darkfield_z_window != 0:
+                    # -1 = all planes; >0 = z±window neighbours
+                    z_range = (
+                        range(n_axial)
+                        if args.darkfield_z_window == -1
+                        else range(
+                            max(0, z - args.darkfield_z_window),
+                            min(n_axial, z + args.darkfield_z_window + 1),
+                        )
+                    )
                     df_parts = []
                     for zz in z_range:
                         p_nb = np.asarray(vol[zz])
