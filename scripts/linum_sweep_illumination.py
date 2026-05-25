@@ -305,10 +305,13 @@ def _save_slice_comparison(
         ax.set_axis_off()
         ax.set_facecolor("black")
 
-    axes[0].imshow(raw_plane, cmap="magma", vmin=0, vmax=_display_vmax(raw_plane))
+    # Shared vmax for raw/corrected so the correction effect is visible
+    shared_vmax = max(_display_vmax(raw_plane), _display_vmax(corr_plane))
+
+    axes[0].imshow(raw_plane, cmap="magma", vmin=0, vmax=shared_vmax)
     axes[0].set_title("RAW", color="white", fontsize=9)
 
-    axes[1].imshow(corr_plane, cmap="magma", vmin=0, vmax=_display_vmax(corr_plane))
+    axes[1].imshow(corr_plane, cmap="magma", vmin=0, vmax=shared_vmax)
     axes[1].set_title("CORRECTED", color="white", fontsize=9)
 
     axes[2].imshow(flatfield, cmap="viridis")
@@ -346,8 +349,11 @@ def _save_aip_grid(
         raw_aip = raw_vol[z0:z1].mean(axis=0)
         corr_aip = corr_vol[z0:z1].mean(axis=0)
 
+        # Shared vmax so raw/corrected are on the same scale and differences are visible
+        shared_vmax = max(_display_vmax(raw_aip), _display_vmax(corr_aip))
+
         for row, (aip, label) in enumerate([(raw_aip, "RAW"), (corr_aip, "CORR")]):
-            axes[row, col].imshow(aip, cmap="magma", vmin=0, vmax=_display_vmax(aip))
+            axes[row, col].imshow(aip, cmap="magma", vmin=0, vmax=shared_vmax)
             axes[row, col].set_title(f"{label} z{z0}-{z1 - 1}", color="white", fontsize=7)
             axes[row, col].set_axis_off()
             axes[row, col].set_facecolor("black")
