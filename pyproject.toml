@@ -134,6 +134,8 @@ docs = [
 "linum_extract_pyramid_levels.py" = "scripts.linum_extract_pyramid_levels:main"
 "linum_fix_galvo_shift_zarr.py" = "scripts.linum_fix_galvo_shift_zarr:main"
 "linum_fix_illumination_3d.py" = "scripts.linum_fix_illumination_3d:main"
+"linum_fix_illumination_basic.py" = "scripts.linum_fix_illumination_basic:main"
+"linum_basic_preview.py" = "scripts.linum_basic_preview:main"
 "linum_sweep_illumination.py" = "scripts.linum_sweep_illumination:main"
 "linum_generate_mosaic_aips.py" = "scripts.linum_generate_mosaic_aips:main"
 "linum_generate_pipeline_report.py" = "scripts.linum_generate_pipeline_report:main"
@@ -233,6 +235,8 @@ convention = "numpy"
 # These scripts must import linumpy.config.threads (or preload CUDA libs)
 # before any other imports, so E402 is unavoidable.
 "scripts/linum_fix_illumination_3d.py" = ["E402"]
+"scripts/linum_fix_illumination_basic.py" = ["E402"]
+"scripts/linum_basic_preview.py" = ["E402"]
 "scripts/linum_sweep_illumination.py" = ["E402"]
 "scripts/linum_normalize_intensities_per_slice.py" = ["E402"]
 "scripts/linum_correct_bias_field.py" = ["E402"]
