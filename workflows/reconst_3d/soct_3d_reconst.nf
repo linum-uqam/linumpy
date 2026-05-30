@@ -142,7 +142,9 @@ workflow {
     // Stage 1: Preprocessing
     resampled = params.resolution > 0 ? resample_mosaic_grid(inputSlices) : inputSlices
     focal_fixed = params.fix_curvature_enabled ? fix_focal_curvature(resampled) : resampled
-    illum_fixed = params.fix_illum_enabled ? fix_illumination(focal_fixed) : focal_fixed
+    illum_fixed = params.fix_illum_enabled \
+        ? (params.fix_illum_backend == 'linum-basic' ? fix_illumination_basic(focal_fixed) : fix_illumination(focal_fixed)) \
+        : focal_fixed
 
     // Stage 2: XY Stitching (image-registration-based blend refinement)
     if (params.stitch_global_transform) {
@@ -578,6 +580,39 @@ process fix_illumination {
     def per_z_fit_flag = params.fix_illum_per_z_fit ? "--per_z_fit" : "--no-per_z_fit"
     """
     linum_fix_illumination_3d.py ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" \
+        --n_processes ${params.processes} \
+        --percentile_max ${params.clip_percentile_upper} ${gpu_flag} --n_levels 0 \
+        --fit_max_samples ${params.fix_illum_fit_max_samples} \
+        --max_iterations ${params.fix_illum_max_iterations} \
+        --darkfield_percentile ${params.fix_illum_darkfield_percentile} \
+        --smoothness_flatfield ${params.fix_illum_smoothness_flatfield} \
+        ${tile_fov_flag} \
+        ${darkfield_flag} \
+        ${per_z_fit_flag}
+    """
+
+    stub:
+    """
+    mkdir -p mosaic_grid_z${slice_id}_illum_fix.ome.zarr
+    """
+}
+
+process fix_illumination_basic {
+    cpus params.processes
+
+    input:
+    tuple val(slice_id), path(mosaic_grid)
+
+    output:
+    tuple val(slice_id), path("mosaic_grid_z${slice_id}_illum_fix.ome.zarr")
+
+    script:
+    def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
+    def darkfield_flag = params.fix_illum_darkfield ? "--use_darkfield" : "--no-use_darkfield"
+    def tile_fov_flag = params.tile_fov_mm != null ? "--tile_fov_mm ${params.tile_fov_mm}" : ""
+    def per_z_fit_flag = params.fix_illum_per_z_fit ? "--per_z_fit" : "--no-per_z_fit"
+    """
+    linum_fix_illumination_basic.py ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" \
         --n_processes ${params.processes} \
         --percentile_max ${params.clip_percentile_upper} ${gpu_flag} --n_levels 0 \
         --fit_max_samples ${params.fix_illum_fit_max_samples} \

@@ -39,6 +39,7 @@ dependencies = [
     "pqdm",
     "hyperactive",
     "basicpy",
+    "linum-basic[viz]",
     "zarr>=3.2.0",
     "ome-zarr>=0.16.0",
     "napari",
@@ -188,6 +189,10 @@ override-dependencies = [
     "scipy",
     "numpy",
 ]
+
+[tool.uv.sources]
+# linum-basic is not published on PyPI; resolve it from the lab repository.
+linum-basic = { git = "https://github.com/linum-uqam/Linum-BaSiC.git", branch = "algorithm-tuning" }
 
 [tool.pytest.ini_options]
 filterwarnings = [
