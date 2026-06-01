@@ -59,7 +59,7 @@ y_shift = mosaic_ymin[fixed] - mosaic_ymin[moving]
 ### Script
 
 ```bash
-linum_estimate_xy_shift_from_metadata.py <tiles_directory> <output_file> [--n_processes N]
+linum-estimate-xy-shift-from-metadata <tiles_directory> <output_file> [--n_processes N]
 ```
 
 ### Process
@@ -74,7 +74,7 @@ linum_estimate_xy_shift_from_metadata.py <tiles_directory> <output_file> [--n_pr
 ### Source Code Reference
 
 ```python
-# From linum_estimate_xy_shift_from_metadata.py
+# From linum-estimate-xy-shift-from-metadata
 
 # Compute the shift between slices in mm
 x_shifts_mm = []
@@ -96,7 +96,7 @@ y_shift_px = np.array(y_shifts_mm) / tile_resolution[1]
 
 ### Common Space Alignment
 
-The `linum_align_mosaics_3d_from_shifts.py` script uses shifts to bring all slices into a common coordinate space:
+The `linum-align-mosaics-3d-from-shifts` script uses shifts to bring all slices into a common coordinate space:
 
 1. **Load shifts**: Read all pairwise shifts from CSV
 2. **Compute cumulative shifts**: Sum shifts from first slice to each subsequent slice
@@ -190,11 +190,11 @@ Uncorrected, these errors cause slices to drift out of the common volume.
 
 ### Solution: Re-homing Detection (pipeline default)
 
-Use `linum_detect_rehoming.py` (run automatically by the 3D reconstruction
+Use `linum-detect-rehoming` (run automatically by the 3D reconstruction
 pipeline when `detect_rehoming = true`) to emit a corrected shifts CSV:
 
 ```bash
-linum_detect_rehoming.py shifts_xy.csv shifts_xy_clean.csv \
+linum-detect-rehoming shifts_xy.csv shifts_xy_clean.csv \
     --return_fraction 0.4 \
     --max_shift_mm 0.5 \
     --tile_fov_mm 0.875   # only for legacy shifts files
@@ -212,7 +212,7 @@ steps are zeroed; genuine re-homing events (large step that stays) are preserved
 
 The output CSV adds a `reliable` column (`0` when the corrected step is still
 large or uncertain), consumed downstream by
-`linum_align_mosaics_3d_from_shifts.py --refine_unreliable`.
+`linum-align-mosaics-3d-from-shifts --refine_unreliable`.
 
 ### Pipeline Configuration
 
@@ -235,11 +235,11 @@ params {
 
 ### Analysing shifts independently
 
-Use `linum_analyze_shifts.py` to produce a drift report and outlier plot
+Use `linum-analyze-shifts` to produce a drift report and outlier plot
 without modifying the shifts file:
 
 ```bash
-linum_analyze_shifts.py shifts_xy.csv output_dir/ --iqr_multiplier 1.5
+linum-analyze-shifts shifts_xy.csv output_dir/ --iqr_multiplier 1.5
 ```
 
 ---

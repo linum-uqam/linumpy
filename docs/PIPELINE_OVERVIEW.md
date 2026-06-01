@@ -740,13 +740,13 @@ You can regenerate reports from existing metrics files:
 
 ```bash
 # HTML report (recommended)
-linum_generate_pipeline_report.py /path/to/pipeline/output report.html --format html
+linum-generate-pipeline-report /path/to/pipeline/output report.html --format html
 
 # Text report
-linum_generate_pipeline_report.py /path/to/pipeline/output report.txt --format text
+linum-generate-pipeline-report /path/to/pipeline/output report.txt --format text
 
 # Verbose report with all details
-linum_generate_pipeline_report.py /path/to/pipeline/output report.html --verbose
+linum-generate-pipeline-report /path/to/pipeline/output report.html --verbose
 ```
 
 ### Interpreting the Report
@@ -811,7 +811,7 @@ Common issues indicated by metrics:
 
 When working with a subset of slices:
 
-1. Generate slice config: `linum_generate_slice_config.py`
+1. Generate slice config: `linum-generate-slice-config`
 2. Edit `slice_config.csv` to set `use=false` for excluded slices
 3. Run reconstruction with `--slice_config` parameter
 

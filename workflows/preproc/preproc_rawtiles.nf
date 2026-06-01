@@ -68,7 +68,7 @@ process create_mosaic_grid {
     // Select GPU or CPU script based on use_gpu parameter
     def gpu_opts: String = params.use_gpu ? "--use_gpu --galvo_threshold ${params.galvo_confidence_threshold}" : "--no-use_gpu"
     """
-    linum_create_mosaic_grid_3d.py mosaic_grid_3d_z${slice_id}.ome.zarr --from_tiles_list ${tiles} --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution} --sharding_factor ${params.sharding_factor} ${options} ${gpu_opts}
+    linum-create-mosaic-grid-3d mosaic_grid_3d_z${slice_id}.ome.zarr --from_tiles_list ${tiles} --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution} --sharding_factor ${params.sharding_factor} ${options} ${gpu_opts}
     """
 
     stub:
@@ -89,7 +89,7 @@ process generate_aip {
     script:
     def gpu_opts: String = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
     """
-    linum_aip_png.py ${mosaic_grid} aip_z${slice_id}.png ${gpu_opts}
+    linum-aip-png ${mosaic_grid} aip_z${slice_id}.png ${gpu_opts}
     """
 
     stub:
@@ -110,7 +110,7 @@ process generate_mosaic_preview {
 
     script:
     """
-    linum_screenshot_omezarr.py ${mosaic_grid} mosaic_grid_z${slice_id}_preview.png
+    linum-screenshot-omezarr ${mosaic_grid} mosaic_grid_z${slice_id}_preview.png
     """
 
     stub:
@@ -131,7 +131,7 @@ process estimate_xy_shifts_from_metadata {
 
     script:
     """
-    linum_estimate_xy_shift_from_metadata.py ${input_dir} shifts_xy.csv --n_processes ${params.processes}
+    linum-estimate-xy-shift-from-metadata ${input_dir} shifts_xy.csv --n_processes ${params.processes}
     """
 
     stub:
@@ -153,7 +153,7 @@ process generate_slice_config {
     def galvo_opts: String = params.detect_galvo ? "--detect_galvo --tiles_dir ${input_dir} --galvo_threshold ${params.galvo_confidence_threshold}" : ""
     def exclude_first_opt: String = params.exclude_first_slices > 0 ? "--exclude_first ${params.exclude_first_slices}" : "--exclude_first 0"
     """
-    linum_generate_slice_config.py ${shifts_file} slice_config.csv --from_shifts ${exclude_first_opt} ${galvo_opts}
+    linum-generate-slice-config ${shifts_file} slice_config.csv --from_shifts ${exclude_first_opt} ${galvo_opts}
     """
 
     stub:

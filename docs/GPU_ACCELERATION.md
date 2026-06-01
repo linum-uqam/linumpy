@@ -37,8 +37,8 @@ uv pip install 'linumpy[gpu]'           # CUDA 13.x (default)
 uv pip install 'linumpy[gpu-cuda12]'    # CUDA 12.x
 
 # Verify GPU
-linum_gpu_info.py
-linum_diagnose_pipeline.py --benchmark
+linum-gpu-info
+linum-diagnose-pipeline --benchmark
 ```
 
 ---
@@ -80,8 +80,8 @@ uv pip install torch --index-url https://download.pytorch.org/whl/cu121
 Verify:
 
 ```bash
-linum_gpu_info.py
-linum_diagnose_pipeline.py --benchmark
+linum-gpu-info
+linum-diagnose-pipeline --benchmark
 ```
 
 ---
@@ -94,16 +94,16 @@ separate `_gpu.py` variant is needed.
 
 | Script | GPU-accelerated operation | Typical Speedup |
 |--------|--------------------------|-----------------|
-| `linum_estimate_transform.py` | FFT / phase correlation | 8-47x |
-| `linum_create_mosaic_grid_3d.py` | Volume resize | 5-12x |
-| `linum_resample_mosaic_grid.py` | Volume resize | 5-12x |
-| `linum_normalize_intensities_per_slice.py` | Gaussian filter, Otsu threshold | 4-10x |
-| `linum_fix_illumination_3d.py` | BaSiCPy via PyTorch/CUDA | 2-5x |
-| `linum_assess_slice_quality.py` | SSIM, morphology | 3-8x |
-| `linum_aip_png.py` | Mean projection | ≤1x |
-| `linum_generate_mosaic_aips.py` | Mean projection | ≤1x |
-| `linum_correct_bias_field.py` | N4 bias field estimation | varies |
-| `linum_estimate_global_transform.py` | Phase correlation | 8-16x |
+| `linum-estimate-transform` | FFT / phase correlation | 8-47x |
+| `linum-create-mosaic-grid-3d` | Volume resize | 5-12x |
+| `linum-resample-mosaic-grid` | Volume resize | 5-12x |
+| `linum-normalize-intensities-per-slice` | Gaussian filter, Otsu threshold | 4-10x |
+| `linum-fix-illumination-3d` | BaSiCPy via PyTorch/CUDA | 2-5x |
+| `linum-assess-slice-quality` | SSIM, morphology | 3-8x |
+| `linum-aip-png` | Mean projection | ≤1x |
+| `linum-generate-mosaic-aips` | Mean projection | ≤1x |
+| `linum-correct-bias-field` | N4 bias field estimation | varies |
+| `linum-estimate-global-transform` | Phase correlation | 8-16x |
 
 ---
 
@@ -141,10 +141,10 @@ separate `_gpu.py` variant is needed.
 
 ```bash
 # Show status of all GPUs
-linum_gpu_info.py --status
+linum-gpu-info --status
 
 # Select best GPU (most free memory)
-linum_gpu_info.py --select-best
+linum-gpu-info --select-best
 
 # Use specific GPU via environment
 CUDA_VISIBLE_DEVICES=1 nextflow run pipeline.nf --use_gpu true
@@ -176,17 +176,17 @@ print(f"GPU memory used: {mempool.used_bytes() / 1e9:.2f} GB")
 ```bash
 nvidia-smi
 python -c "import cupy; print(cupy.cuda.runtime.getDeviceCount())"
-linum_gpu_info.py
+linum-gpu-info
 ```
 
 ### BaSiCPy / PyTorch CUDA Issues
 
-If `linum_fix_illumination_3d.py` falls back to CPU unexpectedly, verify the
+If `linum-fix-illumination-3d` falls back to CPU unexpectedly, verify the
 PyTorch CUDA build is installed and visible:
 
 ```bash
 python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
-linum_diagnose_pipeline.py --debug-cuda
+linum-diagnose-pipeline --debug-cuda
 ```
 
 Reinstall PyTorch from the matching CUDA index URL (see the BaSiCPy section
@@ -257,7 +257,7 @@ Selection order (when `prefer="auto"`):
 1. **kvikio (GPUDirect Storage, native mode)** — chunks DMA'd directly from NVMe into GPU memory. Fastest. Requires `kvikio` installed, GDS native mode enabled (`/etc/cufile.json`: `allow_compat_mode=false`), and an uncompressed zarr.
 2. **`zarr.config.enable_gpu()`** — host I/O with on-host decode, single H→D copy. Works for any zarr (compressed or not) and is the automatic fallback when GDS is unavailable, in compat mode, or the array is compressed.
 
-You can force a specific path with `prefer="kvikio"` or `prefer="zarr-gpu"`. The legacy `cupy.asarray(zarr.open_array(...)[:])` path is kept only as a reference baseline in `linum_benchmark_kvikio_zarr.py`.
+You can force a specific path with `prefer="kvikio"` or `prefer="zarr-gpu"`. The legacy `cupy.asarray(zarr.open_array(...)[:])` path is kept only as a reference baseline in `linum-benchmark-kvikio-zarr`.
 
 ### Reference benchmark
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_generate_slice_config.py", "--help"])
+    ret = script_runner.run(["linum-generate-slice-config", "--help"])
     assert ret.success
 
 
@@ -21,7 +21,7 @@ def test_from_shifts_file(script_runner, tmp_path):
 
     output = tmp_path / "slice_config.csv"
     ret = script_runner.run(
-        ["linum_generate_slice_config.py", str(shifts_file), str(output), "--from_shifts", "--exclude_first", "0"]
+        ["linum-generate-slice-config", str(shifts_file), str(output), "--from_shifts", "--exclude_first", "0"]
     )
     assert ret.success
     assert output.exists()
@@ -51,7 +51,7 @@ def test_from_shifts_file_with_exclude(script_runner, tmp_path):
     output = tmp_path / "slice_config.csv"
     ret = script_runner.run(
         [
-            "linum_generate_slice_config.py",
+            "linum-generate-slice-config",
             str(shifts_file),
             str(output),
             "--from_shifts",

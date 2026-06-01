@@ -2,5 +2,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_download_allen.py", "--help"])
+    ret = script_runner.run(["linum-download-allen", "--help"])
     assert ret.success

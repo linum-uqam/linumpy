@@ -2,5 +2,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_align_mosaics_3d_from_shifts.py", "--help"])
+    ret = script_runner.run(["linum-align-mosaics-3d-from-shifts", "--help"])
     assert ret.success

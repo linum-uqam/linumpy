@@ -140,8 +140,8 @@ CuPy-backed versions of hot paths. Each public entry point either takes a
 * `gpu.bias_field`, `gpu.n4`, `gpu.bspline` — GPU N4 and B-spline grid.
 * `gpu.image_quality` — GPU image-quality metrics.
 * `gpu.registration`, `gpu.corrections` — GPU registration and correction
-  passes used by `linum_estimate_transform.py`,
-  `linum_normalize_intensities_per_slice.py`, etc.
+  passes used by `linum-estimate-transform`,
+  `linum-normalize-intensities-per-slice`, etc.
 * `gpu.zarr_io` — high-level `read_zarr_to_gpu` dispatcher: picks the
   fastest backend available (kvikio/GDS native → `zarr.config.enable_gpu`).
 * `gpu.kvikio_zarr` — kvikio / GPUDirect Storage backend for the dispatcher.

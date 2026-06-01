@@ -2,5 +2,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_estimate_illumination.py", "--help"])
+    ret = script_runner.run(["linum-estimate-illumination", "--help"])
     assert ret.success

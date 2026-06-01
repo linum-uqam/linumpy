@@ -2,5 +2,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_resample_nifti.py", "--help"])
+    ret = script_runner.run(["linum-resample-nifti", "--help"])
     assert ret.success

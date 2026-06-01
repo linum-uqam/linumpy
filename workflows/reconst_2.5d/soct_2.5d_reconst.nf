@@ -94,7 +94,7 @@ process crop_tiles {
 
     script:
     """
-    linum_crop_tiles.py ${mosaic_directory} ${mosaic_directory.baseName}_cropped.tiff --xmin ${params.xmin} --xmax ${params.xmax} --ymin ${params.ymin} --ymax ${params.ymax} --tile_shape ${params.tile_nx} ${params.tile_ny}
+    linum-crop-tiles ${mosaic_directory} ${mosaic_directory.baseName}_cropped.tiff --xmin ${params.xmin} --xmax ${params.xmax} --ymin ${params.ymin} --ymax ${params.ymax} --tile_shape ${params.tile_nx} ${params.tile_ny}
     """
 }
 
@@ -108,7 +108,7 @@ process estimate_illumination_bias {
 
     script:
     """
-    linum_estimate_illumination.py ${mosaic_grid} ${key}_flatfield.nii.gz --tile_shape ${params.nx} ${params.ny} --output_darkfield ${key}_darkfield.nii.gz
+    linum-estimate-illumination ${mosaic_grid} ${key}_flatfield.nii.gz --tile_shape ${params.nx} ${params.ny} --output_darkfield ${key}_darkfield.nii.gz
     """
 }
 
@@ -122,7 +122,7 @@ process compensate_illumination_bias {
 
     script:
     """
-    linum_compensate_illumination.py ${mosaic_grid} ${key}_mosaic_grid_compensated.nii.gz  --flatfield ${flatfield} --darkfield ${darkfield} --tile_shape ${params.nx} ${params.ny}
+    linum-compensate-illumination ${mosaic_grid} ${key}_mosaic_grid_compensated.nii.gz  --flatfield ${flatfield} --darkfield ${darkfield} --tile_shape ${params.nx} ${params.ny}
     """
 }
 
@@ -136,7 +136,7 @@ process estimate_position {
 
     script:
     """
-    linum_estimate_transform.py ${mosaic_grids} position_transform.npy --tile_shape ${params.nx} ${params.ny} --initial_overlap ${params.initial_overlap}
+    linum-estimate-transform ${mosaic_grids} position_transform.npy --tile_shape ${params.nx} ${params.ny} --initial_overlap ${params.initial_overlap}
     """
 }
 
@@ -150,7 +150,7 @@ process stitch_mosaic {
 
     script:
     """
-    linum_stitch_2d.py ${image} ${transform} ${key}_stitched.nii.gz --blending_method diffusion --tile_shape ${params.nx} ${params.ny}
+    linum-stitch-2d ${image} ${transform} ${key}_stitched.nii.gz --blending_method diffusion --tile_shape ${params.nx} ${params.ny}
     """
 }
 
@@ -165,7 +165,7 @@ process stack_mosaic {
 
     script:
     """
-    linum_stack_slices.py ${images} stack.zarr --xy_shifts ${xy_shifts} --resolution_xy ${params.spacing_xy} --resolution_z ${params.spacing_z}
+    linum-stack-slices ${images} stack.zarr --xy_shifts ${xy_shifts} --resolution_xy ${params.spacing_xy} --resolution_z ${params.spacing_z}
     """
 }
 
@@ -179,7 +179,7 @@ process resample_stack {
 
     script:
     """
-    linum_convert_omezarr_to_nifti.py ${stack} stack_10um.nii.gz --resolution ${params.resolution_nifti}
+    linum-convert-omezarr-to-nifti ${stack} stack_10um.nii.gz --resolution ${params.resolution_nifti}
     """
 }
 
@@ -207,6 +207,6 @@ process convert_to_omezarr {
 
     script:
     """
-    linum_convert_zarr_to_omezarr.py ${stack} stack.ome_zarr -r ${params.spacing_z} ${params.spacing_xy} ${params.spacing_xy}
+    linum-convert-zarr-to-omezarr ${stack} stack.ome_zarr -r ${params.spacing_z} ${params.spacing_xy} ${params.spacing_xy}
     """
 }

@@ -2,5 +2,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_compensate_psf_from_model.py", "--help"])
+    ret = script_runner.run(["linum-compensate-psf-from-model", "--help"])
     assert ret.success

@@ -2,5 +2,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_compute_attenuation.py", "--help"])
+    ret = script_runner.run(["linum-compute-attenuation", "--help"])
     assert ret.success

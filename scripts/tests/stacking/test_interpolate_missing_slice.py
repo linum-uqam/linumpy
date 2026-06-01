@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Script-level tests for linum_interpolate_missing_slice.py."""
+"""Script-level tests for linum-interpolate-missing-slice."""
 
 import json
 
@@ -39,7 +39,7 @@ def _save_pair(tmp_path, shape=(8, 48, 48), drift_px=1.0):
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_interpolate_missing_slice.py", "--help"])
+    ret = script_runner.run(["linum-interpolate-missing-slice", "--help"])
     assert ret.success
 
 
@@ -60,7 +60,7 @@ def test_average_method(script_runner, tmp_path):
     save_omezarr(da.from_array(vol_after), slice_after, resolution)
 
     ret = script_runner.run(
-        ["linum_interpolate_missing_slice.py", str(slice_before), str(slice_after), str(output), "--method", "average"]
+        ["linum-interpolate-missing-slice", str(slice_before), str(slice_after), str(output), "--method", "average"]
     )
 
     assert ret.success
@@ -76,7 +76,7 @@ def test_zmorph_method_with_diagnostics_and_manifest(script_runner, tmp_path):
 
     ret = script_runner.run(
         [
-            "linum_interpolate_missing_slice.py",
+            "linum-interpolate-missing-slice",
             str(slice_before),
             str(slice_after),
             str(output),
@@ -136,7 +136,7 @@ def test_zmorph_hard_skips_on_unrelated_volumes(script_runner, tmp_path):
 
     ret = script_runner.run(
         [
-            "linum_interpolate_missing_slice.py",
+            "linum-interpolate-missing-slice",
             str(slice_before),
             str(slice_after),
             str(output),
@@ -201,7 +201,7 @@ def test_finalise_merges_fragments_into_slice_config(script_runner, tmp_path):
 
     ret = script_runner.run(
         [
-            "linum_interpolate_missing_slice.py",
+            "linum-interpolate-missing-slice",
             "--finalise",
             "--slice_config_in",
             str(slice_config_in),
@@ -242,7 +242,7 @@ def test_finalise_stamps_interpolation_failed(script_runner, tmp_path):
 
     ret = script_runner.run(
         [
-            "linum_interpolate_missing_slice.py",
+            "linum-interpolate-missing-slice",
             "--finalise",
             "--slice_config_in",
             str(slice_config_in),
@@ -279,7 +279,7 @@ def test_finalise_no_fragments_copies_slice_config_unchanged(script_runner, tmp_
 
     ret = script_runner.run(
         [
-            "linum_interpolate_missing_slice.py",
+            "linum-interpolate-missing-slice",
             "--finalise",
             "--slice_config_in",
             str(slice_config_in),

@@ -80,7 +80,7 @@ adjust the constants in the function body for your setup.
 ## CLI: `linum_compensate_attenuation_inplace`
 
 ```bash
-linum_compensate_attenuation_inplace.py input.ome.zarr output.ome.zarr \
+linum-compensate-attenuation-inplace input.ome.zarr output.ome.zarr \
     --method {li,liu,smith,vermeer}      # default: li (Li 2020)
     --strength 0.3                       # 1.0 = textbook formula; <1 attenuates
     --k 10                               # XY median filter (voxels); 0 disables
@@ -165,7 +165,7 @@ few voxels for a stable $\hat\mu_E$ fit at that size).
 ## Real-data sweep
 
 Cropped 42×1832×988 OCT slice (10 µm/voxel axial), `--strength 0.3`,
-single-pass `linum_compensate_attenuation_inplace.py`. Drop % is the
+single-pass `linum-compensate-attenuation-inplace`. Drop % is the
 mean intensity drop between the top 1/8 and bottom 1/8 of the volume —
 zero would mean a perfectly flat axial profile.
 

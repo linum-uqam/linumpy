@@ -2,5 +2,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_view_zarr.py", "--help"])
+    ret = script_runner.run(["linum-view-zarr", "--help"])
     assert ret.success

@@ -478,7 +478,7 @@ process analyze_shifts {
 
     script:
     """
-    linum_analyze_shifts.py ${shifts_file} shifts_analysis \
+    linum-analyze-shifts ${shifts_file} shifts_analysis \
         --resolution ${params.resolution} \
         --iqr_multiplier ${params.outlier_iqr_multiplier}
     """
@@ -506,7 +506,7 @@ process generate_report {
     def overview_arg = png ? "--overview_png ${png}" : ""
     def annotated_arg = annotated_png ? "--annotated_png ${annotated_png}" : ""
     """
-    linum_generate_pipeline_report.py ${params.output} ${subject_name}_quality_report.${fmt} \
+    linum-generate-pipeline-report ${params.output} ${subject_name}_quality_report.${fmt} \
         --title "Quality Report: ${subject_name}" \
         --format ${fmt} ${verbose_flag} ${overview_arg} ${annotated_arg}
     """
@@ -534,7 +534,7 @@ process resample_mosaic_grid {
     def prefetch = (params.resample_prefetch ?: 4) as int
     """
     ${gpu_pin_block}
-    linum_resample_mosaic_grid.py ${mosaic_grid} "mosaic_grid_z${slice_id}_resampled.ome.zarr" \
+    linum-resample-mosaic-grid ${mosaic_grid} "mosaic_grid_z${slice_id}_resampled.ome.zarr" \
         -r ${params.resolution} ${gpu_flag} --prefetch ${prefetch} --n_levels 0 -v
     """
 
@@ -554,7 +554,7 @@ process fix_focal_curvature {
     script:
     def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
     """
-    linum_detect_focal_curvature.py ${mosaic_grid} "mosaic_grid_z${slice_id}_focal_fix.ome.zarr" \\
+    linum-detect-focal-curvature ${mosaic_grid} "mosaic_grid_z${slice_id}_focal_fix.ome.zarr" \\
         --n_levels 0 ${gpu_flag}
     """
 
@@ -579,7 +579,7 @@ process fix_illumination {
     def tile_fov_flag = params.tile_fov_mm != null ? "--tile_fov_mm ${params.tile_fov_mm}" : ""
     def per_z_fit_flag = params.fix_illum_per_z_fit ? "--per_z_fit" : "--no-per_z_fit"
     """
-    linum_fix_illumination_3d.py ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" \
+    linum-fix-illumination-3d ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" \
         --n_processes ${params.processes} \
         --percentile_max ${params.clip_percentile_upper} ${gpu_flag} --n_levels 0 \
         --fit_max_samples ${params.fix_illum_fit_max_samples} \
@@ -617,7 +617,7 @@ process fix_illumination_basic {
     def tile_fov_flag = params.tile_fov_mm != null ? "--tile_fov_mm ${params.tile_fov_mm}" : ""
     def per_z_fit_flag = params.fix_illum_per_z_fit ? "--per_z_fit" : "--no-per_z_fit"
     """
-    linum_fix_illumination_basic.py ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" \
+    linum-fix-illumination-basic ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" \
         --n_processes ${params.processes} \
         --percentile_max ${params.clip_percentile_upper} ${gpu_flag} --n_levels 0 \
         --fit_max_samples ${params.fix_illum_fit_max_samples} \
@@ -665,7 +665,7 @@ process estimate_global_transform {
         : ""
     def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
     """
-    linum_estimate_global_transform.py pool_input global_affine.npy \
+    linum-estimate-global-transform pool_input global_affine.npy \
         --overlap_fraction ${params.stitch_overlap_fraction} \
         ${slice_config_arg} \
         ${include_arg} \
@@ -697,7 +697,7 @@ process stitch_3d_with_refinement {
     script:
     def transform_arg = input_transform.name != 'NO_TRANSFORM' ? "--input_transform ${input_transform}" : ""
     """
-    linum_stitch_3d_refined.py ${mosaic_grid} "slice_z${slice_id}_stitch_3d.ome.zarr" \
+    linum-stitch-3d-refined ${mosaic_grid} "slice_z${slice_id}_stitch_3d.ome.zarr" \
         --overlap_fraction ${params.stitch_overlap_fraction} \
         --blending_method ${params.stitch_blending_method} \
         --refinement_mode blend_shift \
@@ -724,7 +724,7 @@ process generate_stitch_preview {
 
     script:
     """
-    linum_screenshot_omezarr.py ${stitched_slice} "slice_z${slice_id}_stitched.png"
+    linum-screenshot-omezarr ${stitched_slice} "slice_z${slice_id}_stitched.png"
     """
 
     stub:
@@ -751,20 +751,20 @@ process beam_profile_correction {
     if (params.compensate_psf_method == 'model')
         """
         set +e
-        linum_compensate_psf_from_model.py ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" \
+        linum-compensate-psf-from-model ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" \
             --zr_initial ${params.compensate_psf_zr_initial}
         rc=\$?
         set -e
         if [ \$rc -ne 0 ]; then
             echo "compensate_psf_from_model failed (rc=\$rc) for slice z${slice_id}; falling back to model_free" >&2
             rm -rf "slice_z${slice_id}_axial_corr.ome.zarr"
-            linum_compensate_psf_model_free.py ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" \
+            linum-compensate-psf-model-free ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" \
                 --percentile_max ${params.clip_percentile_upper} --n_levels 0
         fi
         """
     else
         """
-        linum_compensate_psf_model_free.py ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" \
+        linum-compensate-psf-model-free ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" \
             --percentile_max ${params.clip_percentile_upper} --n_levels 0
         """
 
@@ -786,7 +786,7 @@ process crop_interface {
 
     script:
     """
-    linum_crop_3d_mosaic_below_interface.py ${image} "slice_z${slice_id}_crop_interface.ome.zarr" \
+    linum-crop-3d-mosaic-below-interface ${image} "slice_z${slice_id}_crop_interface.ome.zarr" \
         --depth ${params.crop_interface_out_depth} \
         --crop_before_interface \
         --percentile_max ${params.clip_percentile_upper} --n_levels 0
@@ -807,7 +807,7 @@ process compensate_attenuation {
 
     script:
     """
-    linum_compensate_attenuation_inplace.py ${image} "slice_z${slice_id}_attn_corr.ome.zarr" \
+    linum-compensate-attenuation-inplace ${image} "slice_z${slice_id}_attn_corr.ome.zarr" \
         --method ${params.compensate_attenuation_method} \
         --min_bias ${params.compensate_attenuation_min_bias} \
         --mask_smoothing_sigma ${params.compensate_attenuation_mask_sigma} \
@@ -837,7 +837,7 @@ process normalize {
     script:
     def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
     """
-    linum_normalize_intensities_per_slice.py ${image} "slice_z${slice_id}_normalize.ome.zarr" \
+    linum-normalize-intensities-per-slice ${image} "slice_z${slice_id}_normalize.ome.zarr" \
         --percentile_max ${params.clip_percentile_upper} ${gpu_flag} --n_levels 0
     """
 
@@ -871,7 +871,7 @@ process detect_rehoming_events {
         ? "--slice_config_in ${slice_config_in} --slice_config_out slice_config.csv"
         : ""
     """
-    linum_detect_rehoming.py ${shifts_csv} shifts_xy_clean.csv \
+    linum-detect-rehoming ${shifts_csv} shifts_xy_clean.csv \
         ${frac_arg} ${max_shift_arg} ${tile_fov_arg} ${tile_tol_arg} ${diag_arg} \
         ${sc_args}
     """
@@ -899,7 +899,7 @@ process auto_assess_quality {
         ? "--update_existing --existing_config ${existing_slice_config}"
         : ""
     """
-    linum_assess_slice_quality.py inputs slice_config.csv \\
+    linum-assess-slice-quality inputs slice_config.csv \\
         --min_quality ${params.auto_assess_min_quality} \\
         --exclude_first ${params.auto_assess_exclude_first} \\
         --roi_size ${params.auto_assess_roi_size} \\
@@ -938,7 +938,7 @@ process bring_to_common_space {
         : ""
 
     """
-    linum_align_mosaics_3d_from_shifts.py inputs shifts_xy.csv common_space \
+    linum-align-mosaics-3d-from-shifts inputs shifts_xy.csv common_space \
         ${slice_config_arg} ${excluded_args} ${refine_arg} ${discrepancy_arg} ${min_corr_arg}
     mv common_space/* .
     """
@@ -963,7 +963,7 @@ process generate_common_space_preview {
 
     script:
     """
-    linum_screenshot_omezarr.py ${slice_zarr} "slice_z${slice_id}_preview.png"
+    linum-screenshot-omezarr ${slice_zarr} "slice_z${slice_id}_preview.png"
     """
 
     stub:
@@ -991,7 +991,7 @@ process interpolate_missing_slice {
     def fg_opt = params.interpolation_min_foreground_fraction != null ? "--min_foreground_fraction ${params.interpolation_min_foreground_fraction}" : ""
     def ncc_opt = params.interpolation_min_ncc_improvement != null ? "--min_ncc_improvement ${params.interpolation_min_ncc_improvement}" : ""
     """
-    linum_interpolate_missing_slice.py ${slice_before} ${slice_after} \
+    linum-interpolate-missing-slice ${slice_before} ${slice_after} \
         "slice_z${missing_slice_id}_interpolated.ome.zarr" \
         --method ${params.interpolation_method} \
         --blend_method ${params.interpolation_blend_method} \
@@ -1031,7 +1031,7 @@ process finalise_interpolation {
 
     script:
     """
-    linum_interpolate_missing_slice.py --finalise \\
+    linum-interpolate-missing-slice --finalise \\
         --slice_config_in ${slice_config} \\
         --slice_config_out slice_config_final.csv \\
         --fragments fragments
@@ -1058,7 +1058,7 @@ process register_pairwise {
     def rotation_flag = params.registration_transform == 'translation' ? "--no_rotation" : "--enable_rotation"
     """
     dirname=\$(basename ${moving_vol} .ome.zarr)
-    linum_register_pairwise.py ${fixed_vol} ${moving_vol} \$dirname \
+    linum-register-pairwise ${fixed_vol} ${moving_vol} \$dirname \
         --slicing_interval_mm ${params.registration_slicing_interval_mm} \
         --search_range_mm ${params.registration_allowed_drifting_mm} \
         --moving_z_index ${params.moving_slice_first_index} \
@@ -1091,7 +1091,7 @@ process refine_manual_transforms {
     def manual_dir_opt = params.manual_transforms_dir ? "--manual_transforms_dir ${params.manual_transforms_dir}" : ""
     """
     dirname=\$(basename ${moving_vol} .ome.zarr)
-    linum_refine_manual_transforms.py ${fixed_vol} ${moving_vol} auto_transforms \$dirname \
+    linum-refine-manual-transforms ${fixed_vol} ${moving_vol} auto_transforms \$dirname \
         --max_translation_px ${params.refine_max_translation_px} \
         --max_rotation_deg ${params.refine_max_rotation_deg} \
         ${manual_dir_opt} -f
@@ -1120,7 +1120,7 @@ process auto_exclude_slices {
 
     script:
     """
-    linum_auto_exclude_slices.py transforms ${slice_config_in} slice_config.csv \
+    linum-auto-exclude-slices transforms ${slice_config_in} slice_config.csv \
         --consecutive_threshold ${params.auto_exclude_consecutive} \
         --z_corr_threshold ${params.auto_exclude_z_corr}
     """
@@ -1153,7 +1153,7 @@ process make_manual_align_package {
         ? "--interpolated_slices_remote_dir ${params.output}/interpolate_missing_slice"
         : ""
     """
-    linum_export_manual_align.py slices transforms manual_align_package \
+    linum-export-manual-align slices transforms manual_align_package \
         --level ${params.manual_align_level} \
         --slices_remote_dir ${params.output}/bring_to_common_space \
         ${interp_dir_opt}
@@ -1190,10 +1190,10 @@ process stack {
 
     def annotated_args = Helpers.annotatedScreenshotArgs(params, slice_ids_str)
     """
-    linum_stack_slices_motor.py slices ${shifts_file} ${subject_name}.ome.zarr ${options}
+    linum-stack-slices-motor slices ${shifts_file} ${subject_name}.ome.zarr ${options}
     zip -r ${subject_name}.ome.zarr.zip ${subject_name}.ome.zarr
-    linum_screenshot_omezarr.py ${subject_name}.ome.zarr ${subject_name}.png
-    linum_screenshot_omezarr_annotated.py ${subject_name}.ome.zarr ${subject_name}_annotated.png ${annotated_args}
+    linum-screenshot-omezarr ${subject_name}.ome.zarr ${subject_name}.png
+    linum-screenshot-omezarr-annotated ${subject_name}.ome.zarr ${subject_name}_annotated.png ${annotated_args}
     """
 
     stub:
@@ -1233,7 +1233,7 @@ process correct_bias_field {
     def gpu_pin_block = Helpers.gpuPinBlock(params, "correct_bias_field ${subject_name}")
     """
     ${gpu_pin_block}
-    linum_correct_bias_field.py ${stacked_zarr} ${subject_name}.ome.zarr \
+    linum-correct-bias-field ${stacked_zarr} ${subject_name}.ome.zarr \
         ${n_slices_opt} \
         --mode ${params.bias_mode} \
         --strength ${params.bias_strength} \
@@ -1247,9 +1247,9 @@ process correct_bias_field {
 
     zip -r ${subject_name}.ome.zarr.zip ${subject_name}.ome.zarr
 
-    linum_screenshot_omezarr.py ${subject_name}.ome.zarr ${subject_name}.png
+    linum-screenshot-omezarr ${subject_name}.ome.zarr ${subject_name}.png
 
-    linum_screenshot_omezarr_annotated.py ${subject_name}.ome.zarr ${subject_name}_annotated.png ${annotated_args}
+    linum-screenshot-omezarr-annotated ${subject_name}.ome.zarr ${subject_name}_annotated.png ${annotated_args}
     """
 
     stub:
@@ -1285,7 +1285,7 @@ process align_to_ras {
     def orientation_preview_arg = params.ras_orientation_preview ? "--orientation-preview ${subject_name}_ras_orientation_preview.png" : ""
     def ras_pyramid_opts = Helpers.pyramidArgs(params, '--n-levels')
     """
-    linum_align_to_ras.py ${stacked_zarr} ${subject_name}_ras.ome.zarr \
+    linum-align-to-ras ${stacked_zarr} ${subject_name}_ras.ome.zarr \
         --allen-resolution ${params.allen_resolution} \
         --metric ${params.allen_metric} \
         --max-iterations ${params.allen_max_iterations} \
