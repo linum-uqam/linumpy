@@ -142,9 +142,16 @@ workflow {
     // Stage 1: Preprocessing
     resampled = params.resolution > 0 ? resample_mosaic_grid(inputSlices) : inputSlices
     focal_fixed = params.fix_curvature_enabled ? fix_focal_curvature(resampled) : resampled
-    illum_fixed = params.fix_illum_enabled \
-        ? (params.fix_illum_backend == 'linum-basic' ? fix_illumination_basic(focal_fixed) : fix_illumination(focal_fixed)) \
-        : focal_fixed
+    if (params.fix_illum_enabled) {
+        if (params.fix_illum_backend == 'linum-basic') {
+            fix_illumination_basic(focal_fixed)
+            illum_fixed = fix_illumination_basic.out.corrected
+        } else {
+            illum_fixed = fix_illumination(focal_fixed)
+        }
+    } else {
+        illum_fixed = focal_fixed
+    }
 
     // Stage 2: XY Stitching (image-registration-based blend refinement)
     if (params.stitch_global_transform) {
@@ -607,7 +614,7 @@ process fix_illumination_basic {
     tuple val(slice_id), path(mosaic_grid)
 
     output:
-    tuple val(slice_id), path("mosaic_grid_z${slice_id}_illum_fix.ome.zarr")
+    tuple val(slice_id), path("mosaic_grid_z${slice_id}_illum_fix.ome.zarr"), emit: corrected
     path "*_metrics.json", optional: true, emit: diagnostics
     path "diagnostics/*.png", optional: true, emit: figures
 
