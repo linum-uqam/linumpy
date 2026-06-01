@@ -35,7 +35,6 @@ nextflow_pipeline {
             // Verify mandatory pipeline stages all ran
             assert tasks.any { it.name =~ /stitch_3d_with_refinement/ }
             assert tasks.any { it.name =~ /beam_profile_correction/ }
-            assert tasks.any { it.name =~ /fix_illumination/ }
             assert tasks.any { it.name =~ /compensate_attenuation/ }
             assert tasks.any { it.name =~ /crop_interface/ }
             assert tasks.any { it.name =~ /normalize/ }

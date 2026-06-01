@@ -205,7 +205,7 @@ process resample_stack {
     path stack
 
     output:
-    tuple path("stack_10um.nii.gz")
+    path "stack_10um.nii.gz"
 
     script:
     """
