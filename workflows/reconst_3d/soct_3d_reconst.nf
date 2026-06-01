@@ -40,8 +40,31 @@ workflow {
 
     def inputDir = Helpers.normalizePath(params.input)
     def subject_name = Helpers.resolveSubjectName(inputDir, params.subject_name)
-    log.info("Subject: ${subject_name}")
-    log.info("GPU: ${params.use_gpu ? 'ENABLED' : 'DISABLED'}")
+
+    def resLabel   = params.resolution > 0 ? "${params.resolution} µm/px" : 'skip'
+    def illumLabel = params.fix_illum_enabled ? "${params.fix_illum_backend}" : 'disabled'
+    def rehomLabel = params.detect_rehoming
+        ? (params.tile_fov_mm ? "enabled (tile_fov=${params.tile_fov_mm} mm)" : 'enabled')
+        : 'disabled'
+    log.info("""
+    ============================================================
+     3D Reconstruction Pipeline
+    ============================================================
+     Subject           : ${subject_name}
+     Input             : ${inputDir}
+     Output            : ${params.output}
+     GPU               : ${params.use_gpu ? 'enabled' : 'disabled'}
+    ------------------------------------------------------------
+     Resolution        : ${resLabel}
+     Illumination      : ${illumLabel}
+     Focal curvature   : ${params.fix_curvature_enabled ? 'enabled' : 'disabled'}
+     Global transform  : ${params.stitch_global_transform ? 'enabled' : 'disabled'}
+     Rehoming detect   : ${rehomLabel}
+     Attenuation comp. : ${params.compensate_attenuation_enabled ? 'enabled' : 'disabled'}
+     Bias field corr.  : ${params.correct_bias_field ? 'enabled' : 'disabled'}
+     Atlas alignment   : ${params.align_to_ras_enabled ? 'enabled' : 'disabled'}
+    ============================================================
+    """)
 
     def debugSlices = Helpers.parseDebugSlices(params.debug_slices)
     if (debugSlices) {
@@ -50,7 +73,6 @@ workflow {
 
     // Shifts file
     def shifts_xy_path = params.shifts_xy ?: "${inputDir}/shifts_xy.csv"
-    log.info("Shifts file: ${shifts_xy_path}")
 
     if (!file(shifts_xy_path).exists()) {
         error(
@@ -70,18 +92,16 @@ workflow {
     def slice_config_path = params.slice_config ?: Helpers.joinPath(inputDir, "slice_config.csv")
     def slicesToUse = null
     if (file(slice_config_path).exists()) {
-        log.info("Slice config: ${slice_config_path}")
         def parsed = Helpers.parseSliceConfig(slice_config_path)
         slicesToUse = parsed.use
         def total = slicesToUse.size() + parsed.excluded.size()
-        log.info("Slice config: ${total} entries (${slicesToUse.size()} included, ${parsed.excluded.size()} excluded)")
+        log.info("Slice config: ${slice_config_path} (${total} entries: ${slicesToUse.size()} included, ${parsed.excluded.size()} excluded)")
     }
     else if (params.slice_config) {
         error("Slice config file not found: ${slice_config_path}")
     }
 
     // Discover input mosaic grids
-    log.info("Looking for mosaic grids in: ${inputDir}")
 
     def inputDirFile = file(inputDir)
     def mosaicFiles = inputDirFile
@@ -107,10 +127,10 @@ workflow {
     def skippedCount = mosaicFiles.size() - selectedIds.size()
     if (skippedCount > 0) {
         def reason = debugSlices != null ? "debug_slices filter" : "slice_config"
-        log.info("Found ${mosaicFiles.size()} mosaic grids; ${selectedIds.size()} selected, ${skippedCount} skipped (${reason})")
+        log.info("Slices: ${mosaicFiles.size()} found, ${selectedIds.size()} selected (${skippedCount} skipped by ${reason})")
     }
     else {
-        log.info("Found ${mosaicFiles.size()} mosaic grids; all selected")
+        log.info("Slices: ${mosaicFiles.size()} found, all selected")
     }
 
     inputSlices = channel.fromList(mosaicFiles)
