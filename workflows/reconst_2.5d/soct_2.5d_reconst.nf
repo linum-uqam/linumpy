@@ -96,6 +96,11 @@ process crop_tiles {
     """
     linum-crop-tiles ${mosaic_directory} ${mosaic_directory.baseName}_cropped.tiff --xmin ${params.xmin} --xmax ${params.xmax} --ymin ${params.ymin} --ymax ${params.ymax} --tile_shape ${params.tile_nx} ${params.tile_ny}
     """
+
+    stub:
+    """
+    touch ${mosaic_directory.baseName}_cropped.tiff
+    """
 }
 
 // Estimate the illumination bias affecting each tile, using the BaSIC algorithm.
@@ -109,6 +114,11 @@ process estimate_illumination_bias {
     script:
     """
     linum-estimate-illumination ${mosaic_grid} ${key}_flatfield.nii.gz --tile_shape ${params.nx} ${params.ny} --output_darkfield ${key}_darkfield.nii.gz
+    """
+
+    stub:
+    """
+    touch ${key}_flatfield.nii.gz ${key}_darkfield.nii.gz
     """
 }
 
@@ -124,6 +134,11 @@ process compensate_illumination_bias {
     """
     linum-compensate-illumination ${mosaic_grid} ${key}_mosaic_grid_compensated.nii.gz  --flatfield ${flatfield} --darkfield ${darkfield} --tile_shape ${params.nx} ${params.ny}
     """
+
+    stub:
+    """
+    touch ${key}_mosaic_grid_compensated.nii.gz
+    """
 }
 
 // Estimate the tile positions within the mosaic grid.
@@ -138,6 +153,11 @@ process estimate_position {
     """
     linum-estimate-transform ${mosaic_grids} position_transform.npy --tile_shape ${params.nx} ${params.ny} --initial_overlap ${params.initial_overlap}
     """
+
+    stub:
+    """
+    touch position_transform.npy
+    """
 }
 
 // Stitch each mosaic grid using the estimated tile positions.
@@ -151,6 +171,11 @@ process stitch_mosaic {
     script:
     """
     linum-stitch-2d ${image} ${transform} ${key}_stitched.nii.gz --blending_method diffusion --tile_shape ${params.nx} ${params.ny}
+    """
+
+    stub:
+    """
+    touch ${key}_stitched.nii.gz
     """
 }
 
@@ -167,6 +192,11 @@ process stack_mosaic {
     """
     linum-stack-slices ${images} stack.zarr --xy_shifts ${xy_shifts} --resolution_xy ${params.spacing_xy} --resolution_z ${params.spacing_z}
     """
+
+    stub:
+    """
+    mkdir -p stack.zarr
+    """
 }
 
 // Convert the stack to nifti
@@ -180,6 +210,11 @@ process resample_stack {
     script:
     """
     linum-convert-omezarr-to-nifti ${stack} stack_10um.nii.gz --resolution ${params.resolution_nifti}
+    """
+
+    stub:
+    """
+    touch stack_10um.nii.gz
     """
 }
 
@@ -195,6 +230,11 @@ process compress_stack {
     """
     zip -r stack.zarr.zip ${stack}
     """
+
+    stub:
+    """
+    touch stack.zarr.zip
+    """
 }
 
 // Convert the stack to .zarr format for visualization
@@ -208,5 +248,10 @@ process convert_to_omezarr {
     script:
     """
     linum-convert-zarr-to-omezarr ${stack} stack.ome_zarr -r ${params.spacing_z} ${params.spacing_xy} ${params.spacing_xy}
+    """
+
+    stub:
+    """
+    mkdir -p stack.ome_zarr
     """
 }
