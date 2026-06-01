@@ -484,9 +484,9 @@ consider masking interpolated slices when computing volumetric statistics.
 | File | Description |
 |------|-------------|
 | `linumpy/stitching/interpolation.py` | Interpolation algorithms (`interpolate_z_morph`, `interpolate_weighted`, `interpolate_average`, helpers) |
-| `scripts/linum_interpolate_missing_slice.py` | Standalone CLI (also provides `--finalise` for merging manifest fragments) |
-| `scripts/linum_register_pairwise.py` | Automatically flags registrations touching interpolated slices |
-| `scripts/linum_stack_slices_motor.py` | Uses `reliable=0` to down-weight interpolated-slice transforms |
+| `scripts/stacking/linum_interpolate_missing_slice.py` | Standalone CLI (also provides `--finalise` for merging manifest fragments) |
+| `scripts/stitching/linum_register_pairwise.py` | Automatically flags registrations touching interpolated slices |
+| `scripts/stacking/linum_stack_slices_motor.py` | Uses `reliable=0` to down-weight interpolated-slice transforms |
 | `workflows/reconst_3d/soct_3d_reconst.nf` | `interpolate_missing_slice` + `finalise_interpolation` processes |
 | `workflows/reconst_3d/nextflow.config` | Interpolation parameters |
 | `linumpy/tests/test_stitching_interpolation.py` | Unit tests and synthetic ground-truth benchmarks |

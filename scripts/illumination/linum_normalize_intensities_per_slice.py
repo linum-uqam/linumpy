@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
-# Configure thread limits before numpy/scipy imports
-"""Script."""
-
-import linumpy.config.threads  # noqa: F401
-
-# -*- coding:utf-8 -*-
 """
-Normalize intensities of ome.zarr volume along z axis. Intensities for
-each z are rescaled between the minimum value inside agarose and the value
+Normalize intensities of an ome.zarr volume along the z axis.
+
+Intensities for each z are rescaled between the minimum value inside agarose and the value
 defined by the `percentile_max` argument.
 
 GPU acceleration is used when available (--use_gpu, default on) for the
 Gaussian filtering and Otsu thresholding steps. Falls back to CPU automatically
 if no GPU is detected.
 """
+
+# Configure thread limits before numpy/scipy imports
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 from typing import Any

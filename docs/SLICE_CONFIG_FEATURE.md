@@ -714,14 +714,14 @@ See `linumpy/io/slice_config.py` for the concurrency contract in the module docs
 | File | Changes |
 |------|---------|
 | `linumpy/io/slice_config.py` | **NEW** — canonical schema + `read`/`write`/`stamp`/`stamp_many`/`merge_fragments`/`filter_slices_to_use`/`force_skip_slices`. |
-| `scripts/linum_generate_slice_config.py` | Uses `linumpy.io.slice_config` for writes; canonical columns only. |
-| `scripts/linum_assess_slice_quality[_gpu].py` | Refactored to use `linumpy.io.slice_config`; dropped `ssim_mean`/`edge_score`/`variance_score`/`depth` columns. |
-| `scripts/linum_detect_rehoming.py` | Added `--slice_config_in`/`--slice_config_out`; stamps `rehomed` + `rehoming_reliable`. |
-| `scripts/linum_auto_exclude_slices.py` | Stamps `auto_excluded` + `auto_exclude_reason` directly on `slice_config.csv` (no more side-file). |
-| `scripts/linum_interpolate_missing_slice.py` | Added `--finalise` mode: merges per-slice manifest fragments into `slice_config.csv`. |
-| `scripts/linum_stack_slices_motor.py` | Accepts `--slice_config`; uses `slice_config_io.force_skip_slices()`. `--force_skip_slices` removed. |
-| `scripts/linum_align_mosaics_3d_from_shifts.py` | Fixed indexing bug, added `--slice_config`, now uses shared reader. |
-| `scripts/linum_estimate_global_transform[_gpu].py`, `linum_analyze_stitch_affine.py`, `linum_fix_galvo_shift_zarr.py` | Switched to shared `linumpy.io.slice_config` reader/writer. |
+| `scripts/analysis/linum_generate_slice_config.py` | Uses `linumpy.io.slice_config` for writes; canonical columns only. |
+| `scripts/analysis/linum_assess_slice_quality[_gpu].py` | Refactored to use `linumpy.io.slice_config`; dropped `ssim_mean`/`edge_score`/`variance_score`/`depth` columns. |
+| `scripts/analysis/linum_detect_rehoming.py` | Added `--slice_config_in`/`--slice_config_out`; stamps `rehomed` + `rehoming_reliable`. |
+| `scripts/analysis/linum_auto_exclude_slices.py` | Stamps `auto_excluded` + `auto_exclude_reason` directly on `slice_config.csv` (no more side-file). |
+| `scripts/stacking/linum_interpolate_missing_slice.py` | Added `--finalise` mode: merges per-slice manifest fragments into `slice_config.csv`. |
+| `scripts/stacking/linum_stack_slices_motor.py` | Accepts `--slice_config`; uses `slice_config_io.force_skip_slices()`. `--force_skip_slices` removed. |
+| `scripts/stitching/linum_align_mosaics_3d_from_shifts.py` | Fixed indexing bug, added `--slice_config`, now uses shared reader. |
+| `scripts/stitching/linum_estimate_global_transform[_gpu].py`, `linum_analyze_stitch_affine.py`, `linum_fix_galvo_shift_zarr.py` | Switched to shared `linumpy.io.slice_config` reader/writer. |
 | `scripts/linum_update_slice_config_with_interpolation.py` | **REMOVED** — replaced by `linum_interpolate_missing_slice.py --finalise`. |
 | `workflows/preproc/preproc_rawtiles.nf` | Adds `generate_slice_config` process. |
 | `workflows/reconst_3d/soct_3d_reconst.nf` | Threads `slice_config.csv` through `detect_rehoming_events` → `finalise_interpolation` → `auto_exclude_slices` → `stack`. |

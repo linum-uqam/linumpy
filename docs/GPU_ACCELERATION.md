@@ -261,7 +261,7 @@ You can force a specific path with `prefer="kvikio"` or `prefer="zarr-gpu"`. The
 
 ### Reference benchmark
 
-`scripts/linum_benchmark_kvikio_zarr.py` measures all three paths. On a 16 GiB float32 zarr v3 (256³ chunks) on local NVMe ext4 with an RTX A6000:
+`scripts/utils/linum_benchmark_kvikio_zarr.py` measures all three paths. On a 16 GiB float32 zarr v3 (256³ chunks) on local NVMe ext4 with an RTX A6000:
 
 | Path | Cold | Warm |
 |---|---|---|

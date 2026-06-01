@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 import SimpleITK as sitk
 
-SCRIPT_PATH = Path(__file__).resolve().parents[1] / "linum_align_to_ras.py"
+SCRIPT_PATH = Path(__file__).resolve().parents[2] / "stitching" / "linum_align_to_ras.py"
 
 
 @pytest.fixture(scope="module")

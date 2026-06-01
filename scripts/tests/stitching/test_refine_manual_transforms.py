@@ -9,8 +9,8 @@ import zarr.storage
 
 
 def _load_script_module():
-    """Import scripts/linum_refine_manual_transforms.py as a module."""
-    script_path = Path(__file__).resolve().parents[1] / "linum_refine_manual_transforms.py"
+    """Import scripts/stitching/linum_refine_manual_transforms.py as a module."""
+    script_path = Path(__file__).resolve().parents[2] / "stitching" / "linum_refine_manual_transforms.py"
     spec = importlib.util.spec_from_file_location("linum_refine_manual_transforms", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
