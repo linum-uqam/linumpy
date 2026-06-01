@@ -600,11 +600,16 @@ process fix_illumination {
 process fix_illumination_basic {
     cpus params.processes
 
+    publishDir { "${params.output}/${task.process}" }, mode: 'copy', pattern: "*_metrics.json"
+    publishDir { "${params.output}/${task.process}" }, mode: 'copy', pattern: "diagnostics/*.png"
+
     input:
     tuple val(slice_id), path(mosaic_grid)
 
     output:
     tuple val(slice_id), path("mosaic_grid_z${slice_id}_illum_fix.ome.zarr")
+    path "*_metrics.json", optional: true, emit: diagnostics
+    path "diagnostics/*.png", optional: true, emit: figures
 
     script:
     def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
@@ -621,12 +626,15 @@ process fix_illumination_basic {
         --smoothness_flatfield ${params.fix_illum_smoothness_flatfield} \
         ${tile_fov_flag} \
         ${darkfield_flag} \
-        ${per_z_fit_flag}
+        ${per_z_fit_flag} \
+        --slice_id z${slice_id} \
+        --diagnostics_dir diagnostics
     """
 
     stub:
     """
     mkdir -p mosaic_grid_z${slice_id}_illum_fix.ome.zarr
+    mkdir -p diagnostics
     """
 }
 

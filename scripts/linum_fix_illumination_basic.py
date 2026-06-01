@@ -17,6 +17,13 @@ Two fitting strategies are available:
 
 GPU acceleration is used through the PyTorch backend of linum-basic when
 ``--use_gpu`` is set and a CUDA device is available.
+
+When ``--diagnostics_dir`` is provided the script writes:
+
+* a ``*_metrics.json`` quality report in the current working directory,
+* a ``<diagnostics_dir>/<stem>_diagnostic.png`` figure with the estimated
+  flat-field and raw-vs-corrected mosaic comparison,
+* a ``<diagnostics_dir>/<stem>_aip.png`` average-intensity projection preview.
 """
 
 import linumpy.config.threads  # noqa: F401
@@ -28,6 +35,7 @@ import numpy as np
 
 from linumpy.cli.args import add_processes_arg
 from linumpy.io.zarr import read_omezarr, save_omezarr
+from linumpy.metrics import PipelineMetrics
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -109,6 +117,21 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Accepted for Nextflow-pipeline compatibility. Not used by the\nlinum-basic backend. [%(default)s]",
     )
+    p.add_argument(
+        "--diagnostics_dir",
+        type=Path,
+        default=None,
+        help="Directory to write diagnostic figures (.png) alongside the metrics\n"
+        "JSON. When omitted no figures are written but the metrics JSON is\n"
+        "still saved to the current working directory. [%(default)s]",
+    )
+    p.add_argument(
+        "--slice_id",
+        type=str,
+        default=None,
+        help="Slice identifier string used as a prefix for diagnostic output\n"
+        "files. Inferred from the output path when omitted. [%(default)s]",
+    )
     add_processes_arg(p)
     return p
 
@@ -143,7 +166,19 @@ def main() -> None:
     else:
         tile_shape = (int(vol.chunks[-2]), int(vol.chunks[-1]))
 
-    mosaic = MosaicGrid(array=array, tile_shape=tile_shape)
+    # Crop array to tile-divisible dimensions.  The modernisation branch of
+    # linum-basic enforces that H and W are exact multiples of tile height/width.
+    # Edge pixels that don't form a complete tile are preserved in the output
+    # unchanged (they retain their raw values).
+    th, tw = tile_shape
+    h, w = array.shape[1], array.shape[2]
+    h_crop = (h // th) * th
+    w_crop = (w // tw) * tw
+    if h_crop != h or w_crop != w:
+        print(f"Cropping mosaic from ({h},{w}) to ({h_crop},{w_crop}) to match tile grid (tile={tile_shape}).")
+    array_crop = array[:, :h_crop, :w_crop]
+
+    mosaic = MosaicGrid(array=array_crop, tile_shape=tile_shape)
     print(f"Mosaic grid: {mosaic.n_z} planes, {mosaic.n_rows}x{mosaic.n_cols} tiles of {tile_shape} (plane {plane_shape}).")
 
     # Sub-sample axial planes so the pooled tile count stays within budget.
@@ -177,10 +212,16 @@ def main() -> None:
         field_mode=field_mode,
         basic_kwargs=basic_kwargs,
         n_extra_rows=args.n_extra_rows,
+        n_workers=args.processes,
         verbose=True,
     )
 
-    corrected = apply_fit(mosaic, fit, n_extra_rows=args.n_extra_rows)
+    corrected_crop = apply_fit(mosaic, fit, n_extra_rows=args.n_extra_rows)
+
+    # Embed the corrected crop back into the full (possibly larger) array so that
+    # edge pixels at the boundary are preserved as-is.
+    corrected = array.copy()
+    corrected[:, :h_crop, :w_crop] = corrected_crop
 
     out_min = float(corrected.min())
     out_max = float(corrected.max())
@@ -196,8 +237,164 @@ def main() -> None:
         print(f"Minimum value in the output volume is {out_min}. Clipping at 0.")
         corrected = np.clip(corrected, 0.0, None)
 
+    # ------------------------------------------------------------------
+    # Quality metrics
+    # ------------------------------------------------------------------
+    seam_pairs = mosaic.seam_pairs()
+    eval_metrics: dict[str, float] = {}
+    if seam_pairs:
+        from linum_basic.metrics import evaluate_correction_volume
+
+        eval_metrics = evaluate_correction_volume(mosaic, fit, metrics=("seam", "curvature"))
+        print(
+            f"Seam metrics: L1={eval_metrics['seam_l1']:.4f}  "
+            f"1-Pearson={eval_metrics['seam_1minus_pearson']:.4f}  "
+            f"curvature={eval_metrics['seam_curvature']:.4f}"
+        )
+
+    slice_id = args.slice_id or output_zarr.stem
+    metrics = PipelineMetrics("fix_illumination_basic", str(output_zarr.parent))
+    metrics.add_info("input_volume", str(input_zarr), "Input mosaic grid path")
+    metrics.add_info("output_volume", str(output_zarr), "Output corrected volume path")
+    metrics.add_info("input_shape", list(array.shape), "Input array shape (Z,Y,X)")
+    metrics.add_info("mosaic_grid", f"{mosaic.n_rows}x{mosaic.n_cols}", "Tile grid layout")
+    metrics.add_info("tile_shape", list(tile_shape), "Tile size in pixels (H,W)")
+    metrics.add_info("n_planes_fit", len(z_indices), "Number of axial planes used for fitting")
+    metrics.add_info("field_mode", field_mode, "Flat-field fitting mode")
+    metrics.add_info("use_darkfield", args.use_darkfield, "Whether a dark-field was estimated")
+    if eval_metrics:
+        metrics.add_metric(
+            "seam_l1",
+            eval_metrics["seam_l1"],
+            description="Mean per-seam relative L1 intensity mismatch after correction (lower is better)",
+            custom_thresholds={"warning": 0.12, "error": 0.25},
+        )
+        metrics.add_metric(
+            "seam_pearson",
+            1.0 - eval_metrics["seam_1minus_pearson"],
+            description="Mean Pearson correlation across seam pairs after correction (higher is better)",
+            custom_thresholds={"warning": 0.7, "error": 0.5, "higher_is_better": True},
+        )
+        metrics.add_metric(
+            "seam_curvature",
+            eval_metrics["seam_curvature"],
+            description="Flatfield focal-curvature metric (lower is better)",
+            custom_thresholds={"warning": 0.15, "error": 0.30},
+        )
+    metrics.save(f"{slice_id}_metrics.json")
+
+    # ------------------------------------------------------------------
+    # Diagnostic figures
+    # ------------------------------------------------------------------
+    if args.diagnostics_dir is not None:
+        args.diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        _write_diagnostics(
+            mosaic=mosaic,
+            fit=fit,
+            corrected_crop=corrected_crop,
+            corrected_full=corrected,
+            resolution=resolution,
+            seam_pairs=seam_pairs,
+            eval_metrics=eval_metrics,
+            diagnostics_dir=args.diagnostics_dir,
+            slice_id=slice_id,
+        )
+
     save_omezarr(corrected, output_zarr, voxel_size=resolution, chunks=vol.chunks, n_levels=args.n_levels)
     print(f"Saved corrected mosaic grid to {output_zarr}")
+
+
+def _write_diagnostics(
+    *,
+    mosaic: object,
+    fit: object,
+    corrected_crop: np.ndarray,
+    corrected_full: np.ndarray,
+    resolution: object,
+    seam_pairs: list,
+    eval_metrics: dict,
+    diagnostics_dir: Path,
+    slice_id: str,
+) -> None:
+    """Write diagnostic PNG figures for the illumination correction step."""
+    try:
+        from linum_basic import viz
+    except ImportError:
+        print("linum_basic.viz not available — skipping diagnostic figures.")
+        return
+
+    try:
+        from linum_basic.metrics import seam_l1 as _seam_l1
+    except ImportError:
+        return
+
+    pixel_size_mm = float(resolution[1]) if resolution is not None else None
+
+    # --- flat-field for display ------------------------------------------
+    ff_display: np.ndarray = fit.flatfields if fit.flatfields.ndim == 2 else fit.flatfields.mean(axis=0)
+    df_display: np.ndarray | None = None
+    if fit.darkfields is not None and fit.darkfields.ndim >= 2:
+        df_candidate = fit.darkfields if fit.darkfields.ndim == 2 else fit.darkfields.mean(axis=0)
+        if float(df_candidate.max()) > 1e-6:
+            df_display = df_candidate
+
+    # --- representative z-level -----------------------------------------
+    z_idx_mid = len(fit.z_indices) // 2
+    z_mid = fit.z_indices[z_idx_mid]
+
+    raw_tiles = mosaic.iter_tiles(z_mid)
+    if fit.field_mode == "global":
+        ff_z: np.ndarray = fit.flatfields
+        df_z: np.ndarray = fit.darkfields
+    else:
+        ff_z = fit.flatfields[z_idx_mid]
+        df_z = fit.darkfields[z_idx_mid]
+
+    corrected_tiles = (raw_tiles.astype(np.float32) - df_z[np.newaxis]) / (ff_z[np.newaxis] + 1e-6)
+
+    # Raw seam score for the representative plane
+    raw_seam = _seam_l1(raw_tiles, seam_pairs) if seam_pairs else 0.0
+    corr_seam = eval_metrics.get("seam_l1", _seam_l1(corrected_tiles, seam_pairs) if seam_pairs else 0.0)
+
+    # Center tile as representative
+    center_tile_idx = len(raw_tiles) // 2
+    raw_tile = raw_tiles[center_tile_idx]
+    corr_tile = corrected_tiles[center_tile_idx]
+
+    # Full mosaic planes for the representative z
+    raw_mosaic_plane = mosaic.array[z_mid]
+    corr_mosaic_plane = corrected_crop[z_mid]
+
+    try:
+        fig_diag = viz.figure_apply_correction(
+            flatfield=ff_display,
+            raw_mosaic=raw_mosaic_plane,
+            corrected_mosaic=corr_mosaic_plane,
+            raw_tile=raw_tile,
+            corrected_tile=corr_tile,
+            seam_raw=raw_seam,
+            seam_corrected=corr_seam,
+            darkfield=df_display,
+            title=f"Illumination correction — {slice_id}",
+            pixel_size_mm=pixel_size_mm,
+        )
+        diag_path = diagnostics_dir / f"{slice_id}_diagnostic.png"
+        viz.save_figure(fig_diag, str(diag_path))
+        print(f"Saved illumination diagnostic figure to {diag_path}")
+    except Exception as exc:
+        print(f"Warning: could not save diagnostic figure: {exc}")
+
+    try:
+        fig_aip = viz.aip_preview(
+            corrected_full,
+            pixel_size_mm=pixel_size_mm,
+            title=f"Corrected AIP — {slice_id}",
+        )
+        aip_path = diagnostics_dir / f"{slice_id}_aip.png"
+        viz.save_figure(fig_aip, str(aip_path))
+        print(f"Saved AIP preview to {aip_path}")
+    except Exception as exc:
+        print(f"Warning: could not save AIP preview: {exc}")
 
 
 if __name__ == "__main__":

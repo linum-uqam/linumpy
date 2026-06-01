@@ -1379,12 +1379,14 @@ wheels = [
 [[package]]
 name = "linum-basic"
 version = "0.2.0"
-source = { git = "https://github.com/linum-uqam/Linum-BaSiC.git?branch=algorithm-tuning#02ae2b3314493607f5e0176b87640f2cd68315ad" }
+source = { git = "https://github.com/linum-uqam/Linum-BaSiC.git?branch=modernisation#40a2742c80058279a622be4c2828bc2f05e1ac47" }
 dependencies = [
+    { name = "joblib" },
     { name = "numpy" },
     { name = "ome-zarr" },
     { name = "opencv-python" },
     { name = "optuna" },
+    { name = "sbh-simulator" },
     { name = "scipy" },
     { name = "tqdm" },
     { name = "zarr" },
@@ -1480,7 +1482,7 @@ requires-dist = [
     { name = "kvikio-cu12", marker = "extra == 'gds-cuda12'" },
     { name = "kvikio-cu13", marker = "extra == 'gds'" },
     { name = "linkify-it-py", marker = "extra == 'docs'", specifier = ">=2.1" },
-    { name = "linum-basic", extras = ["viz"], git = "https://github.com/linum-uqam/Linum-BaSiC.git?branch=algorithm-tuning" },
+    { name = "linum-basic", extras = ["viz"], git = "https://github.com/linum-uqam/Linum-BaSiC.git?branch=modernisation" },
     { name = "matplotlib" },
     { name = "myst-parser", marker = "extra == 'docs'", specifier = ">=5.0" },
     { name = "napari" },
@@ -3051,6 +3053,16 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/cb/d8/76f3dc1558bdf4494b117a9f7a9cc0a5d9d34edadc9e5d7ceabc5a6a7c37/s3fs-2026.4.0.tar.gz", hash = "sha256:5bdce0abb00b0435ee150807a45fea727451dbc22de4cbc116464f8504ab9d37", size = 85986, upload-time = "2026-04-29T20:52:51.748Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5d/a4/9d1ea10ebc9e028a289a72fec84da170689549a8102c8aacfcad26bc5035/s3fs-2026.4.0-py3-none-any.whl", hash = "sha256:de0d2a1f33cdf03831fd2382d278c6e4e31fe57c3bf2f703c61f8aec6b703e2a", size = 32392, upload-time = "2026-04-29T20:52:50.295Z" },
+]
+
+[[package]]
+name = "sbh-simulator"
+version = "0.1.0"
+source = { git = "https://github.com/linum-uqam/sbh_simulator.git?rev=master#110a59d7b0c150eb096fd4b9c63cc7633f785cd3" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "simpleitk" },
 ]
 
 [[package]]

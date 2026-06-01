@@ -38,6 +38,7 @@ from linumpy.metrics import aggregate_metrics, compute_summary_statistics
 # Logical pipeline step ordering
 STEP_ORDER = [
     "slice_quality_assessment",
+    "fix_illumination_basic",
     "stitch_3d",
     "stitch_3d_refined",
     "rehoming_detection",
@@ -55,6 +56,7 @@ STEP_ORDER = [
 # Human-readable display names (step_name → display label)
 STEP_DISPLAY_NAMES = {
     "slice_quality_assessment": "Slice Quality Assessment",
+    "fix_illumination_basic": "Illumination Correction (BaSiC)",
     "stitch_3d": "Stitch 3D",
     "stitch_3d_refined": "Stitch 3D (refined)",
     "rehoming_detection": "Rehoming Detection",
@@ -72,6 +74,11 @@ STEP_DISPLAY_NAMES = {
 # Human-readable descriptions for pipeline steps
 STEP_DESCRIPTIONS = {
     "slice_quality_assessment": "Scores each slice (SSIM, edges, variance) and proposes exclusions.",
+    "fix_illumination_basic": (
+        "Corrects lateral illumination inhomogeneities across mosaic tiles using the BaSiC "
+        "(Background and Shading Correction) algorithm (linum-basic backend). "
+        "Metrics report seam consistency before and after correction."
+    ),
     "stitch_3d": "Stitches individual mosaic tiles into a single 2D slice.",
     "stitch_3d_refined": (
         "Stitches mosaic tiles using refined per-pair shift estimates (rotation, overlap fraction, scan/stage angles)."
@@ -90,6 +97,7 @@ STEP_DESCRIPTIONS = {
 
 # Maps pipeline step_name → image category shown in that step section
 STEP_PREVIEW_CATEGORY = {
+    "fix_illumination_basic": "fix_illum_basic_preview",
     "stitch_3d": "stitch_preview",
     "stitch_3d_refined": "stitch_preview",
     "pairwise_registration": "common_space_preview",
@@ -829,6 +837,13 @@ def discover_images(
                 if pngs:
                     images["overview"] = pngs[:2]  # at most overview + annotated
                     break
+
+    # Illumination correction diagnostics (linum-basic)
+    fix_illum_diag_dir = input_dir / "fix_illumination_basic" / "diagnostics"
+    if fix_illum_diag_dir.exists():
+        pngs = sorted(fix_illum_diag_dir.glob("*.png"))
+        if pngs:
+            images["fix_illum_basic_preview"] = pngs
 
     # Diagnostic images: add one category per diagnostics subdir
     diag_dir = input_dir / "diagnostics"
