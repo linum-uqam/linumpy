@@ -46,6 +46,10 @@ workflow {
     def rehomLabel = params.detect_rehoming
         ? (params.tile_fov_mm ? "enabled (tile_fov=${params.tile_fov_mm} mm)" : 'enabled')
         : 'disabled'
+    def biasLabel  = params.correct_bias_field ? "enabled (mode=${params.bias_mode})" : 'disabled'
+    def manualLabel = (params.refine_manual_transforms && params.manual_transforms_dir)
+        ? "${params.manual_transforms_dir}"
+        : 'disabled'
     log.info("""
     ============================================================
      3D Reconstruction Pipeline
@@ -61,7 +65,8 @@ workflow {
      Global transform  : ${params.stitch_global_transform ? 'enabled' : 'disabled'}
      Rehoming detect   : ${rehomLabel}
      Attenuation comp. : ${params.compensate_attenuation_enabled ? 'enabled' : 'disabled'}
-     Bias field corr.  : ${params.correct_bias_field ? 'enabled' : 'disabled'}
+     Bias field corr.  : ${biasLabel}
+     Manual transforms : ${manualLabel}
      Atlas alignment   : ${params.align_to_ras_enabled ? 'enabled' : 'disabled'}
     ============================================================
     """)
@@ -311,8 +316,6 @@ workflow {
     }
 
     // Stage 6: Pairwise Registration
-    log.info("Registering slices pairwise")
-
     fixed_slices = all_slices
         .map { list -> list.size() > 1 ? list.subList(0, list.size() - 1) : [] }
         .flatten()
@@ -338,7 +341,6 @@ workflow {
     // registration initialised from each manual transform; non-manual pairs
     // are copied unchanged. Refined outputs replace automated transforms.
     if (params.refine_manual_transforms && params.manual_transforms_dir) {
-        log.info("Refining manual transforms from: ${params.manual_transforms_dir}")
         // Re-derive pairs from all_slices (value channel, safe to reuse)
         refine_fixed = all_slices
             .map { list -> list.size() > 1 ? list.subList(0, list.size() - 1) : [] }
@@ -367,8 +369,6 @@ workflow {
     }
 
     // Stage 7: Stacking
-    log.info("Stacking slices with registration refinements")
-
     // Auto-exclude: detect clusters of consecutive low-quality registrations.
     // Stamps auto_excluded/auto_exclude_reason into slice_config so stack
     // sees them via --slice_config. Requires a real slice_config.
@@ -397,7 +397,6 @@ workflow {
 
     // Stage 8: Bias Field Correction (optional)
     if (params.correct_bias_field) {
-        log.info("Running N4 bias field correction (mode=${params.bias_mode})")
         znorm_input = stack_output
             .combine(stack_metadata)
             .map { zarr, _zip, _png, _annotated, name, n, ids_str -> tuple(zarr, name, n, ids_str) }
