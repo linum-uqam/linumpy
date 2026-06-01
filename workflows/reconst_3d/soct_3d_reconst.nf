@@ -50,63 +50,22 @@ workflow {
     def manualLabel = (params.refine_manual_transforms && params.manual_transforms_dir)
         ? "${params.manual_transforms_dir}"
         : 'disabled'
-    log.info("""
-    ============================================================
-     3D Reconstruction Pipeline
-    ============================================================
-     Subject           : ${subject_name}
-     Input             : ${inputDir}
-     Output            : ${params.output}
-     GPU               : ${params.use_gpu ? 'enabled' : 'disabled'}
-    ------------------------------------------------------------
-     Resolution        : ${resLabel}
-     Illumination      : ${illumLabel}
-     Focal curvature   : ${params.fix_curvature_enabled ? 'enabled' : 'disabled'}
-     Global transform  : ${params.stitch_global_transform ? 'enabled' : 'disabled'}
-     Rehoming detect   : ${rehomLabel}
-     Attenuation comp. : ${params.compensate_attenuation_enabled ? 'enabled' : 'disabled'}
-     Bias field corr.  : ${biasLabel}
-     Manual transforms : ${manualLabel}
-     Atlas alignment   : ${params.align_to_ras_enabled ? 'enabled' : 'disabled'}
-    ============================================================
-    """)
 
-    def debugSlices = Helpers.parseDebugSlices(params.debug_slices)
-    if (debugSlices) {
-        log.info("DEBUG MODE: Processing only slices ${debugSlices.sort().join(', ')}")
-    }
-
-    // Shifts file
-    def shifts_xy_path = params.shifts_xy ?: "${inputDir}/shifts_xy.csv"
-
-    if (!file(shifts_xy_path).exists()) {
-        error(
-            """
-        Shifts file not found: ${shifts_xy_path}
-
-        Please ensure shifts_xy.csv exists in your input directory,
-        or specify the path with --shifts_xy /path/to/shifts_xy.csv
-        """
-        )
-    }
-    // Value channel — fans out to many consumers; see "Authoring Notes" in
-    // docs/NEXTFLOW_WORKFLOWS.md.
-    shifts_xy = channel.value(file(shifts_xy_path))
-
-    // Slice config (optional)
+    // Pre-compute slice info for the banner (synchronous file I/O)
     def slice_config_path = params.slice_config ?: Helpers.joinPath(inputDir, "slice_config.csv")
     def slicesToUse = null
+    def sliceConfigLabel = 'none'
     if (file(slice_config_path).exists()) {
         def parsed = Helpers.parseSliceConfig(slice_config_path)
         slicesToUse = parsed.use
         def total = slicesToUse.size() + parsed.excluded.size()
-        log.info("Slice config: ${slice_config_path} (${total} entries: ${slicesToUse.size()} included, ${parsed.excluded.size()} excluded)")
+        sliceConfigLabel = "${slice_config_path} (${total} entries: ${slicesToUse.size()} included, ${parsed.excluded.size()} excluded)"
     }
     else if (params.slice_config) {
         error("Slice config file not found: ${slice_config_path}")
     }
 
-    // Discover input mosaic grids
+    def debugSlices = Helpers.parseDebugSlices(params.debug_slices)
 
     def inputDirFile = file(inputDir)
     def mosaicFiles = inputDirFile
@@ -130,14 +89,56 @@ workflow {
             return true
         }
     def skippedCount = mosaicFiles.size() - selectedIds.size()
-    if (skippedCount > 0) {
-        def reason = debugSlices != null ? "debug_slices filter" : "slice_config"
-        log.info("Slices: ${mosaicFiles.size()} found, ${selectedIds.size()} selected (${skippedCount} skipped by ${reason})")
-    }
-    else {
-        log.info("Slices: ${mosaicFiles.size()} found, all selected")
+    def slicesLabel = skippedCount > 0
+        ? "${mosaicFiles.size()} found, ${selectedIds.size()} selected (${skippedCount} skipped by ${debugSlices != null ? 'debug_slices filter' : 'slice_config'})"
+        : "${mosaicFiles.size()} found, all selected"
+
+    log.info("""
+    ============================================================
+     3D Reconstruction Pipeline
+    ============================================================
+     Subject           : ${subject_name}
+     Input             : ${inputDir}
+     Output            : ${params.output}
+     GPU               : ${params.use_gpu ? 'enabled' : 'disabled'}
+    ------------------------------------------------------------
+     Slices            : ${slicesLabel}
+     Slice config      : ${sliceConfigLabel}
+    ------------------------------------------------------------
+     Resolution        : ${resLabel}
+     Illumination      : ${illumLabel}
+     Focal curvature   : ${params.fix_curvature_enabled ? 'enabled' : 'disabled'}
+     Global transform  : ${params.stitch_global_transform ? 'enabled' : 'disabled'}
+     Rehoming detect   : ${rehomLabel}
+     Attenuation comp. : ${params.compensate_attenuation_enabled ? 'enabled' : 'disabled'}
+     Bias field corr.  : ${biasLabel}
+     Manual transforms : ${manualLabel}
+     Atlas alignment   : ${params.align_to_ras_enabled ? 'enabled' : 'disabled'}
+    ============================================================
+    """)
+
+    if (debugSlices) {
+        log.info("DEBUG MODE: Processing only slices ${debugSlices.sort().join(', ')}")
     }
 
+    // Shifts file
+    def shifts_xy_path = params.shifts_xy ?: "${inputDir}/shifts_xy.csv"
+
+    if (!file(shifts_xy_path).exists()) {
+        error(
+            """
+        Shifts file not found: ${shifts_xy_path}
+
+        Please ensure shifts_xy.csv exists in your input directory,
+        or specify the path with --shifts_xy /path/to/shifts_xy.csv
+        """
+        )
+    }
+    // Value channel — fans out to many consumers; see "Authoring Notes" in
+    // docs/NEXTFLOW_WORKFLOWS.md.
+    shifts_xy = channel.value(file(shifts_xy_path))
+
+    // Discover input mosaic grids (slice_config + mosaicFiles already computed above)
     inputSlices = channel.fromList(mosaicFiles)
         .map { f -> Helpers.toSliceTuple(f) }
         .filter { slice_id, _files ->
