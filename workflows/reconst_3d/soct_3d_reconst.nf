@@ -643,7 +643,9 @@ process fix_illumination_basic {
     def darkfield_flag = params.fix_illum_darkfield ? "--use_darkfield" : "--no-use_darkfield"
     def tile_fov_flag = params.tile_fov_mm != null ? "--tile_fov_mm ${params.tile_fov_mm}" : ""
     def per_z_fit_flag = params.fix_illum_per_z_fit ? "--per_z_fit" : "--no-per_z_fit"
+    def gpu_pin_block = Helpers.gpuPinBlock(params, "fix_illumination_basic slice=${slice_id}")
     """
+    ${gpu_pin_block}
     linum-fix-illumination-basic ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" \
         --n_processes ${params.processes} \
         --percentile_max ${params.clip_percentile_upper} ${gpu_flag} --n_levels 0 \
