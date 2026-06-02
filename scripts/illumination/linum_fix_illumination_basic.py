@@ -196,19 +196,44 @@ def main() -> None:
     else:
         z_indices = np.linspace(0, mosaic.n_z - 1, n_planes_for_fit, dtype=int).tolist()
 
+    # Resolve backend and device.  Passing an explicit device string is required
+    # so that linum-basic's GPU guard in _parallel.resolve_workers fires and
+    # collapses n_workers to 1 (multi-process fan-out on a single accelerator
+    # would serialise on the device and multiply VRAM use).
+    backend: str = "numpy"
+    device: str | None = None
+    if args.use_gpu:
+        try:
+            import torch as _torch
+
+            if _torch.cuda.is_available():
+                backend = "torch"
+                device = "cuda"
+                print(f"GPU acceleration enabled: {_torch.cuda.get_device_name(0)}")
+            elif _torch.backends.mps.is_available():
+                backend = "torch"
+                device = "mps"
+                print("GPU acceleration enabled: Apple MPS")
+            else:
+                print("--use_gpu requested but no CUDA/MPS device found; falling back to NumPy CPU.")
+        except ImportError:
+            print("--use_gpu requested but PyTorch is not installed; falling back to NumPy CPU.")
+
     basic_kwargs: dict[str, object] = {
         "estimate_darkfield": args.use_darkfield,
         "max_reweighting_iterations": args.max_iterations,
-        "backend": "torch" if args.use_gpu else "numpy",
+        "backend": backend,
         "verbose": False,
     }
+    if device is not None:
+        basic_kwargs["device"] = device
     if args.smoothness_flatfield is not None:
         basic_kwargs["l_s"] = args.smoothness_flatfield
 
     field_mode = "per-z" if args.per_z_fit else "global"
     print(
-        f"Fitting BaSiC (field_mode={field_mode}, darkfield={args.use_darkfield}) "
-        f"on {len(z_indices)} / {mosaic.n_z} axial planes."
+        f"Fitting BaSiC (field_mode={field_mode}, backend={backend}, device={device}, "
+        f"darkfield={args.use_darkfield}) on {len(z_indices)} / {mosaic.n_z} axial planes."
     )
     fit = fit_mosaic(
         mosaic,
