@@ -643,7 +643,10 @@ process fix_illumination_basic {
     def darkfield_flag = params.fix_illum_darkfield ? "--use_darkfield" : "--no-use_darkfield"
     def tile_fov_flag = params.tile_fov_mm != null ? "--tile_fov_mm ${params.tile_fov_mm}" : ""
     def per_z_fit_flag = params.fix_illum_per_z_fit ? "--per_z_fit" : "--no-per_z_fit"
-    def gpu_pin_block = Helpers.gpuPinBlock(params, "fix_illumination_basic slice=${slice_id}")
+    def use_multi_gpu = params.use_gpu && params.fix_illum_multi_gpu && (params.gpu_count as int) > 1
+    def gpu_pin_block = use_multi_gpu
+        ? Helpers.gpuExposeAllBlock(params, "fix_illumination_basic slice=${slice_id}")
+        : Helpers.gpuPinBlock(params, "fix_illumination_basic slice=${slice_id}")
     """
     ${gpu_pin_block}
     linum-fix-illumination-basic ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" \

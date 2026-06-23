@@ -360,4 +360,22 @@ class Helpers {
         echo "[${tag}] CUDA_VISIBLE_DEVICES=\$CUDA_VISIBLE_DEVICES"
         """
     }
+
+    /**
+     * Expose every GPU to the task for intra-process multi-GPU work (e.g.
+     * linum-basic ``fit_mosaic`` z-level fan-out).  Pair with ``maxForks = 1``
+     * on the calling process so concurrent tasks do not oversubscribe devices.
+     *
+     * When ``gpu_count <= 1`` this falls back to :meth:`gpuPinBlock`.
+     */
+    static String gpuExposeAllBlock(params, String tag) {
+        if (!params.use_gpu) return ''
+        def n = params.gpu_count as int
+        if (n <= 1) return gpuPinBlock(params, tag)
+        def devices = (0..(n - 1)).join(',')
+        return """
+        export CUDA_VISIBLE_DEVICES=${devices}
+        echo "[${tag}] CUDA_VISIBLE_DEVICES=\$CUDA_VISIBLE_DEVICES (all GPUs for multi-GPU fit)"
+        """
+    }
 }
