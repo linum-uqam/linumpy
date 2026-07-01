@@ -96,7 +96,7 @@ def main() -> None:
         dx_from_max = xmax_mm[i] - xmax_mm[i + 1]
         dy_from_min = ymin_mm[i] - ymin_mm[i + 1]
         dy_from_max = ymax_mm[i] - ymax_mm[i + 1]
-        # Use the boundary that shifted less — it reflects tissue drift rather
+        # Use the boundary that shifted less -- it reflects tissue drift rather
         # than mosaic repositioning.  When neither boundary is dominant, both
         # estimates are consistent and either is equally valid.
         dx = dx_from_min if abs(dx_from_min) <= abs(dx_from_max) else dx_from_max

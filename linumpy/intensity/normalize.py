@@ -173,7 +173,7 @@ def get_smooth_intensity_transition(vol: np.ndarray, slices_start: list[int]) ->
     References
     ----------
     * Wang, H., et al. (2014). Serial optical coherence scanner for large-scale brain imaging at microscopic resolution.
-      NeuroImage, 84, 1007–1017. http://doi.org/10.1016/j.neuroimage.2013.09.063
+      NeuroImage, 84, 1007-1017. http://doi.org/10.1016/j.neuroimage.2013.09.063
 
     """
     volume = np.copy(vol)
