@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+
+"""
+Crop a 3D OME-Zarr volume to a specified depth below the water/tissue interface.
+
+This script loads a 3D OME-Zarr volume, detects the water/tissue interface per (Y,X) then crops the
+volume to a specified depth *below* the interface. The script can also crop the data before the
+water/tissue interface. The cropped volume is saved as a new OME-Zarr file.
+"""
+
+# Configure thread limits before numpy/scipy imports
+import linumpy.config.threads  # noqa: F401
+
+import argparse
+from pathlib import Path
+
+import dask.array as da
+import numpy as np
+import zarr
+
+from linumpy.geometry.crop import crop_below_interface
+from linumpy.geometry.resampling import resolution_is_mm
+from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
+from linumpy.metrics import collect_interface_crop_metrics
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("input_zarr", help="Path to the input 3D OME-Zarr OCT volume")
+    p.add_argument(
+        "output_zarr",
+        help="Path to the output 3D OME-Zarr *cropped* volume",
+    )
+    p.add_argument(
+        "--sigma_xy",
+        type=float,
+        default=3.0,
+        help="Gaussian smoothing sigma in X and Y before interface detection [%(default)s]",
+    )
+    p.add_argument(
+        "--sigma_z", type=float, default=2.0, help="Gaussian smoothing sigma in Z before interface detection [%(default)s]"
+    )
+    p.add_argument("--use_log", action="store_true", help="Apply log transform before gradient detection")
+    p.add_argument("--depth", type=int, default=300, help="Target depth in um [%(default)s]")
+    p.add_argument("--crop_before_interface", action="store_true", help="If set, also crop the volume before the interface.")
+    p.add_argument(
+        "--pad_after",
+        action="store_true",
+        help="If set, pad the volume such that its depth below interface is equal to `depth`.",
+    )
+    p.add_argument(
+        "--percentile_max",
+        type=float,
+        help="Values above the ith percentile will be clipped *prior\n"
+        "to finding the interface*. Original values will\n"
+        "remain in output clipped volume (range [0-100]).",
+    )
+    p.add_argument("--n_levels", type=int, default=5, help="Number of levels in pyramid representation. [%(default)s]")
+    p.add_argument(
+        "--max_interface_depth_fraction",
+        type=float,
+        default=0.5,
+        help="Restrict interface search to the first fraction of the Z axis.\n"
+        "OCT tissue/water interface is always near the top of the A-scan;\n"
+        "values past this fraction are treated as detection failures. [%(default)s]",
+    )
+    return p
+
+
+def main() -> None:
+    """Run function."""
+    args = _build_arg_parser().parse_args()
+    input_path = Path(args.input_zarr)
+    output_path = Path(args.output_zarr)
+
+    # Load volume
+    vol, res = read_omezarr(input_path, level=0)
+    print("Loaded volume shape:", vol.shape)
+    # res may be stored in mm (NGFF convention) or µm (legacy). Convert to µm.
+    resolution_um = res[0] * 1000 if resolution_is_mm(res) else float(res[0])
+
+    vol_crop, avg_iface = crop_below_interface(
+        vol,
+        depth_um=args.depth,
+        resolution_um=resolution_um,
+        sigma_xy=args.sigma_xy,
+        sigma_z=args.sigma_z,
+        crop_before_interface=args.crop_before_interface,
+        percentile_clip=args.percentile_max if args.percentile_max is not None else None,
+        max_interface_depth_fraction=args.max_interface_depth_fraction,
+    )
+    print(f"Average surface depth: {avg_iface} voxels")
+
+    # Compute number of Z-slices for desired depth (um / um-per-voxel)
+    depth_px = round(args.depth / resolution_um)
+    print(f"Cropping depth: {depth_px} voxels ({args.depth} um)")
+
+    # Compute end index for cropping
+    surface_idx = max(0, min(avg_iface, vol.shape[0] - 1))
+    end_idx = surface_idx + depth_px
+    if end_idx > vol.shape[0]:
+        out_shape = (end_idx, vol.shape[1], vol.shape[2]) if args.pad_after else vol.shape
+        store = create_tempstore()
+        out_vol = zarr.open_array(store, mode="w", shape=out_shape, dtype=np.float32, chunks=vol.chunks)
+        out_vol[: vol.shape[0]] = vol[:]
+        vol = out_vol
+        start_idx = 0 if not args.crop_before_interface else surface_idx
+        vol_crop = np.asarray(vol[start_idx:end_idx, :, :])
+    else:
+        start_idx = 0 if not args.crop_before_interface else surface_idx
+
+    crop_dask = da.from_array(vol_crop, chunks=vol.chunks)
+    # Save cropped volume as OME-Zarr
+    save_omezarr(crop_dask, output_path, voxel_size=res, chunks=vol.chunks, n_levels=args.n_levels)
+
+    # Collect metrics using helper function
+    original_shape = vol.shape
+    collect_interface_crop_metrics(
+        detected_interface=avg_iface,
+        crop_depth_px=depth_px,
+        start_idx=start_idx,
+        end_idx=end_idx,
+        input_shape=original_shape,
+        output_shape=vol_crop.shape,
+        resolution_um=resolution_um,
+        output_path=output_path,
+        input_path=input_path,
+        padding_needed=(end_idx > original_shape[0]),
+    )
+
+
+if __name__ == "__main__":
+    main()

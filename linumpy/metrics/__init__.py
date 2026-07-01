@@ -55,7 +55,7 @@ class PipelineMetrics:
         "translation_magnitude": {"warning": 30.0, "error": 50.0},
         # Rotation angle derived from the estimated transform (degrees)
         "rotation_degrees": {"warning": 1.0, "error": 2.0},
-        # Normalized cross-correlation between registered image pairs (unitless, 0–1)
+        # Normalized cross-correlation between registered image pairs (unitless, 0-1)
         "correlation": {"warning": 0.7, "error": 0.5, "higher_is_better": True},
         # Fraction of the volume voxels classified as tissue
         "tissue_coverage": {"warning": 0.1, "error": 0.05, "higher_is_better": True},
@@ -65,9 +65,9 @@ class PipelineMetrics:
         "agarose_coverage": {"warning": 0.05, "error": 0.01, "higher_is_better": True},
         # Fraction of the volume voxels that are empty (below background threshold)
         "empty_fraction": {"warning": 0.5, "error": 0.8},
-        # Depth (in pixels) of the tissue–agarose interface from the top of the volume
+        # Depth (in pixels) of the tissue-agarose interface from the top of the volume
         "interface_depth": {"warning": 50, "error": 100},
-        # Quality score of the axial intensity profile fit (unitless, 0–1)
+        # Quality score of the axial intensity profile fit (unitless, 0-1)
         "profile_quality": {"warning": 0.5, "error": 0.3, "higher_is_better": True},
         # Root-mean-square residual of the least-squares transform fit (pixels)
         "rms_residual": {"warning": 5.0, "error": 15.0},
@@ -477,7 +477,7 @@ def collect_pairwise_registration_metrics(
     params : dict, optional
         Dictionary of parameters used.
     z_correlation : float, optional
-        Normalized cross-correlation score from Z-matching (0–1). Higher values
+        Normalized cross-correlation score from Z-matching (0-1). Higher values
         indicate a reliable Z-match between the two slices.
 
     Returns
@@ -525,11 +525,11 @@ def collect_pairwise_registration_metrics(
         "z_correlation",
         float(max(0.0, z_correlation)),
         unit="",
-        description="Z-matching cross-correlation score (0–1; higher = more reliable)",
+        description="Z-matching cross-correlation score (0-1; higher = more reliable)",
         threshold_name="correlation",
     )
 
-    # Composite confidence score (0–1): combines Z-correlation, normalized translation
+    # Composite confidence score (0-1): combines Z-correlation, normalized translation
     # and normalized rotation.  Used downstream by adaptive transform degradation
     # in linum_stack_slices_motor.py to decide whether to apply the full transform,
     # rotation-only, or skip entirely.
@@ -615,13 +615,13 @@ def collect_interface_crop_metrics(
     metrics.add_metric("end_index", int(end_idx), unit="voxels", description="End index for cropping")
 
     # Quality checks
-    _min_depth = PipelineMetrics.DEFAULT_THRESHOLDS["interface_min_depth_px"]["error"]
-    _max_fraction = PipelineMetrics.DEFAULT_THRESHOLDS["interface_max_depth_fraction"]["error"]
-    if detected_interface < _min_depth:
+    min_depth = PipelineMetrics.DEFAULT_THRESHOLDS["interface_min_depth_px"]["error"]
+    max_fraction = PipelineMetrics.DEFAULT_THRESHOLDS["interface_max_depth_fraction"]["error"]
+    if detected_interface < min_depth:
         metrics.add_metric(
             "interface_quality", "warning", description="Interface detected very close to start - may be incorrect"
         )
-    elif detected_interface > input_shape[0] * _max_fraction:
+    elif detected_interface > input_shape[0] * max_fraction:
         metrics.add_metric("interface_quality", "warning", description="Interface detected past halfway - check detection")
     else:
         metrics.add_metric("interface_quality", "ok", description="Interface detection appears reasonable")

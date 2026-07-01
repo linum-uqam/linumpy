@@ -101,10 +101,10 @@ def get_mosaic_info(directory: Path, z: int, overlap_fraction: float = 0.2, use_
 
     assert oct_tile is not None
     # Compute the mosaic shape
-    x_min = min([x for x, _ in tiles_positions_px])
-    y_min = min([y for _, y in tiles_positions_px])
-    x_max = max([x for x, _ in tiles_positions_px]) + oct_tile.shape[0]
-    y_max = max([y for _, y in tiles_positions_px]) + oct_tile.shape[1]
+    x_min = min(x for x, _ in tiles_positions_px)
+    y_min = min(y for _, y in tiles_positions_px)
+    x_max = max(x for x, _ in tiles_positions_px) + oct_tile.shape[0]
+    y_max = max(y for _, y in tiles_positions_px) + oct_tile.shape[1]
     mosaic_nrows = x_max - x_min
     mosaic_ncols = y_max - y_min
 

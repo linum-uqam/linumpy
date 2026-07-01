@@ -31,12 +31,21 @@ To ensure proper limiting, scripts should call configure_all_libraries() after i
 """
 
 import contextlib
-import multiprocessing
 import os
 import sys
 
 # Track if we've already configured
 _thread_config_applied = False
+
+
+def _available_cpus() -> int:
+    """Return the number of CPUs usable by this process.
+
+    Prefers ``os.process_cpu_count()`` (Python 3.13+) which honours
+    ``sched_setaffinity`` and cgroup CPU limits, falling back to
+    ``os.cpu_count()`` and finally to 1.
+    """
+    return os.process_cpu_count() or os.cpu_count() or 1
 
 
 def get_max_threads() -> int:
@@ -47,20 +56,23 @@ def get_max_threads() -> int:
     -------
         int: Maximum number of threads to use
     """
-    total_cpus = multiprocessing.cpu_count()
+    total_cpus = _available_cpus()
 
-    try:
-        # Check for explicit max CPUs limit
-        max_cpus = os.environ.get("LINUMPY_MAX_CPUS")
-        if max_cpus is not None:
+    # Check for explicit max CPUs limit
+    max_cpus = os.environ.get("LINUMPY_MAX_CPUS")
+    if max_cpus is not None:
+        try:
             return max(1, min(int(max_cpus), total_cpus))
+        except ValueError:
+            pass
 
-        # Check for reserved CPUs
-        reserved = os.environ.get("LINUMPY_RESERVED_CPUS")
-        if reserved is not None:
+    # Check for reserved CPUs
+    reserved = os.environ.get("LINUMPY_RESERVED_CPUS")
+    if reserved is not None:
+        try:
             return max(1, total_cpus - int(reserved))
-    except ValueError:
-        pass
+        except ValueError:
+            pass
 
     # Default: use all CPUs
     return total_cpus
@@ -118,7 +130,7 @@ def configure_dask() -> None:
     try:
         import dask
 
-        max_threads = int(os.environ.get("OMP_NUM_THREADS", multiprocessing.cpu_count()))
+        max_threads = int(os.environ.get("OMP_NUM_THREADS", _available_cpus()))
         dask.config.set(num_workers=max_threads)
         dask.config.set(scheduler="threads")  # Use thread scheduler, not process
         dask.config.set({"array.slicing.split_large_chunks": False})
@@ -139,7 +151,7 @@ def configure_sitk() -> None:
     try:
         import SimpleITK as sitk
 
-        max_threads = int(os.environ.get("OMP_NUM_THREADS", multiprocessing.cpu_count()))
+        max_threads = int(os.environ.get("OMP_NUM_THREADS", _available_cpus()))
         sitk.ProcessObject.SetGlobalDefaultNumberOfThreads(max_threads)
     except ImportError:
         pass
@@ -154,10 +166,10 @@ def configure_torch() -> None:
     try:
         import torch
 
-        max_threads = int(os.environ.get("OMP_NUM_THREADS", multiprocessing.cpu_count()))
+        max_threads = int(os.environ.get("OMP_NUM_THREADS", _available_cpus()))
         torch.set_num_threads(max_threads)
         torch.set_num_interop_threads(max_threads)
-    except (ImportError, RuntimeError):
+    except ImportError, RuntimeError:
         pass
 
 
@@ -176,7 +188,7 @@ def apply_threadpool_limits() -> object | None:
         from threadpoolctl import threadpool_limits
 
         # Get the configured thread limit
-        max_threads = int(os.environ.get("OMP_NUM_THREADS", multiprocessing.cpu_count()))
+        max_threads = int(os.environ.get("OMP_NUM_THREADS", _available_cpus()))
 
         # Apply limits globally - this returns a context manager but also applies immediately
         limiter = threadpool_limits(limits=max_threads)
@@ -204,7 +216,7 @@ def configure_all_libraries() -> int:
     """
     global _thread_config_applied
 
-    max_threads = int(os.environ.get("OMP_NUM_THREADS", multiprocessing.cpu_count()))
+    max_threads = int(os.environ.get("OMP_NUM_THREADS", _available_cpus()))
 
     # Configure SimpleITK if imported (CRITICAL - major source of CPU spikes)
     if "SimpleITK" in sys.modules:
@@ -224,7 +236,7 @@ def configure_all_libraries() -> int:
             from numba import set_num_threads
 
             set_num_threads(max_threads)
-        except (ImportError, Exception):
+        except ImportError, Exception:
             pass
 
     # Apply threadpoolctl limits (catches numpy, scipy, etc.)
@@ -245,8 +257,8 @@ def get_thread_info() -> dict:
         dict: Thread configuration information
     """
     info = {
-        "total_cpus": multiprocessing.cpu_count(),
-        "configured_threads": int(os.environ.get("OMP_NUM_THREADS", multiprocessing.cpu_count())),
+        "total_cpus": _available_cpus(),
+        "configured_threads": int(os.environ.get("OMP_NUM_THREADS", _available_cpus())),
         "env_vars": {},
         "libraries": {},
     }
