@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Apply N4 bias field correction to an OME-Zarr OCT volume.
+"""
+Apply N4 bias field correction to an OME-Zarr OCT volume.
 
-Three correction modes are supported.
+Three correction modes are supported:
 
-* ``per_section`` -- independently correct each serial tissue section
-  (removes depth-dependent attenuation per section).
-* ``global`` -- correct the whole stack as one volume (removes slow
-  large-scale intensity gradients).
-* ``two_pass`` -- run ``per_section`` first, then ``global`` (default).
+  per_section  -- Independently correct each serial tissue section
+                  (removes depth-dependent attenuation per section).
+  global       -- Correct the whole stack as one volume (removes slow
+                  large-scale intensity gradients).
+  two_pass     -- Run per_section first, then global (default).
 
-The ``--strength`` parameter (0-1) blends between the original and the
-fully-corrected result:
-``output = strength * corrected + (1 - strength) * input``.
+The ``--strength`` parameter (0–1) blends between the original and the
+fully-corrected result:  output = strength * corrected + (1 - strength) * input.
 """
 
 # Configure thread limits before numpy/scipy imports
@@ -29,7 +29,7 @@ from linumpy.intensity.bias_field import (
     n4_correct_per_section,
 )
 from linumpy.intensity.normalization import apply_histogram_matching, apply_zprofile_smoothing
-from linumpy.io.zarr import AnalysisOmeZarrWriter, read_omezarr_array
+from linumpy.io.zarr import AnalysisOmeZarrWriter, read_omezarr
 
 logger = logging.getLogger(__name__)
 
@@ -186,9 +186,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 def _save(arr: np.ndarray, path: str, res: list, args: argparse.Namespace) -> None:
     """Save a volume to OME-Zarr using resolution-based or fixed pyramid levels."""
-    from pathlib import Path
-
-    writer = AnalysisOmeZarrWriter(Path(path), arr.shape, chunk_shape=(128, 128, 128), dtype=np.float32)
+    writer = AnalysisOmeZarrWriter(path, arr.shape, chunk_shape=(128, 128, 128), dtype=np.float32)
     writer[:] = arr
     writer.finalize(
         res,
@@ -210,9 +208,12 @@ def main() -> None:
 
     n_processes = parse_processes_arg(args.n_processes)
 
-    # Resolve GPU usage from --backend choice for non-N4 stages. We resolve
-    # this BEFORE reading so we can stream the volume directly into device
-    # memory through the GDS / zarr-gpu fast path when the GPU is in play.
+    # Load volume
+    vol_da, res = read_omezarr(args.in_image, level=0)
+    vol = np.asarray(vol_da).astype(np.float32)
+    logger.info("Loaded volume %s from %s", vol.shape, args.in_image)
+
+    # Resolve GPU usage from --backend choice for non-N4 stages.
     if args.backend == "gpu":
         use_gpu_pre = True
     elif args.backend == "auto":
@@ -221,11 +222,6 @@ def main() -> None:
         use_gpu_pre = GPU_AVAILABLE
     else:
         use_gpu_pre = False
-
-    # Load volume — onto GPU directly when use_gpu_pre, else host.
-    vol, res = read_omezarr_array(args.in_image, level=0, use_gpu=use_gpu_pre)
-    vol = vol.astype(np.float32)  # works on both numpy and cupy arrays
-    logger.info("Loaded volume %s from %s (gpu=%s)", vol.shape, args.in_image, use_gpu_pre)
 
     # Tissue mask (per serial section)
     mask = compute_tissue_mask(
@@ -265,7 +261,7 @@ def main() -> None:
     n4_kwargs = {
         "shrink_factor": args.shrink_factor,
         "n_iterations": args.n_iterations,
-        "voxel_size_mm": (float(res[0]), float(res[1]), float(res[2])),
+        "voxel_size_mm": tuple(res),
         "backend": args.backend,
     }
 
@@ -297,37 +293,12 @@ def main() -> None:
 
     if args.mode in ("global", "two_pass"):
         logger.info("Running global N4…")
-        # When the GPU backend is in play and ``working_vol`` already
-        # owns a full-resolution float32 buffer, alias it as the output
-        # destination so n4_correct_gpu does not allocate a fresh
-        # ``corrected_host`` (~one full-volume float32, ~80 GB on a
-        # large mosaic).  The host buffer is not read after the initial
-        # H2D upload.  Pre-allocate a separate ``bias_global`` buffer
-        # so the multiplicative combine into ``bias_field_combined``
-        # below stays well-defined.
-        gpu_inplace = (
-            args.backend in ("gpu", "auto")
-            and isinstance(working_vol, np.ndarray)
-            and working_vol.dtype == np.float32
-            and vol_for_blend is not working_vol
+        working_vol, bias_global = n4_correct(
+            working_vol,
+            mask,
+            spline_distance_mm=global_spline,
+            **n4_kwargs,
         )
-        if gpu_inplace:
-            bias_global = np.empty_like(working_vol, dtype=np.float32)
-            n4_correct(
-                working_vol,
-                mask,
-                spline_distance_mm=global_spline,
-                out=working_vol,
-                bias_out=bias_global,
-                **n4_kwargs,
-            )
-        else:
-            working_vol, bias_global = n4_correct(
-                working_vol,
-                mask,
-                spline_distance_mm=global_spline,
-                **n4_kwargs,
-            )
         if bias_field_combined is not None:
             # Combine in place to avoid a third 36 GB allocation during the
             # multiply, then release bias_global immediately.

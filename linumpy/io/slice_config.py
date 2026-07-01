@@ -33,6 +33,8 @@ scripts running in parallel), make sure each writer targets a distinct
 output path; otherwise the last writer wins.
 """
 
+from __future__ import annotations
+
 import csv
 from collections import OrderedDict
 from pathlib import Path
@@ -274,7 +276,7 @@ def filter_slices_to_use(path: Path) -> set[str]:
     """Return the set of slice IDs whose ``use`` column is truthy.
 
     When ``slice_config.csv`` is missing this raises :class:`FileNotFoundError`
-    -- callers should guard on ``path.exists()`` or pass an optional path
+    — callers should guard on ``path.exists()`` or pass an optional path
     themselves.
     """
     rows = read(path)
