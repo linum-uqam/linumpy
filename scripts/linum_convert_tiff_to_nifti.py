@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Convert TIFF image stack to NIfTI format."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy.config.threads  # noqa: F401
+import linumpy._thread_config  # noqa: F401
 
 import argparse
 from pathlib import Path
@@ -10,17 +9,14 @@ from pathlib import Path
 import SimpleITK as sitk
 
 
-def _build_arg_parser() -> argparse.ArgumentParser:
+def _build_arg_parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_folder", type=Path, help="Full path to a folder containing TIFF images")
-    p.add_argument(
-        "output_folder", type=Path, help="Full path to the output folder which will contain the nifti (.nii.gz) images"
-    )
+    p.add_argument("input_folder", help="Full path to a folder containing TIFF images")
+    p.add_argument("output_folder", help="Full path to the output folder which will contain the nifti (.nii.gz) images")
     return p
 
 
 def main() -> None:
-    """Run the TIFF-to-NIfTI conversion script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()

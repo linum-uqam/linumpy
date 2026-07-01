@@ -3,7 +3,7 @@
 """Convert an ome-zarr volume into a nifti volume at a given resolution."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy.config.threads  # noqa: F401
+import linumpy._thread_config  # noqa: F401
 
 import argparse
 from pathlib import Path
@@ -14,18 +14,17 @@ import SimpleITK as sitk
 from linumpy.io.zarr import read_omezarr
 
 
-def _build_arg_parser() -> argparse.ArgumentParser:
+def _build_arg_parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input", type=Path, help="Full path to an OME-ZARR directory")
-    p.add_argument("output", type=Path, help="Full path to the output nifti file")
-    p.add_argument("-r", "--resolution", type=float, default=10.0, help="Output resolution in micron [%(default)s]")
+    p.add_argument("input", help="Full path to an OME-ZARR directory")
+    p.add_argument("output", help="Full path to the output nifti file")
+    p.add_argument("-r", "--resolution", type=float, default=10.0, help="Output resolution in micron (default=%(default)s)")
     p.add_argument("-i", "--isotropic", action="store_true", help="Interpolate the volume to isotropic resolution")
     p.add_argument("--save_mm", action="store_true", help="Save nifti header in mm.")
     return p
 
 
 def main() -> None:
-    """Run the OME-Zarr-to-NIfTI conversion script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -56,7 +55,7 @@ def main() -> None:
         new_spacing = (out_resolution, out_resolution, zarr_resolution[0])
 
     # Prepare the output
-    input_volume = sitk.GetImageFromArray(np.asarray(vol))
+    input_volume = sitk.GetImageFromArray(vol[:])
     # conversion mm to um
     input_volume.SetSpacing((zarr_resolution[2], zarr_resolution[1], zarr_resolution[0]))
 

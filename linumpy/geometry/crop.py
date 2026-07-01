@@ -8,9 +8,7 @@ from skimage.filters import threshold_otsu
 from linumpy.geometry.interface import find_tissue_interface
 
 
-def crop_volume(
-    vol: np.ndarray, xlim: list[int] | None = None, ylim: list[int] | None = None, zlim: list[int] | None = None
-) -> np.ndarray:
+def crop_volume(vol: np.ndarray, xlim: list[int] | None = None, ylim: list[int] | None = None, zlim: list[int] | None = None) -> np.ndarray:
     """Crops the given volume according to the range given as input.
 
     Parameters
@@ -59,6 +57,7 @@ def crop_volume(
         return vol[xlim[0] : xlim[1], ylim[0] : ylim[1]]
 
     return vol
+
 
 
 def crop_z0_whole_slice(
@@ -129,6 +128,7 @@ def crop_z0_whole_slice(
         return crop_volume(vol, zlim=[zmin, zmax])
 
 
+
 def mask_under_interface(vol: np.ndarray, interface: np.ndarray, return_mask: bool = False) -> np.ndarray:
     """Create a boolean mask for all voxels at or below the interface depth."""
     nx, ny, nz = vol.shape
@@ -141,9 +141,8 @@ def mask_under_interface(vol: np.ndarray, interface: np.ndarray, return_mask: bo
         return vol * mask
 
 
-def apply_interface_correction(
-    vol: np.ndarray, interface: np.ndarray
-) -> np.ndarray:  # TODO: Test this algorithm to make sure it works well.
+
+def apply_interface_correction(vol: np.ndarray, interface: np.ndarray) -> np.ndarray:  # TODO: Test this algorithm to make sure it works well.
     """Apply interface depth correction using linear interpolation.
 
     Parameters
@@ -173,62 +172,3 @@ def apply_interface_correction(
             fixed_vol[x, y, :] = z_interp(new_z)
 
     return fixed_vol
-
-
-def crop_below_interface(
-    vol_zxy: np.ndarray,
-    depth_um: float,
-    resolution_um: float,
-    sigma_xy: float = 3.0,
-    sigma_z: float = 2.0,
-    crop_before_interface: bool = False,
-    percentile_clip: float | None = None,
-) -> tuple[np.ndarray, int]:
-    """Crop an OME-Zarr volume to a specified depth below the tissue interface.
-
-    Detects the water/tissue interface using gradient analysis, then crops
-    the volume to retain only ``depth_um`` microns below the interface.
-
-    Parameters
-    ----------
-    vol_zxy : np.ndarray
-        Volume with shape (Z, X, Y) as returned by read_omezarr.
-    depth_um : float
-        Target depth below interface in microns.
-    resolution_um : float
-        Z resolution in microns per voxel.
-    sigma_xy : float
-        XY smoothing sigma for interface detection.
-    sigma_z : float
-        Z smoothing sigma for interface detection.
-    crop_before_interface : bool
-        If True, also crop the volume above the detected interface.
-    percentile_clip : float or None
-        If provided, clip values above this percentile before interface detection.
-
-    Returns
-    -------
-    np.ndarray
-        Cropped volume (Z', X, Y).
-    int
-        Detected interface depth in Z voxels.
-    """
-    from linumpy.geometry.interface import detect_interface_z
-
-    vol_f = np.abs(vol_zxy) if np.iscomplexobj(vol_zxy) else np.asarray(vol_zxy, dtype=np.float32)
-
-    vol_xyz = np.transpose(vol_f, (1, 2, 0))
-
-    if percentile_clip is not None:
-        vol_xyz = np.clip(vol_xyz, None, np.percentile(vol_xyz, percentile_clip))
-
-    avg_iface = detect_interface_z(vol_xyz, sigma_xy=sigma_xy, sigma_z=sigma_z)
-
-    depth_px = round(depth_um / resolution_um)
-    surface_idx = max(0, min(avg_iface, vol_zxy.shape[0] - 1))
-    end_idx = surface_idx + depth_px
-
-    start_idx = surface_idx if crop_before_interface else 0
-    vol_crop = vol_zxy[start_idx:end_idx, :, :]
-
-    return vol_crop, avg_iface

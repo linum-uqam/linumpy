@@ -2,28 +2,26 @@
 """Apply corrections from linum_estimate_slices_transforms_gui.py to volume."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy.config.threads  # noqa: F401
+import linumpy._thread_config  # noqa: F401
 
 import argparse
-from pathlib import Path
 
 import numpy as np
 import zarr
 from tqdm import tqdm
 
-from linumpy.registration.manual import transform_and_rescale_slice
+from linumpy.stitching.manual_registration import transform_and_rescale_slice
 
 
-def _build_arg_parser() -> argparse.ArgumentParser:
+def _build_arg_parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("in_zarr", type=Path, help="Input zarr file to correct.")
-    p.add_argument("in_corrections", type=Path, help="File (.npz) containing the correction parameters.")
-    p.add_argument("out_zarr", type=Path, help="Output zarr file.")
+    p.add_argument("in_zarr", help="Input zarr file to correct.")
+    p.add_argument("in_corrections", help="File (.npz) containing the correction parameters.")
+    p.add_argument("out_zarr", help="Output zarr file.")
     return p
 
 
-def apply_transform(ty: np.ndarray, tx: np.ndarray, theta: np.ndarray, coordinates: np.ndarray) -> np.ndarray:
-    """Apply a rotation and translation transform to coordinates."""
+def apply_transform(ty, tx, theta, coordinates):
     # Step 1. Rotate coordinates
     center_y = np.max(coordinates[:, :, 1]) / 2.0
     center_x = np.max(coordinates[:, :, 2]) / 2.0
@@ -40,8 +38,7 @@ def apply_transform(ty: np.ndarray, tx: np.ndarray, theta: np.ndarray, coordinat
     return coordinates
 
 
-def apply_scaling(data: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
-    """Clip and normalize data to the range [0, 1]."""
+def apply_scaling(data, vmin, vmax):
     data = np.clip(data, vmin, vmax)
     data -= vmin
     if vmax - vmin > 0.0:
@@ -51,21 +48,17 @@ def apply_scaling(data: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
 
 
 def main() -> None:
-    """Run the apply slices transforms script."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 
-    _in = zarr.open(args.in_zarr, mode="r")
-    assert isinstance(_in, zarr.Array)
-    in_zarr = _in
-    imin, imax = np.min(np.asarray(in_zarr)), np.max(np.asarray(in_zarr))
+    in_zarr = zarr.open(args.in_zarr, mode="r")
+    imin, imax = np.min(in_zarr), np.max(in_zarr)
 
     checkpoint = np.load(args.in_corrections)
     custom_ranges = checkpoint["custom_ranges"]
     transforms = checkpoint["transforms"]
 
     out_zarr = zarr.open(args.out_zarr, mode="w", shape=in_zarr.shape, dtype=in_zarr.dtype)
-    assert isinstance(out_zarr, zarr.Array)
 
     # process slices one at a time
     for z in tqdm(range(in_zarr.shape[0])):

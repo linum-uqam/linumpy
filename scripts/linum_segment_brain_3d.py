@@ -3,7 +3,7 @@
 """Segment the brain from a 3D volume using a threshold and morphological operations."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy.config.threads  # noqa: F401
+import linumpy._thread_config  # noqa: F401
 
 import argparse
 from pathlib import Path
@@ -13,20 +13,19 @@ import numpy as np
 from scipy.ndimage import median_filter
 from skimage.filters import threshold_otsu
 
-from linumpy.segmentation import brain as segmentation
+from linumpy import segmentation
 
 
-def _build_arg_parser() -> argparse.ArgumentParser:
+def _build_arg_parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_volume", type=Path, help="Full path to the input volume (.nii or .nii.gz)")
-    p.add_argument("output_mask", type=Path, help="Full path to the output mask (.nii or .nii.gz)")
-    p.add_argument("--median-size", type=int, default=5, help="Size of the median filter [%(default)s]")
+    p.add_argument("input_volume", help="Full path to the input volume (.nii or .nii.gz)")
+    p.add_argument("output_mask", help="Full path to the output mask (.nii or .nii.gz)")
+    p.add_argument("--median-size", type=int, default=5, help="Size of the median filter (default=%(default)s)")
 
     return p
 
 
 def main() -> None:
-    """Run the 3D brain segmentation script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -41,7 +40,6 @@ def main() -> None:
 
     # Load the volume
     img = nib.load(str(volume_filename))
-    assert isinstance(img, nib.Nifti1Image)
     vol = img.get_fdata()
 
     # Create a data mask
@@ -55,7 +53,7 @@ def main() -> None:
     mask[vol < threshold] = False
 
     # Fill the holes
-    mask = segmentation.fill_holes_2d_and_3d(mask)
+    mask = segmentation.fillHoles_2Dand3D(mask)
 
     # Filter to remove some noise
     mask = median_filter(mask, size=args.median_size)
