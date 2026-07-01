@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Compensate PSF blurring using a parametric model."""
+"""Compensate PSF blurring using a parametric model.
+
+Notes
+-----
+The default initial Rayleigh length (``--zr_initial 610`` µm) is tuned for a
+3x objective.
+
+For the 10x objective (Mitutoyo M Plan Apo NIR 10X, NA = 0.26, WD = 30.5 mm,
+used with a water immersion cap) an empirical multi-seed fit on sub-19 /
+slice_z27 (10 µm/voxel, stitched mosaic) gave ``zr ≈ 1060 µm`` (median over
+seeds ∈ {50, 100, 200, 400, 610}; range 935-1145 µm). When processing 10x
+data pass ``--zr_initial 1060`` (or a value refitted on your own data)
+rather than relying on the 3x default.
+"""
 
 # Configure thread limits before numpy/scipy imports
 import linumpy.config.threads  # noqa: F401
@@ -15,7 +28,7 @@ from linumpy.psf.synthetic import synthesize_3d_psf
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser()
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("in_zarr", type=Path, help="Input stitched 3D slice (OME-zarr).")
     p.add_argument("out_zarr", type=Path, help="Output volume corrected for beam PSF (OME-zarr).")
     p.add_argument("--out_psf", type=Path, help="Optional output PSF filename.")
@@ -23,6 +36,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--n_profiles", type=int, default=10, help="Number of intensity profiles to use [%(default)s].")
     p.add_argument("--n_iterations", type=int, default=15, help="Number of iterations [%(default)s].")
     p.add_argument("--smooth", type=float, default=0.01, help="Smoothing factor as a fraction of volume depth [%(default)s].")
+    p.add_argument(
+        "--zr_initial",
+        type=float,
+        default=610.0,
+        help="Initial Rayleigh length in micron used to bootstrap the confocal-PSF fit.\n"
+        "Default is calibrated for a 3x objective; for the 10x Mitutoyo M Plan Apo NIR\n"
+        "objective use ~1060 (empirical, sub-19/slice_z27). [%(default)s]",
+    )
     return p
 
 
@@ -40,7 +61,17 @@ def main() -> None:
 
     # 2. estimate psf
     zf, zr = extract_psf_parameters_from_mosaic(
-        vol, n_profiles=args.n_profiles, res=res_axial_microns, f=args.smooth, n_iterations=args.n_iterations
+        vol,
+        n_profiles=args.n_profiles,
+        res=res_axial_microns,
+        f=args.smooth,
+        n_iterations=args.n_iterations,
+        zr_0=args.zr_initial,
+    )
+    print(
+        f"[psf_fit] axial_res_um={res_axial_microns:.3f}  zr_initial={args.zr_initial:.2f}  "
+        f"zf={zf:.3f}  zr={zr:.3f}  (focal depth and Rayleigh length in micron)",
+        flush=True,
     )
     psf_3d = synthesize_3d_psf(zf, zr, res_axial_microns, vol.shape)
 
