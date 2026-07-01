@@ -55,9 +55,9 @@ def main() -> None:
     parser = _build_arg_parser()
     args = parser.parse_args()
 
-    _in = zarr.open(args.in_zarr, mode="r")
-    assert isinstance(_in, zarr.Array)
-    in_zarr = _in
+    in_ = zarr.open(args.in_zarr, mode="r")
+    assert isinstance(in_, zarr.Array)
+    in_zarr = in_
     imin, imax = np.min(np.asarray(in_zarr)), np.max(np.asarray(in_zarr))
 
     checkpoint = np.load(args.in_corrections)
