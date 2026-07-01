@@ -1,8 +1,6 @@
 # Slice Configuration Feature
 
 
----
-
 ## Overview
 
 `slice_config.csv` is the **single source of truth for per-slice pipeline decisions**. It controls which slices are included in the 3D reconstruction pipeline and records how every stage has acted on each slice, in a machine- and human-readable audit trail.
@@ -52,7 +50,7 @@ This caused errors when:
 
 A CSV file (`slice_config.csv`) records per-slice pipeline decisions. Below is a fully-populated example after a complete run:
 
-```csv
+```text
 slice_id,use,quality_score,galvo_confidence,galvo_fix,rehomed,rehoming_reliable,auto_excluded,auto_exclude_reason,interpolated,interpolation_failed,interpolation_method_used,interpolation_fallback_reason,notes
 00,false,0.000,0.234,false,false,,false,,false,false,,,calibration_slice
 01,true,0.812,0.891,true,false,,false,,false,false,,,
@@ -134,7 +132,7 @@ After `finalise_interpolation`, any slice that reached `linum_interpolate_missin
   - `interpolation_method_used` empty
   - `interpolation_fallback_reason` = one of `low_overlap_ncc`, `no_foreground_planes`, `registration_exception`, `reg_did_not_improve`, `affine_determinant_non_positive`
 
-The pipeline never fabricates a slice from a weighted blend when registration fails; blending two neighbours that could not be registered introduces ghost contours and would also be made-up data. See [`SLICE_INTERPOLATION_FEATURE.md`](SLICE_INTERPOLATION_FEATURE.md) for the interpolation algorithm details and rationale.
+The pipeline never fabricates a slice from a weighted blend when registration fails; blending two neighbours that could not be registered introduces ghost contours and would also be made-up data. See {doc}`SLICE_INTERPOLATION_FEATURE` for the interpolation algorithm details and rationale.
 
 ---
 
@@ -167,7 +165,7 @@ The first slice in an acquisition is typically a **calibration slice** that is t
 
 When quality assessment runs, the writer only populates canonical columns:
 
-```csv
+```text
 slice_id,use,quality_score,notes
 00,false,0.000,calibration_slice
 01,true,0.812,
@@ -489,7 +487,7 @@ All Python-side slice filtering (e.g. `linum_estimate_global_transform.py`) uses
 
 The shifts file contains pairwise shifts between consecutive slices:
 
-```csv
+```text
 fixed_id,moving_id,x_shift,y_shift,x_shift_mm,y_shift_mm
 0,1,10,5,0.01,0.005
 1,2,8,3,0.008,0.003
@@ -716,14 +714,14 @@ See `linumpy/io/slice_config.py` for the concurrency contract in the module docs
 | File | Changes |
 |------|---------|
 | `linumpy/io/slice_config.py` | **NEW** — canonical schema + `read`/`write`/`stamp`/`stamp_many`/`merge_fragments`/`filter_slices_to_use`/`force_skip_slices`. |
-| `scripts/linum_generate_slice_config.py` | Uses `linumpy.io.slice_config` for writes; canonical columns only. |
-| `scripts/linum_assess_slice_quality[_gpu].py` | Refactored to use `linumpy.io.slice_config`; dropped `ssim_mean`/`edge_score`/`variance_score`/`depth` columns. |
-| `scripts/linum_detect_rehoming.py` | Added `--slice_config_in`/`--slice_config_out`; stamps `rehomed` + `rehoming_reliable`. |
-| `scripts/linum_auto_exclude_slices.py` | Stamps `auto_excluded` + `auto_exclude_reason` directly on `slice_config.csv` (no more side-file). |
-| `scripts/linum_interpolate_missing_slice.py` | Added `--finalise` mode: merges per-slice manifest fragments into `slice_config.csv`. |
-| `scripts/linum_stack_slices_motor.py` | Accepts `--slice_config`; uses `slice_config_io.force_skip_slices()`. `--force_skip_slices` removed. |
-| `scripts/linum_align_mosaics_3d_from_shifts.py` | Fixed indexing bug, added `--slice_config`, now uses shared reader. |
-| `scripts/linum_estimate_global_transform[_gpu].py`, `linum_analyze_stitch_affine.py`, `linum_fix_galvo_shift_zarr.py` | Switched to shared `linumpy.io.slice_config` reader/writer. |
+| `scripts/analysis/linum_generate_slice_config.py` | Uses `linumpy.io.slice_config` for writes; canonical columns only. |
+| `scripts/analysis/linum_assess_slice_quality[_gpu].py` | Refactored to use `linumpy.io.slice_config`; dropped `ssim_mean`/`edge_score`/`variance_score`/`depth` columns. |
+| `scripts/analysis/linum_detect_rehoming.py` | Added `--slice_config_in`/`--slice_config_out`; stamps `rehomed` + `rehoming_reliable`. |
+| `scripts/analysis/linum_auto_exclude_slices.py` | Stamps `auto_excluded` + `auto_exclude_reason` directly on `slice_config.csv` (no more side-file). |
+| `scripts/stacking/linum_interpolate_missing_slice.py` | Added `--finalise` mode: merges per-slice manifest fragments into `slice_config.csv`. |
+| `scripts/stacking/linum_stack_slices_motor.py` | Accepts `--slice_config`; uses `slice_config_io.force_skip_slices()`. `--force_skip_slices` removed. |
+| `scripts/stitching/linum_align_mosaics_3d_from_shifts.py` | Fixed indexing bug, added `--slice_config`, now uses shared reader. |
+| `scripts/stitching/linum_estimate_global_transform[_gpu].py`, `linum_analyze_stitch_affine.py`, `linum_fix_galvo_shift_zarr.py` | Switched to shared `linumpy.io.slice_config` reader/writer. |
 | `scripts/linum_update_slice_config_with_interpolation.py` | **REMOVED** — replaced by `linum_interpolate_missing_slice.py --finalise`. |
 | `workflows/preproc/preproc_rawtiles.nf` | Adds `generate_slice_config` process. |
 | `workflows/reconst_3d/soct_3d_reconst.nf` | Threads `slice_config.csv` through `detect_rehoming_events` → `finalise_interpolation` → `auto_exclude_slices` → `stack`. |
