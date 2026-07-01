@@ -128,7 +128,7 @@ def sharpen_residual(
     if not np.isfinite(r_min) or not np.isfinite(r_max):
         return log_v_xp if _is_gpu_array(log_v) else np.asarray(log_v).astype(np.float32)
     if r_max - r_min < 1e-8:
-        # Degenerate distribution — no sharpening possible.
+        # Degenerate distribution -- no sharpening possible.
         return log_v_xp if _is_gpu_array(log_v) else np.asarray(log_v).astype(np.float32)
 
     bin_width = (r_max - r_min) / float(n_bins - 1)

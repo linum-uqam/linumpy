@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for ``linum_compensate_attenuation_inplace.py``.
+"""Tests for ``linum-compensate-attenuation-inplace``.
 
 The synthetic test builds a uniform "tissue" volume with a known exponential
 depth decay ``I(z) = I0 * exp(-2 * mu * dz * z)`` (the factor 2 is the
@@ -16,7 +16,7 @@ from linumpy.io.zarr import read_omezarr, save_omezarr
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_compensate_attenuation_inplace.py", "--help"])
+    ret = script_runner.run(["linum-compensate-attenuation-inplace", "--help"])
     assert ret.success
 
 
@@ -83,7 +83,7 @@ def test_flattens_synthetic_exponential_decay(script_runner, tmp_path):
 
     ret = script_runner.run(
         [
-            "linum_compensate_attenuation_inplace.py",
+            "linum-compensate-attenuation-inplace",
             str(input_path),
             str(output_path),
             "--method",
@@ -131,7 +131,7 @@ def test_min_bias_caps_gain(script_runner, tmp_path):
     min_bias = 0.5  # caps gain at 2x
     ret = script_runner.run(
         [
-            "linum_compensate_attenuation_inplace.py",
+            "linum-compensate-attenuation-inplace",
             str(input_path),
             str(output_path),
             "--min_bias",
@@ -159,7 +159,7 @@ def test_preserves_shape_and_dtype(script_runner, tmp_path):
 
     ret = script_runner.run(
         [
-            "linum_compensate_attenuation_inplace.py",
+            "linum-compensate-attenuation-inplace",
             str(input_path),
             str(output_path),
             "--n_levels",
@@ -191,7 +191,7 @@ def test_method_dispatch(script_runner, tmp_path, method):
 
     ret = script_runner.run(
         [
-            "linum_compensate_attenuation_inplace.py",
+            "linum-compensate-attenuation-inplace",
             str(input_path),
             str(output_path),
             "--method",

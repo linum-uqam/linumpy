@@ -47,7 +47,7 @@ def _make_transform(path, tx=0.0, ty=0.0, rot_deg=0.0, cx=16.0, cy=16.0):
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_refine_manual_transforms.py", "--help"])
+    ret = script_runner.run(["linum-refine-manual-transforms", "--help"])
     assert ret.success
 
 
@@ -70,7 +70,7 @@ def test_run_no_manual_transforms(tmp_path, script_runner):
 
     ret = script_runner.run(
         [
-            "linum_refine_manual_transforms.py",
+            "linum-refine-manual-transforms",
             str(fixed_zarr),
             str(moving_zarr),
             str(auto_dir),
@@ -104,7 +104,7 @@ def test_run_with_manual_transform(tmp_path, script_runner):
 
     ret = script_runner.run(
         [
-            "linum_refine_manual_transforms.py",
+            "linum-refine-manual-transforms",
             str(fixed_zarr),
             str(moving_zarr),
             str(auto_dir),
@@ -135,7 +135,7 @@ def test_overwrite_guard(tmp_path, script_runner):
     _make_transform(auto_dir / "transform.tfm")
 
     base_args = [
-        "linum_refine_manual_transforms.py",
+        "linum-refine-manual-transforms",
         str(fixed_zarr),
         str(moving_zarr),
         str(auto_dir),

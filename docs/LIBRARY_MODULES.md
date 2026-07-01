@@ -1,854 +1,217 @@
-# Library Modules Documentation
+# Library Modules
 
+A concise map of the `linumpy` Python package. Use this page to find which
+subpackage owns what, then follow the auto-generated [API
+reference](api/linumpy/index) for full signatures and docstrings.
 
----
-
-## Overview
-
-The linumpy library provides Python modules for microscopy data processing. This document describes the main modules and their functionality.
-
----
-
-## Module Structure
+## Package layout
 
 ```
 linumpy/
-├── _thread_config.py      # CPU thread management
-├── __init__.py
-├── io/                    # Input/Output modules (zarr, allen, npz, thorlabs,
-│                          #   test_data, slice_config, data_io)
-├── gpu/                   # GPU acceleration modules
-├── microscope/            # Microscope-specific modules (oct)
-├── preproc/               # Preprocessing modules (icorr, normalization,
-│                          #   resampling, xyzcorr)
-├── psf/                   # Point spread function
-├── shifts/                # XY shift CSV utilities
-├── stitching/             # Image stitching (registration, motor, stacking,
-│                          #   interpolation, topology, mosaic_grid, ...)
-├── utils/                 # Utility modules (io, metrics, orientation,
-│                          #   image_quality, visualization)
-├── reconstruction.py      # Core reconstruction
-├── segmentation.py        # Segmentation tools
-└── utils_images.py        # Image utilities
+├── cli/             # argparse helpers shared by linum_* scripts
+├── config/          # thread/process limits (BLAS, OpenMP, threadpoolctl)
+├── geometry/        # crop, galvo correction, interface detection, resampling
+├── gpu/             # CuPy-backed FFT, morphology, B-spline, N4, registration
+├── imaging/         # orientation, overlays, simple transforms, visualization
+├── intensity/       # attenuation, bias-field, normalization, PSF model,
+│                    #   vignette, intensity conversion
+├── io/              # OME-Zarr I/O, slice-config, ThorLabs raw, test data
+├── metrics/         # PipelineMetrics + per-step metric collectors
+├── microscope/      # OCT-specific helpers
+├── mosaic/          # mosaic-grid layout, motor positions, stacking,
+│                    #   interpolation, blending, discovery
+├── psf/             # PSF extraction and synthetic generation
+├── reference/       # Allen brain atlas helpers
+├── registration/    # phase correlation, SimpleITK, manual, refinement
+├── segmentation/    # brain tissue segmentation
+└── stack_alignment/ # shifts CSV I/O, unit detection, filtering
 ```
 
----
+## Subpackage cheat sheet
 
-## I/O Modules (`linumpy.io`)
+### `linumpy.io`
 
-### zarr.py - OME-Zarr I/O
+OME-Zarr is the canonical on-disk format. Two writers are provided:
 
-Read and write OME-Zarr format files.
+* `OmeZarrWriter` — generic chunked writer with power-of-2 pyramid levels.
+* `AnalysisOmeZarrWriter` — writes analysis-friendly resolution levels
+  (10/25/50/100 µm) for the final 3D volume.
 
-```python
-from linumpy.io.zarr import read_omezarr, save_omezarr, OmeZarrWriter, AnalysisOmeZarrWriter
-
-# Read OME-Zarr
-image, resolution = read_omezarr("input.ome.zarr")
-# image: dask.array.Array
-# resolution: tuple (z, x, y) in mm/pixel
-
-# Save OME-Zarr
-save_omezarr(image, "output.ome.zarr", resolution, chunks=(10, 128, 128))
-
-# Write large volumes incrementally (traditional power-of-2 pyramid)
-writer = OmeZarrWriter("output.ome.zarr", shape, chunks, dtype)
-writer[0:10] = data_slice
-writer.finalize(resolution, n_levels=5)  # 2x downsampling per level
-
-# Write with analysis-optimized resolutions (10, 25, 50, 100 µm)
-writer = AnalysisOmeZarrWriter("output.ome.zarr", shape, chunks, dtype)
-writer[0:10] = data_slice
-writer.finalize(resolution, [10, 25, 50, 100])  # or use default
-writer.finalize(resolution)  # defaults to [10, 25, 50, 100] µm
-```
-
-### allen.py - Allen Brain Atlas
-
-Download and access Allen Brain Atlas data.
+Common entry points:
 
 ```python
-from linumpy.io.allen import download_allen_atlas
-
-# Download atlas
-download_allen_atlas(output_dir)
-```
-
-### npz.py - NPZ Files
-
-Handle NumPy compressed archives.
-
-```python
-from linumpy.io.npz import load_npz, save_npz
-
-data = load_npz("data.npz")
-save_npz("output.npz", array)
-```
-
-### thorlabs.py - Thorlabs Files
-
-Read Thorlabs microscope data formats.
-
-```python
-from linumpy.io.thorlabs import read_thorlabs
-
-data = read_thorlabs("thorlabs_file")
-```
-
-### test_data.py - Test Data
-
-Access test datasets for development.
-
-```python
+from linumpy.io.zarr import read_omezarr, read_omezarr_array, save_omezarr, OmeZarrWriter, AnalysisOmeZarrWriter
 from linumpy.io.test_data import get_data
-
-# Get path to test data
-raw_tiles_path = get_data('raw_tiles')
+from linumpy.io import slice_config        # slice_config.json reader/writer
+from linumpy.io.thorlabs import ThorImageOCT
 ```
 
-### slice_config.py - Slice Config I/O
+`read_omezarr(path, level=0)` returns a `(zarr.Array, voxel_size)` tuple (lazy).
+`read_omezarr_array(path, level=0, use_gpu=False)` is the high-level entry
+point: it materialises the requested level into memory and returns
+`(array, voxel_size)`. With ``use_gpu=False`` (default) the array is a
+``numpy.ndarray``; with ``use_gpu=True`` it dispatches through
+`linumpy.gpu.zarr_io.read_zarr_to_gpu` (see {doc}`GPU_ACCELERATION`) and returns a
+``cupy.ndarray`` (kvikio/GPUDirect Storage when available, otherwise the
+``zarr.config.enable_gpu`` fallback). Voxel size is ordered to match the array
+axes (Z, Y, X for 3D volumes; Y, X for 2D mosaics).
 
-Shared helpers for reading, writing, and stamping `slice_config.csv` — the
-per-slice trace file threaded through the reconstruction pipeline. Each
-pipeline stage that makes a per-slice decision (quality assessment, rehoming
-correction, auto-exclusion, missing-slice interpolation) stamps its flag
-columns via this module and hands the enriched file to the next stage.
+See {doc}`Mosaic Grid Format <MOSAIC_GRID_FORMAT>` and
+{doc}`Slice Config Feature <SLICE_CONFIG_FEATURE>` for format details.
 
-```python
-from linumpy.io.slice_config import (
-    CANONICAL_COLUMNS,  # list of pipeline decision columns
-    read,               # load slice_config.csv as dict keyed by slice_id
-    write,              # write dict back to CSV with canonical column order
-    stamp,              # update per-slice flags (use, auto_excluded, etc.) and write
-    merge_fragments,    # merge per-slice manifest fragments into a single CSV
-    force_skip_slices,  # return set of slice_ids where use=false or auto_excluded=true
-)
-```
+### `linumpy.cli` and `linumpy.config`
 
-The module does not implement file locking; concurrency safety is provided by
-Nextflow's channel discipline (each process receives an immutable copy; merges
-happen in a single downstream process).
+`linumpy.cli.args` provides `add_overwrite_arg`, `add_processes_arg`,
+`parse_processes_arg`, `assert_output_exists`, and `get_available_cpus`
+(honours `LINUMPY_MAX_CPUS` / `LINUMPY_RESERVED_CPUS` env vars).
 
-### data_io.py - Slicer Data I/O
+`linumpy.config.threads` configures BLAS/OpenMP/threadpoolctl thread caps and
+is imported as a side-effect at the top of every `linum_*` script (before
+NumPy/SciPy).
 
-Legacy readers for slicer-format volumes, NIfTI files and tile metadata.
+### `linumpy.metrics`
 
-```python
-from linumpy.io.data_io import (
-    listSlicesInDir,
-    getSliceListIndices,
-    load_volume,
-    loadTiffImage,
-    saveImage,
-)
-```
-
----
-
-## Microscope Module (`linumpy.microscope`)
-
-### oct.py - OCT Tile Reading
-
-Read raw OCT tiles with metadata and optional corrections.
+Structured metrics collected at every pipeline stage and aggregated into
+`PipelineMetrics`. Per-step collectors live alongside the dataclass.
 
 ```python
-from linumpy.microscope.oct import OCT
-
-# Open tile
-tile = OCT("/path/to/tile_x00_y00_z00")
-
-# Access properties
-shape = tile.shape           # (z, x, y)
-resolution = tile.resolution # (res_z, res_x, res_y)
-dimension = tile.dimension   # Physical dimensions
-position = tile.position     # Stage position (if available)
-
-# Read data with corrections
-data = tile.load_image(
-    crop=True,              # Crop galvo return region
-    fix_galvo_shift=True,   # Auto-detect and fix galvo artifacts
-    fix_camera_shift=False  # Fix camera timing shift (old data)
-)
-```
-
-**Properties:**
-- `shape`: Data shape (z, x, y)
-- `resolution`: Pixel size in mm
-- `dimension`: Physical dimensions in mm
-- `position`: Stage position (x, y, z) in mm
-- `position_available`: Whether position metadata exists
-
-**load_image() Parameters:**
-- `crop`: Remove extra pixels from galvo return
-- `fix_galvo_shift`: 
-  - `True`: Auto-detect artifact and fix if confident (≥0.3 confidence)
-  - `int`: Apply specific shift value
-  - `False`: No correction
-- `fix_camera_shift`: Correct camera timing offset (legacy data)
-
----
-
-## Preprocessing Modules (`linumpy.preproc`)
-
-### normalization.py - Intensity Normalization
-
-Normalize OCT volume intensities based on agarose background.
-
-```python
-from linumpy.preproc.normalization import normalize_volume
-
-# Normalize volume intensities
-# agarose_mask: 2D binary mask indicating agarose regions
-normalized, background_thresholds = normalize_volume(
-    vol,                    # Input volume (Z, X, Y)
-    agarose_mask,           # 2D mask for agarose detection
-    percentile_max=99.9     # Clip values above this percentile
-)
-```
-
-### icorr.py - Illumination Correction
-
-Correct illumination inhomogeneity.
-
-```python
-from linumpy.preproc.icorr import estimate_illumination, apply_illumination_correction
-
-# Estimate illumination profile
-profile = estimate_illumination(image)
-
-# Apply correction
-corrected = apply_illumination_correction(image, profile)
-```
-
-### xyzcorr.py - XYZ Corrections
-
-Apply spatial corrections including galvo shift detection and correction.
-
-```python
-from linumpy.preproc.xyzcorr import (
-    detect_galvo_shift,
-    detect_galvo_for_slice,
-    detect_galvo_artifact_presence,
-    fix_galvo_shift,
-    findTissueInterface,
-    cropVolume
-)
-
-# Detect galvo shift with confidence score
-aip = volume.mean(axis=0)  # Average intensity projection
-shift, confidence = detect_galvo_shift(
-    aip, 
-    n_pixel_return=40,      # Number of pixels in galvo return region
-    return_confidence=True  # Return confidence score (0-1)
-)
-
-# Only apply fix if confident (artifact is present)
-if confidence >= 0.3:
-    corrected = fix_galvo_shift(volume, shift=shift, axis=1)
-
-# Or apply with known shift value
-corrected = fix_galvo_shift(volume, shift=15, axis=1)
-
-# For slice-level detection (samples multiple tiles, skips background)
-shift, confidence = detect_galvo_for_slice(
-    tiles,                  # zarr array of tiles
-    n_extra=40,             # Number of extra pixels from galvo return
-    threshold=0.6,          # Minimum confidence threshold
-    n_samples=5,            # Number of tiles to sample
-    min_intensity=20.0      # Skip tiles with mean intensity below this
-)
-
-# For batch processing: check artifact presence separately
-presence_score = detect_galvo_artifact_presence(
-    aip,
-    n_pixel_return=40,
-    detected_shift=shift
-)
-```
-
-**Galvo Shift Detection:**
-
-The galvo mirror in OCT systems can cause horizontal banding artifacts when the galvo return region is not at the edge of the raw tile data. The detection system has three parts:
-
-1. **`detect_galvo_shift()`** - Finds *where* the galvo return boundary is located
-   - Analyzes average A-line intensity profile
-   - Searches for the shift that maximizes boundary discontinuities
-   - Returns shift value (in pixels) and optional confidence score
-
-2. **`detect_galvo_for_slice(tiles, n_extra, ...)`** - Slice-level detection
-   - Samples tiles from the center of the mosaic (more likely to contain tissue)
-   - Skips background tiles with low mean intensity
-   - Returns the detection with highest confidence
-   - Returns `(0, confidence)` if no artifact detected above threshold
-
-**Confidence Score Interpretation (0-1):**
-| Score | Meaning | Action |
-|-------|---------|--------|
-| < 0.5 | No clear artifact detected | Skip correction |
-| ≥ 0.5 | Galvo artifact likely present | Apply correction |
-| > 0.7 | Clear galvo artifact | High confidence |
-
-**Key Algorithm Details:**
-- Uses **gradient-based detection** to find intensity discontinuities
-- Finds pairs of high gradients separated by exactly `n_pixel_return` pixels
-- Checks B-scan subregions for subtle artifacts only visible in parts of the tile
-- Validates using peak dominance, boundary gradient ranking, and intensity contrast
-- Default threshold: 0.6 (configurable via `galvo_threshold` parameter)
-
-### resampling.py - Mosaic Grid Resampling
-
-Resample mosaic grid volumes to a target isotropic resolution, processing tile-by-tile to avoid loading the full volume into memory.
-
-```python
-from linumpy.preproc.resampling import resample_mosaic_grid
-
-# Resample to 10 µm isotropic
-resample_mosaic_grid(
-    vol,                # Dask/Zarr array with chunk structure (Z, nx*h, ny*w)
-    source_res,         # Source resolution (res_z, res_y, res_x)
-    target_res_um=10.0, # Target isotropic resolution in µm
-    n_levels=5,         # Number of output pyramid levels
-    out_path="output.ome.zarr"
-)
-```
-
----
-
-## PSF Module (`linumpy.psf`)
-
-### psf_estimator.py - PSF Estimation
-
-Estimate and model point spread functions.
-
-```python
-from linumpy.psf.psf_estimator import estimate_psf, apply_deconvolution
-
-# Estimate PSF from data
-psf = estimate_psf(image)
-
-# Apply deconvolution
-deconvolved = apply_deconvolution(image, psf)
-```
-
----
-
-## Stitching Module (`linumpy.stitching`)
-
-### registration.py - Image Registration
-
-Register images using various methods.
-
-```python
-from linumpy.stitching.registration import (
-    register_2d_images_sitk,
-    apply_transform,
-    pairWisePhaseCorrelation
-)
-
-# Get initial translation estimate using phase correlation
-deltas = pairWisePhaseCorrelation(fixed_image, moving_image)
-initial_translation = (deltas[1], deltas[0])  # (x, y) order for SimpleITK
-
-# Register 2D images with phase correlation initialization
-transform, moving_registered, error = register_2d_images_sitk(
-    fixed_image, 
-    moving_image,
-    metric='MSE',              # MSE, CC, AntsCC, MI
-    method='affine',           # affine, euler, translation
-    max_iterations=2500,
-    grad_mag_tol=1e-6,
-    moving_mask=None,
-    fixed_mask=None,
-    return_3d_transform=True,
-    initial_translation=initial_translation,  # Optional: phase correlation result
-    initial_step=None          # Optional: optimizer step size (auto-reduced with initial_translation)
-)
-
-# Apply transform to volume
-transformed = apply_transform(volume, transform)
-```
-
-**Note:** When `initial_translation` is provided, the optimizer uses a smaller step size (1.0 vs 4.0 pixels) to prevent drifting away from the correct solution.
-
-### stitch_utils.py - Stitching Utilities
-
-Helper functions for stitching operations.
-
-```python
-from linumpy.stitching.stitch_utils import (
-    compute_overlap,
-    blend_images
-)
-```
-
-### topology.py - Mosaic Topology
-
-Manage tile arrangements and topology.
-
-```python
-from linumpy.stitching.topology import (
-    build_topology_graph,
-    find_optimal_path
-)
-```
-
-### motor.py - Motor-Position Tile Placement
-
-Compute tile pixel positions from motor grid geometry (regular grid with configurable overlap, scale, and rotation).
-
-```python
-from linumpy.stitching.motor import compute_motor_positions
-
-positions, step_y, step_x = compute_motor_positions(
-    nx=3,                   # Number of tiles in X
-    ny=3,                   # Number of tiles in Y
-    tile_shape=(100, 512, 512),
-    overlap_fraction=0.2,
-    scale_factor=1.0,       # Scale step size (default: no scaling)
-    rotation_deg=0.0        # Global grid rotation
-)
-# positions: list of (row_pos, col_pos) pixel positions
-```
-
-### stacking.py - 3D Slice Stacking Utilities
-
-Z-overlap detection between consecutive slices using normalized cross-correlation.
-
-```python
-from linumpy.stitching.stacking import find_z_overlap
-
-best_overlap, best_corr = find_z_overlap(
-    fixed_vol,               # Bottom (fixed) slice volume (Z, Y, X)
-    moving_vol,              # Top (moving) slice volume (Z, Y, X)
-    slicing_interval_mm=0.05,
-    search_range_mm=0.1,
-    resolution_um=3.5
-)
-# best_overlap: optimal overlap in Z voxels
-# best_corr: correlation score at optimal overlap
-```
-
-### interpolation.py - Missing Slice Interpolation
-
-Z-aware morphing interpolation for missing serial sections. The primary entry
-point is `interpolate_z_morph(vol_before, vol_after)`, which warps the two
-boundary planes via fractional affine transforms (`T**alpha`) and cross-fades
-them. Falls back to `interpolate_weighted` when quality gates fail.
-
-```python
-from linumpy.stitching.interpolation import interpolate_z_morph
-
-volume, diagnostics = interpolate_z_morph(vol_before, vol_after)
-# vol_before, vol_after: 3D neighbours on either side of a gap, shape (Z, Y, X)
-# Returns: interpolated volume (shape matching min(nz_before, nz_after), H, W)
-#          and a JSON-serialisable diagnostics dict (method_used, pre/post
-#          NCC, affine_determinant, fallback_reason, ...).
-```
-
-See `docs/SLICE_INTERPOLATION_FEATURE.md` for the physical model.
-
-### manual_registration.py - Manual Registration
-
-GUI-based manual registration tools.
-
-```python
-from linumpy.stitching.manual_registration import ManualRegistrationGUI
-```
-
-### FileUtils.py - File Utilities
-
-File handling utilities for stitching.
-
-```python
-from linumpy.stitching.FileUtils import (
-    list_tiles,
-    parse_tile_name
-)
-```
-
-### mosaic_grid.py - Mosaic Grid Class
-
-The `MosaicGrid` class manages 2D mosaic grid images (a 2D image containing
-all tiles for a slice without overlap). Provides tile iteration, affine tile
-placement, and stitching utilities including diffusion-based blending.
-
-```python
-from linumpy.stitching.mosaic_grid import MosaicGrid, getDiffusionBlendingWeights
-
-mg = MosaicGrid(image, tile_shape=(512, 512), overlap_fraction=0.2)
-stitched = mg.stitch(blending_method='diffusion')
-
-# Blending weights helper (also used standalone)
-weights = getDiffusionBlendingWeights(mask_fixed, mask_moving, factor=2)
-```
-
----
-
-## Utilities Module (`linumpy.utils`)
-
-### io.py - I/O Utilities
-
-Command-line argument helpers.
-
-```python
-from linumpy.utils.io import (
-    add_overwrite_arg,
-    add_processes_arg,
-    assert_output_exists,
-    get_available_cpus,
-    parse_processes_arg
-)
-
-# Add standard arguments to parser
-parser = argparse.ArgumentParser()
-add_overwrite_arg(parser)
-add_processes_arg(parser)
-
-# Parse and validate
-args = parser.parse_args()
-n_processes = parse_processes_arg(args.n_processes)
-assert_output_exists(args.output, parser, args)
-
-# Get available CPUs (respects LINUMPY_MAX_CPUS and LINUMPY_RESERVED_CPUS env vars)
-available = get_available_cpus()
-```
-
-#### CPU Core Management
-
-The `get_available_cpus()` function respects environment variables for limiting CPU usage:
-
-```python
-import os
-from linumpy.utils.io import get_available_cpus
-
-# Default: uses all CPUs minus 1
-cpus = get_available_cpus()  # e.g., 15 on a 16-core system
-
-# With LINUMPY_RESERVED_CPUS=4
-os.environ['LINUMPY_RESERVED_CPUS'] = '4'
-cpus = get_available_cpus()  # e.g., 12 on a 16-core system
-
-# With LINUMPY_MAX_CPUS=8 (takes precedence)
-os.environ['LINUMPY_MAX_CPUS'] = '8'
-cpus = get_available_cpus()  # 8 (or total if less than 8)
-```
-
-### metrics.py - Pipeline Quality Metrics
-
-Collect, save, and aggregate quality metrics from pipeline steps.
-
-```python
-from linumpy.utils.metrics import (
+from linumpy.metrics import (
     PipelineMetrics,
     collect_normalization_metrics,
-    collect_xy_transform_metrics,
     collect_pairwise_registration_metrics,
-    collect_interface_crop_metrics,
-    collect_psf_compensation_metrics,
-    collect_stack_metrics,
-    collect_stitch_3d_metrics,
     aggregate_metrics,
-    compute_summary_statistics
-)
-
-# Manual metrics collection
-metrics = PipelineMetrics('my_step', output_dir)
-metrics.add_info('input', input_path, 'Input file path')
-metrics.add_metric('error', 0.05, unit='pixels', threshold_name='registration_error')
-metrics.save()
-
-# Use step-specific collectors (recommended - simpler)
-collect_normalization_metrics(vol, agarose_mask, otsu_thresh, bg_thresh, output_path)
-collect_pairwise_registration_metrics(error, tx, ty, rot, best_z, expected_z, output_path)
-
-# Aggregate metrics from pipeline run
-aggregated = aggregate_metrics('/path/to/pipeline/output')
-# Returns: {'step_name': [list of metrics dicts], ...}
-
-# Compute summary statistics
-summary = compute_summary_statistics(aggregated['pairwise_registration'])
-# Returns: {'count': N, 'status_counts': {...}, 'metric_name': {'mean': ..., 'std': ...}}
-```
-
-**Available Threshold Names:**
-| Name | Warning | Error | Higher is Better |
-|------|---------|-------|------------------|
-| `registration_error` | 0.05 | 0.15 | No |
-| `translation_magnitude` | 30.0 | 50.0 | No |
-| `rotation_degrees` | 1.0 | 2.0 | No |
-| `correlation` | 0.7 | 0.5 | Yes |
-| `mask_coverage` | 0.05 | 0.01 | Yes |
-| `agarose_coverage` | 0.05 | 0.01 | Yes |
-| `rms_residual` | 5.0 | 15.0 | No |
-| `z_offset_std` | 10.0 | 25.0 | No |
-| `z_offset_range` | 15.0 | 30.0 | No |
-
-## XY Shifts Module (`linumpy.shifts`)
-
-### shifts/utils.py - XY Shift Utilities
-
-Load and process XY shift CSV files for inter-slice alignment.
-
-```python
-from linumpy.shifts.utils import load_shifts_csv, detect_shift_units
-
-# Load shifts and compute cumulative positions
-cumsum, all_ids = load_shifts_csv("shifts_xy.csv")
-# cumsum: {slice_id: (cumulative_dx_mm, cumulative_dy_mm)}
-# all_ids: sorted list of all slice IDs
-
-# Detect resolution units (mm vs µm)
-res_x_um, res_y_um = detect_shift_units(resolution)
-```
-
-### orientation.py - Volume Orientation
-
-Parse 3-letter orientation codes and compute axis permutations/flips for RAS alignment.
-
-```python
-from linumpy.utils.orientation import parse_orientation_code
-
-# Parse orientation for RAS alignment
-axis_permutation, axis_flips = parse_orientation_code('PIR')
-# axis_permutation: source indices for each target dimension
-# axis_flips: +1 (keep) or -1 (flip) per axis after permutation
-
-# Example: PIR → (1, 2, 0), (-1, 1, -1)
-# Example: SRA → (0, 1, 2), (1, 1, 1)  # identity
-```
-
-**Supported letters:** R/L (Right/Left), A/P (Anterior/Posterior), S/I (Superior/Inferior)
-
-### image_quality.py - Image Quality Assessment
-
-CPU-based image quality metrics for slice analysis.
-
-```python
-from linumpy.utils.image_quality import (
-    compute_ssim_2d,
-    compute_ssim_3d,
-    compute_edge_score,
-    compute_variance_score,
-    assess_slice_quality,
-)
-
-# Compare two 3D volumes
-ssim = compute_ssim_3d(vol1, vol2)
-
-# Assess overall quality of a slice relative to its neighbors
-quality, metrics = assess_slice_quality(
-    vol,        # The slice to assess
-    vol_before, # Previous slice
-    vol_after   # Next slice
-)
-# quality: float in [0, 1]
-# metrics: dict with ssim, edge_score, variance_score, etc.
-```
-
-For GPU-accelerated versions see `linumpy.gpu.image_quality`.
-
-### visualization.py - Orthogonal View Screenshots
-
-Save orthogonal (XY, XZ, YZ) views of a 3D volume as a figure.
-
-```python
-from linumpy.utils.visualization import save_orthogonal_views, save_annotated_views
-
-# Basic orthogonal view
-save_orthogonal_views(
-    image,              # 3D volume (Z, X, Y)
-    "view.png",
-    z_slice=None,       # Default: center
-    x_slice=None,
-    y_slice=None,
-    cmap='magma',
-    percentile_max=99.9
-)
-
-# Annotated view with Z-slice index labels
-save_annotated_views(
-    image,
-    "annotated_view.png",
-    n_slices=50,        # Number of input slices (for label spacing)
-    slice_ids=None,     # Optional explicit slice IDs
-    font_size=7,
-    label_every=1,
-    show_lines=False
+    compute_summary_statistics,
 )
 ```
 
----
+See {doc}`Reconstruction Diagnostics <RECONSTRUCTION_DIAGNOSTICS>`.
 
-## Core Modules
+### `linumpy.geometry`
 
-### reconstruction.py - Core Reconstruction
+Pixel/world geometry, plus OCT-specific corrections:
 
-Core reconstruction functions.
+* `geometry.galvo` — `detect_galvo_shift`, `fix_galvo_shift`,
+  `detect_galvo_for_slice` (B-scan galvo artifact correction).
+* `geometry.interface` — tissue-surface detection.
+* `geometry.crop` — crop volumes around the tissue interface.
+* `geometry.resampling` — resample mosaic grids and 3D volumes to a target
+  isotropic resolution.
 
-```python
-from linumpy.reconstruction import (
-    get_tiles_ids,
-    get_mosaic_info,
-    getLargestCC
-)
+### `linumpy.intensity`
 
-# Get tile IDs from directory
-tiles, tile_ids = get_tiles_ids(directory, z=None)
-# tiles: list of Path objects
-# tile_ids: list of (mx, my, mz) tuples
+Intensity-domain corrections used during preprocessing.
 
-# Get mosaic information
-mosaic_info = get_mosaic_info(
-    directory, 
-    z=0, 
-    overlap_fraction=0.2,
-    use_stage_positions=True
-)
-# Returns dict with:
-# - mosaic_shape, tile_positions, etc.
-# - mosaic_xmin_mm, mosaic_ymin_mm
-# - tile_resolution
+* `intensity.attenuation` — depth-dependent attenuation modelling.
+* `intensity.bias_field` — N4 bias-field correction (CPU SimpleITK and the
+  GPU port; `n4_correct`, `n4_correct_per_section`, `compute_tissue_mask`).
+* `intensity.normalization` — per-slice histogram matching, Z-profile
+  smoothing, agarose flattening.
+* `intensity.psf_model` — `estimate_psf` and PSF-based deconvolution.
+* `intensity.vignette` — vignette/illumination flat-field correction.
 
-# Get largest connected component
-largest_cc = getLargestCC(binary_mask)
-```
+### `linumpy.mosaic`
 
-### segmentation.py - Segmentation
+Everything that turns a folder of tiles into a stacked 3D volume.
 
-Image segmentation tools.
+* `mosaic.grid` — `MosaicGrid` (pixel-space tile layout).
+* `mosaic.motor` — motor-position handling (`compute_motor_positions`).
+* `mosaic.stacking` — `find_z_overlap`, slab assembly utilities.
+* `mosaic.interpolation` — `interpolate_z_morph`, `interpolate_weighted`.
+* `mosaic.discovery` — discover tiles on disk.
+* `mosaic.overlap` — overlap-region utilities.
+* `mosaic.quick_stitch` — fast diagnostic stitching.
 
-```python
-from linumpy.segmentation import (
-    segment_tissue
-)
-```
+### `linumpy.registration`
 
-### utils_images.py - Image Utilities
+* `registration.phase_correlation` — masked phase correlation primitives.
+* `registration.sitk` — `register_2d_images_sitk`, `apply_transform`.
+* `registration.refinement` — `find_best_z`, `register_refinement`,
+  `gradient_magnitude_alignment`, `centre_of_mass_offset`.
+* `registration.transforms` — transform composition / decomposition / I/O.
+* `registration.manual` — manual landmark registration GUI.
 
-General image processing utilities.
+### `linumpy.gpu`
 
-```python
-from linumpy.utils_images import (
-    apply_xy_shift,
-    normalize_image
-)
+CuPy-backed versions of hot paths. Each public entry point either takes a
+`backend="cpu"|"gpu"|"auto"` flag or has an explicit `_gpu` suffix.
 
-# Apply XY shift to image
-shifted = apply_xy_shift(
-    image,       # Source image
-    reference,   # Reference (determines output shape)
-    dy,          # Y shift in pixels
-    dx           # X shift in pixels
-)
-```
+* `gpu.fft_ops`, `gpu.array_ops`, `gpu.morphology`, `gpu.interpolation`
+  — FFT, element-wise ops, morphology, interpolation primitives.
+* `gpu.bias_field`, `gpu.n4`, `gpu.bspline` — GPU N4 and B-spline grid.
+* `gpu.image_quality` — GPU image-quality metrics.
+* `gpu.registration`, `gpu.corrections` — GPU registration and correction
+  passes used by `linum-estimate-transform`,
+  `linum-normalize-intensities-per-slice`, etc.
+* `gpu.zarr_io` — high-level `read_zarr_to_gpu` dispatcher: picks the
+  fastest backend available (kvikio/GDS native → `zarr.config.enable_gpu`).
+* `gpu.kvikio_zarr` — kvikio / GPUDirect Storage backend for the dispatcher.
 
----
+See {doc}`GPU Acceleration <GPU_ACCELERATION>` and {doc}`N4 GPU <N4_GPU>`.
 
-## Common Patterns
+### `linumpy.stack_alignment`
 
-### Reading and Processing a Mosaic Grid
+Shifts CSV utilities used to align serial sections.
 
 ```python
-from linumpy.io.zarr import read_omezarr, save_omezarr
-import numpy as np
-
-# Read
-image, resolution = read_omezarr("input.ome.zarr")
-
-# Process (example: normalize)
-data = image[:]  # Load into memory
-data = (data - np.min(data)) / (np.max(data) - np.min(data))
-
-# Save
-import dask.array as da
-save_omezarr(da.from_array(data), "output.ome.zarr", resolution)
+from linumpy.stack_alignment.io import load_shifts_csv, write_shifts_csv
+from linumpy.stack_alignment.units import detect_shift_units
+from linumpy.stack_alignment.filter import filter_outliers
 ```
 
-### Parallel Processing with Multiple Tiles
+See {doc}`Shifts File Format <SHIFTS_FILE_FORMAT>`.
 
-```python
-from linumpy.reconstruction import get_tiles_ids
-from linumpy.microscope.oct import OCT
-from tqdm.contrib.concurrent import process_map
+### `linumpy.imaging`
 
-def process_tile(tile_path):
-    tile = OCT(tile_path)
-    # Process tile...
-    return result
+Convenience helpers for figures and quick previews.
 
-tiles, tile_ids = get_tiles_ids(directory)
-results = process_map(process_tile, tiles, max_workers=8)
-```
+* `imaging.orientation` — anatomical-axis labelling.
+* `imaging.overlay` — overlay generation for diagnostics.
+* `imaging.transform` — 2D affine helpers.
+* `imaging.visualization` — matplotlib panels used by diagnostic scripts.
 
-### Registration Workflow
+### `linumpy.psf`
 
-```python
-from linumpy.io.zarr import read_omezarr
-from linumpy.stitching.registration import register_2d_images_sitk, apply_transform
+* `psf.extract` — extract PSF estimates from acquisitions.
+* `psf.synthetic` — synthetic PSF generators for tests.
 
-# Load images
-fixed, _ = read_omezarr("fixed.ome.zarr")
-moving, _ = read_omezarr("moving.ome.zarr")
+(Higher-level PSF model lives in `linumpy.intensity.psf_model`.)
 
-# Register
-transform, _, error = register_2d_images_sitk(
-    fixed[0],  # 2D slice
-    moving[0],
-    method='affine',
-    metric='MSE'
-)
+### `linumpy.reference`
 
-# Apply to full volume
-registered = apply_transform(moving, transform)
-```
+* `reference.allen` — download the Allen mouse atlas template, register a
+  3D volume to it, and produce RAS-aligned templates.
 
----
+### `linumpy.segmentation`
 
-## Type Hints
+* `segmentation.brain` — tissue / background segmentation in 3D OCT.
 
-Most functions include type hints for better IDE support:
+### `linumpy.microscope`
 
-```python
-def read_omezarr(path: str | Path) -> tuple[da.Array, tuple[float, ...]]:
-    ...
+* `microscope.oct.OCT` — OCT acquisition metadata wrapper.
 
-def apply_xy_shift(
-    image: np.ndarray,
-    reference: np.ndarray,
-    dy: float,
-    dx: float
-) -> np.ndarray:
-    ...
-```
+## How the pieces fit together
 
----
+A typical pipeline run wires these subpackages as follows:
 
-## Error Handling
+1. **Discovery** (`mosaic.discovery`) finds raw tiles on disk and reads
+   ThorLabs metadata via `io.thorlabs`.
+2. **Tile preprocessing** uses `geometry.galvo`, `intensity.vignette`,
+   `intensity.attenuation`, and `intensity.normalization`.
+3. **Mosaic assembly** builds 2D AIPs (`mosaic.grid`) and 3D mosaic grids
+   per slice, then writes OME-Zarr via `io.zarr`.
+4. **Stitching** uses `registration.phase_correlation` (CPU/GPU) plus
+   `stack_alignment` to compute and store shifts.
+5. **Stacking** matches consecutive slices with `registration.refinement`
+   and assembles the volume with `mosaic.stacking`.
+6. **Bias-field & global polish** run `intensity.bias_field` (with the
+   `gpu.n4` backend when CUDA is available) and `imaging.orientation` / RAS
+   alignment via `reference.allen`.
+7. **Diagnostics** use `metrics` collectors throughout; see
+   {doc}`Reconstruction Diagnostics <RECONSTRUCTION_DIAGNOSTICS>`.
 
-Functions typically raise standard Python exceptions:
+## See also
 
-```python
-try:
-    image, res = read_omezarr("nonexistent.ome.zarr")
-except FileNotFoundError:
-    print("File not found")
-except ValueError as e:
-    print(f"Invalid format: {e}")
-```
-
----
-
-## Dependencies
-
-Key dependencies used by the library:
-
-| Package | Purpose |
-|---------|---------|
-| `numpy` | Array operations |
-| `dask` | Lazy/parallel arrays |
-| `zarr` | Chunked array storage |
-| `SimpleITK` | Image registration |
-| `scikit-image` | Image processing |
-| `scipy` | Scientific computing |
-| `pandas` | Data manipulation |
-| `tqdm` | Progress bars |
+* Auto-generated API reference: [api/linumpy](api/linumpy/index.rst)
+* {doc}`Pipeline Overview <PIPELINE_OVERVIEW>`
+* {doc}`Scripts Reference <SCRIPTS_REFERENCE>`
+* {doc}`Nextflow Workflows <NEXTFLOW_WORKFLOWS>`

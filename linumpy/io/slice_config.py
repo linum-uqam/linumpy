@@ -276,7 +276,7 @@ def filter_slices_to_use(path: Path) -> set[str]:
     """Return the set of slice IDs whose ``use`` column is truthy.
 
     When ``slice_config.csv`` is missing this raises :class:`FileNotFoundError`
-    — callers should guard on ``path.exists()`` or pass an optional path
+    -- callers should guard on ``path.exists()`` or pass an optional path
     themselves.
     """
     rows = read(path)

@@ -152,7 +152,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 # =============================================================================
-# Orientation utilities — imported from linumpy.imaging.orientation
+# Orientation utilities -- imported from linumpy.imaging.orientation
 # =============================================================================
 
 
@@ -595,19 +595,19 @@ def create_input_preview(input_path: Path, output_path: Path, level: int = 0) ->
 
     # Axial slice (dim0 midpoint)
     axes[0, 0].imshow(vol[z_mid, :, :].T, cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
-    axes[0, 0].set_title("Slice at dim0 midpoint\nShows: dim1 × dim2")
+    axes[0, 0].set_title("Slice at dim0 midpoint\nShows: dim1 x dim2")
     axes[0, 0].set_xlabel("dim1 →")
     axes[0, 0].set_ylabel("dim2 →")
 
     # Sagittal slice (dim1 midpoint)
     axes[0, 1].imshow(vol[::-1, x_mid, :], cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
-    axes[0, 1].set_title("Slice at dim1 midpoint\nShows: dim2 × dim0")
+    axes[0, 1].set_title("Slice at dim1 midpoint\nShows: dim2 x dim0")
     axes[0, 1].set_xlabel("dim2 →")
     axes[0, 1].set_ylabel("dim0 →")
 
     # Coronal slice (dim2 midpoint)
     axes[1, 0].imshow(vol[::-1, :, y_mid], cmap="gray", origin="lower", vmin=vmin, vmax=vmax)
-    axes[1, 0].set_title("Slice at dim2 midpoint\nShows: dim1 × dim0")
+    axes[1, 0].set_title("Slice at dim2 midpoint\nShows: dim1 x dim0")
     axes[1, 0].set_xlabel("dim1 →")
     axes[1, 0].set_ylabel("dim0 →")
 
@@ -680,7 +680,7 @@ def create_alignment_preview(
 
     # apply_orientation_transform yields linumpy convention (S, R, A): dim0=S,
     # dim1=R, dim2=A. The aligned and Allen-template volumes below are in
-    # standard RAS — numpy (S, A, R): dim0=S, dim1=A, dim2=R. Permute the
+    # standard RAS -- numpy (S, A, R): dim0=S, dim1=A, dim2=R. Permute the
     # original to (S, A, R) here so all three columns share one convention and
     # a single set of "Axial / Coronal / Sagittal" labels applies uniformly.
     vol_original = np.transpose(vol_original, (0, 2, 1))
@@ -882,7 +882,7 @@ def create_orientation_preview(
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
     fig.suptitle(
-        f"Orientation Preview — {subtitle}\n"
+        f"Orientation Preview -- {subtitle}\n"
         f"Shape: {vol.shape}  |  After corrections: dim0=S (Superior), dim1=R (Right), dim2=A (Anterior)",
         fontsize=11,
     )

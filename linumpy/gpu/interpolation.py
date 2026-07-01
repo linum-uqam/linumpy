@@ -188,7 +188,7 @@ def apply_displacement_field(image: Any, displacement_field: Any, use_gpu: Any =
     image : np.ndarray
         Input image (2D or 3D)
     displacement_field : np.ndarray
-        Displacement field with shape (ndim, *image.shape)
+        Displacement field with shape ``(ndim, *image.shape)``
     use_gpu : bool
         Whether to use GPU
 

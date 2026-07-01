@@ -2,5 +2,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_stitch_3d.py", "--help"])
+    ret = script_runner.run(["linum-stitch-3d", "--help"])
     assert ret.success

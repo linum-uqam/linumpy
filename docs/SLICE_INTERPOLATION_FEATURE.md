@@ -28,7 +28,7 @@ survives to the final quality report.
   decisions, see {doc}`SLICE_CONFIG_FEATURE`.
   Successful interpolations stamp `interpolated=true`; failures stamp
   `interpolation_failed=true` plus the specific `fallback_reason`.
-- Downstream propagation: `linum_register_pairwise.py` automatically marks
+- Downstream propagation: `linum-register-pairwise` automatically marks
   any transform touching an interpolated slice as `reliable=0` so stacking
   can down-weight it. For hard-skipped slices there is no zarr at all, so
   pairwise simply bridges the two surviving neighbours directly.
@@ -166,8 +166,8 @@ The cost is that *micro-structure that was truly unique to the missing
 block* cannot be recovered — it is physically unobservable from the
 neighbours alone. This is a limitation shared by any interpolation method,
 and is why interpolated slices stay flagged in `slice_config_final.csv` and
-propagate `reliable=0` through `linum_register_pairwise.py` →
-`linum_stack_slices_motor.py`.
+propagate `reliable=0` through `linum-register-pairwise` →
+`linum-stack-slices-motor`.
 
 ### `weighted` and `average` — simple baselines (user-requested only)
 
@@ -248,7 +248,7 @@ interpolate_missing_slice  ──►  zarr + preview + diagnostics.json + manife
         │
         ▼  (one fragment per interpolated slice, collected)
         │
-finalise_interpolation (linum_interpolate_missing_slice.py --finalise)
+finalise_interpolation (linum-interpolate-missing-slice --finalise)
         │
         ├── input: current slice_config.csv (flowing from earlier steps)
         ├── input: per-slice manifest fragments
@@ -291,10 +291,10 @@ the row left blank.
 
 ### Downstream reliability propagation
 
-`linum_register_pairwise.py` detects `_interpolated.ome.zarr` inputs and
+`linum-register-pairwise` detects `_interpolated.ome.zarr` inputs and
 forces the resulting `pairwise_registration_metrics.json` to
 `overall_status="error"` and `registration_confidence=0.0`.
-`linum_stack_slices_motor.py` reads that flag via the `reliable` column and
+`linum-stack-slices-motor` reads that flag via the `reliable` column and
 down-weights those transforms during accumulation. Interpolated slices
 therefore never masquerade as measured data in the stacked volume.
 
@@ -358,7 +358,7 @@ when reviewing the whole subject.
 
 ```bash
 # Recommended: z-morph method with diagnostics + manifest entry
-linum_interpolate_missing_slice.py slice_z05.ome.zarr slice_z07.ome.zarr \
+linum-interpolate-missing-slice slice_z05.ome.zarr slice_z07.ome.zarr \
     slice_z06_interpolated.ome.zarr \
     --method zmorph \
     --blend_method gaussian \
@@ -367,7 +367,7 @@ linum_interpolate_missing_slice.py slice_z05.ome.zarr slice_z07.ome.zarr \
     --manifest_entry slice_z06_manifest.csv
 
 # Simple baselines (no 2D registration)
-linum_interpolate_missing_slice.py slice_z05.ome.zarr slice_z07.ome.zarr \
+linum-interpolate-missing-slice slice_z05.ome.zarr slice_z07.ome.zarr \
     slice_z06_interpolated.ome.zarr --method weighted
 ```
 
@@ -375,7 +375,7 @@ linum_interpolate_missing_slice.py slice_z05.ome.zarr slice_z07.ome.zarr \
 
 ```bash
 # Merge a directory of per-slice manifest fragments into slice_config.csv.
-linum_interpolate_missing_slice.py --finalise \
+linum-interpolate-missing-slice --finalise \
     --slice_config_in  slice_config.csv \
     --slice_config_out slice_config_final.csv \
     --fragments        interpolate_missing_slice

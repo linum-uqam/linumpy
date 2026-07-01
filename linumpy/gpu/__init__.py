@@ -7,7 +7,8 @@ using CuPy. All functions have automatic fallback to CPU (NumPy) if:
 - No CUDA-capable GPU is available
 - GPU memory is insufficient
 
-Usage:
+Usage::
+
     from linumpy.gpu import GPU_AVAILABLE, get_array_module
 
     # Check if GPU is available

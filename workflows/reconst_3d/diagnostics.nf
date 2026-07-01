@@ -17,14 +17,14 @@ process analyze_rotation_drift {
     publishDir "${params.output}/diagnostics/rotation_analysis", mode: 'copy'
 
     input:
-    path("register_pairwise/*")
+    path "register_pairwise/*"
 
     output:
     path "rotation_analysis/*"
 
     script:
     """
-    linum_analyze_registration_transforms.py register_pairwise rotation_analysis \
+    linum-analyze-registration-transforms register_pairwise rotation_analysis \
         --resolution ${params.resolution} \
         --rotation_threshold ${params.diagnostic_rotation_threshold}
     """
@@ -42,7 +42,7 @@ process stitch_motor_only {
     script:
     def blending = params.motor_only_stitch_blending ?: 'diffusion'
     """
-    linum_stitch_motor_only.py ${mosaic_grid} "slice_z${slice_id}_motor_only.ome.zarr" \
+    linum-stitch-motor-only ${mosaic_grid} "slice_z${slice_id}_motor_only.ome.zarr" \
         --overlap_fraction ${params.motor_only_overlap} \
         --blending_method ${blending}
     """
@@ -61,7 +61,7 @@ process stitch_refined {
     script:
     def refinement_out = params.save_refinement_data ? "--output_refinements slice_z${slice_id}_refinements.json" : ""
     """
-    linum_stitch_3d_refined.py ${mosaic_grid} "slice_z${slice_id}_refined.ome.zarr" \
+    linum-stitch-3d-refined ${mosaic_grid} "slice_z${slice_id}_refined.ome.zarr" \
         --overlap_fraction ${params.stitch_overlap_fraction} \
         --blending_method diffusion \
         --refinement_mode blend_shift \
@@ -81,7 +81,7 @@ process compare_stitching {
 
     script:
     """
-    linum_compare_stitching.py ${motor_stitch} ${refined_stitch} \
+    linum-compare-stitching ${motor_stitch} ${refined_stitch} \
         "slice_z${slice_id}_comparison" \
         --label1 "Motor-only" --label2 "Refined" \
         --tile_step ${params.comparison_tile_step}
@@ -92,8 +92,8 @@ process stack_motor_only {
     publishDir "${params.output}/diagnostics/motor_only_stack", mode: 'copy'
 
     input:
-    path("slices/*")
-    path(shifts_file)
+    path "slices/*"
+    path shifts_file
 
     output:
     path "motor_only_stack.ome.zarr"
@@ -102,7 +102,7 @@ process stack_motor_only {
     script:
     def blending_arg = params.motor_only_stack_blending ?: 'none'
     """
-    linum_stack_motor_only.py slices ${shifts_file} motor_only_stack.ome.zarr \
+    linum-stack-motor-only slices ${shifts_file} motor_only_stack.ome.zarr \
         --blending ${blending_arg} \
         --preview motor_only_stack_preview.png
     """
@@ -112,15 +112,15 @@ process analyze_acquisition_rotation {
     publishDir "${params.output}/diagnostics/acquisition_rotation", mode: 'copy'
 
     input:
-    path(shifts_file)
-    path("register_pairwise/*")
+    path shifts_file
+    path "register_pairwise/*"
 
     output:
     path "acquisition_rotation_analysis/*"
 
     script:
     """
-    linum_analyze_acquisition_rotation.py ${shifts_file} acquisition_rotation_analysis \
+    linum-analyze-acquisition-rotation ${shifts_file} acquisition_rotation_analysis \
         --registration_dir register_pairwise \
         --resolution ${params.resolution}
     """
