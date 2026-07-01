@@ -1,9 +1,5 @@
 #!/usr/bin/env python
-"""
-Compensate the tissue attenuation using a precomputed attenuation.
-
-bias field.
-"""
+"""Compensate the tissue attenuation using a precomputed attenuation bias field."""
 
 # Configure thread limits before numpy/scipy imports
 import linumpy.config.threads  # noqa: F401
