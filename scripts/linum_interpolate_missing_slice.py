@@ -5,10 +5,10 @@ Interpolate a missing slice using information from adjacent slices.
 Uses z-aware morphing (``zmorph``): an affine transform ``T`` between the
 boundary planes of the two neighbours is computed, then for each output
 plane at fractional depth ``alpha`` the before-boundary is warped by
-``T^alpha`` and the after-boundary by ``T^(alpha - 1)`` and the two are
+``T**alpha`` and the after-boundary by ``T**(alpha - 1)`` and the two are
 cross-faded.
 
-Hard skip on gate failure: when zmorph's 2D boundary registration fails
+**Hard skip on gate failure.** When zmorph's 2D boundary registration fails
 any quality gate, no interpolated zarr is produced: the slot is left as a
 genuine gap rather than filled with a blended (and therefore fabricated)
 volume. A manifest fragment and diagnostics JSON are still emitted so the
@@ -16,14 +16,13 @@ failure is visible in ``slice_config_final.csv`` and the final report. The
 ``average`` / ``weighted`` methods remain available as explicit,
 user-requested baselines.
 
-Only a SINGLE missing slice can be reconstructed -- two or more consecutive
+Only a SINGLE missing slice can be reconstructed — two or more consecutive
 gaps carry insufficient information.
 
 See ``docs/SLICE_INTERPOLATION_FEATURE.md`` for the physical model and
 parameter-tuning guidance.
 
-Example usage::
-
+Example usage:
     linum_interpolate_missing_slice.py slice_z00.ome.zarr slice_z02.ome.zarr \\
         slice_z01_interpolated.ome.zarr
 
@@ -49,7 +48,6 @@ import numpy as np
 from linumpy.cli.args import add_overwrite_arg, assert_output_exists
 from linumpy.io import slice_config as slice_config_io
 from linumpy.io.zarr import read_omezarr, save_omezarr
-from linumpy.metrics import collect_slice_interpolation_metrics
 from linumpy.mosaic.interpolation import (
     interpolate_average,
     interpolate_weighted,
@@ -61,9 +59,9 @@ configure_all_libraries()
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("slice_before", nargs="?", help="Path to the slice BEFORE the missing slice (`*.ome.zarr`)")
-    p.add_argument("slice_after", nargs="?", help="Path to the slice AFTER the missing slice (`*.ome.zarr`)")
-    p.add_argument("output", nargs="?", help="Output path for the interpolated slice (`*.ome.zarr`)")
+    p.add_argument("slice_before", nargs="?", help="Path to the slice BEFORE the missing slice (*.ome.zarr)")
+    p.add_argument("slice_after", nargs="?", help="Path to the slice AFTER the missing slice (*.ome.zarr)")
+    p.add_argument("output", nargs="?", help="Output path for the interpolated slice (*.ome.zarr)")
     p.add_argument(
         "--method",
         choices=["zmorph", "average", "weighted"],
@@ -72,7 +70,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "  zmorph   - z-aware morphing (respects serial-section geometry; recommended)\n"
         "  average  - Simple average of adjacent slices\n"
         "  weighted - Weighted average with distance falloff\n"
-        "\n"
         "[default: %(default)s]",
     )
     p.add_argument(
@@ -82,7 +79,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Blending method for combining warped slices:\n"
         "  linear - Equal 50/50 blend (may show edges)\n"
         "  gaussian - Feathered blend using distance transform (recommended)\n"
-        "\n"
         "[default: %(default)s]",
     )
     p.add_argument(
@@ -292,7 +288,7 @@ def generate_preview(
         axes[2].set_xticks([])
         axes[2].set_yticks([])
 
-        # XZ view still useful for context -- skip the missing middle slab.
+        # XZ view still useful for context — skip the missing middle slab.
         y_mid = vol_before.shape[1] // 2
         xz_before = normalize_for_display(vol_before[:, y_mid, :])
         xz_after = normalize_for_display(vol_after[:, y_mid, :])
@@ -323,7 +319,7 @@ def generate_preview(
         axes[3].axis("off")
 
     title = (
-        f"Slice Interpolation Preview (z={preview_slice}) -- FAILED"
+        f"Slice Interpolation Preview (z={preview_slice}) — FAILED"
         if interpolated is None
         else f"Slice Interpolation Preview (z={preview_slice})"
     )
@@ -362,13 +358,11 @@ def _finalise(args: argparse.Namespace) -> None:
     elif fragments_dir.exists():
         fragment_paths = [fragments_dir]
     else:
-        print(f"  Fragments path does not exist: {fragments_dir} -- copying slice_config unchanged.")
+        print(f"  Fragments path does not exist: {fragments_dir} — copying slice_config unchanged.")
 
     updates: dict[str, dict[str, object]] = {}
     interpolated_ids: set[str] = set()
     failed_ids: set[str] = set()
-    fallback_reasons: dict[str, int] = {}
-    method_counts: dict[str, int] = {}
     import csv
 
     for frag_path in fragment_paths:
@@ -390,12 +384,6 @@ def _finalise(args: argparse.Namespace) -> None:
                     target = _FRAGMENT_COLUMN_MAP.get(col)
                     if target:
                         entry[target] = val
-                method = (raw.get("method_used") or "").strip()
-                if method:
-                    method_counts[method] = method_counts.get(method, 0) + 1
-                reason = (raw.get("fallback_reason") or "").strip()
-                if reason:
-                    fallback_reasons[reason] = fallback_reasons.get(reason, 0) + 1
                 if failed:
                     failed_ids.add(sid)
                     entry["interpolation_method_used"] = ""
@@ -407,14 +395,6 @@ def _finalise(args: argparse.Namespace) -> None:
     print(
         f"Finalise: merged {len(fragment_paths)} fragment(s), "
         f"{len(interpolated_ids)} interpolated, {len(failed_ids)} failed → {args.slice_config_out}"
-    )
-    collect_slice_interpolation_metrics(
-        output_path=Path(args.slice_config_out),
-        n_fragments=len(fragment_paths),
-        interpolated_ids=list(interpolated_ids),
-        failed_ids=list(failed_ids),
-        fallback_reasons=fallback_reasons,
-        method_counts=method_counts,
     )
 
 
@@ -550,7 +530,7 @@ def main() -> None:
         print(f"Saving interpolated slice to: {output_path}")
         save_omezarr(da.from_array(final_result), Path(output_path), res_before)
     else:
-        print("Skipping zarr output -- no fabricated data will enter the reconstruction.")
+        print("Skipping zarr output — no fabricated data will enter the reconstruction.")
 
     if args.diagnostics is not None:
         diagnostics["slice_id"] = args.slice_id
@@ -564,7 +544,7 @@ def main() -> None:
             json.dump(diagnostics, fh, indent=2, default=_json_default)
         print(f"Diagnostics saved to: {diagnostics_path}")
 
-    # Manifest records pipeline-relevant flags only -- raw metrics live in the
+    # Manifest records pipeline-relevant flags only — raw metrics live in the
     # per-slice diagnostics JSON. The `interpolation_failed` column is what
     # finalise_interpolation uses to decide whether to stamp the slice as
     # successfully interpolated or as a hard-skip.
