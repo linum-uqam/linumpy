@@ -1,14 +1,9 @@
-"""Outlier filtering for inter-slice shift fields."""
+"""Outlier filtering and tile-offset correction for inter-slice shift fields."""
+
+from typing import cast
 
 import numpy as np
 import pandas as pd
-
-
-def _get_loc_int(index: pd.Index, key: int) -> int:
-    """Return integer position for a unique-index key."""
-    loc = index.get_loc(key)
-    assert isinstance(loc, int)
-    return loc
 
 
 def filter_outlier_shifts(
@@ -32,7 +27,7 @@ def filter_outlier_shifts(
         'rehome' (recommended default): distinguishes genuine re-homing events
         from encoder glitch spikes.  A step is only corrected if it is large
         AND approximately self-cancelling with an adjacent step.  Specifically,
-        a step at position i is treated as a spike when
+        a step at position i is treated as a spike when::
 
             |step[i] + step[i±1]| < return_fraction * |step[i]|
 
@@ -44,7 +39,7 @@ def filter_outlier_shifts(
         Multiplier for IQR-based detection (only used by 'iqr' method).
     return_fraction : float
         For 'rehome': fraction threshold below which a round-trip is
-        considered self-cancelling (default 0.4 — if the adjacent step
+        considered self-cancelling (default 0.4 -- if the adjacent step
         reverses more than 60 % of a large step, treat as glitch spike).
 
     Returns
@@ -53,8 +48,7 @@ def filter_outlier_shifts(
         Filtered DataFrame with outlier shifts corrected.
     """
     df = shifts_df.copy()
-    _sm = np.sqrt(df["x_shift_mm"].to_numpy() ** 2 + df["y_shift_mm"].to_numpy() ** 2)
-    shift_mag = pd.Series(_sm, index=df.index)
+    shift_mag = (df["x_shift_mm"] ** 2 + df["y_shift_mm"] ** 2) ** 0.5
 
     if method == "iqr":
         q1 = shift_mag.quantile(0.25)
@@ -97,7 +91,7 @@ def filter_outlier_shifts(
 
     elif method in ["local", "iqr"]:
         for idx in df[outlier_mask].index:
-            pos = _get_loc_int(df.index, idx)
+            pos: int = cast("int", df.index.get_loc(idx))
             neighbor_vals_x, neighbor_vals_y = [], []
             for offset in [-2, -1, 1, 2]:
                 neighbor_pos = pos + offset
@@ -132,16 +126,16 @@ def filter_outlier_shifts(
             return False
 
         for idx in df[outlier_mask].index:
-            pos = _get_loc_int(df.index, idx)
+            pos: int = cast("int", df.index.get_loc(idx))
             step_x = df.loc[idx, "x_shift_mm"]
             step_y = df.loc[idx, "y_shift_mm"]
             step_mag = shift_mag[idx]
 
             if not _is_spike(pos, step_x, step_y, step_mag):
-                # Re-homing event — leave it unchanged
+                # Re-homing event -- leave it unchanged
                 continue
 
-            # Glitch spike — replace with local median of non-outlier neighbours
+            # Glitch spike -- replace with local median of non-outlier neighbours
             neighbor_vals_x, neighbor_vals_y = [], []
             for offset in [-2, -1, 1, 2]:
                 neighbor_pos = pos + offset
@@ -191,13 +185,13 @@ def correct_tile_offset_shifts(
     in the shifts file as an apparent lateral tissue drift even though the tissue
     itself did not move.  The magnitude equals however far the detected tissue
     boundary shifted, which is determined by tissue geometry and the ROI
-    detection algorithm — **not** by the overlap-corrected tile step or any
+    detection algorithm -- **not** by the overlap-corrected tile step or any
     stage hardware quantum.
 
     .. note::
         The artifact step ``tile_fov_x_mm`` must be **empirically determined**
         from the shifts_xy.csv data.  It is **not** equal to
-        ``tile_size_um × (1 - overlap_fraction) / 1000`` (the stitching tile
+        ``tile_size_um x (1 - overlap_fraction) / 1000`` (the stitching tile
         step).  To find the correct value, inspect the x_shift_mm column for a
         cluster of near-equal large steps; that common value is the artifact step.
 
@@ -207,8 +201,8 @@ def correct_tile_offset_shifts(
     the true inter-slice tissue drift.
 
     This function checks each pairwise step independently: if the X component
-    is within ``tolerance`` of N × ``tile_fov_x_mm`` (for integer N ≠ 0), the
-    offset N × tile_fov_x_mm is subtracted, recovering the true tissue drift.
+    is within ``tolerance`` of N x ``tile_fov_x_mm`` (for integer N ≠ 0), the
+    offset N x tile_fov_x_mm is subtracted, recovering the true tissue drift.
     The same is done for the Y component independently.
 
     Parameters
@@ -218,15 +212,15 @@ def correct_tile_offset_shifts(
         (and optionally x_shift, y_shift in pixels).
     tile_fov_x_mm : float
         Empirically determined artifact step size in X (mm).  Must be found
-        from the shifts data — see note above.
+        from the shifts data -- see note above.
     tile_fov_y_mm : float, optional
         Tile field-of-view width in Y (mm).  Defaults to ``tile_fov_x_mm``.
     tolerance : float
         Fractional tolerance: a component is treated as a tile-multiple when
-        ``|component - N × fov| / fov < tolerance``.  Default 0.05 (5 %).
+        ``|component - N x fov| / fov < tolerance``.  Default 0.05 (5 %).
     min_step_mm : float
         Only inspect steps whose magnitude exceeds this value (mm).
-        Default 0 — all steps are checked.
+        Default 0 -- all steps are checked.
 
     Returns
     -------
@@ -312,20 +306,14 @@ def filter_step_outliers(
         Filtered DataFrame.
     """
     df = shifts_df.copy()
-    _sm2 = np.sqrt(df["x_shift_mm"].to_numpy() ** 2 + df["y_shift_mm"].to_numpy() ** 2)
-    shift_mag = pd.Series(_sm2, index=df.index)
+    shift_mag = (df["x_shift_mm"] ** 2 + df["y_shift_mm"] ** 2) ** 0.5
 
     if method == "local_mad":
         outlier_mask = pd.Series(False, index=df.index)
         for i in range(len(df)):
             lo = max(0, i - window)
             hi = min(len(df), i + window + 1)
-            neighbour_mags = np.concatenate(
-                [
-                    np.asarray(shift_mag.iloc[lo:i]),
-                    np.asarray(shift_mag.iloc[i + 1 : hi]),
-                ]
-            )
+            neighbour_mags = np.concatenate([shift_mag.iloc[lo:i].to_numpy(), shift_mag.iloc[i + 1 : hi].to_numpy()])
             if len(neighbour_mags) == 0:
                 continue
             local_med = float(np.median(neighbour_mags))
@@ -345,8 +333,7 @@ def filter_step_outliers(
             return df
 
     for idx in df[outlier_mask].index:
-        df.loc[idx]
-        pos = _get_loc_int(df.index, idx)
+        pos: int = cast("int", df.index.get_loc(idx))
         step_x = df.loc[idx, "x_shift_mm"]
         step_y = df.loc[idx, "y_shift_mm"]
         step_mag = float(shift_mag.iloc[pos])
@@ -367,7 +354,7 @@ def filter_step_outliers(
                         is_spike = True
                         break
             if not is_spike:
-                continue  # Re-homing event — leave unchanged
+                continue  # Re-homing event -- leave unchanged
 
         if method == "clamp":
             scale = max_step_mm / shift_mag[idx]
@@ -377,7 +364,7 @@ def filter_step_outliers(
                 df.loc[idx, "x_shift"] *= scale
                 df.loc[idx, "y_shift"] *= scale
         else:
-            pos = _get_loc_int(df.index, idx)
+            pos = cast("int", df.index.get_loc(idx))
             neighbor_vals_x, neighbor_vals_y = [], []
             for offset in range(-window, window + 1):
                 if offset == 0:
@@ -391,16 +378,15 @@ def filter_step_outliers(
                 df.loc[idx, "x_shift_mm"] = float(np.median(neighbor_vals_x))
                 df.loc[idx, "y_shift_mm"] = float(np.median(neighbor_vals_y))
                 if "x_shift" in df.columns:
-                    idx_loc = _get_loc_int(df.index, idx)
                     neighbor_px_x = [
-                        df.loc[df.index[idx_loc + o], "x_shift"]
+                        df.loc[df.index[pos + o], "x_shift"]
                         for o in range(-window, window + 1)
-                        if o != 0 and 0 <= idx_loc + o < len(df) and "x_shift" in df.columns
+                        if o != 0 and 0 <= pos + o < len(df) and "x_shift" in df.columns
                     ]
                     neighbor_px_y = [
-                        df.loc[df.index[idx_loc + o], "y_shift"]
+                        df.loc[df.index[pos + o], "y_shift"]
                         for o in range(-window, window + 1)
-                        if o != 0 and 0 <= idx_loc + o < len(df) and "x_shift" in df.columns
+                        if o != 0 and 0 <= pos + o < len(df) and "x_shift" in df.columns
                     ]
                     if neighbor_px_x:
                         df.loc[idx, "x_shift"] = float(np.median(neighbor_px_x))

@@ -19,7 +19,6 @@ import linumpy.config.threads  # noqa: F401
 
 import argparse
 import logging
-from typing import Any
 
 import numpy as np
 
@@ -30,7 +29,7 @@ from linumpy.intensity.bias_field import (
     n4_correct_per_section,
 )
 from linumpy.intensity.normalization import apply_histogram_matching, apply_zprofile_smoothing
-from linumpy.io.zarr import AnalysisOmeZarrWriter, read_omezarr_array
+from linumpy.io.zarr import AnalysisOmeZarrWriter, read_omezarr
 
 logger = logging.getLogger(__name__)
 
@@ -211,9 +210,12 @@ def main() -> None:
 
     n_processes = parse_processes_arg(args.n_processes)
 
-    # Resolve GPU usage from --backend choice for non-N4 stages. We resolve
-    # this BEFORE reading so we can stream the volume directly into device
-    # memory through the GDS / zarr-gpu fast path when the GPU is in play.
+    # Load volume
+    vol_da, res = read_omezarr(args.in_image, level=0)
+    vol = np.asarray(vol_da).astype(np.float32)
+    logger.info("Loaded volume %s from %s", vol.shape, args.in_image)
+
+    # Resolve GPU usage from --backend choice for non-N4 stages.
     if args.backend == "gpu":
         use_gpu_pre = True
     elif args.backend == "auto":
@@ -222,13 +224,6 @@ def main() -> None:
         use_gpu_pre = GPU_AVAILABLE
     else:
         use_gpu_pre = False
-
-    # Load volume — onto GPU directly when use_gpu_pre, else host.
-    vol, res = read_omezarr_array(args.in_image, level=0, use_gpu=use_gpu_pre)
-    # copy=False avoids doubling GPU memory when the array is already float32
-    # (the common case for mosaic grids).
-    vol = vol.astype(np.float32, copy=False)
-    logger.info("Loaded volume %s from %s (gpu=%s)", vol.shape, args.in_image, use_gpu_pre)
 
     # Tissue mask (per serial section)
     mask = compute_tissue_mask(
@@ -265,20 +260,15 @@ def main() -> None:
     per_section_spline = args.spline_distance_mm if args.spline_distance_mm is not None else 2.0
     global_spline = args.spline_distance_mm if args.spline_distance_mm is not None else 10.0
 
-    n4_kwargs: dict[str, Any] = {
+    n4_kwargs = {
         "shrink_factor": args.shrink_factor,
         "n_iterations": args.n_iterations,
-        "voxel_size_mm": (float(res[0]), float(res[1]), float(res[2])),
+        "voxel_size_mm": tuple(res),
         "backend": args.backend,
     }
 
     # Correction passes
     bias_field_combined: np.ndarray | None = None
-    # If the strength blend won't run, the per-section pass can write its
-    # corrected output directly back into ``vol`` -- saves a full-size
-    # float32 buffer (~36 GB on a typical OCT mosaic) during the per-section
-    # pass and removes the matching kernel-compaction pressure.
-    can_overwrite_vol = args.strength >= 1.0
 
     if args.mode in ("per_section", "two_pass"):
         logger.info(
@@ -286,48 +276,22 @@ def main() -> None:
             args.n_serial_slices,
             n_processes,
         )
-        if can_overwrite_vol and n_processes == 1:
-            # Pre-allocate the bias buffer and pass `vol` as the corrected
-            # destination so per-section writes in place.
-            bias_field_combined = np.empty_like(vol, dtype=np.float32)
-            n4_correct_per_section(
-                vol,
-                n_serial_slices=args.n_serial_slices,
-                mask=mask,
-                n_processes=n_processes,
-                spline_distance_mm=per_section_spline,
-                out=vol,
-                bias_out=bias_field_combined,
-                **n4_kwargs,
-            )
-            working_vol = vol
-        else:
-            vol_ps, bias_ps = n4_correct_per_section(
-                vol,
-                n_serial_slices=args.n_serial_slices,
-                mask=mask,
-                n_processes=n_processes,
-                spline_distance_mm=per_section_spline,
-                **n4_kwargs,
-            )
-            bias_field_combined = bias_ps
-            working_vol = vol_ps
-            # Drop the per-section aliases so the global pass below does not
-            # have to keep two extra full-size float32 volumes alive.
-            del vol_ps, bias_ps
+        vol_ps, bias_ps = n4_correct_per_section(
+            vol,
+            n_serial_slices=args.n_serial_slices,
+            mask=mask,
+            n_processes=n_processes,
+            spline_distance_mm=per_section_spline,
+            **n4_kwargs,
+        )
+        bias_field_combined = bias_ps
+        working_vol = vol_ps
+        # Drop the per-section aliases so the global pass below does not have
+        # to keep two extra full-size float32 volumes alive (~72 GB on a
+        # 36 GB mosaic). bias_field_combined / working_vol still hold them.
+        del vol_ps, bias_ps
     else:
         working_vol = vol
-
-    # The strength blend is the only consumer of the original input
-    # buffer below; keep an alias just for that branch and drop the
-    # primary ``vol`` name so the buffer can be released before the
-    # global pass when no blend is needed.  In the in-place per-section
-    # path ``working_vol is vol``, so this just drops a redundant
-    # reference; in the per-section path it frees the original ~36 GB
-    # input buffer.  Holding it through the global pass forces
-    # kcompactd0 to fight for THP-sized free regions.
-    vol_for_blend: np.ndarray | None = vol if args.strength < 1.0 else None
-    del vol
 
     if args.mode in ("global", "two_pass"):
         logger.info("Running global N4…")
@@ -371,28 +335,22 @@ def main() -> None:
             bias_field_combined = bias_global
 
     corrected = working_vol
-    del working_vol
 
     # Strength blend
-    if vol_for_blend is not None:
+    if args.strength < 1.0:
         logger.info("Blending: strength=%.3f", args.strength)
-        corrected = args.strength * corrected + (1.0 - args.strength) * vol_for_blend
-        del vol_for_blend
+        corrected = args.strength * corrected + (1.0 - args.strength) * vol
 
-    corrected = corrected.astype(np.float32, copy=False)
+    corrected = corrected.astype(np.float32)
 
-    # Zero out non-tissue voxels (suppress agarose).  In-place multiply
-    # by the boolean mask (broadcast-cast to 0.0/1.0) avoids the ~36 GB
-    # temporary that ``np.where(mask, corrected, 0)`` allocates.
+    # Zero out non-tissue voxels (suppress agarose)
     if args.zero_outside_mask:
         logger.info("Zeroing voxels outside tissue mask\u2026")
-        corrected *= mask
-    del mask
+        corrected = np.where(mask, corrected, 0.0).astype(np.float32)
 
     # Save output
     _save(corrected, args.out_image, res, args)
     logger.info("Saved corrected volume to %s", args.out_image)
-    del corrected
 
     # Optionally save bias field
     if args.save_bias_field is not None and bias_field_combined is not None:

@@ -201,7 +201,7 @@ def test_build_cumulative_shifts(tmp_path):
     # resolution: 10 µm → 1 mm = 100 px
     result = build_cumulative_shifts(df, [0, 1, 2, 3], resolution=[0.01, 0.01, 0.01], center_drift=False)
     assert abs(result[0][0] - 0.0) < 1e-6  # first slice: 0 px
-    assert abs(result[1][0] - 1.0) < 1e-6  # 0.01 mm × 100 px/mm = 1 px
+    assert abs(result[1][0] - 1.0) < 1e-6  # 0.01 mm x 100 px/mm = 1 px
     assert abs(result[3][0] - 3.0) < 1e-6
 
 
@@ -240,7 +240,7 @@ def test_correct_tile_offset_single_step():
 
 
 def test_correct_tile_offset_negative_multiple():
-    """A step of -2 tile-widths is corrected by adding 2 × tile_fov."""
+    """A step of -2 tile-widths is corrected by adding 2 x tile_fov."""
     tile_fov = 0.875
     x = [0.02] * 5 + [-2 * tile_fov + 0.005] + [0.02] * 5
     y = [0.0] * 11

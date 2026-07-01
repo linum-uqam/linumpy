@@ -1,8 +1,6 @@
 # Pipeline Overview
 
 
----
-
 ## Overview
 
 The linumpy processing pipeline converts raw S-OCT (Serial Optical Coherence Tomography) microscopy data into reconstructed 3D volumes. The pipeline consists of two main stages:
@@ -49,8 +47,6 @@ flowchart TD
     P3 --> INTER
     INTER --> R00
     INTER --> R01
-    R14 --> OUT
-    R14b --> OUT
     R16 --> OUT
 
     classDef opt fill:#f5f5f5,stroke:#999,stroke-dasharray:3 3,color:#555
@@ -275,7 +271,7 @@ interpolate_missing_slice
 - Fills single-slice gaps using the two neighbouring slices
 - Enabled by `interpolate_missing_slices = true` (default)
 - Default method is **zmorph** (z-aware morphing via fractional affine
-  transforms on the boundary planes) — see [SLICE_INTERPOLATION_FEATURE.md](SLICE_INTERPOLATION_FEATURE.md)
+  transforms on the boundary planes) — see {doc}`SLICE_INTERPOLATION_FEATURE`
 - When zmorph's quality gates fail the slot stays a genuine gap (no zarr
   emitted) — nothing is fabricated
 - `finalise_interpolation` merges per-slice manifest fragments into
@@ -463,7 +459,7 @@ and shift each A-line so that $z'(y, x) = z - (\hat{z}_0(y, x) - \min \hat{z}_0)
 $$
 \min_{F, D, B_i} \quad \sum_i \| A_i - (F \odot B_i + D)\|_1 + \lambda_F \|F\|_* + \lambda_D \|D\|_1
 $$
-where $F$ is the flat-field (smooth, nuclear-norm regularised), $D$ is the dark-field, and $B_i$ is the per-tile baseline. Each tile is then corrected as $\hat{B}_i = (A_i - D) / F$. The JAX implementation runs this on GPU.
+where $F$ is the flat-field (smooth, nuclear-norm regularised), $D$ is the dark-field, and $B_i$ is the per-tile baseline. Each tile is then corrected as $\hat{B}_i = (A_i - D) / F$. BaSiCPy 2.x runs this on the GPU via its PyTorch backend when a CUDA build of PyTorch is available.
 
 ---
 
@@ -649,7 +645,7 @@ Both pipelines support optional GPU acceleration using NVIDIA CUDA via CuPy. GPU
 | Preprocessing | `create_mosaic_grid` | Galvo detection, volume resize |
 | Preprocessing | `generate_aip` | Mean projection |
 | 3D Reconstruction | `resample_mosaic_grid` | Volume resize |
-| 3D Reconstruction | `fix_illumination` | BaSiCPy background correction (JAX on GPU) |
+| 3D Reconstruction | `fix_illumination` | BaSiCPy background correction (PyTorch on GPU) |
 | 3D Reconstruction | `normalize` | Intensity normalization, percentile clipping |
 
 ### Running with GPU
@@ -666,7 +662,7 @@ nextflow run preproc_rawtiles.nf --input /path/to/data --output /path/to/output 
 
 - NVIDIA GPU with CUDA support
 - CuPy installed (`uv pip install cupy-cuda12x`)
-- See [GPU_ACCELERATION.md](GPU_ACCELERATION.md) for detailed setup
+- See {doc}`GPU_ACCELERATION` for detailed setup
 
 ---
 
@@ -744,13 +740,13 @@ You can regenerate reports from existing metrics files:
 
 ```bash
 # HTML report (recommended)
-linum_generate_pipeline_report.py /path/to/pipeline/output report.html --format html
+linum-generate-pipeline-report /path/to/pipeline/output report.html --format html
 
 # Text report
-linum_generate_pipeline_report.py /path/to/pipeline/output report.txt --format text
+linum-generate-pipeline-report /path/to/pipeline/output report.txt --format text
 
 # Verbose report with all details
-linum_generate_pipeline_report.py /path/to/pipeline/output report.html --verbose
+linum-generate-pipeline-report /path/to/pipeline/output report.html --verbose
 ```
 
 ### Interpreting the Report
@@ -815,7 +811,7 @@ Common issues indicated by metrics:
 
 When working with a subset of slices:
 
-1. Generate slice config: `linum_generate_slice_config.py`
+1. Generate slice config: `linum-generate-slice-config`
 2. Edit `slice_config.csv` to set `use=false` for excluded slices
 3. Run reconstruction with `--slice_config` parameter
 

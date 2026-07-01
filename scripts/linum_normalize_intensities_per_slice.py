@@ -37,9 +37,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--percentile_max", type=float, default=99.9, help="Values above the ith percentile will be clipped. [%(default)s]"
     )
     p.add_argument("--sigma", type=float, default=1.0, help="Smoothing sigma for estimating the agarose mask. [%(default)s]")
+    p.add_argument(
+        "--min_contrast_fraction",
+        type=float,
+        default=0.1,
+        help="Minimum contrast as fraction of global max to prevent\nover-amplification of weak/bad slices. [%(default)s]",
+    )
     p.add_argument("--use_gpu", default=True, action=argparse.BooleanOptionalAction, help="Use GPU acceleration if available.")
     p.add_argument("--verbose", action="store_true", help="Print GPU information.")
-    p.add_argument("--n_levels", type=int, default=3, help="Number of levels in pyramid representation. [%(default)s]")
     return p
 
 
@@ -70,9 +75,11 @@ def main() -> None:
 
     agarose_mask, otsu_threshold = get_agarose_mask(vol_data, args.sigma, use_gpu=use_gpu)
 
-    vol_normalized, background_thresholds = normalize_volume(vol_data, agarose_mask, args.percentile_max)
+    vol_normalized, background_thresholds = normalize_volume(
+        vol_data, agarose_mask, args.percentile_max, args.min_contrast_fraction
+    )
 
-    save_omezarr(da.from_array(vol_normalized), args.out_image, res, n_levels=args.n_levels)
+    save_omezarr(da.from_array(vol_normalized), args.out_image, res, n_levels=3)
 
     collect_normalization_metrics(
         vol_normalized=vol_normalized,
@@ -84,6 +91,7 @@ def main() -> None:
         params={
             "percentile_max": args.percentile_max,
             "sigma": args.sigma,
+            "min_contrast_fraction": args.min_contrast_fraction,
             "use_gpu": use_gpu,
         },
     )

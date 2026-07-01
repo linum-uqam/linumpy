@@ -10,11 +10,11 @@ but kept generic so other smoothing/warp primitives can reuse it.
 The fit implements the single-level Lee-Wolberg-Shin (1997) B-spline
 approximation that ITK uses inside ``BSplineScatteredDataPointSetToImageFilter``
 (the engine of N4).  For each scattered sample p with value v_p the
-locally-optimal value at surrounding control point c is
+locally-optimal value at surrounding control point c is::
 
     phi_c(p) = w_c(p) * v_p / sum_d w_d(p)^2
 
-and the per-control-point coefficient is the squared-weight average
+and the per-control-point coefficient is the squared-weight average::
 
     coeff[c] = sum_p w_c(p)^2 * phi_c(p) / sum_p w_c(p)^2
              = sum_p gamma_p * w_c(p)^3 * v_p / S(p)
@@ -25,7 +25,7 @@ where ``S(p) = sum_d w_d(p)^2`` and gamma_p folds in the per-voxel
 mask/weight.  Because the tensor-product basis is separable,
 ``w_c(p)^k`` factorises across axes and S(p) factorises into a product
 of per-axis sums of squared basis weights, so the fit reduces to three
-contiguous tensor contractions — one through ``B^3`` for the numerator
+contiguous tensor contractions -- one through ``B^3`` for the numerator
 and one through ``B^2`` for the denominator.  This matches the ITK
 behaviour while remaining a single GPU-friendly tensordot chain.
 
@@ -116,7 +116,7 @@ def _voxel_to_control_coords(n_voxels: int, n_control: int, xp: Any) -> Any:
 def _build_axis_basis(n_voxels: int, n_control: int, xp: Any) -> Any:
     """Return the dense (n_voxels, n_control) cubic-B-spline basis matrix.
 
-    Row ``i`` contains exactly four non-zero entries — the four basis
+    Row ``i`` contains exactly four non-zero entries -- the four basis
     weights at offsets ``-1, 0, 1, 2`` around ``floor(u_i)``, with OOB
     stencil indices clamped to ``[0, n_control - 1]`` (boundary
     partition-of-unity preservation, matching the original scattered

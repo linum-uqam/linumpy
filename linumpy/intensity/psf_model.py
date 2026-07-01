@@ -622,7 +622,7 @@ def fit_tissue_confocal_model(
         return np.sqrt(np.sum((y - tissue * confocal_model(x, z)) ** 2.0) / float(y.size))
 
     p0 = [z[-1] * 0.5, zr_0, 1.0]  # zf, zr, a
-    param_bounds: list[tuple[float | None, float | None]] = [(z[0], z[-1]), (zr_0, zr_0), (0.0, None)]
+    param_bounds = [[z[0], z[-1]], [zr_0, zr_0], [0.0, None]]
     popt_firstpsf = minimize(fo_PSF, x0=p0, args=(this_profile, z, syn_tissue), bounds=param_bounds)
     zf, zr = popt_firstpsf.x[0:2]
     psf1 = confocal_model([zf, zr, 1.0], z)
@@ -648,7 +648,7 @@ def fit_tissue_confocal_model(
             return np.sqrt(np.sum((y - psf * bump_tissue_model(x, z)) ** 2.0) / float(y.size))
 
         p0 = [new_z0, 60, 5, 1.0, 0.5]
-        param_bounds = [(z[0], z[-1]), (0, 100), (1.0, 10), (0, None), (0, None)]
+        param_bounds = [[z[0], z[-1]], [0, 100], [1.0, 10], [0, None], [0, None]]
         popt_btm = minimize(fo_btm, x0=p0, args=(this_profile, z, psf1), bounds=param_bounds)
         z0, c, w, a, b = popt_btm.x[:]
         bump_tissue = bump_tissue_model(popt_btm.x, z)
@@ -671,9 +671,9 @@ def fit_tissue_confocal_model(
         p0 = popt_firstpsf.x  # zf, zr, a
         if fix_zr:
             zr_0 = p0[1]
-            param_bounds = [(z[0], z[-1]), (zr_0, zr_0), (0.0, None)]
+            param_bounds = [[z[0], z[-1]], [zr_0, zr_0], [0.0, None]]
         else:
-            param_bounds = [(z[0], z[-1]), (0, None), (0.0, None)]
+            param_bounds = [[z[0], z[-1]], [0, None], [0.0, None]]
         popt_psf = minimize(
             fo_psf_normalized,
             x0=p0,

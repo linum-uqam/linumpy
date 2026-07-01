@@ -192,6 +192,7 @@ nextflow run soct_3d_reconst.nf \
 | `enable_cpu_limits` | `true` | Enable CPU limiting |
 | `max_cpus` | `16` | Maximum CPUs to use (0 = no limit) |
 | `reserved_cpus` | `4` | CPUs reserved for system overhead |
+| `scratch_dir` | `true` | Per-task scratch location for Nextflow's `scratch` directive. `true` stages each task into `$TMPDIR` and rsyncs outputs back (default Nextflow behaviour); `false` runs directly in the work directory (no double-write, no /tmp pressure); a string path stages tasks into `<path>/<task-uuid>` (use when /tmp is small but a faster local filesystem has room). On hosts where /tmp and the work dir share a physical disk, prefer `false`. |
 
 #### Resolution & Basic Settings
 
@@ -201,6 +202,12 @@ nextflow run soct_3d_reconst.nf \
 | `clip_percentile_upper` | `99.9` | Upper percentile for intensity clipping |
 | `fix_curvature_enabled` | `false` | Detect and compensate focal curvature artifacts |
 | `fix_illum_enabled` | `true` | Fix illumination inhomogeneity (BaSiCPy algorithm) |
+| `fix_illum_fit_max_samples` | `2000` | Max tile samples for BaSiC flatfield estimation (higher = better fit, more memory) |
+| `fix_illum_max_iterations` | `500` | Max BaSiC optimizer iterations (higher = better convergence, slower) |
+| `fix_illum_darkfield` | `false` | Also fit a per-tile additive darkfield. Disabled by default: out-of-tile zero padding can make BaSiC fit a darkfield > signal and zero the volume. Enable when residual tile waffle pattern persists after flatfield correction. |
+| `compensate_psf_enabled` | `true` | Run axial PSF / beam-profile correction (after stitching, before interface crop) |
+| `compensate_psf_method` | `'model_free'` | PSF estimator: `'model_free'` (default; agarose-region axial profile, no optics assumptions) or `'model'` (confocal-PSF parametric fit; uses `compensate_psf_zr_initial`) |
+| `compensate_psf_zr_initial` | `1060.0` | Initial Rayleigh length (µm) for the parametric PSF fit. Only used when `compensate_psf_method = 'model'`. The default is the empirical value for the 10× Mitutoyo objective. |
 | `crop_interface_out_depth` | `600` | Maximum tissue depth after interface crop (µm) |
 
 
@@ -325,7 +332,7 @@ and correlation or physics-based Z-matching.
 |-----------|---------|-------------|
 | `transform_confidence_high` | `0.6` | Above this: full transform applied |
 | `transform_confidence_low` | `0.3` | Between low and high: rotation-only; below low: skipped |
-| `z_overlap_min_corr` | `0.5` | Fall back to expected Z-overlap below this NCC score |
+| `z_overlap_min_corr` | `0.5` | Fall back to expected Z-overlap below this NCC score. The fallback is recorded in `output/stack/stacking_decisions.csv` as `overlap_source = 'correlation_fallback'` and a boolean `correlation_fallback_used` column captures the original (sub-threshold) NCC. |
 | `blend_z_refine_min_confidence` | `0.5` | Min confidence to run blend Z-refinement (else use expected overlap) |
 
 **Transform gating:**
@@ -415,7 +422,7 @@ letter 3 → dim2 (zarr X) = in-plane column direction
 
 Each letter is one of: `R`/`L` (right/left), `A`/`P` (anterior/posterior), `S`/`I` (superior/inferior).
 
-The script `linum_align_to_ras.py` uses the code to permute and flip axes before registration, bringing the volume into approximate RAS space. The `ras_initial_rotation` then seeds the registration optimizer with a coarse rotation, which is essential for oblique cuts.
+The script `linum-align-to-ras` uses the code to permute and flip axes before registration, bringing the volume into approximate RAS space. The `ras_initial_rotation` then seeds the registration optimizer with a coarse rotation, which is essential for oblique cuts.
 
 **Standard setup assumption** used in the table below:
 
@@ -438,7 +445,7 @@ Orientation code construction:
 | Axial/Horizontal — dorsal→ventral | D→V | Anterior→Posterior (P) | Left→Right (R) | `IPR` |
 | Axial/Horizontal — ventral→dorsal | V→D | Anterior→Posterior (P) | Left→Right (R) | `SPR` |
 
-> **Important:** The in-plane letters (2nd and 3rd) depend on the physical stage motor orientation and brain mounting. If the output looks mirrored or rotated 90°, swap or negate the in-plane letters. Run `linum_align_to_ras.py --preview-only` to inspect the raw volume orientation before registering.
+> **Important:** The in-plane letters (2nd and 3rd) depend on the physical stage motor orientation and brain mounting. If the output looks mirrored or rotated 90°, swap or negate the in-plane letters. Run `linum-align-to-ras --preview-only` to inspect the raw volume orientation before registering.
 
 ##### 45° oblique cutting orientations
 
@@ -745,10 +752,10 @@ These can also be set manually when running scripts directly:
 
 ```bash
 # Reserve 4 cores when running standalone scripts
-LINUMPY_RESERVED_CPUS=4 linum_create_mosaic_grid_3d.py input.ome.zarr output.ome.zarr
+LINUMPY_RESERVED_CPUS=4 linum-create-mosaic-grid-3d input.ome.zarr output.ome.zarr
 
 # Or set explicit max
-LINUMPY_MAX_CPUS=8 linum_stitch_3d.py mosaic_grid.ome.zarr transform.npy output.ome.zarr
+LINUMPY_MAX_CPUS=8 linum-stitch-3d mosaic_grid.ome.zarr transform.npy output.ome.zarr
 ```
 
 ---
@@ -1138,12 +1145,12 @@ even though it logically refines it. Two reasons:
    and `finalise_interpolation.out` is an empty channel. Rebinding
    `current_slice_config` to that empty channel propagates the emptiness
    downstream and **silently skips `stack`** (and everything after it).
-2. `linum_stack_slices_motor.py` only reads `use` and `auto_excluded` from
+2. `linum-stack-slices-motor` only reads `use` and `auto_excluded` from
    the slice config (via `slice_config_io.force_skip_slices`).
    `finalise_interpolation` only adds `interpolated` and
    `interpolation_failed`, so it does not change any column that `stack`
    acts on. The published `slice_config_final.csv` is consumed directly
-   from the output directory by `linum_generate_pipeline_report.py`, which
+   from the output directory by `linum-generate-pipeline-report`, which
    gracefully falls back to `slice_config.csv` if the final file is absent.
 
 Treat `finalise_interpolation` as an artifact-emitting side effect; do not
@@ -1182,7 +1189,7 @@ Each process that performs GPU-accelerated work passes `--use_gpu` or
 ```groovy
 def gpu_flag = params.use_gpu ? "--use_gpu" : "--no-use_gpu"
 """
-linum_foo.py ... ${gpu_flag}
+linum-foo ... ${gpu_flag}
 """
 ```
 

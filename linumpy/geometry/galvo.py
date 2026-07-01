@@ -1,5 +1,7 @@
 """Galvanometric XY shift detection and correction."""
 
+from __future__ import annotations
+
 import numpy as np
 from scipy.ndimage import median_filter
 

@@ -5,20 +5,22 @@ Assess slice quality for 3D mosaic grids and optionally update slice configurati
 This script analyzes mosaic grid slices to detect quality issues that might affect
 reconstruction. It uses multiple metrics to identify problematic slices:
 
-1. **SSIM (Structural Similarity)**: Compares each slice to its neighbors
-2. **Edge Preservation**: Detects if edge structures are preserved compared to neighbors
-3. **Variance Consistency**: Checks for unusual signal variance (data loss/corruption)
-4. **First Slice Detection**: Automatically identifies calibration slices (thicker/different)
+- SSIM (Structural Similarity): compares each slice to its neighbors.
+- Edge Preservation: detects if edge structures are preserved compared to neighbors.
+- Variance Consistency: checks for unusual signal variance (data loss/corruption).
+- First Slice Detection: automatically identifies calibration slices (thicker/different).
 
 GPU acceleration is used when available (--use_gpu, default on) for SSIM and
 edge-detection computations. Falls back to CPU automatically if no GPU is detected.
 
 The output can be:
-- A new slice_config.csv with quality scores and recommendations
-- An update to an existing slice_config.csv with quality assessments
-- A quality report for review
 
-Example usage:
+- A new slice_config.csv with quality scores and recommendations.
+- An update to an existing slice_config.csv with quality assessments.
+- A quality report for review.
+
+Example usage::
+
     # Assess quality and create/update slice config
     linum_assess_slice_quality.py /path/to/mosaics slice_config.csv
 
@@ -66,7 +68,7 @@ from linumpy.metrics.image_quality import (
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input", help="Input directory containing mosaic grids (*.ome.zarr)")
+    p.add_argument("input", help="Input directory containing mosaic grids (`*.ome.zarr`)")
     p.add_argument("output_file", help="Output slice configuration CSV file")
 
     gpu_group = p.add_argument_group("GPU Options")
@@ -178,7 +180,7 @@ def write_slice_config_with_quality(
     """Write ``slice_config.csv`` with the decision columns set from the quality.
 
     assessment. Raw per-metric scores (ssim_mean / edge_score / variance_score /
-    depth) intentionally stay out of the CSV — they live in the pipeline report
+    depth) intentionally stay out of the CSV -- they live in the pipeline report
     and per-stage diagnostics JSON, not in the per-slice decision trace.
     """
     out_rows: list[dict[str, object]] = []

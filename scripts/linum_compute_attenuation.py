@@ -15,7 +15,7 @@ import argparse
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-from linumpy.intensity.attenuation import get_attenuation_smith2015
+from linumpy.intensity.attenuation import get_extended_attenuation_vermeer2013
 from linumpy.io.zarr import read_omezarr, save_omezarr
 
 
@@ -63,7 +63,7 @@ def main() -> None:
     # TODO: If there is a 1.0e-6 multiplier it means dz is
     # expected to be given in meters. However, from docstring
     # the resolution appears to be expected in microns also.
-    attn = get_attenuation_smith2015(vol, mask=mask, k=0, res=res_axial_microns, fill_holes=True, zshift=10)
+    attn = get_extended_attenuation_vermeer2013(vol, mask=mask, k=0, res=res_axial_microns, fill_holes=True, zshift=10)
 
     # Saving the attenuation
     attn = np.moveaxis(attn, (0, 1, 2), (2, 1, 0))

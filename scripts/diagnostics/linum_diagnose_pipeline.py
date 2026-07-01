@@ -18,12 +18,10 @@ Usage:
     linum_diagnose_pipeline.py --output report.txt  # Save results to file
 """
 
-# Configure thread limits before numpy/scipy imports
-import linumpy.config.threads  # noqa: F401
-
 import argparse
 import glob
 import json
+import multiprocessing
 import os
 import subprocess
 import sys
@@ -75,7 +73,7 @@ class SystemDiagnostics:
         print_header("CPU Configuration")
 
         # Physical CPU info
-        total_cpus = os.process_cpu_count() or os.cpu_count() or 1
+        total_cpus = multiprocessing.cpu_count()
         self.results["cpu"]["total_cores"] = total_cpus
         print(f"  Total CPU cores detected: {total_cpus}")
 
@@ -172,7 +170,7 @@ class SystemDiagnostics:
                                     f"{int(float(parts[2])) / 1024:.1f} GB free"
                                 )
                                 print(f"    Driver: {parts[3]}, CUDA: {parts[4]}")
-                            except ValueError, IndexError:
+                            except (ValueError, IndexError):
                                 print(f"  ⚠️  Could not parse GPU {i} info: {line}")
 
                     self.results["gpu"]["available"] = len(gpus) > 0
