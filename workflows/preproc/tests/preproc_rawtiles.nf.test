@@ -1,0 +1,64 @@
+nextflow_pipeline {
+    name "Test preproc_rawtiles.nf"
+    script "../preproc_rawtiles.nf"
+
+    test("Should run without failures in stub mode") {
+        options "-stub"
+
+        when {
+            params {
+                input = "${projectDir}/workflows/preproc/tests/data"
+                output = "${outputDir}"
+                generate_aips = false
+                generate_previews = false
+                generate_slice_config = false
+                use_gpu = false
+            }
+        }
+
+        then {
+            assert workflow.success
+            def tasks = workflow.trace.tasks()
+            assert tasks.size() > 0
+            // Verify core channel wiring: mosaic grid creation and shift estimation ran
+            assert tasks.any { it.name =~ /create_mosaic_grid/ }
+            assert tasks.any { it.name =~ /estimate_xy_shifts_from_metadata/ }
+            // Both test tile dirs should produce one task each
+            assert tasks.count { it.name =~ /create_mosaic_grid/ } == 2
+            // Optional branches should NOT have run
+            assert !tasks.any { it.name =~ /generate_aip/ }
+            assert !tasks.any { it.name =~ /generate_mosaic_preview/ }
+            assert !tasks.any { it.name =~ /generate_slice_config/ }
+        }
+    }
+
+    test("Should run optional branches in stub mode") {
+        options "-stub"
+
+        when {
+            params {
+                input = "${projectDir}/workflows/preproc/tests/data"
+                output = "${outputDir}"
+                generate_aips = true
+                generate_previews = true
+                generate_slice_config = true
+                use_gpu = false
+            }
+        }
+
+        then {
+            assert workflow.success
+            def tasks = workflow.trace.tasks()
+            // Core processes still ran
+            assert tasks.any { it.name =~ /create_mosaic_grid/ }
+            assert tasks.any { it.name =~ /estimate_xy_shifts_from_metadata/ }
+            // Optional branches should now have run
+            assert tasks.any { it.name =~ /generate_aip/ }
+            assert tasks.any { it.name =~ /generate_mosaic_preview/ }
+            assert tasks.any { it.name =~ /generate_slice_config/ }
+            // Each per-slice optional process runs once per input zarr (2 test dirs)
+            assert tasks.count { it.name =~ /generate_aip/ } == 2
+            assert tasks.count { it.name =~ /generate_mosaic_preview/ } == 2
+        }
+    }
+}

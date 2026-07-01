@@ -1,0 +1,58 @@
+name: Nextflow CI
+
+on:
+  push:
+    branches: ["main", "dev"]
+    paths:
+      - "workflows/**"
+      - ".github/workflows/nextflow-ci.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "workflows/**"
+      - ".github/workflows/nextflow-ci.yml"
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: actions/setup-java@v5.2.0
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Nextflow
+        run: |
+          wget -qO nextflow https://github.com/nextflow-io/nextflow/releases/latest/download/nextflow
+          chmod +x nextflow
+          sudo mv nextflow /usr/local/bin/
+
+      - name: Install nf-test
+        run: |
+          NF_TEST_VERSION=0.9.5
+          wget -qO nf-test.tar.gz "https://github.com/askimed/nf-test/releases/download/v${NF_TEST_VERSION}/nf-test-${NF_TEST_VERSION}.tar.gz"
+          tar -xzf nf-test.tar.gz
+          mkdir -p "$HOME/.nf-test"
+          mv nf-test.jar "$HOME/.nf-test/nf-test.jar"
+          sudo mv nf-test /usr/local/bin/nf-test
+          sudo chmod +x /usr/local/bin/nf-test
+
+      - name: Lint Nextflow files
+        # Pass -project-dir so that nextflow lint (26.04+) can resolve Groovy
+        # classes from lib/ (e.g. Helpers). Each workflow lives in its own
+        # subdirectory, so lint is invoked once per workflow.
+        run: |
+          nextflow lint -project-dir workflows/preproc workflows/preproc/preproc_rawtiles.nf
+          nextflow lint -project-dir workflows/reconst_3d workflows/reconst_3d/soct_3d_reconst.nf
+          nextflow lint -project-dir workflows/reconst_2.5d workflows/reconst_2.5d/soct_2.5d_reconst.nf
+
+      - name: Validate Nextflow configs
+        run: |
+          nextflow config workflows/preproc/nextflow.config -profile standard || true
+          nextflow config workflows/reconst_3d/nextflow.config -profile standard || true
+
+      - name: Run nf-test stub runs
+        run: nf-test test --stop-on-first-failure workflows/preproc/tests/ workflows/reconst_3d/tests/ workflows/reconst_2.5d/tests/

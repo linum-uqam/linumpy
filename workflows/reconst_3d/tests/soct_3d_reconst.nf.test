@@ -1,0 +1,96 @@
+nextflow_pipeline {
+    name "Test soct_3d_reconst.nf"
+    script "../soct_3d_reconst.nf"
+
+    test("Should run core pipeline without failures in stub mode") {
+        options "-stub"
+
+        when {
+            params {
+                input = "${projectDir}/workflows/reconst_3d/tests/data"
+                output = "${outputDir}"
+                use_gpu = false
+                resolution = -1
+                fix_curvature_enabled = false
+                fix_illum_enabled = false
+                stitch_global_transform = false
+                detect_rehoming = false
+                auto_assess_quality = false
+                analyze_shifts = false
+                stitch_preview = false
+                common_space_preview = false
+                interpolate_missing_slices = false
+                export_manual_align = false
+                refine_manual_transforms = false
+                auto_exclude_enabled = false
+                correct_bias_field = false
+                align_to_ras_enabled = false
+                apply_pairwise_transforms = true
+            }
+        }
+
+        then {
+            assert workflow.success
+            def tasks = workflow.trace.tasks()
+            // Verify mandatory pipeline stages all ran
+            assert tasks.any { it.name =~ /stitch_3d_with_refinement/ }
+            assert tasks.any { it.name =~ /beam_profile_correction/ }
+            assert tasks.any { it.name =~ /compensate_attenuation/ }
+            assert tasks.any { it.name =~ /crop_interface/ }
+            assert tasks.any { it.name =~ /normalize/ }
+            assert tasks.any { it.name =~ /bring_to_common_space/ }
+            assert tasks.any { it.name =~ /register_pairwise/ }
+            assert tasks.any { it.name =~ /stack/ }
+            // Per-slice processes should run once per input zarr (2 test files)
+            assert tasks.count { it.name =~ /stitch_3d_with_refinement/ } == 2
+            assert tasks.count { it.name =~ /normalize/ } == 2
+            // Optional stages should NOT have run
+            assert !tasks.any { it.name =~ /detect_rehoming_events/ }
+            assert !tasks.any { it.name =~ /correct_bias_field/ }
+        }
+    }
+
+    test("Should run optional branch pipeline without failures in stub mode") {
+        options "-stub"
+
+        when {
+            params {
+                input = "${projectDir}/workflows/reconst_3d/tests/data"
+                output = "${outputDir}"
+                use_gpu = false
+                resolution = -1
+                fix_curvature_enabled = false
+                fix_illum_enabled = false
+                stitch_global_transform = false
+                detect_rehoming = true
+                auto_assess_quality = false
+                analyze_shifts = false
+                stitch_preview = false
+                common_space_preview = false
+                interpolate_missing_slices = false
+                export_manual_align = false
+                refine_manual_transforms = false
+                auto_exclude_enabled = false
+                align_to_ras_enabled = false
+                apply_pairwise_transforms = true
+                correct_bias_field = true
+                generate_report = false
+                // GitHub-hosted runners have only 4 CPUs; the default of 8
+                // causes 'Process requirement exceeds available CPUs'.
+                processes = 2
+            }
+        }
+
+        then {
+            assert workflow.success
+            def tasks = workflow.trace.tasks()
+            // detect_rehoming branch: shifts channel should be replaced
+            assert tasks.any { it.name =~ /detect_rehoming_events/ }
+            // correct_bias_field branch: runs after stack
+            assert tasks.any { it.name =~ /correct_bias_field/ }
+            // Core stages still ran
+            assert tasks.any { it.name =~ /stitch_3d_with_refinement/ }
+            assert tasks.any { it.name =~ /stack/ }
+        }
+    }
+}

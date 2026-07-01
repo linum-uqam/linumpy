@@ -1,0 +1,38 @@
+nextflow_pipeline {
+    name "Test soct_2.5d_reconst.nf"
+    script "../soct_2.5d_reconst.nf"
+
+    test("Should run without failures in stub mode") {
+        options "-stub"
+
+        when {
+            params {
+                directory = "${projectDir}/workflows/reconst_2.5d/tests/data"
+                input_directory = "${projectDir}/workflows/reconst_2.5d/tests/data/mosaicgrids"
+                xy_shift_file = "${projectDir}/workflows/reconst_2.5d/tests/data/shifts_xy.csv"
+                output_directory = "${outputDir}"
+            }
+        }
+
+        then {
+            assert workflow.success
+            def tasks = workflow.trace.tasks()
+            assert tasks.size() > 0
+            // Verify all major pipeline stages ran
+            assert tasks.any { it.name =~ /crop_tiles/ }
+            assert tasks.any { it.name =~ /estimate_illumination_bias/ }
+            assert tasks.any { it.name =~ /compensate_illumination_bias/ }
+            assert tasks.any { it.name =~ /estimate_position/ }
+            assert tasks.any { it.name =~ /stitch_mosaic/ }
+            assert tasks.any { it.name =~ /stack_mosaic/ }
+            assert tasks.any { it.name =~ /compress_stack/ }
+            assert tasks.any { it.name =~ /convert_to_omezarr/ }
+            assert tasks.any { it.name =~ /resample_stack/ }
+            // Two test tiff files should produce one task each for per-slice processes
+            assert tasks.count { it.name =~ /crop_tiles/ } == 2
+            assert tasks.count { it.name =~ /estimate_illumination_bias/ } == 2
+            assert tasks.count { it.name =~ /compensate_illumination_bias/ } == 2
+            assert tasks.count { it.name =~ /stitch_mosaic/ } == 2
+        }
+    }
+}
