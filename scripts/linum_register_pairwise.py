@@ -133,17 +133,7 @@ def main() -> None:
         p.error(f"Output directory exists: {out_dir}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Get moving slice — clamp index in case crop_interface left fewer z-voxels than the
-    # configured moving_z_index (e.g. default 4 but volume has only 3 slices).
-    nz_moving = moving_vol.shape[0]
-    if args.moving_z_index >= nz_moving:
-        logger.warning(
-            "moving_z_index %d exceeds moving volume depth %d; clamping to %d",
-            args.moving_z_index,
-            nz_moving,
-            nz_moving - 1,
-        )
-        args.moving_z_index = nz_moving - 1
+    # Get moving slice
     moving_slice = np.array(moving_vol[args.moving_z_index])
     moving_norm = normalize(moving_slice)
 

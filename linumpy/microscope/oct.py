@@ -40,7 +40,8 @@ class OCT:
         filename
             Path to the scan_file written by the OCT (.txt)
         """
-        foo = Path(filename).read_text()
+        with Path(filename).open() as f:
+            foo = f.read()
 
         # Process the file input
         foo = foo.split("\n")

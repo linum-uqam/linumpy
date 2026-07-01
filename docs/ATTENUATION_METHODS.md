@@ -80,7 +80,7 @@ adjust the constants in the function body for your setup.
 ## CLI: `linum_compensate_attenuation_inplace`
 
 ```bash
-linum_compensate_attenuation_inplace.py input.ome.zarr output.ome.zarr \
+linum-compensate-attenuation-inplace input.ome.zarr output.ome.zarr \
     --method {li,liu,smith,vermeer}      # default: li (Li 2020)
     --strength 0.3                       # 1.0 = textbook formula; <1 attenuates
     --k 10                               # XY median filter (voxels); 0 disables
@@ -165,7 +165,7 @@ few voxels for a stable $\hat\mu_E$ fit at that size).
 ## Real-data sweep
 
 Cropped 42×1832×988 OCT slice (10 µm/voxel axial), `--strength 0.3`,
-single-pass `linum_compensate_attenuation_inplace.py`. Drop % is the
+single-pass `linum-compensate-attenuation-inplace`. Drop % is the
 mean intensity drop between the top 1/8 and bottom 1/8 of the volume —
 zero would mean a perfectly flat axial profile.
 
@@ -205,10 +205,6 @@ rationale, in order of importance:
 3. **Marginal cost over Liu.** On the test volume the wall time was
    23.3 s (Li) vs 23.0 s (Liu) — the noise / SNR pre-pass is a
    fraction of the cumulative-sum cost, which dominates either way.
-4. **Backwards-compatible escape hatches.** Smith remains available
-   for reproducing legacy outputs; Vermeer is kept as a reference;
-   `--strength` still scales the correction so the practical gain on
-   any specific dataset can be tuned without changing methods.
 
 When Li is *not* the right default:
 
@@ -217,6 +213,3 @@ When Li is *not* the right default:
   `smith` instead. The synthetic 60-voxel CLI test
   (`test_method_dispatch`) explicitly exempts `li` from the strict
   flatness assertion for this reason.
-* **Reproducing a previous reconstruction** — set
-  `compensate_attenuation_method = 'smith'` in the per-subject
-  `nextflow.config`.

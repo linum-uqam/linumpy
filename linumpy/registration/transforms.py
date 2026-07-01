@@ -47,7 +47,7 @@ def compute_motor_transform(tile_shape: Sequence[int], overlap_fraction: float) 
     tile_shape : tuple or list
         Tile shape as (height, width) in pixels.
     overlap_fraction : float
-        Expected overlap between tiles (0–1).
+        Expected overlap between tiles (0-1).
 
     Returns
     -------

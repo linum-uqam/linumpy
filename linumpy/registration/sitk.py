@@ -1,8 +1,5 @@
 """SimpleITK-based image registration and transform application."""
 
-from collections.abc import Callable, Sequence
-from typing import Any
-
 import numpy as np
 import SimpleITK as sitk
 
@@ -315,50 +312,22 @@ def command_iteration(method: sitk.ImageRegistrationMethod) -> None:
     print(f"{method.GetOptimizerIteration():3} " + f"= {method.GetMetricValue():7.5f} " + f": {method.GetOptimizerPosition()}")
 
 
-def apply_transform(
-    moving_image: np.ndarray,
-    transform: sitk.Transform,
-    reference_image: np.ndarray | None = None,
-    reference_spacing: Sequence[float] | None = None,
-    moving_spacing: Sequence[float] | None = None,
-) -> np.ndarray:
+def apply_transform(moving_image: np.ndarray, transform: sitk.Transform) -> np.ndarray:
     """Apply `transform` to `moving_image`.
 
-    By default the image is transformed inside its own domain (preserving
-    backward compatibility).  When ``reference_image`` is provided, the moving
-    image is resampled onto the reference grid instead — required when the
-    transform maps between two volumes that do not share a domain (e.g.
-    inter-subject registration with different shapes / spacing).
+    The image is transformed inside its own domain.
 
     Parameters
     ----------
-    moving_image
-        Moving image to transform (numpy ZYX).
-    transform
-        SimpleITK transform mapping the reference (or moving) domain to
-        moving voxel coordinates.
-    reference_image
-        Optional reference volume defining the output grid.  Only its shape
-        and spacing are used; intensities are ignored.
-    reference_spacing
-        Voxel spacing ``(sz, sy, sx)`` in mm for ``reference_image``.
-        Required when ``reference_image`` is given.
-    moving_spacing
-        Voxel spacing ``(sz, sy, sx)`` in mm for ``moving_image``.  Required
-        when ``reference_image`` is given so the moving image carries the
-        correct physical extent.
+    moving_image: numpy.ndarray
+        Moving image to transform.
+    transform: sitk.sitkTransform
+        Transform to apply to `moving_image`.
     """
-    if reference_image is not None:
-        if reference_spacing is None or moving_spacing is None:
-            raise ValueError("reference_spacing and moving_spacing are required when reference_image is given.")
-        moving_image_sitk = _numpy_to_sitk_image(moving_image, moving_spacing)
-        reference_sitk = _numpy_to_sitk_image(reference_image, reference_spacing)
-    else:
-        moving_image_sitk = sitk.GetImageFromArray(moving_image)
-        reference_sitk = moving_image_sitk
+    moving_image_sitk = sitk.GetImageFromArray(moving_image)
 
     resampler = sitk.ResampleImageFilter()
-    resampler.SetReferenceImage(reference_sitk)
+    resampler.SetReferenceImage(moving_image_sitk)  # transforms the image inside its domain
     resampler.SetInterpolator(sitk.sitkLinear)
 
     # Use edge value instead of zero to avoid black dots at boundaries
@@ -372,239 +341,3 @@ def apply_transform(
     out = sitk.GetArrayFromImage(out)
 
     return out
-
-
-def _numpy_to_sitk_image(volume: np.ndarray, spacing: Sequence[float]) -> sitk.Image:
-    """Convert a numpy ZYX volume to a SimpleITK image with identity frame.
-
-    Spacing is in numpy order ``(sz, sy, sx)``; SITK uses ``(sx, sy, sz)``.
-    Origin is ``(0, 0, 0)`` and direction is identity — matching the
-    project-wide RAS-aligned OME-Zarr convention.
-    """
-    vol_sitk = sitk.GetImageFromArray(volume)
-    vol_sitk.SetSpacing([float(spacing[2]), float(spacing[1]), float(spacing[0])])
-    vol_sitk.SetOrigin([0.0, 0.0, 0.0])
-    vol_sitk.SetDirection([1, 0, 0, 0, 1, 0, 0, 0, 1])
-    return vol_sitk
-
-
-def register_3d_rigid_to_volume(
-    fixed_volume: np.ndarray,
-    fixed_spacing: Sequence[float],
-    moving_volume: np.ndarray,
-    moving_spacing: Sequence[float],
-    metric: str = "MI",
-    max_iterations: int = 1000,
-    initial_rotation_deg: Sequence[float] = (0.0, 0.0, 0.0),
-    crop_to_bbox: bool = True,
-    verbose: bool = False,
-    progress_callback: Callable[[Any], None] | None = None,
-) -> tuple[sitk.Euler3DTransform, str, float]:
-    """Rigid 3-D registration between two arbitrary volumes (no atlas).
-
-    Both volumes are interpreted as ZYX numpy arrays sitting in an identity
-    physical frame (origin = 0, direction = identity, spacing in mm).  The
-    returned ``Euler3DTransform`` maps ``fixed`` coordinates to ``moving``
-    coordinates and can be passed to :func:`apply_transform` together with
-    ``reference_image=fixed_volume`` to resample the moving subject onto the
-    fixed grid.
-
-    The recipe mirrors :func:`linumpy.reference.allen.register_3d_rigid_to_allen`
-    minus the Allen-specific resampling and centroid-fallback logic: the two
-    volumes are expected to already share an approximate RAS frame at a
-    compatible resolution.
-
-    Parameters
-    ----------
-    fixed_volume, moving_volume
-        Numpy ZYX volumes.
-    fixed_spacing, moving_spacing
-        ``(sz, sy, sx)`` in mm.
-    metric
-        ``'MI'`` (default, Mattes), ``'MSE'``, ``'CC'``, or ``'AntsCC'``.
-    max_iterations
-        Maximum optimizer iterations per pyramid level.
-    initial_rotation_deg
-        ``(rx, ry, rz)`` degrees applied before optimisation.
-    crop_to_bbox
-        Crop both volumes to their non-zero tissue bounding box before
-        registration.  Translation offsets are restored on output so the
-        transform is valid for the full original volumes.
-    verbose
-        Print progress.
-    progress_callback
-        Called once per iteration with the SITK registration method.
-
-    Returns
-    -------
-    transform, stop_condition, metric_value
-    """
-    fixed_vol = np.asarray(fixed_volume)
-    moving_vol = np.asarray(moving_volume)
-
-    # Optional crop to non-zero bounding box.  Translation offsets are added
-    # back on the final transform's translation so it remains valid for the
-    # uncropped volumes.
-    margin_voxels = 10
-    fixed_crop_origin_mm = (0.0, 0.0, 0.0)
-    moving_crop_origin_mm = (0.0, 0.0, 0.0)
-    if crop_to_bbox:
-        fixed_vol, fixed_crop_origin_mm = _crop_to_bbox(fixed_vol, fixed_spacing, margin_voxels)
-        moving_vol, moving_crop_origin_mm = _crop_to_bbox(moving_vol, moving_spacing, margin_voxels)
-        if verbose:
-            print(f"Cropped fixed → {fixed_vol.shape}, moving → {moving_vol.shape}")
-
-    fixed_sitk = _numpy_to_sitk_image(fixed_vol, fixed_spacing)
-    moving_sitk = _numpy_to_sitk_image(moving_vol, moving_spacing)
-
-    fixed_image = sitk.Normalize(sitk.Cast(fixed_sitk, sitk.sitkFloat32))
-    moving_image = sitk.Normalize(sitk.Cast(moving_sitk, sitk.sitkFloat32))
-
-    registration = sitk.ImageRegistrationMethod()
-
-    metric_u = metric.upper()
-    if metric_u == "MI":
-        registration.SetMetricAsMattesMutualInformation(numberOfHistogramBins=50)
-    elif metric_u == "MSE":
-        registration.SetMetricAsMeanSquares()
-    elif metric_u == "CC":
-        registration.SetMetricAsCorrelation()
-    elif metric_u == "ANTSCC":
-        registration.SetMetricAsANTSNeighborhoodCorrelation(radius=20)
-    else:
-        raise ValueError(f"Unknown metric: {metric}. Choose from: MI, MSE, CC, AntsCC")
-
-    registration.SetMetricSamplingStrategy(registration.REGULAR)
-    registration.SetMetricSamplingPercentage(0.25)
-
-    registration.SetOptimizerAsRegularStepGradientDescent(
-        learningRate=0.5,
-        minStep=1e-4,
-        numberOfIterations=max_iterations,
-        relaxationFactor=0.5,
-        gradientMagnitudeTolerance=1e-8,
-    )
-    registration.SetOptimizerScalesFromPhysicalShift()
-
-    registration.SetShrinkFactorsPerLevel([8, 4, 2, 1])
-    registration.SetSmoothingSigmasPerLevel([4, 2, 1, 0])
-    registration.SmoothingSigmasAreSpecifiedInPhysicalUnitsOn()
-    registration.SetInterpolator(sitk.sitkLinear)
-
-    # Centroid-based initial alignment: align the centre-of-tissue of each
-    # volume in physical space.  Falls back to geometric centre when a volume
-    # is entirely zero (shouldn't happen for real data but keeps the function
-    # safe).
-    fixed_center = _tissue_centroid_mm(fixed_vol, fixed_spacing)
-    moving_center = _tissue_centroid_mm(moving_vol, moving_spacing)
-
-    initial_transform = sitk.Euler3DTransform()
-    # SITK XYZ order; numpy axes are ZYX.
-    initial_transform.SetCenter([fixed_center[2], fixed_center[1], fixed_center[0]])
-    initial_transform.SetTranslation(
-        [
-            moving_center[2] - fixed_center[2],
-            moving_center[1] - fixed_center[1],
-            moving_center[0] - fixed_center[0],
-        ]
-    )
-    initial_transform.SetRotation(
-        float(np.deg2rad(initial_rotation_deg[0])),
-        float(np.deg2rad(initial_rotation_deg[1])),
-        float(np.deg2rad(initial_rotation_deg[2])),
-    )
-    if verbose:
-        print(f"Centroid init: fixed={fixed_center} mm, moving={moving_center} mm")
-        print(f"Initial translation: {initial_transform.GetTranslation()} mm (SITK XYZ)")
-
-    registration.SetInitialTransform(initial_transform)
-
-    if verbose or progress_callback is not None:
-
-        def _on_iter(method: Any) -> None:
-            if verbose:
-                if method.GetOptimizerIteration() == 0:
-                    print(f"Estimated scales: {method.GetOptimizerScales()}")
-                print(
-                    f"Iter {method.GetOptimizerIteration():3d} "
-                    f"= {method.GetMetricValue():7.5f} : {method.GetOptimizerPosition()}"
-                )
-            if progress_callback is not None:
-                progress_callback(method)
-
-        registration.AddCommand(sitk.sitkIterationEvent, lambda: _on_iter(registration))
-
-    final_transform = registration.Execute(fixed_image, moving_image)
-    stop = registration.GetOptimizerStopConditionDescription()
-    error = registration.GetMetricValue()
-
-    # Restore crop offsets so the transform is valid for the uncropped
-    # volumes (both still anchored at SITK origin = 0, identity direction).
-    # Derivation.  Let R, c, t_crop be the rigid params learned on the
-    # cropped images.  Cropped fixed coord p_fc maps to uncropped fixed coord
-    # p_ff = p_fc + fixed_off, and similarly for moving.  We want
-    #     T_full(p_ff) = T_crop(p_ff - fixed_off) + moving_off
-    #                  = R(p_ff - fixed_off - c) + c + t_crop + moving_off.
-    # Substituting c' = c + fixed_off gives
-    #     T_full(p_ff) = R(p_ff - c') + c' + (t_crop + moving_off - fixed_off).
-    # So c_new = c + fixed_off and t_new = t_crop + moving_off - fixed_off.
-    if crop_to_bbox and (any(fixed_crop_origin_mm) or any(moving_crop_origin_mm)):
-        # SITK XYZ; our offsets are stored in numpy ZYX, so reverse them.
-        fixed_off_xyz = np.array([fixed_crop_origin_mm[2], fixed_crop_origin_mm[1], fixed_crop_origin_mm[0]])
-        moving_off_xyz = np.array([moving_crop_origin_mm[2], moving_crop_origin_mm[1], moving_crop_origin_mm[0]])
-        c_old = np.array(final_transform.GetCenter())
-        params = list(final_transform.GetParameters())
-        t_old = np.array(params[3:6])
-        c_new = c_old + fixed_off_xyz
-        t_new = t_old + moving_off_xyz - fixed_off_xyz
-        final_transform.SetCenter(c_new.tolist())
-        params[3], params[4], params[5] = float(t_new[0]), float(t_new[1]), float(t_new[2])
-        final_transform.SetParameters(params)
-        if verbose:
-            print(f"Crop-restored translation (SITK XYZ): {tuple(params[3:6])} mm")
-
-    if verbose:
-        print(f"Done: {stop}; metric={error:.6f}")
-
-    return final_transform, stop, error
-
-
-def _crop_to_bbox(
-    volume: np.ndarray, spacing: Sequence[float], margin_voxels: int
-) -> tuple[np.ndarray, tuple[float, float, float]]:
-    """Crop ``volume`` to its non-zero bounding box.
-
-    Returns the cropped array and the physical offset ``(z, y, x)`` of the
-    crop origin in mm.  If the volume is entirely zero the original array
-    and a zero offset are returned.
-    """
-    nonzero = np.nonzero(volume)
-    if len(nonzero[0]) == 0:
-        return volume, (0.0, 0.0, 0.0)
-    slices = tuple(
-        slice(
-            max(0, int(idx.min()) - margin_voxels),
-            min(volume.shape[ax], int(idx.max()) + margin_voxels + 1),
-        )
-        for ax, idx in enumerate(nonzero)
-    )
-    cropped = volume[slices]
-    offset_mm = (
-        slices[0].start * float(spacing[0]),
-        slices[1].start * float(spacing[1]),
-        slices[2].start * float(spacing[2]),
-    )
-    return cropped, offset_mm
-
-
-def _tissue_centroid_mm(volume: np.ndarray, spacing: Sequence[float]) -> tuple[float, float, float]:
-    """Return the centroid of non-zero voxels in mm (numpy ZYX order).
-
-    Falls back to the geometric centre when the volume is entirely zero.
-    """
-    nonzero = np.argwhere(volume > 0)
-    if len(nonzero) == 0:
-        z, y, x = volume.shape
-        return (z / 2.0 * spacing[0], y / 2.0 * spacing[1], x / 2.0 * spacing[2])
-    cz, cy, cx = nonzero.mean(axis=0)
-    return (float(cz) * spacing[0], float(cy) * spacing[1], float(cx) * spacing[2])

@@ -18,7 +18,7 @@ from linumpy.mosaic.motor import (
 
 def test_compute_motor_positions_count():
     positions, _step_y, _step_x = compute_motor_positions(nx=3, ny=4, tile_shape=(10, 64, 64), overlap_fraction=0.1)
-    assert len(positions) == 12  # 3 × 4
+    assert len(positions) == 12  # 3 x 4
 
 
 def test_compute_motor_positions_step_sizes():

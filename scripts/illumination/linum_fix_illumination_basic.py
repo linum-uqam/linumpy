@@ -216,7 +216,7 @@ def main() -> None:
         field_mode=field_mode,
         basic_kwargs=basic_kwargs,
         n_extra_rows=args.n_extra_rows,
-        n_workers=args.processes,
+        n_workers=args.n_processes,
         verbose=True,
     )
 

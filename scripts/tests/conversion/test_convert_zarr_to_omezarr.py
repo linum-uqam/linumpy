@@ -2,5 +2,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_convert_zarr_to_omezarr.py", "--help"])
+    ret = script_runner.run(["linum-convert-zarr-to-omezarr", "--help"])
     assert ret.success

@@ -3,7 +3,7 @@
 """Normalize the intensity in a given nifty image."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 from pathlib import Path
@@ -13,16 +13,17 @@ import numpy as np
 from tqdm import tqdm
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_image", help="Full path to the input nifti volume.")
-    p.add_argument("output_image", help="Full path to the output volume")
-    p.add_argument("--resolution_xy", type=float, default=3.0, help="Lateral (xy) resolution in micron. (default=%(default)s)")
-    p.add_argument("--resolution_z", type=float, default=3.5, help="Axial (z) resolution in micron. (default=%(default)s)")
+    p.add_argument("input_image", type=Path, help="Full path to the input nifti volume.")
+    p.add_argument("output_image", type=Path, help="Full path to the output volume")
+    p.add_argument("--resolution_xy", type=float, default=3.0, help="Lateral (xy) resolution in micron. [%(default)s]")
+    p.add_argument("--resolution_z", type=float, default=3.5, help="Axial (z) resolution in micron. [%(default)s]")
     return p
 
 
 def main() -> None:
+    """Run the intensity normalization script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -32,6 +33,7 @@ def main() -> None:
 
     # Load the image and create empty output array
     img = nib.load(input_path)
+    assert isinstance(img, nib.Nifti1Image)
     array = img.get_fdata()
     dim = np.shape(array)
     output_array = np.zeros(dim, dtype=np.uint32)

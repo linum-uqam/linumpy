@@ -51,13 +51,13 @@ from linumpy.io.thorlabs import ThorImageOCT
 point: it materialises the requested level into memory and returns
 `(array, voxel_size)`. With ``use_gpu=False`` (default) the array is a
 ``numpy.ndarray``; with ``use_gpu=True`` it dispatches through
-[`linumpy.gpu.zarr_io.read_zarr_to_gpu`](GPU_ACCELERATION.md) and returns a
+`linumpy.gpu.zarr_io.read_zarr_to_gpu` (see {doc}`GPU_ACCELERATION`) and returns a
 ``cupy.ndarray`` (kvikio/GPUDirect Storage when available, otherwise the
 ``zarr.config.enable_gpu`` fallback). Voxel size is ordered to match the array
 axes (Z, Y, X for 3D volumes; Y, X for 2D mosaics).
 
-See [Mosaic Grid Format](MOSAIC_GRID_FORMAT.md) and
-[Slice Config Feature](SLICE_CONFIG_FEATURE.md) for format details.
+See {doc}`Mosaic Grid Format <MOSAIC_GRID_FORMAT>` and
+{doc}`Slice Config Feature <SLICE_CONFIG_FEATURE>` for format details.
 
 ### `linumpy.cli` and `linumpy.config`
 
@@ -84,7 +84,7 @@ from linumpy.metrics import (
 )
 ```
 
-See [Reconstruction Diagnostics](RECONSTRUCTION_DIAGNOSTICS.md).
+See {doc}`Reconstruction Diagnostics <RECONSTRUCTION_DIAGNOSTICS>`.
 
 ### `linumpy.geometry`
 
@@ -140,13 +140,13 @@ CuPy-backed versions of hot paths. Each public entry point either takes a
 * `gpu.bias_field`, `gpu.n4`, `gpu.bspline` — GPU N4 and B-spline grid.
 * `gpu.image_quality` — GPU image-quality metrics.
 * `gpu.registration`, `gpu.corrections` — GPU registration and correction
-  passes used by `linum_estimate_transform.py`,
-  `linum_normalize_intensities_per_slice.py`, etc.
+  passes used by `linum-estimate-transform`,
+  `linum-normalize-intensities-per-slice`, etc.
 * `gpu.zarr_io` — high-level `read_zarr_to_gpu` dispatcher: picks the
   fastest backend available (kvikio/GDS native → `zarr.config.enable_gpu`).
 * `gpu.kvikio_zarr` — kvikio / GPUDirect Storage backend for the dispatcher.
 
-See [GPU Acceleration](GPU_ACCELERATION.md) and [N4 GPU](N4_GPU.md).
+See {doc}`GPU Acceleration <GPU_ACCELERATION>` and {doc}`N4 GPU <N4_GPU>`.
 
 ### `linumpy.stack_alignment`
 
@@ -158,7 +158,7 @@ from linumpy.stack_alignment.units import detect_shift_units
 from linumpy.stack_alignment.filter import filter_outliers
 ```
 
-See [Shifts File Format](SHIFTS_FILE_FORMAT.md).
+See {doc}`Shifts File Format <SHIFTS_FILE_FORMAT>`.
 
 ### `linumpy.imaging`
 
@@ -207,11 +207,11 @@ A typical pipeline run wires these subpackages as follows:
    `gpu.n4` backend when CUDA is available) and `imaging.orientation` / RAS
    alignment via `reference.allen`.
 7. **Diagnostics** use `metrics` collectors throughout; see
-   [Reconstruction Diagnostics](RECONSTRUCTION_DIAGNOSTICS.md).
+   {doc}`Reconstruction Diagnostics <RECONSTRUCTION_DIAGNOSTICS>`.
 
 ## See also
 
 * Auto-generated API reference: [api/linumpy](api/linumpy/index.rst)
-* [Pipeline Overview](PIPELINE_OVERVIEW.md)
-* [Scripts Reference](SCRIPTS_REFERENCE.md)
-* [Nextflow Workflows](NEXTFLOW_WORKFLOWS.md)
+* {doc}`Pipeline Overview <PIPELINE_OVERVIEW>`
+* {doc}`Scripts Reference <SCRIPTS_REFERENCE>`
+* {doc}`Nextflow Workflows <NEXTFLOW_WORKFLOWS>`

@@ -16,7 +16,7 @@ boundaries give consistent estimates and the result is the same as before.
 """
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 import csv
@@ -25,19 +25,20 @@ from pathlib import Path
 import numpy as np
 from tqdm.contrib.concurrent import process_map
 
-from linumpy.reconstruction import get_mosaic_info, get_tiles_ids
-from linumpy.utils.io import add_processes_arg, parse_processes_arg
+from linumpy.cli.args import add_processes_arg, parse_processes_arg
+from linumpy.mosaic.discovery import get_mosaic_info, get_tiles_ids
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("directory", help="Tiles directory")
-    p.add_argument("output_file", help="Output CSV file")
+    p.add_argument("directory", type=Path, help="Tiles directory")
+    p.add_argument("output_file", type=Path, help="Output CSV file")
     add_processes_arg(p)
     return p
 
 
-def process_slice(z, tiles_directory):
+def process_slice(z: int, tiles_directory: Path) -> tuple:
+    """Process a single z slice and return its mosaic spatial extent."""
     mosaic_info = get_mosaic_info(tiles_directory, z, use_stage_positions=True)
     return (
         mosaic_info["mosaic_xmin_mm"],
@@ -50,6 +51,7 @@ def process_slice(z, tiles_directory):
 
 
 def main() -> None:
+    """Run the XY shift estimation from tile metadata script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -94,7 +96,7 @@ def main() -> None:
         dx_from_max = xmax_mm[i] - xmax_mm[i + 1]
         dy_from_min = ymin_mm[i] - ymin_mm[i + 1]
         dy_from_max = ymax_mm[i] - ymax_mm[i + 1]
-        # Use the boundary that shifted less — it reflects tissue drift rather
+        # Use the boundary that shifted less -- it reflects tissue drift rather
         # than mosaic repositioning.  When neither boundary is dominant, both
         # estimates are consistent and either is equally valid.
         dx = dx_from_min if abs(dx_from_min) <= abs(dx_from_max) else dx_from_max
@@ -114,7 +116,7 @@ def main() -> None:
 
     # Save the shifts to a csv file
     shifts = np.array([z_values[:-1], z_values[1:], x_shift_px, y_shift_px, x_shifts_mm, y_shifts_mm, reliable_flags]).T
-    with open(output_file, "w") as csv_file:
+    with Path(output_file).open("w") as csv_file:
         writer = csv.writer(csv_file, delimiter=",")
         writer.writerow(["fixed_id", "moving_id", "x_shift", "y_shift", "x_shift_mm", "y_shift_mm", "reliable"])
         writer.writerows(shifts)

@@ -6,7 +6,6 @@
 import linumpy.config.threads  # noqa: F401
 
 import argparse
-from pathlib import Path
 
 import napari
 import zarr
@@ -14,23 +13,23 @@ import zarr
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_zarr", type=Path, help="Full path to the Zarr file.")
+    p.add_argument("input_zarr", help="Full path to the Zarr file.")
     p.add_argument(
         "-r",
         "--resolution",
         nargs=3,
         type=float,
         default=[1.0] * 3,
-        metavar=("z", "x", "y"),
-        help="Resolution in micrometer in the Z, X, Y order. For an isotropic resolution, provide a single value."
-        " (default=%(default)s)",
+        metavar=("z", "y", "x"),
+        help="Resolution in micrometer in the Z, Y, X order. "
+        "For an isotropic resolution, provide a single value. [%(default)s]",
     )
 
     return p
 
 
 def main() -> None:
-    """Run the zarr viewer script."""
+    """Run function."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()

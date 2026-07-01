@@ -87,7 +87,9 @@ def main() -> None:
     # Get the resolution of the original volume
     resolutions = img.header["pixdim"][1:4]
     new_resolutions = []
-    new_resolutions.extend((resolutions[axis_lr], resolutions[axis_pa], resolutions[axis_is]))
+    new_resolutions.append(resolutions[axis_lr])
+    new_resolutions.append(resolutions[axis_pa])
+    new_resolutions.append(resolutions[axis_is])
 
     # Save the new volume
     affine = np.eye(4)

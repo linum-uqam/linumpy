@@ -16,8 +16,7 @@ Usage on the lab server::
         --live-zarr /scratch/workspace/sub-22/output/01/fix_illumination/mosaic_grid_z01_illum_fix.ome.zarr
 """
 
-# Configure thread limits before numpy/scipy imports
-import linumpy.config.threads  # noqa: F401
+from __future__ import annotations
 
 import argparse
 import json
@@ -256,7 +255,7 @@ def main():
     if args.live_zarr is not None and args.live_zarr.exists():
         print(f"\n=== Live OCT volume: {args.live_zarr} (level={args.live_level}) ===")
         vol, mask = _load_live_volume(args.live_zarr, level=args.live_level, slice_index=args.live_slice_index)
-        zc, yc, xc = map(min, vol.shape, args.max_live_shape, strict=True)
+        zc, yc, xc = (min(s, c) for s, c in zip(vol.shape, args.max_live_shape, strict=True))
         vol = vol[:zc, :yc, :xc].copy()
         mask = mask[:zc, :yc, :xc].copy()
         print(f"  live volume shape={vol.shape}, mask coverage={float(mask.mean()):.2%}")
@@ -278,12 +277,10 @@ def main():
     json_path.write_text(json.dumps(records, indent=2))
 
     lines = ["# N4 GPU vs SimpleITK benchmark", ""]
-    lines.extend(
-        (
-            "| Volume | shrink | iters | CPU (s) | GPU (s) | Speedup | r(bias) | median |Δ|/mean | CV bias CPU | CV bias GPU |",
-            "|---|---|---|---|---|---|---|---|---|---|",
-        )
+    lines.append(
+        "| Volume | shrink | iters | CPU (s) | GPU (s) | Speedup | r(bias) | median |Δ|/mean | CV bias CPU | CV bias GPU |"
     )
+    lines.append("|---|---|---|---|---|---|---|---|---|---|")
     for r in records:
         shape = "x".join(str(s) for s in r["shape"])
         n_iter_str = ",".join(str(n) for n in r["n_iter"])

@@ -89,7 +89,7 @@ def compute_registration_refinements(
     unclamped absolute displacements for fitting the affine displacement model
     (Lefebvre et al. 2017, Eqs 1-6).
 
-    Note: this operates on tiles *within a single slice* — it is entirely
+    Note: this operates on tiles *within a single slice* -- it is entirely
     separate from the Z-slice pairwise registration (``linum_register_pairwise.py``).
 
     Parameters
@@ -127,7 +127,7 @@ def compute_registration_refinements(
     -------
     dict with keys 'horizontal', 'vertical', 'pairs', 'stats'.
         'pairs' is a list of dicts with keys 'row_delta', 'col_delta',
-        'measured_dy', 'measured_dx' — the absolute observed pixel
+        'measured_dy', 'measured_dx' -- the absolute observed pixel
         displacements used for affine model estimation.
     """
     from linumpy.registration.transforms import pair_wise_phase_correlation
@@ -318,7 +318,7 @@ def estimate_affine_from_pairs(pairs: list, tile_shape: tuple, overlap_fraction:
     Returns
     -------
     transform : np.ndarray
-        Fitted 2×2 affine matrix mapping tile index to pixel position.
+        Fitted 2x2 affine matrix mapping tile index to pixel position.
     diagnostics : dict
         Extracted displacement model parameters (θ, φ, Ox, Oy) and fit
         residual statistics.
@@ -371,7 +371,7 @@ def pool_pairs_and_fit_global_affine(
     OME-Zarr volume and call :func:`compute_registration_refinements` with the
     supplied options.  All resulting pairs are concatenated, optionally
     sub-sampled with a deterministic seed, and fed to
-    :func:`estimate_affine_from_pairs` for a single 2×2 affine fit.
+    :func:`estimate_affine_from_pairs` for a single 2x2 affine fit.
 
     Parameters
     ----------
@@ -395,7 +395,7 @@ def pool_pairs_and_fit_global_affine(
     Returns
     -------
     transform : np.ndarray
-        Fitted 2×2 affine matrix.
+        Fitted 2x2 affine matrix.
     diagnostics : dict
         Full diagnostics including per-slice stats, pooled pair count,
         chosen backend label, and the output of
@@ -419,7 +419,7 @@ def pool_pairs_and_fit_global_affine(
             tile_shape_ref = tile_shape
         elif tile_shape[1:] != tile_shape_ref[1:]:
             logger.warning(
-                "slice %s: tile shape %s differs from reference %s — pooling across different "
+                "slice %s: tile shape %s differs from reference %s -- pooling across different "
                 "tile sizes is not supported. Skipping.",
                 slice_id,
                 tile_shape,
@@ -513,7 +513,7 @@ def _extract_displacement_params(transform: np.ndarray, tile_shape: tuple, overl
     recover the scan-to-stage rotation θ, the motor-axis angle φ, and the
     effective per-direction overlap fractions Ox, Oy.
 
-    Derivation (Lefebvre et al. 2017, Eqs. 1–6).  In image coordinates
+    Derivation (Lefebvre et al. 2017, Eqs. 1-6).  In image coordinates
     (y-down, x-right) the horizontal motor step (``col_delta = 1``) has
     image displacement
 
@@ -531,7 +531,7 @@ def _extract_displacement_params(transform: np.ndarray, tile_shape: tuple, overl
     Parameters
     ----------
     transform : np.ndarray
-        2×2 affine matrix fitted by :func:`estimate_affine_from_pairs`.
+        2x2 affine matrix fitted by :func:`estimate_affine_from_pairs`.
     tile_shape : tuple
         Tile dimensions (z, height, width).
     overlap_fraction : float
@@ -587,7 +587,7 @@ def compute_affine_positions(nx: int, ny: int, transform: np.ndarray) -> list[tu
     nx, ny : int
         Number of tiles in each direction.
     transform : np.ndarray
-        2×2 affine matrix mapping tile index (i, j) to pixel position
+        2x2 affine matrix mapping tile index (i, j) to pixel position
         (row_px, col_px).
 
     Returns
@@ -616,7 +616,7 @@ def compute_affine_output_shape(nx: int, ny: int, tile_shape: tuple, transform: 
     tile_shape : tuple
         Tile dimensions (z, height, width).
     transform : np.ndarray
-        2×2 affine matrix.
+        2x2 affine matrix.
 
     Returns
     -------
