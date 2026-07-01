@@ -18,12 +18,10 @@ Usage:
     linum_diagnose_pipeline.py --output report.txt  # Save results to file
 """
 
-# Configure thread limits before numpy/scipy imports
-import linumpy.config.threads  # noqa: F401
-
 import argparse
 import glob
 import json
+import multiprocessing
 import os
 import subprocess
 import sys
@@ -75,7 +73,7 @@ class SystemDiagnostics:
         print_header("CPU Configuration")
 
         # Physical CPU info
-        total_cpus = os.process_cpu_count() or os.cpu_count() or 1
+        total_cpus = multiprocessing.cpu_count()
         self.results["cpu"]["total_cores"] = total_cpus
         print(f"  Total CPU cores detected: {total_cpus}")
 
@@ -172,7 +170,7 @@ class SystemDiagnostics:
                                     f"{int(float(parts[2])) / 1024:.1f} GB free"
                                 )
                                 print(f"    Driver: {parts[3]}, CUDA: {parts[4]}")
-                            except ValueError, IndexError:
+                            except (ValueError, IndexError):
                                 print(f"  ⚠️  Could not parse GPU {i} info: {line}")
 
                     self.results["gpu"]["available"] = len(gpus) > 0
@@ -594,21 +592,216 @@ except Exception as e:
                 if versioned_files:
                     print(f"  nvidia/{dir_name}/lib: {', '.join(sorted(versioned_files)[:4])}")
 
-        # PyTorch CUDA availability (BaSiCPy / fix_illumination uses the PyTorch backend)
-        print_subheader("PyTorch CUDA")
-        try:
-            import torch  # type: ignore[import-not-found]
+        # Check nvidia/cu13/lib (from non-suffixed packages - should NOT be installed)
+        print_subheader("Non-suffixed Package Libraries (nvidia/cu13/lib)")
+        cu13_lib = os.path.join(sp, "nvidia", "cu13", "lib")
+        if os.path.isdir(cu13_lib):
+            so_files = glob.glob(os.path.join(cu13_lib, "*.so*"))
+            print(f"  ⚠️  nvidia/cu13/lib exists with {len(so_files)} files")
+            print("  This may indicate non-suffixed nvidia packages are installed.")
+            print("  These are INCOMPATIBLE with JAX 0.4.23.")
+            print("  Run: source scripts/fix_jax_cuda_plugin.sh")
+        else:
+            print("  ✅ nvidia/cu13/lib does not exist (correct)")
 
-            print(f"  torch: {torch.__version__}")
-            print(f"  torch.cuda.is_available(): {torch.cuda.is_available()}")
-            if torch.cuda.is_available():
-                for i in range(torch.cuda.device_count()):
-                    print(f"    [{i}] {torch.cuda.get_device_name(i)}")
+        # Check key libraries needed by JAX
+        print_subheader("Key Libraries for JAX CUDA 12 Plugin")
+        # JAX 0.4.23 needs these specific library versions from pinned nvidia packages
+        # Format: (lib_name, pkg_name, alt_names) - alt_names for case variations
+        key_libs = [
+            ("libcusolver.so.11", "nvidia-cusolver-cu12==11.5.4.101", []),
+            ("libcublas.so.12", "nvidia-cublas-cu12==12.3.4.1", []),
+            ("libcublasLt.so.12", "nvidia-cublas-cu12==12.3.4.1", []),
+            ("libcudnn.so.8", "nvidia-cudnn-cu12==8.9.7.29", []),
+            ("libcufft.so.11", "nvidia-cufft-cu12==11.0.12.1", []),
+            ("libcusparse.so.12", "nvidia-cusparse-cu12==12.2.0.103", []),
+            ("libnvjitlink.so.12", "nvidia-nvjitlink-cu12==12.3.101", ["libnvJitLink.so.12"]),
+            ("libcudart.so.12", "nvidia-cuda-runtime-cu12==12.3.101", []),
+        ]
+        # Build list of all paths to check
+        check_paths = []
+        # Individual -cu12 package paths
+        cu12_pkg_paths = [
+            "nvidia/cublas/lib",
+            "nvidia/cuda_runtime/lib",
+            "nvidia/nvjitlink/lib",
+            "nvidia/cudnn/lib",
+            "nvidia/cufft/lib",
+            "nvidia/cusolver/lib",
+            "nvidia/cusparse/lib",
+        ]
+        for pkg_path in cu12_pkg_paths:
+            full_path = os.path.join(sp, pkg_path)
+            if os.path.isdir(full_path) and full_path not in check_paths:
+                check_paths.append(full_path)
+        # Add LD_LIBRARY_PATH entries
+        for p in ld_path.split(":"):
+            if p and os.path.isdir(p) and p not in check_paths:
+                check_paths.append(p)
+
+        missing_libs = []
+        found_wrong_version = []
+
+        for lib, pkg_name, alt_names in key_libs:
+            found = False
+            wrong_version = None
+
+            # Check all names (including alternates for case variations)
+            names_to_check = [lib, *alt_names]
+
+            for check_path in check_paths:
+                for name in names_to_check:
+                    lib_path = os.path.join(check_path, name)
+                    if os.path.exists(lib_path):
+                        # Get a nice short path name for display
+                        rel_path = check_path.replace(sp + "/", "")
+                        print(f"  ✅ {lib} found in {rel_path}")
+                        found = True
+                        break
+                if found:
+                    break
+
+            if not found:
+                # Check for wrong version (.so.13 instead of .so.12, etc.)
+                base_name = lib.rsplit(".so.", 1)[0]
+                for check_path in check_paths:
+                    wrong_files = glob.glob(os.path.join(check_path, f"{base_name}.so.*"))
+                    # Also check case variations
+                    if "nvjitlink" in base_name.lower():
+                        wrong_files += glob.glob(os.path.join(check_path, "libnvJitLink.so.*"))
+                    for wf in wrong_files:
+                        wf_base = os.path.basename(wf)
+                        if wf_base not in names_to_check and ".so." in wf_base:
+                            wrong_version = wf_base
+                            break
+                    if wrong_version:
+                        break
+
+            if not found:
+                if wrong_version:
+                    print(f"  ❌ {lib} NOT FOUND (have {wrong_version} instead)")
+                    found_wrong_version.append((lib, wrong_version, pkg_name))
+                else:
+                    print(f"  ❌ {lib} NOT FOUND")
+                    missing_libs.append((lib, pkg_name))
+
+        # Check JAX plugins
+        print_subheader("JAX CUDA Plugins")
+        jax_plugins_path = os.path.join(sp, "jax_plugins")
+        if os.path.isdir(jax_plugins_path):
+            plugins = os.listdir(jax_plugins_path)
+            for plugin in sorted(plugins):
+                plugin_path = os.path.join(jax_plugins_path, plugin)
+                if os.path.isdir(plugin_path):
+                    so_files = glob.glob(os.path.join(plugin_path, "*.so"))
+                    print(f"  {plugin}: {len(so_files)} .so files")
+                    # Check for xla_cuda_plugin.so
+                    xla_plugin = os.path.join(plugin_path, "xla_cuda_plugin.so")
+                    if os.path.exists(xla_plugin):
+                        # Check if patchelf was applied by looking at execstack
+                        try:
+                            result = subprocess.run(["readelf", "-l", xla_plugin], capture_output=True, text=True, timeout=5)
+                            if "GNU_STACK" in result.stdout:
+                                for line in result.stdout.split("\n"):
+                                    if "GNU_STACK" in line:
+                                        if "RWE" in line:
+                                            print("    ⚠️ xla_cuda_plugin.so has executable stack (needs patchelf)")
+                                        else:
+                                            print("    ✅ xla_cuda_plugin.so stack is non-executable")
+                                        break
+                        except Exception:
+                            pass
+        else:
+            print("  No jax_plugins directory found")
+
+        # Show ldd output for the JAX plugin
+        print_subheader("JAX CUDA Plugin Dependencies (ldd)")
+        try:
+            xla_plugin = os.path.join(sp, "jax_plugins", "xla_cuda12", "xla_cuda_plugin.so")
+            if os.path.exists(xla_plugin):
+                # Build LD_LIBRARY_PATH with nvidia package paths
+                nvidia_paths = []
+                for pkg_dir in ["cublas", "cuda_runtime", "cusolver", "cusparse", "cufft", "cudnn", "nvjitlink"]:
+                    pkg_path = os.path.join(sp, "nvidia", pkg_dir, "lib")
+                    if os.path.isdir(pkg_path):
+                        nvidia_paths.append(pkg_path)
+                test_ld_path = ":".join(nvidia_paths)
+                if ld_path:
+                    test_ld_path = f"{test_ld_path}:{ld_path}"
+
+                env = os.environ.copy()
+                env["LD_LIBRARY_PATH"] = test_ld_path
+
+                result = subprocess.run(["ldd", xla_plugin], capture_output=True, text=True, timeout=10, env=env)
+                # Show only CUDA-related or "not found" lines
+                for line in result.stdout.split("\n"):
+                    line = line.strip()
+                    if (
+                        "cuda" in line.lower()
+                        or "cublas" in line.lower()
+                        or "cusolver" in line.lower()
+                        or "cudnn" in line.lower()
+                        or "cufft" in line.lower()
+                        or "cusparse" in line.lower()
+                        or "nvjit" in line.lower()
+                        or "not found" in line.lower()
+                    ):
+                        print(f"  {line}")
             else:
-                print("  ℹ️  Install a CUDA build of PyTorch to enable BaSiCPy GPU acceleration.")
-                print("     See docs/GPU_ACCELERATION.md (BaSiCPy section).")
-        except ImportError:
-            print("  torch not installed (BaSiCPy will run on CPU)")
+                print("  xla_cuda_plugin.so not found at expected location")
+        except Exception as e:
+            print(f"  Error checking ldd: {e}")
+
+        # Recommendations based on findings
+        print_subheader("Recommendations")
+
+        # Check if we have version mismatches (CUDA 13 libs instead of CUDA 12)
+        if found_wrong_version:
+            print("  ⚠️  CUDA LIBRARY VERSION MISMATCH DETECTED")
+            print("")
+            print("  Your nvidia packages have CUDA 13 libraries (.so.13), but")
+            print("  JAX 0.4.23's CUDA 12 plugin needs CUDA 12 libraries (.so.12).")
+            print("")
+            print("  Found wrong versions:")
+            for needed, have, _pkg in found_wrong_version:
+                print(f"    - Need {needed}, have {have}")
+            print("")
+            print("  RECOMMENDED FIX (automated):")
+            print("    source scripts/fix_jax_cuda_plugin.sh")
+            print("")
+            print("  This script will:")
+            print("    1. Install hybrid nvidia packages (mix of -cu12 and non-suffixed)")
+            print("    2. Reinstall JAX 0.4.23 with CUDA 12 support")
+            print("    3. Apply patchelf fix for modern Linux kernels")
+            print("    4. Set LD_LIBRARY_PATH correctly")
+            print("    5. Test the installation")
+            print("")
+            print("  See docs/GPU_ACCELERATION.md for manual setup details.")
+        elif missing_libs:
+            print("  ❌ Some CUDA libraries are missing")
+            print("")
+            print("  Missing libraries:")
+            for lib, pkg in missing_libs:
+                print(f"    - {lib} (from {pkg})")
+            print("")
+            print("  RECOMMENDED FIX (automated):")
+            print("    source scripts/fix_jax_cuda_plugin.sh")
+            print("")
+            print("  Or install packages manually:")
+            print("    pip install --extra-index-url https://pypi.nvidia.com \\")
+            print("        nvidia-cusolver nvidia-cublas nvidia-cuda-runtime \\")
+            print("        nvidia-cufft nvidia-cusparse nvidia-nvjitlink nvidia-cudnn-cu12")
+        else:
+            cu13_lib = os.path.join(sp, "nvidia", "cu13", "lib")
+            if os.path.isdir(cu13_lib):
+                print("  ✅ All required CUDA 12 libraries found!")
+                print("")
+                print("  Make sure LD_LIBRARY_PATH includes:")
+                print(f"    export LD_LIBRARY_PATH={cu13_lib}:$LD_LIBRARY_PATH")
+            else:
+                print("  ℹ️  Using individual nvidia/xxx/lib paths")
+                print("")
+                print("  Your current LD_LIBRARY_PATH looks correct.")
 
     def generate_report(self) -> Any:
         """Generate summary report with recommendations."""

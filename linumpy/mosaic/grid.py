@@ -5,9 +5,8 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
-import scipy.ndimage.morphology as morpho
 import scipy.optimize
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import binary_dilation, binary_erosion, gaussian_filter
 from skimage.morphology import ball, disk
 from tqdm import tqdm
 
@@ -753,14 +752,14 @@ def get_diffusion_blending_weights(
         strel = ball(k)
 
     small_mask = np.logical_and(small_fixed_mask, small_moving_mask)
-    eroded_mask = morpho.binary_erosion(small_mask, structure=strel)
-    boundary = np.logical_xor(small_mask, morpho.binary_erosion(small_mask, structure=strel))
+    eroded_mask = binary_erosion(small_mask, structure=strel)
+    boundary = np.logical_xor(small_mask, binary_erosion(small_mask, structure=strel))
 
     # Getting the boundary conditions
     bc = boundary.copy()
-    bc = bc * morpho.binary_erosion(small_fixed_mask, strel)
+    bc = bc * binary_erosion(small_fixed_mask, strel)
 
-    dilated_mask = morpho.binary_dilation(~np.logical_or(small_fixed_mask, small_mask), structure=strel)
+    dilated_mask = binary_dilation(~np.logical_or(small_fixed_mask, small_mask), structure=strel)
     bc = np.zeros(new_shape)
     bc[boundary] = (~dilated_mask[boundary]) * 1.0
 
@@ -787,7 +786,7 @@ def get_diffusion_blending_weights(
         i_step += 1
 
     # Resampling the blending weigths to the original resolution
-    alpha[~morpho.binary_dilation(small_mask, strel)] = 1
+    alpha[~binary_dilation(small_mask, strel)] = 1
     alpha[np.logical_xor(small_moving_mask, small_mask)] = 0.0
     alpha[np.logical_xor(small_fixed_mask, small_mask)] = 1.0
     alpha = 1.0 - alpha
