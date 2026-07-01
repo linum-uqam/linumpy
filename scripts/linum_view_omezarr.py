@@ -3,33 +3,29 @@
 """View an ome-zarr file with napari."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy.config.threads  # noqa: F401
+import linumpy._thread_config  # noqa: F401
 
 import argparse
-from pathlib import Path
 
 import napari
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Reader
 
 
-def _build_arg_parser() -> argparse.ArgumentParser:
+def _build_arg_parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_zarr", type=Path, help="Full path to the OME_ZARR file.")
+    p.add_argument("input_zarr", help="Full path to the OME_ZARR file.")
 
     return p
 
 
 def main() -> None:
-    """Run the OME-Zarr viewer script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
 
     # read the image data
-    _loc = parse_url(args.input_zarr)
-    assert _loc is not None
-    reader = Reader(_loc)
+    reader = Reader(parse_url(args.input_zarr))
     # nodes may include images, labels etc
     nodes = list(reader())
 

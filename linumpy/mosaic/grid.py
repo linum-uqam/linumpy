@@ -712,21 +712,23 @@ def get_diffusion_blending_weights(
         ND blending weights.
     """
 
-    def laplace_solver_step(I: np.ndarray, mask: np.ndarray) -> np.ndarray | None:
-        dI = np.zeros_like(I)
-        if I.ndim == 2:
-            dI[1:-1, 1:-1] = I[0:-2, 1:-1] + I[2::, 1:-1] + I[1:-1, 0:-2] + I[1:-1, 2::] - 4 * I[1:-1, 1:-1]
+    def laplace_solver_step(field: np.ndarray, mask: np.ndarray) -> np.ndarray | None:
+        dI = np.zeros_like(field)
+        if field.ndim == 2:
+            dI[1:-1, 1:-1] = (
+                field[0:-2, 1:-1] + field[2::, 1:-1] + field[1:-1, 0:-2] + field[1:-1, 2::] - 4 * field[1:-1, 1:-1]
+            )
             dI *= mask
             return dI / 4.0
-        elif I.ndim == 3:
+        elif field.ndim == 3:
             dI[1:-1, 1:-1, 1:-1] = (
-                I[0:-2, 1:-1, 1:-1]
-                + I[2::, 1:-1, 1:-1]
-                + I[1:-1, 0:-2, 1:-1]
-                + I[1:-1, 2::, 1:-1]
-                + I[1:-1, 1:-1, 0:-2]
-                + I[1:-1, 1:-1, 2::]
-                - 6 * I[1:-1, 1:-1, 1:-1]
+                field[0:-2, 1:-1, 1:-1]
+                + field[2::, 1:-1, 1:-1]
+                + field[1:-1, 0:-2, 1:-1]
+                + field[1:-1, 2::, 1:-1]
+                + field[1:-1, 1:-1, 0:-2]
+                + field[1:-1, 1:-1, 2::]
+                - 6 * field[1:-1, 1:-1, 1:-1]
             )
             dI *= mask
             return dI / 6.0

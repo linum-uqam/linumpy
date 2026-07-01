@@ -6,7 +6,6 @@ from typing import Literal, overload
 import numpy as np
 from scipy.ndimage import (
     binary_fill_holes,
-    gaussian_filter,
     gaussian_filter1d,
     gaussian_gradient_magnitude,
     label,
@@ -376,11 +375,11 @@ def linear_homogeneous_profile(z: np.ndarray, z0: float, dz: float, I0: float, I
     z_underz0 = z < z0 - dz
     z_betweenz0 = (z >= z0 - dz) * (z < z0)
     z_overz0 = z >= z0
-    I = np.zeros((len(z),))
-    I[z_underz0] = Ib
-    I[z_betweenz0] = (I0 - Ib) / (1.0 * dz) * (z[z_betweenz0] - (z0 - dz)) + Ib
-    I[z_overz0] = I0 - sigma * (z[z_overz0] - z0)
-    return I
+    log_intensity = np.zeros((len(z),))
+    log_intensity[z_underz0] = Ib
+    log_intensity[z_betweenz0] = (I0 - Ib) / (1.0 * dz) * (z[z_betweenz0] - (z0 - dz)) + Ib
+    log_intensity[z_overz0] = I0 - sigma * (z[z_overz0] - z0)
+    return log_intensity
 
 
 def estimate_lh_profile_parameters(
@@ -443,12 +442,12 @@ def estimate_lh_profile_parameters(
 
     for x in range(nx):  # TODO: Accelerate this loop (multithreading ?)
         for y in range(ny):
-            I = vol_p[x, y, :]
+            profile = vol_p[x, y, :]
             If = vol_f[x, y, :]
             I_g = np.gradient(If)
 
             this_z0 = np.where(I_g == I_g.max())[0][0]
-            I_gm = I[this_z0]
+            I_gm = profile[this_z0]
             indices = np.where(I_g / I_gm < 0.1)
             zlist_min = indices[0][indices[0] < this_z0]
             zlist_max = indices[0][indices[0] > this_z0]
@@ -461,10 +460,10 @@ def estimate_lh_profile_parameters(
             if zmax - this_z0 < -5:
                 this_z0 = zmax
 
-            this_I0 = I[this_z0]
+            this_I0 = profile[this_z0]
             this_sigma = -np.median(I_g[this_z0::])
 
-            this_Ib = 1 if this_z0 == 0 or this_z0 - this_dz <= 0 else np.median(I[0 : this_z0 - this_dz])
+            this_Ib = 1 if this_z0 == 0 or this_z0 - this_dz <= 0 else np.median(profile[0 : this_z0 - this_dz])
 
             z0[x, y] = this_z0
             dz[x, y] = this_dz
@@ -473,45 +472,3 @@ def estimate_lh_profile_parameters(
             sigma[x, y] = this_sigma
 
     return z0, dz, I0, Ib, sigma
-
-
-def detect_interface_z(vol: np.ndarray, sigma_xy: float = 3.0, sigma_z: float = 2.0, use_log: bool = False) -> int:
-    """Detect water/tissue interface along Z using gradient-based method.
-
-    Applies Gaussian smoothing then finds the peak of the first-order
-    Z-derivative to locate the tissue surface.
-
-    Parameters
-    ----------
-    vol : np.ndarray
-        Volume with shape (X, Y, Z) — already transposed from OME-Zarr (Z, X, Y).
-    sigma_xy : float
-        Gaussian smoothing sigma in XY before Z-gradient.
-    sigma_z : float
-        Gaussian smoothing sigma for Z-gradient computation.
-    use_log : bool
-        Apply log transform before gradient detection.
-
-    Returns
-    -------
-    int
-        Estimated interface depth in Z voxels.
-    """
-    vol_f = np.log(vol + 1e-6) if use_log else vol.astype(np.float32)
-
-    pad_width = int(np.round(sigma_z * 4))
-    vol_padded = np.pad(vol_f, ((0, 0), (0, 0), (pad_width, 0)), mode="edge")
-    vol_padded = gaussian_filter(vol_padded, (sigma_xy, sigma_xy, 0))
-    dz = gaussian_filter1d(vol_padded, sigma=sigma_z, axis=-1, order=1)
-
-    mean_xy = np.mean(vol_f, axis=2)
-    nonzero_vals = mean_xy[mean_xy > 0]
-    if nonzero_vals.size > 0:
-        threshold = np.percentile(nonzero_vals, 5)
-        tissue_mask = mean_xy > threshold
-        avg_dz = np.sum(dz[tissue_mask, :], axis=0)
-    else:
-        avg_dz = np.sum(dz, axis=(0, 1))
-
-    avg_iface = max(int(np.argmax(avg_dz)) - pad_width, 0)
-    return avg_iface

@@ -2,7 +2,7 @@
 """Move slices from a flat directory into subdirectories based on their names."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy.config.threads  # noqa: F401
+import linumpy._thread_config  # noqa: F401
 
 import argparse
 import filecmp
@@ -13,9 +13,9 @@ from pathlib import Path
 from tqdm.auto import tqdm
 
 
-def _build_arg_parser() -> argparse.ArgumentParser:
+def _build_arg_parser():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--dir", type=Path, help="Directory containing the slices.", required=True)
+    p.add_argument("--dir", help="Directory containing the slices.", required=True)
     return p
 
 
@@ -23,15 +23,10 @@ def get_folder_list(tiles_directory: Path) -> list[Path]:
     """
     List all subdirectories in a given directory, excluding those that match the "zxx" pattern.
 
-    Parameters
-    ----------
-    tiles_directory : Path
-        Path to the directory containing the tiles.
-
-    Returns
-    -------
-    list[Path]
-        List of subdirectory paths (excluding "zxx" directories).
+    :param tiles_directory: Path to the directory containing the tiles.
+    :type tiles_directory: Path
+    :return: List of subdirectory paths (excluding "zxx" directories).
+    :rtype: list[Path]
     """
     # List all folders in the path
     folders = [f for f in tiles_directory.iterdir() if f.is_dir()]
@@ -45,12 +40,11 @@ def copy_files(tiles_directory: Path, folders: list) -> None:
     """
     Create the new folders per z slice and copy the files from the old folders to the new ones.
 
-    Parameters
-    ----------
-    tiles_directory : Path
-        Path to the directory containing the tiles.
-    folders : list[Path]
-        List of folders containing the tiles.
+    :param tiles_directory: Path to the directory containing the tiles.
+    :type tiles_directory: Path
+    :param folders: List of folders containing the tiles.
+    :type folders: list[Path]
+    :return: None
     """
     # Create new folders per z slice
     for folder in tqdm(folders, desc="Copying data from old folders to new z slice folders", unit="folder"):
@@ -70,12 +64,10 @@ def check_files(tiles_directory: Path, old_folders: list) -> None:
     """
     Check if all files were moved correctly by comparing the new folders with the old ones.
 
-    Parameters
-    ----------
-    tiles_directory : Path
-        Path to the directory containing the tiles.
-    old_folders : list[Path]
-        List of old folders containing the tiles.
+    :param tiles_directory: Path to the directory containing the tiles.
+    :type tiles_directory: Path
+    :param old_folders: List of old folders containing the tiles.
+    :type old_folders: list[Path]
     """
     print("Checking if all files were moved correctly...")
     equal = True
@@ -111,10 +103,9 @@ def remove_old_folders(old_folders: list) -> None:
     """
     Remove the old folders after confirming with the user.
 
-    Parameters
-    ----------
-    old_folders : list[Path]
-        List of old folders to remove.
+    :param old_folders: List of old folders to remove.
+    :type old_folders: list[Path]
+    :return: None
     """
     confirm = input(f"Are you sure you want to remove {len(old_folders)} old folders? (y/n): ")
     if confirm.lower() != "y":
@@ -126,7 +117,6 @@ def remove_old_folders(old_folders: list) -> None:
 
 
 def main() -> None:
-    """Run the script to merge tile files into z-slice folders."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()

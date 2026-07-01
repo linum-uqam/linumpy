@@ -8,27 +8,23 @@ volume to a specified depth *below* the interface. The script can also crop the 
 water/tissue interface. The cropped volume is saved as a new OME-Zarr file.
 """
 
-# Configure thread limits before numpy/scipy imports
-import linumpy.config.threads  # noqa: F401
-
 import argparse
 from pathlib import Path
 
 import dask.array as da
 import numpy as np
 import zarr
+from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
-from linumpy.geometry.crop import crop_below_interface
-from linumpy.geometry.resampling import resolution_is_mm
 from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
-from linumpy.metrics import collect_interface_crop_metrics
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_zarr", help="Path to the input 3D OME-Zarr OCT volume")
+    p.add_argument("input_zarr", type=Path, help="Path to the input 3D OME-Zarr OCT volume")
     p.add_argument(
         "output_zarr",
+        type=Path,
         help="Path to the output 3D OME-Zarr *cropped* volume",
     )
     p.add_argument(
@@ -59,7 +55,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    """Run function."""
+    """Run the script to crop a 3D mosaic below the tissue interface."""
     args = _build_arg_parser().parse_args()
     input_path = Path(args.input_zarr)
     output_path = Path(args.output_zarr)
@@ -67,18 +63,24 @@ def main() -> None:
     # Load volume
     vol, res = read_omezarr(input_path, level=0)
     print("Loaded volume shape:", vol.shape)
-    # res may be stored in mm (NGFF convention) or µm (legacy). Convert to µm.
-    resolution_um = res[0] * 1000 if resolution_is_mm(res) else float(res[0])
+    resolution_um = res[0] * 1000
+    vol_chunks = vol.chunks
 
-    vol_crop, avg_iface = crop_below_interface(
-        vol,
-        depth_um=args.depth,
-        resolution_um=resolution_um,
-        sigma_xy=args.sigma_xy,
-        sigma_z=args.sigma_z,
-        crop_before_interface=args.crop_before_interface,
-        percentile_clip=args.percentile_max if args.percentile_max is not None else None,
-    )
+    # vol is (Z, X, Y); reorient to (X, Y, Z) for xyzcorr functions
+    vol = np.asarray(vol)
+    vol_f = np.abs(vol) if np.iscomplexobj(vol) else vol
+    vol_f = np.transpose(vol_f, (1, 2, 0))
+    if args.percentile_max is not None:
+        vol_f = np.clip(vol_f, None, np.percentile(vol_f, args.percentile_max))
+
+    # compute the derivative along z to find the average tissue depth
+    pad_width = int(np.round(args.sigma_z * 4))
+    vol_padded = np.pad(vol_f, ((0, 0), (0, 0), (pad_width, 0)), mode="wrap")
+    vol_padded = gaussian_filter(vol_padded, (args.sigma_xy, args.sigma_xy, 0))
+    dz = gaussian_filter1d(vol_padded, sigma=args.sigma_z, axis=-1, order=1)
+    avg_dz = np.sum(dz, axis=(0, 1))
+
+    avg_iface = max(int(np.argmax(avg_dz)) - pad_width, 0)
     print(f"Average surface depth: {avg_iface} voxels")
 
     # Compute number of Z-slices for desired depth (um / um-per-voxel)
@@ -91,32 +93,18 @@ def main() -> None:
     if end_idx > vol.shape[0]:
         out_shape = (end_idx, vol.shape[1], vol.shape[2]) if args.pad_after else vol.shape
         store = create_tempstore()
-        out_vol = zarr.open_array(store, mode="w", shape=out_shape, dtype=np.float32, chunks=vol.chunks)
+        out_vol = zarr.open(store, mode="w", shape=out_shape, dtype=np.float32, chunks=vol_chunks)
+        assert isinstance(out_vol, zarr.Array)
         out_vol[: vol.shape[0]] = vol[:]
         vol = out_vol
-        start_idx = 0 if not args.crop_before_interface else surface_idx
-        vol_crop = np.asarray(vol[start_idx:end_idx, :, :])
-    else:
-        start_idx = 0 if not args.crop_before_interface else surface_idx
 
-    crop_dask = da.from_array(vol_crop, chunks=vol.chunks)
+    # Crop volume along Z axis
+    start_idx = 0 if not args.crop_before_interface else surface_idx
+    vol_crop = vol[start_idx:end_idx, :, :]
+
+    crop_dask = da.from_array(vol_crop, chunks=vol_chunks)
     # Save cropped volume as OME-Zarr
-    save_omezarr(crop_dask, output_path, voxel_size=res, chunks=vol.chunks)
-
-    # Collect metrics using helper function
-    original_shape = vol.shape
-    collect_interface_crop_metrics(
-        detected_interface=avg_iface,
-        crop_depth_px=depth_px,
-        start_idx=start_idx,
-        end_idx=end_idx,
-        input_shape=original_shape,
-        output_shape=vol_crop.shape,
-        resolution_um=resolution_um,
-        output_path=output_path,
-        input_path=input_path,
-        padding_needed=(end_idx > original_shape[0]),
-    )
+    save_omezarr(crop_dask, output_path, voxel_size=res, chunks=vol_chunks)
 
 
 if __name__ == "__main__":

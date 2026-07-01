@@ -65,24 +65,11 @@ docs = [
 ]
 
 [project.scripts]
-"linum_aggregate_dilation_analysis.py" = "scripts.diagnostics.linum_aggregate_dilation_analysis:main"
-"linum_aip_png.py" = "scripts.linum_aip_png:main"
 "linum_aip.py" = "scripts.linum_aip:main"
 "linum_align_mosaics_3d_from_shifts.py" = "scripts.linum_align_mosaics_3d_from_shifts:main"
-"linum_align_to_ras.py" = "scripts.linum_align_to_ras:main"
-"linum_analyze_acquisition_rotation.py" = "scripts.diagnostics.linum_analyze_acquisition_rotation:main"
-"linum_analyze_registration_transforms.py" = "scripts.diagnostics.linum_analyze_registration_transforms:main"
-"linum_analyze_shifts.py" = "scripts.linum_analyze_shifts:main"
-"linum_analyze_stitch_affine.py" = "scripts.diagnostics.linum_analyze_stitch_affine:main"
-"linum_analyze_tile_dilation.py" = "scripts.diagnostics.linum_analyze_tile_dilation:main"
 "linum_apply_slices_transforms.py" = "scripts.linum_apply_slices_transforms:main"
-"linum_assess_slice_quality.py" = "scripts.linum_assess_slice_quality:main"
-"linum_auto_exclude_slices.py" = "scripts.linum_auto_exclude_slices:main"
 "linum_axis_xyz_to_zyx.py" = "scripts.linum_axis_xyz_to_zyx:main"
-"linum_benchmark_gpu.py" = "scripts.diagnostics.linum_benchmark_gpu:main"
-"linum_clean_raw_data.py" = "scripts.linum_clean_raw_data:main"
 "linum_clip_percentile.py" = "scripts.linum_clip_percentile:main"
-"linum_compare_stitching.py" = "scripts.diagnostics.linum_compare_stitching:main"
 "linum_compensate_attenuation.py" = "scripts.linum_compensate_attenuation:main"
 "linum_compensate_illumination.py" = "scripts.linum_compensate_illumination:main"
 "linum_compensate_psf_from_model.py" = "scripts.linum_compensate_psf_from_model:main"
@@ -103,44 +90,25 @@ docs = [
 "linum_crop_tiles.py" = "scripts.linum_crop_tiles:main"
 "linum_detect_focal_curvature.py" = "scripts.linum_detect_focal_curvature:main"
 "linum_detect_rehoming.py" = "scripts.linum_detect_rehoming:main"
-"linum_diagnose_pipeline.py" = "scripts.diagnostics.linum_diagnose_pipeline:main"
-"linum_diagnose_reconstruction.py" = "scripts.diagnostics.linum_diagnose_reconstruction:main"
 "linum_download_allen.py" = "scripts.linum_download_allen:main"
-"linum_estimate_global_transform.py" = "scripts.linum_estimate_global_transform:main"
 "linum_estimate_illumination.py" = "scripts.linum_estimate_illumination:main"
 "linum_estimate_slices_transforms_gui.py" = "scripts.linum_estimate_slices_transforms_gui:main"
 "linum_estimate_transform.py" = "scripts.linum_estimate_transform:main"
 "linum_estimate_xy_shift_from_metadata.py" = "scripts.linum_estimate_xy_shift_from_metadata:main"
-"linum_export_manual_align.py" = "scripts.linum_export_manual_align:main"
-"linum_extract_pyramid_levels.py" = "scripts.linum_extract_pyramid_levels:main"
-"linum_fix_galvo_shift_zarr.py" = "scripts.linum_fix_galvo_shift_zarr:main"
 "linum_fix_illumination_3d.py" = "scripts.linum_fix_illumination_3d:main"
-"linum_generate_mosaic_aips.py" = "scripts.linum_generate_mosaic_aips:main"
-"linum_generate_pipeline_report.py" = "scripts.linum_generate_pipeline_report:main"
-"linum_generate_slice_config.py" = "scripts.linum_generate_slice_config:main"
-"linum_gpu_info.py" = "scripts.linum_gpu_info:main"
 "linum_intensity_normalization.py" = "scripts.linum_intensity_normalization:main"
-"linum_interpolate_missing_slice.py" = "scripts.linum_interpolate_missing_slice:main"
 "linum_merge_slices_into_folders.py" = "scripts.linum_merge_slices_into_folders:main"
 "linum_normalize_intensities_per_slice.py" = "scripts.linum_normalize_intensities_per_slice:main"
-"linum_normalize_z_intensity.py" = "scripts.linum_normalize_z_intensity:main"
-"linum_refine_manual_transforms.py" = "scripts.linum_refine_manual_transforms:main"
 "linum_register_pairwise.py" = "scripts.linum_register_pairwise:main"
 "linum_reorient_nifti_to_ras.py" = "scripts.linum_reorient_nifti_to_ras:main"
+"linum_resample.py" = "scripts.linum_resample:main"
 "linum_resample_mosaic_grid.py" = "scripts.linum_resample_mosaic_grid:main"
-"linum_resample_nifti.py" = "scripts.linum_resample_nifti:main"
-"linum_screenshot_omezarr_annotated.py" = "scripts.linum_screenshot_omezarr_annotated:main"
 "linum_screenshot_omezarr.py" = "scripts.linum_screenshot_omezarr:main"
 "linum_segment_brain_3d.py" = "scripts.linum_segment_brain_3d:main"
-"linum_stack_motor_only.py" = "scripts.diagnostics.linum_stack_motor_only:main"
+"linum_stack_slices.py" = "scripts.linum_stack_slices_motor:main"
 "linum_stack_slices_3d.py" = "scripts.linum_stack_slices_3d:main"
-"linum_stack_slices_motor.py" = "scripts.linum_stack_slices_motor:main"
-"linum_stack_slices_2d.py" = "scripts.linum_stack_slices_2d:main"
 "linum_stitch_2d.py" = "scripts.linum_stitch_2d:main"
-"linum_stitch_3d_refined.py" = "scripts.linum_stitch_3d_refined:main"
 "linum_stitch_3d.py" = "scripts.linum_stitch_3d:main"
-"linum_stitch_motor_only.py" = "scripts.diagnostics.linum_stitch_motor_only:main"
-"linum_suggest_params.py" = "scripts.diagnostics.linum_suggest_params:main"
 "linum_view_oct_raw_tile.py" = "scripts.linum_view_oct_raw_tile:main"
 "linum_view_omezarr.py" = "scripts.linum_view_omezarr:main"
 "linum_view_zarr.py" = "scripts.linum_view_zarr:main"
@@ -187,52 +155,47 @@ fix = true
 include = ["linumpy*", "scripts*"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "RUF", "SIM", "C4", "PIE", "PTH", 
-            "N", "PERF", "FLY", "TCH", "G", "D", "ANN", "ARG", "ERA"]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "PIE"]
 # N813: SimpleITK as sitk is the universal Python convention — excluded globally.
-# D212/D213 conflict: numpy convention picks D213 (summary on second line of multi-line docstrings).
-# ANN401: Any is legitimately unavoidable in a few callback/override signatures.
-ignore = ["N813", "ANN401"]
-extend-select = ["D417"]
-# Scientific codebase: these Unicode characters are intentional
-allowed-confusables = ["–", "×", "σ", "ℹ"]
-
-[tool.ruff.lint.pydocstyle]
-# numpy-style docstrings across the whole codebase.
-# This disables D203, D212, D215 (conflicting numpy-incompatible rules).
-convention = "numpy"
+ignore = ["N813"]
 
 [tool.ruff.lint.per-file-ignores]
-# These scripts must import linumpy.config.threads (or preload CUDA libs)
-# before any other imports, so E402 is unavoidable.
+# These scripts must import linumpy._thread_config before any other imports
+# so E402 (module-level import not at top) is unavoidable.
 "scripts/linum_fix_illumination_3d.py" = ["E402"]
 "scripts/linum_normalize_intensities_per_slice.py" = ["E402"]
-"scripts/linum_normalize_z_intensity.py" = ["E402"]
-# Star imports are intentional re-exports in __init__.py
-"linumpy/io/__init__.py" = ["F403"]
-# py.typed is a PEP 561 marker file — not a module requiring a docstring
-"linumpy/py.typed" = ["D100"]
-# Scientific code uses uppercase variable names (I, N, C, A, T, Q, etc.)
-# by mathematical convention; renaming them would reduce legibility.
-"linumpy/intensity/*.py" = ["N803", "N806", "N802", "E741", "E501"]
-"linumpy/geometry/*.py" = ["N803", "N806", "E741", "E501"]
-"linumpy/mosaic/grid.py" = ["N803", "N806", "E741"]
-"linumpy/registration/*.py" = ["N803", "N806", "E501"]
-"linumpy/io/zarr.py" = ["E501"]
-# Diagnostic shell snippets have intentionally long template strings;
-# CUDA library detection uses os.path for system-level path traversal
-"scripts/diagnostics/linum_diagnose_pipeline.py" = ["E501", "PTH"]
-"scripts/linum_align_mosaics_3d_from_shifts.py" = ["E501"]
+# Star imports and re-exports in __init__.py are intentional
+"linumpy/__init__.py" = ["F401"]
+"linumpy/io/__init__.py" = ["F401", "F403"]
+"linumpy/preproc/__init__.py" = ["F403"]
+"linumpy/stitching/__init__.py" = ["F403"]
+
+# Pre-existing lint warnings on files inherited from pre-build-tooling history.
+# Will be mopped up in dependent PRs as they touch these files.
+"linumpy/io/data_io.py" = ["E501", "E722"]
+"linumpy/io/thorlabs.py" = ["E501"]
+"linumpy/preproc/icorr.py" = ["E501", "E722", "E741", "UP031"]
+"linumpy/preproc/xyzcorr.py" = ["E722", "E741", "UP031"]
+"linumpy/reconstruction.py" = ["E501"]
+"linumpy/stitching/FileUtils.py" = ["E501", "E722"]
+"linumpy/stitching/mosaic_grid.py" = ["E501", "E722", "E741"]
+"linumpy/stitching/registration.py" = ["E722"]
+"linumpy/stitching/stitch_utils.py" = ["E722"]
+"linumpy/stitching/topology.py" = ["B007", "E722", "UP031"]
+"scripts/linum_compensate_illumination.py" = ["E501"]
+"scripts/linum_convert_tiff_to_omezarr.py" = ["E741"]
 "scripts/linum_create_all_mosaic_grids_2d.py" = ["E501"]
-# Test files: type annotations, docstrings, unused-arg checks, naming conventions and commented-out code are not required in tests.
-"linumpy/tests/**" = ["ANN", "D", "ARG", "N", "ERA", "TC"]
-"scripts/tests/**" = ["ANN", "D", "ARG", "N", "ERA", "TC"]
+"scripts/linum_create_mosaic_grid_2d.py" = ["E501"]
+"scripts/linum_estimate_illumination.py" = ["E501"]
+"scripts/linum_estimate_transform.py" = ["E501"]
+"scripts/linum_stack_slices_motor.py" = ["E501"]
+"scripts/linum_view_zarr.py" = ["E501"]
 
 [tool.ruff.lint.isort]
-# linumpy.config.threads sets OMP_NUM_THREADS & friends and MUST be imported
+# linumpy._thread_config sets OMP_NUM_THREADS & friends and MUST be imported
 # before numpy/scipy/SimpleITK or the env vars have no effect.
 known-first-party = ["linumpy"]
-sections.thread-config = ["linumpy.config.threads"]
+sections.thread-config = ["linumpy._thread_config"]
 section-order = ["future", "thread-config", "standard-library", "third-party", "first-party", "local-folder"]
 
 [tool.ruff.format]
