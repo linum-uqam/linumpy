@@ -1,8 +1,6 @@
 # GPU Acceleration
 
 
----
-
 ## Overview
 
 linumpy supports GPU acceleration for compute-intensive operations using NVIDIA CUDA via CuPy. GPU acceleration is **optional** - all functions automatically fall back to CPU (NumPy/SciPy) if:
@@ -10,6 +8,21 @@ linumpy supports GPU acceleration for compute-intensive operations using NVIDIA 
 - CuPy is not installed
 - No CUDA-capable GPU is available
 - GPU memory is insufficient
+
+```mermaid
+flowchart TD
+    CALL[GPU-aware function called<br/>backend='auto' default] --> CHK1{CuPy installed?}
+    CHK1 -->|no| CPU[Run on CPU<br/>NumPy / SciPy / SimpleITK]
+    CHK1 -->|yes| CHK2{CUDA device available?}
+    CHK2 -->|no| CPU
+    CHK2 -->|yes| PICK[Auto-select least-loaded GPU]
+    PICK --> RUN[Run CuPy kernel on device]
+    RUN -->|OOM / runtime error| CPU
+    RUN -->|success| OUT([Result])
+    CPU --> OUT
+```
+
+backend selection is per-call (`backend="cpu" | "gpu" | "auto"`); the auto path is the safe default and is what the Nextflow workflows use when `use_gpu=true`.
 
 ---
 
@@ -20,13 +33,12 @@ linumpy supports GPU acceleration for compute-intensive operations using NVIDIA 
 nvidia-smi | grep "CUDA Version"
 
 # Install linumpy with GPU support (choose your CUDA version)
-pip install linumpy[gpu]           # CUDA 12.x (default)
-pip install linumpy[gpu-cuda11]    # CUDA 11.x
-pip install linumpy[gpu-cuda13]    # CUDA 13.x (requires extra setup for JAX)
+uv pip install 'linumpy[gpu]'           # CUDA 13.x (default)
+uv pip install 'linumpy[gpu-cuda12]'    # CUDA 12.x
 
 # Verify GPU
-linum_gpu_info.py
-linum_diagnose_pipeline.py --benchmark
+linum-gpu-info
+linum-diagnose-pipeline --benchmark
 ```
 
 ---
@@ -43,98 +55,33 @@ linum_diagnose_pipeline.py --benchmark
 
 ### CuPy Version Reference
 
-| CUDA Version | CuPy Package |
-|--------------|--------------|
-| CUDA 11.x | `cupy-cuda11x` |
-| CUDA 12.x | `cupy-cuda12x` |
-| CUDA 13.x | `cupy-cuda13x` |
+| CUDA Version | CuPy Package | linumpy extra |
+|--------------|--------------|---------------|
+| CUDA 13.x    | `cupy-cuda13x` | `linumpy[gpu]` (default) |
+| CUDA 12.x    | `cupy-cuda12x` | `linumpy[gpu-cuda12]` |
 
 ---
 
-## JAX GPU for BaSiCPy (fix_illumination)
+## BaSiCPy (fix_illumination)
 
-The `fix_illumination` step uses BaSiCPy which is built on JAX. JAX GPU requires additional setup.
+The `fix_illumination` step uses BaSiCPy 2.x, which now ships with a
+**PyTorch backend** (no JAX). BaSiCPy will use a CUDA-enabled PyTorch wheel
+automatically when one is installed; otherwise it runs on CPU.
 
-### Important: JAX 0.4.23 Library Requirements
-
-BaSiCPy requires `jax<=0.4.23`. JAX 0.4.23 was compiled against specific library versions:
-- cuSOLVER 11 (libcusolver.so.11)
-- cuSPARSE 12 (libcusparse.so.12)
-- cuFFT 11 (libcufft.so.11)
-- cuBLAS 12 (libcublas.so.12)
-- cuDNN 8 (libcudnn.so.8)
-
-These exact versions are only available in **specific pinned versions** of the `nvidia-xxx-cu12` packages. Newer versions of these packages have different `.so` versions that are **incompatible**.
-
-### Automated Setup (Recommended)
+If you only need linumpy's CuPy paths (resampling, FFT, morphology, N4),
+no extra steps beyond `pip install 'linumpy[gpu]'` are required. To enable
+GPU acceleration of BaSiCPy as well, install a CUDA build of PyTorch:
 
 ```bash
-# Run the fix script - handles everything
-source shell_scripts/fix_jax_cuda_plugin.sh
+# Pick the index URL that matches your CUDA toolkit
+uv pip install torch --index-url https://download.pytorch.org/whl/cu121
 ```
 
-This script:
-1. Removes conflicting nvidia packages
-2. Installs JAX 0.4.23 with **pinned nvidia package versions**:
-   - `nvidia-cublas-cu12==12.3.4.1`
-   - `nvidia-cudnn-cu12==8.9.7.29`
-   - `nvidia-cusolver-cu12==11.5.4.101`
-   - etc.
-3. Applies patchelf fix (required for Linux 6.x+ kernels)
-4. Sets up LD_LIBRARY_PATH
-5. Tests JAX CUDA with SVD operation
-
-### Manual Setup
-
-If you prefer manual setup:
+Verify:
 
 ```bash
-# 1. Uninstall all conflicting packages
-pip uninstall -y jax jaxlib jax-cuda12-plugin nvidia-cusolver nvidia-cufft \
-    nvidia-cusparse nvidia-cublas nvidia-cuda-runtime nvidia-cudnn nvidia-nvjitlink \
-    nvidia-cublas-cu12 nvidia-cuda-cupti-cu12 nvidia-cuda-runtime-cu12 \
-    nvidia-cudnn-cu12 nvidia-cufft-cu12 nvidia-cusolver-cu12 nvidia-cusparse-cu12 \
-    nvidia-nccl-cu12 nvidia-nvjitlink-cu12
-
-# 2. Install JAX 0.4.23 with CUDA wheel
-pip install 'jax==0.4.23' 'jaxlib==0.4.23+cuda12.cudnn89' \
-    -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-
-# 3. Install PINNED nvidia package versions (critical - newer versions won't work!)
-pip install \
-    'nvidia-cublas-cu12==12.3.4.1' \
-    'nvidia-cuda-cupti-cu12==12.3.101' \
-    'nvidia-cuda-runtime-cu12==12.3.101' \
-    'nvidia-cudnn-cu12==8.9.7.29' \
-    'nvidia-cufft-cu12==11.0.12.1' \
-    'nvidia-cusolver-cu12==11.5.4.101' \
-    'nvidia-cusparse-cu12==12.2.0.103' \
-    'nvidia-nccl-cu12==2.19.3' \
-    'nvidia-nvjitlink-cu12==12.3.101'
-
-# 4. Apply patchelf fix (required for modern Linux kernels)
-sudo apt install patchelf
-JAXLIB_PATH=$(python -c "import jaxlib; print(jaxlib.__path__[0])")
-find "$JAXLIB_PATH" -name "*.so" -exec patchelf --clear-execstack {} \;
-find $(python -c "import site; print(site.getsitepackages()[0])")/jax_plugins \
-    -name "*.so" -exec patchelf --clear-execstack {} \;
-
-# 5. Set LD_LIBRARY_PATH (before running JAX/BaSiCPy)
-SP=$(python -c "import site; print(site.getsitepackages()[0])")
-export LD_LIBRARY_PATH="${SP}/nvidia/cublas/lib:${SP}/nvidia/cuda_runtime/lib:${SP}/nvidia/cusolver/lib:${SP}/nvidia/cusparse/lib:${SP}/nvidia/cufft/lib:${SP}/nvidia/cudnn/lib:${LD_LIBRARY_PATH}"
-
-# 6. Test
-python -c "import jax; print(jax.devices()); import jax.numpy as jnp; print(jnp.linalg.svd(jnp.eye(2)))"
-```
-
-### Verify Installation
-
-```bash
-# Check GPU availability
-linum_gpu_info.py
-
-# Run full pipeline diagnostics
-linum_diagnose_pipeline.py --benchmark
+linum-gpu-info
+linum-diagnose-pipeline --benchmark
 ```
 
 ---
@@ -147,16 +94,16 @@ separate `_gpu.py` variant is needed.
 
 | Script | GPU-accelerated operation | Typical Speedup |
 |--------|--------------------------|-----------------|
-| `linum_estimate_transform.py` | FFT / phase correlation | 8-47x |
-| `linum_create_mosaic_grid_3d.py` | Volume resize | 5-12x |
-| `linum_resample_mosaic_grid.py` | Volume resize | 5-12x |
-| `linum_normalize_intensities_per_slice.py` | Gaussian filter, Otsu threshold | 4-10x |
-| `linum_fix_illumination_3d.py` | BaSiCPy via JAX/CUDA | 2-5x |
-| `linum_assess_slice_quality.py` | SSIM, morphology | 3-8x |
-| `linum_aip_png.py` | Mean projection | ≤1x |
-| `linum_generate_mosaic_aips.py` | Mean projection | ≤1x |
-| `linum_normalize_z_intensity.py` | Scale-factor computation | varies |
-| `linum_estimate_global_transform.py` | Phase correlation | 8-16x |
+| `linum-estimate-transform` | FFT / phase correlation | 8-47x |
+| `linum-create-mosaic-grid-3d` | Volume resize | 5-12x |
+| `linum-resample-mosaic-grid` | Volume resize | 5-12x |
+| `linum-normalize-intensities-per-slice` | Gaussian filter, Otsu threshold | 4-10x |
+| `linum-fix-illumination-3d` | BaSiCPy via PyTorch/CUDA | 2-5x |
+| `linum-assess-slice-quality` | SSIM, morphology | 3-8x |
+| `linum-aip-png` | Mean projection | ≤1x |
+| `linum-generate-mosaic-aips` | Mean projection | ≤1x |
+| `linum-correct-bias-field` | N4 bias field estimation | varies |
+| `linum-estimate-global-transform` | Phase correlation | 8-16x |
 
 ---
 
@@ -190,14 +137,43 @@ separate `_gpu.py` variant is needed.
 
 ---
 
+## CuPy acceleration backends (`CUPY_ACCELERATORS`)
+
+CuPy can route some array ops through additional NVIDIA backends. By default CuPy
+enables only `cub`; adding `cutensor` lets CuPy use the cuTENSOR backend for
+`tensordot`/`einsum` (the GPU B-spline / bias-field path in `linumpy.gpu.bspline`).
+cuTENSOR ships with the CUDA toolkit, so no extra install is needed.
+
+The Nextflow pipelines expose this via the `cupy_accelerators` param (default
+`'cub,cutensor'`), exported as `CUPY_ACCELERATORS` into every task:
+
+```bash
+# Default (cuTENSOR enabled)
+nextflow run workflows/reconst_3d/soct_3d_reconst.nf ...
+
+# Fall back to CuPy's built-in default
+nextflow run workflows/reconst_3d/soct_3d_reconst.nf ... --cupy_accelerators cub
+```
+
+Outside Nextflow, set the variable directly:
+
+```bash
+CUPY_ACCELERATORS=cub,cutensor linum-correct-bias-field ...
+```
+
+It only affects CuPy's `tensordot`/`einsum`; FFT phase correlation, morphology,
+Gaussian filtering, and N4 already run on dedicated CuPy/cuFFT kernels regardless.
+
+---
+
 ## Multi-GPU Systems
 
 ```bash
 # Show status of all GPUs
-linum_gpu_info.py --status
+linum-gpu-info --status
 
 # Select best GPU (most free memory)
-linum_gpu_info.py --select-best
+linum-gpu-info --select-best
 
 # Use specific GPU via environment
 CUDA_VISIBLE_DEVICES=1 nextflow run pipeline.nf --use_gpu true
@@ -229,18 +205,21 @@ print(f"GPU memory used: {mempool.used_bytes() / 1e9:.2f} GB")
 ```bash
 nvidia-smi
 python -c "import cupy; print(cupy.cuda.runtime.getDeviceCount())"
-linum_gpu_info.py
+linum-gpu-info
 ```
 
-### JAX CUDA Issues
+### BaSiCPy / PyTorch CUDA Issues
+
+If `linum-fix-illumination-3d` falls back to CPU unexpectedly, verify the
+PyTorch CUDA build is installed and visible:
 
 ```bash
-# Run the fix script
-source shell_scripts/fix_jax_cuda_plugin.sh
-
-# Or check diagnostics
-linum_diagnose_pipeline.py --debug-cuda
+python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+linum-diagnose-pipeline --debug-cuda
 ```
+
+Reinstall PyTorch from the matching CUDA index URL (see the BaSiCPy section
+above) if `torch.cuda.is_available()` returns `False`.
 
 ### Out of Memory
 
@@ -282,4 +261,64 @@ from linumpy.gpu.fft_ops import fft2, ifft2, phase_correlation
 from linumpy.gpu.interpolation import resize, affine_transform
 from linumpy.gpu.morphology import binary_closing, gaussian_filter
 from linumpy.gpu.array_ops import normalize_percentile, clip_percentile
+from linumpy.gpu.zarr_io import read_zarr_to_gpu
 ```
+
+---
+
+## Fast zarr → GPU loading
+
+For zarr arrays on local NVMe, `linumpy.gpu.zarr_io.read_zarr_to_gpu` is the recommended entry point. It dispatches to the fastest backend available at runtime:
+
+```python
+from linumpy.gpu.zarr_io import read_zarr_to_gpu
+
+dev = read_zarr_to_gpu("/scratch_nvme/volume.zarr")
+# dev is a cupy.ndarray
+```
+
+Backend implementations live in their own modules:
+
+- `linumpy.gpu.kvikio_zarr` — kvikio / GPUDirect Storage reader (uncompressed zarr v2/v3 only).
+
+Selection order (when `prefer="auto"`):
+
+1. **kvikio (GPUDirect Storage, native mode)** — chunks DMA'd directly from NVMe into GPU memory. Fastest. Requires `kvikio` installed, GDS native mode enabled (`/etc/cufile.json`: `allow_compat_mode=false`), and an uncompressed zarr.
+2. **`zarr.config.enable_gpu()`** — host I/O with on-host decode, single H→D copy. Works for any zarr (compressed or not) and is the automatic fallback when GDS is unavailable, in compat mode, or the array is compressed.
+
+You can force a specific path with `prefer="kvikio"` or `prefer="zarr-gpu"`. The legacy `cupy.asarray(zarr.open_array(...)[:])` path is kept only as a reference baseline in `linum-benchmark-kvikio-zarr`.
+
+### Reference benchmark
+
+`scripts/utils/linum_benchmark_kvikio_zarr.py` measures all three paths. On a 16 GiB float32 zarr v3 (256³ chunks) on local NVMe ext4 with an RTX A6000:
+
+| Path | Cold | Warm |
+|---|---|---|
+| kvikio (GDS native) | 8.2 GiB/s | **9.9 GiB/s** |
+| `zarr.config.enable_gpu()` | 6.3 GiB/s | 7.1 GiB/s |
+| `zarr → numpy → cupy.asarray` | 1.1 GiB/s | 2.8 GiB/s |
+
+In compat mode (GDS bounce-buffer), kvikio drops to ~4 GiB/s — slower than the `zarr-gpu` path. The auto selector detects this via `kvikio.defaults.compat_mode()` and prefers `zarr-gpu` in that case.
+
+### Installing the GDS path
+
+```bash
+# CuPy + linumpy GPU support
+uv pip install 'linumpy[gpu]'           # CUDA 13.x (default)
+uv pip install 'linumpy[gpu-cuda12]'    # CUDA 12.x
+
+# kvikio (optional, only needed for the GDS fast path)
+uv pip install 'linumpy[gds]'           # CUDA 13.x (default)
+uv pip install 'linumpy[gds-cuda12]'    # CUDA 12.x
+```
+
+### Enabling native GDS
+
+Native GDS additionally requires:
+
+- A CUDA-aware filesystem on the source path (ext4 / xfs on local NVMe is fine; NFS, overlayfs, encrypted FS are not).
+- `/etc/cufile.json`: `properties.use_compat_mode = false`.
+- IOMMU disabled or in passthrough (`amd_iommu=off iommu=off` on AMD; `intel_iommu=off` on Intel).
+- nvidia-fs DKMS module loaded with matching ABI; verify `dmesg | grep nvidia_fs` shows no "no extended symbol version" warnings after driver/kernel updates.
+
+If any of these are missing, kvikio silently falls back to a POSIX bounce-buffer (compat mode) and `read_zarr_to_gpu` will route around it.
