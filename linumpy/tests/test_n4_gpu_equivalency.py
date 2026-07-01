@@ -26,6 +26,8 @@ that matter for bias-field correction:
   a small tolerance.
 """
 
+from __future__ import annotations
+
 import numpy as np
 import pytest
 
@@ -135,7 +137,7 @@ def test_both_backends_recover_known_bias(seed):
 def test_both_backends_reduce_residual_non_uniformity(seed):
     """In the interior of the phantom (where the true intensity is uniform),
     both backends must reduce the within-class CV to <= 50% of the input
-    CV.  (Tight thresholds aren't useful here -- the noise floor of the
+    CV.  (Tight thresholds aren't useful here — the noise floor of the
     phantom is already < 5% so further reduction is bounded.)"""
     vol, _, mask = _make_phantom(shape=(28, 56, 56), bias_amp=0.5, seed=seed)
     z, y, x = vol.shape
@@ -185,9 +187,9 @@ def test_gpu_vs_simpleitk_bias_correlation(seed):
     SimpleITK estimate after normalising out the global multiplicative
     constant.  This is the spatial-structure equivalency test.
 
-    Note: r is not 1.0 because the two algorithms differ -- GPU uses a
+    Note: r is not 1.0 because the two algorithms differ — GPU uses a
     Nadaraya-Watson cubic-B-spline kernel regression, SimpleITK uses the
-    full Lee-Wolberg-Shin BSpline scattered-data approximation -- so
+    full Lee-Wolberg-Shin BSpline scattered-data approximation — so
     they pick out slightly different smooth biases when both are
     consistent with the data.  Observed envelope is r ~ 0.8."""
     vol, _, mask = _make_phantom(shape=(28, 56, 56), bias_amp=0.4, seed=seed)
@@ -253,8 +255,8 @@ def test_gpu_vs_simpleitk_corrected_volume_close(seed):
 def test_bspline_fit_converges_to_low_order_polynomial():
     """PSDB is an approximation, not interpolation: a single fit underfits
     smooth fields by design (squared-weight penalty regularises against
-    tissue absorption).  Residual iteration -- the same scheme N4 uses
-    across its outer iterations -- must drive the fit to high accuracy on
+    tissue absorption).  Residual iteration — the same scheme N4 uses
+    across its outer iterations — must drive the fit to high accuracy on
     a low-degree trilinear test field."""
     from linumpy.gpu.bspline import bspline_evaluate, bspline_fit
 
@@ -284,7 +286,7 @@ def test_bspline_fit_converges_to_low_order_polynomial():
 @pytest.mark.skipif(not GPU_AVAILABLE, reason="GPU not available")
 def test_numpy_and_cupy_paths_agree_n4():
     """When the same n4_correct_gpu driver runs on NumPy vs CuPy, the
-    estimated bias fields must agree within tight tolerance -- they
+    estimated bias fields must agree within tight tolerance — they
     execute the *same* algorithm, just on different devices."""
     vol, _, mask = _make_phantom(shape=(20, 36, 36), bias_amp=0.3, seed=0)
     _, bias_np = n4_correct_gpu(
