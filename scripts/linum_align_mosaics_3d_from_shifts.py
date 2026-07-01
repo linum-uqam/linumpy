@@ -25,6 +25,7 @@ from linumpy.cli.args import add_overwrite_arg, assert_output_exists
 from linumpy.imaging.transform import apply_xy_shift
 from linumpy.io import slice_config as slice_config_io
 from linumpy.io.zarr import read_omezarr, save_omezarr
+from linumpy.metrics import collect_common_space_metrics
 from linumpy.stack_alignment.io import build_cumulative_shifts
 
 
@@ -373,9 +374,14 @@ def main() -> None:
         )
 
     # Refine unreliable transitions with image-based registration if requested
+    n_unreliable_total = 0
+    n_refined_image_based = 0
+    n_refined_rejected = 0
+    refine_discrepancies_px: list[float] = []
     if args.refine_unreliable and "reliable" in shifts_df.columns:
         unreliable_mask = shifts_df["reliable"].astype(int) == 0
         n_unreliable = int(unreliable_mask.sum())
+        n_unreliable_total = n_unreliable
         if n_unreliable > 0:
             print(f"Refining {n_unreliable} unreliable transitions via image registration...")
             for idx in shifts_df[unreliable_mask].index:
@@ -383,12 +389,13 @@ def main() -> None:
                 moving_id = int(shifts_df.loc[idx, "moving_id"])
                 if fixed_id not in mosaic_files or moving_id not in mosaic_files:
                     print(f"  Skipping z{fixed_id:02d}→z{moving_id:02d}: mosaic file(s) not found")
+                    n_refined_rejected += 1
                     continue
                 try:
                     dx_mm, dy_mm, dx_px, dy_px, ncc = _estimate_shift_by_registration(
                         mosaic_files[fixed_id], mosaic_files[moving_id]
                     )
-                    # Check correlation quality — reject low-quality phase correlations
+                    # Check correlation quality -- reject low-quality phase correlations
                     orig_dx_mm = shifts_df.loc[idx, "x_shift_mm"]
                     orig_dy_mm = shifts_df.loc[idx, "y_shift_mm"]
                     if args.refine_min_correlation > 0 and ncc < args.refine_min_correlation:
@@ -397,12 +404,14 @@ def main() -> None:
                             f"(ncc={ncc:.3f} < {args.refine_min_correlation:.3f}); "
                             f"keeping motor estimate ({orig_dx_mm:.3f}, {orig_dy_mm:.3f}) mm"
                         )
+                        n_refined_rejected += 1
                         continue
                     # Check discrepancy between image estimate and original motor estimate
                     if args.refine_max_discrepancy_px > 0 and "x_shift" in shifts_df.columns:
                         orig_dx_px = float(shifts_df.loc[idx, "x_shift"])
                         orig_dy_px = float(shifts_df.loc[idx, "y_shift"])
                         discrepancy_px = np.sqrt((dx_px - orig_dx_px) ** 2 + (dy_px - orig_dy_px) ** 2)
+                        refine_discrepancies_px.append(float(discrepancy_px))
                         if discrepancy_px > args.refine_max_discrepancy_px:
                             print(
                                 f"  z{fixed_id:02d}→z{moving_id:02d}: image estimate discarded "
@@ -410,7 +419,12 @@ def main() -> None:
                                 f"{args.refine_max_discrepancy_px:.0f} px threshold, ncc={ncc:.3f}); "
                                 f"keeping motor estimate ({orig_dx_mm:.3f}, {orig_dy_mm:.3f}) mm"
                             )
+                            n_refined_rejected += 1
                             continue
+                    elif "x_shift" in shifts_df.columns:
+                        orig_dx_px = float(shifts_df.loc[idx, "x_shift"])
+                        orig_dy_px = float(shifts_df.loc[idx, "y_shift"])
+                        refine_discrepancies_px.append(float(np.sqrt((dx_px - orig_dx_px) ** 2 + (dy_px - orig_dy_px) ** 2)))
                     print(
                         f"  z{fixed_id:02d}→z{moving_id:02d}: metadata=({orig_dx_mm:.3f}, "
                         f"{orig_dy_mm:.3f}) mm → "
@@ -421,10 +435,12 @@ def main() -> None:
                     if "x_shift" in shifts_df.columns:
                         shifts_df.loc[idx, "x_shift"] = dx_px
                         shifts_df.loc[idx, "y_shift"] = dy_px
+                    n_refined_image_based += 1
                 except Exception as exc:
                     print(
                         f"  Warning: registration failed for z{fixed_id:02d}→z{moving_id:02d} ({exc}); keeping metadata shift"
                     )
+                    n_refined_rejected += 1
         else:
             print("No unreliable transitions found in shifts file; --refine_unreliable has no effect")
     elif args.refine_unreliable:
@@ -497,6 +513,16 @@ def main() -> None:
             f"  Processed slice {slice_id:02d}: cumulative_shift=({dx:.1f}, {dy:.1f}) px, "
             f"applied_shift=({dx_shifted:.1f}, {dy_shifted:.1f}) px"
         )
+
+    collect_common_space_metrics(
+        output_dir=Path(args.out_directory),
+        n_selected_slices=len(selected_slice_ids),
+        n_excluded_slices=len(excluded),
+        n_unreliable=n_unreliable_total,
+        n_refined_image_based=n_refined_image_based,
+        n_refined_rejected=n_refined_rejected,
+        refine_discrepancies_px=refine_discrepancies_px,
+    )
 
 
 if __name__ == "__main__":

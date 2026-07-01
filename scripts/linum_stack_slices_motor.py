@@ -288,6 +288,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "Default: none (use only automated transforms).",
     )
 
+    p.add_argument(
+        "--use_gpu",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use GPU acceleration for the Z-overlap NCC sweep when available [%(default)s].",
+    )
+
     add_overwrite_arg(p)
     return p
 
@@ -376,20 +383,20 @@ def load_registration_transforms(
                 status = metrics_data.get("overall_status", "ok")
                 try:
                     confidence = float(metrics_data["metrics"]["registration_confidence"]["value"])
-                except (KeyError, TypeError, ValueError):
+                except KeyError, TypeError, ValueError:
                     confidence = 1.0  # fallback for older JSONs without confidence score
 
                 # Always extract translations and zcorr for accumulation,
-                # BEFORE gating — so translations are available even for
+                # BEFORE gating -- so translations are available even for
                 # slices whose transforms are skipped due to bad rotation.
                 try:
                     metrics_tx = float(metrics_data["metrics"]["translation_x"]["value"])
                     metrics_ty = float(metrics_data["metrics"]["translation_y"]["value"])
-                except (KeyError, TypeError, ValueError):
+                except KeyError, TypeError, ValueError:
                     metrics_tx, metrics_ty = 0.0, 0.0
                 try:
                     metrics_zcorr = float(metrics_data["metrics"]["z_correlation"]["value"])
-                except (KeyError, TypeError, ValueError):
+                except KeyError, TypeError, ValueError:
                     metrics_zcorr = 0.0
                 all_pairwise_translations[slice_id] = (metrics_tx, metrics_ty, metrics_zcorr)
 
@@ -397,11 +404,11 @@ def load_registration_transforms(
                     # Metric-based gating: accept based on z_correlation and rotation
                     try:
                         zcorr = float(metrics_data["metrics"]["z_correlation"]["value"])
-                    except (KeyError, TypeError, ValueError):
+                    except KeyError, TypeError, ValueError:
                         zcorr = 0.0
                     try:
                         rot_deg = float(metrics_data["metrics"]["rotation"]["value"])
-                    except (KeyError, TypeError, ValueError):
+                    except KeyError, TypeError, ValueError:
                         rot_deg = 999.0
                     if zcorr < load_min_zcorr or abs(rot_deg) > load_max_rotation:
                         logger.warning(
@@ -695,7 +702,7 @@ def main() -> None:
             n_total = len(pairwise_translations)
             logger.info("Translation filter: excluded %s/%s pairs at boundary (>= %.1f px)", n_excluded, n_total, boundary)
 
-        # Second pass: accumulate filtered translations (NO cap yet — cap applied after smoothing)
+        # Second pass: accumulate filtered translations (NO cap yet -- cap applied after smoothing)
         # Optionally weight each translation by its confidence score
         cumulative_tx, cumulative_ty = 0.0, 0.0
         n_accumulated = 0
@@ -855,6 +862,9 @@ def main() -> None:
         # Check if we have registration-derived Z-indices
         fixed_z = None
         moving_z = None
+        # Tracks whether the correlation-based Z-overlap was overridden by the
+        # min_corr fallback (only relevant in the correlation branch below).
+        correlation_fallback_used = False
         if slice_id in registration_transforms and registration_transforms[slice_id] is not None:
             _, fixed_z, moving_z, _ = registration_transforms[slice_id]
 
@@ -881,7 +891,7 @@ def main() -> None:
             # boundary to blend at, while keeping z-spacing fixed at slicing_interval.
             # This handles cases where the actual tissue overlap is smaller than the
             # imaging depth implies (i.e. the cut removed more tissue than expected).
-            # Skip refinement for low-confidence slices — spurious correlation matches
+            # Skip refinement for low-confidence slices -- spurious correlation matches
             # at degraded tissue boundaries cause Z-jumps.
             blend_overlap = overlap
             slice_confidence = None
@@ -889,7 +899,7 @@ def main() -> None:
                 if registration_transforms[slice_id] is not None:
                     slice_confidence = registration_transforms[slice_id][3]
                 else:
-                    # Transform was skipped (error/warning) — treat as zero confidence
+                    # Transform was skipped (error/warning) -- treat as zero confidence
                     slice_confidence = 0.0
             refine_ok = slice_confidence is None or slice_confidence >= args.blend_z_refine_min_confidence
             if args.blend_z_refine_vox > 0 and overlap > 0 and refine_ok:
@@ -940,8 +950,15 @@ def main() -> None:
         else:
             # find_z_overlap expects resolution in µm for its internal calculation
             res_z_um = res_z_mm * 1000
-            overlap, corr = find_z_overlap(prev_vol, vol, args.slicing_interval_mm, args.search_range_mm, res_z_um)
-            # Fall back to expected overlap when correlation is too low to trust
+            overlap, corr = find_z_overlap(
+                prev_vol, vol, args.slicing_interval_mm, args.search_range_mm, res_z_um, use_gpu=args.use_gpu
+            )
+            # Fall back to expected overlap when correlation is too low to trust.
+            # Preserve the measured correlation in the CSV so a sensible
+            # min_corr threshold can be derived from real numbers; signal the
+            # fallback via the dedicated `correlation_fallback_used` flag and
+            # the `correlation_fallback` overlap_source instead of zeroing
+            # corr (which would be indistinguishable from a zero-NCC match).
             if args.z_overlap_min_corr > 0 and corr < args.z_overlap_min_corr:
                 interval_voxels = int(args.slicing_interval_mm / res_z_mm)
                 crop_z = args.moving_z_first_index or 0
@@ -956,7 +973,7 @@ def main() -> None:
                     overlap,
                 )
                 overlap = fallback_overlap
-                corr = 0.0
+                correlation_fallback_used = True
             blend_overlap = overlap
             moving_z = args.moving_z_first_index  # Use default
 
@@ -968,6 +985,7 @@ def main() -> None:
                 "blend_overlap_voxels": blend_overlap,
                 "moving_z_start": moving_z,  # Z-index in moving volume where to start
                 "correlation": corr,
+                "correlation_fallback_used": correlation_fallback_used,
             }
         )
 
@@ -1168,34 +1186,42 @@ def main() -> None:
 
         logger.debug("  Slice %s: z=[%s:%s], xy=[%s:%s, %s:%s]", slice_id, z_start, z_end, dst_y0, dst_y1, dst_x0, dst_x1)
 
-    # Save per-slice stacking decisions
+    # Build per-slice stacking decisions (also fed into the metrics collector)
+    decisions = []
+    for match in z_matches:
+        sid = match["moving_id"]
+        has_tfm = sid in registration_transforms and registration_transforms[sid] is not None
+        conf = registration_transforms[sid][3] if has_tfm else None
+        # Determine overlap source.  The correlation branch reports
+        # "correlation_fallback" when the measured NCC was below
+        # `z_overlap_min_corr` and the script reverted to the slicing-interval
+        # estimate -- so the CSV preserves the measured `correlation` value
+        # while still flagging which pairs were not trusted.
+        if args.use_expected_overlap:
+            overlap_src = "expected"
+        elif has_tfm:
+            overlap_src = "registration"
+        elif match.get("correlation_fallback_used"):
+            overlap_src = "correlation_fallback"
+        else:
+            overlap_src = "correlation"
+        decisions.append(
+            {
+                "slice_id": sid,
+                "fixed_id": match["fixed_id"],
+                "transform_loaded": has_tfm,
+                "transform_source": "manual" if sid in manual_override_ids else "automated",
+                "manual_override": sid in manual_override_ids,
+                "confidence": round(conf, 4) if conf is not None else "",
+                "overlap_source": overlap_src,
+                "overlap_voxels": match["overlap_voxels"],
+                "blend_overlap_voxels": match.get("blend_overlap_voxels", match["overlap_voxels"]),
+                "correlation": round(match["correlation"], 4),
+            }
+        )
+    decisions_df = pd.DataFrame(decisions)
     if args.output_stacking_decisions:
-        decisions = []
-        for match in z_matches:
-            sid = match["moving_id"]
-            has_tfm = sid in registration_transforms and registration_transforms[sid] is not None
-            conf = registration_transforms[sid][3] if has_tfm else None
-            # Determine overlap source
-            if args.use_expected_overlap:
-                overlap_src = "expected"
-            elif has_tfm:
-                overlap_src = "registration"
-            else:
-                overlap_src = "correlation"
-            decisions.append(
-                {
-                    "slice_id": sid,
-                    "fixed_id": match["fixed_id"],
-                    "transform_loaded": has_tfm,
-                    "transform_source": "manual" if sid in manual_override_ids else "automated",
-                    "confidence": round(conf, 4) if conf is not None else "",
-                    "overlap_source": overlap_src,
-                    "overlap_voxels": match["overlap_voxels"],
-                    "blend_overlap_voxels": match.get("blend_overlap_voxels", match["overlap_voxels"]),
-                    "correlation": round(match["correlation"], 4),
-                }
-            )
-        pd.DataFrame(decisions).to_csv(args.output_stacking_decisions, index=False)
+        decisions_df.to_csv(args.output_stacking_decisions, index=False)
         logger.info("Stacking decisions saved to %s", args.output_stacking_decisions)
 
     # Finalize with pyramid
@@ -1204,6 +1230,7 @@ def main() -> None:
 
     # Collect metrics
     z_offsets = np.array([m["overlap_voxels"] for m in z_matches])
+    z_matches_df = pd.DataFrame(z_matches)
     collect_stack_metrics(
         output_shape=output_shape,
         z_offsets=z_offsets,
@@ -1212,6 +1239,8 @@ def main() -> None:
         output_path=output_path,
         blend_enabled=args.blend,
         normalize_enabled=False,
+        z_matches_df=z_matches_df,
+        decisions_df=decisions_df,
     )
 
     logger.info("Done! Output saved to %s", output_path)

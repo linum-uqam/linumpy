@@ -52,17 +52,17 @@ def save_orthogonal_views(
 
     width_ratio = [i.shape[1] for i in (image_z, image_x, image_y)]
 
-    allvals = np.concatenate([image_x.flatten(), image_y.flatten(), image_z.flatten()])
-    vmin = float(np.min(allvals))
-    vmax = float(np.percentile(allvals, percentile_max))
+    def _panel_vmax(arr: np.ndarray) -> float:
+        pos = arr[arr > 0]
+        return float(np.percentile(pos, percentile_max)) if pos.size > 0 else 1.0
 
     fig, ax = plt.subplots(1, 3, width_ratios=width_ratio)
     fig.set_size_inches(24, 10)
     fig.set_dpi(512)
 
-    ax[0].imshow(image_z, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax)
-    ax[1].imshow(image_x, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax)
-    ax[2].imshow(image_y, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax)
+    ax[0].imshow(image_z, cmap=cmap, origin="lower", vmin=0, vmax=_panel_vmax(image_z))
+    ax[1].imshow(image_x, cmap=cmap, origin="lower", vmin=0, vmax=_panel_vmax(image_x))
+    ax[2].imshow(image_y, cmap=cmap, origin="lower", vmin=0, vmax=_panel_vmax(image_y))
 
     for a in ax:
         a.set_axis_off()

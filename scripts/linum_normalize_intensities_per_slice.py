@@ -39,6 +39,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--sigma", type=float, default=1.0, help="Smoothing sigma for estimating the agarose mask. [%(default)s]")
     p.add_argument("--use_gpu", default=True, action=argparse.BooleanOptionalAction, help="Use GPU acceleration if available.")
     p.add_argument("--verbose", action="store_true", help="Print GPU information.")
+    p.add_argument("--n_levels", type=int, default=3, help="Number of levels in pyramid representation. [%(default)s]")
     return p
 
 
@@ -71,7 +72,7 @@ def main() -> None:
 
     vol_normalized, background_thresholds = normalize_volume(vol_data, agarose_mask, args.percentile_max)
 
-    save_omezarr(da.from_array(vol_normalized), args.out_image, res, n_levels=3)
+    save_omezarr(da.from_array(vol_normalized), args.out_image, res, n_levels=args.n_levels)
 
     collect_normalization_metrics(
         vol_normalized=vol_normalized,

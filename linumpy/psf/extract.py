@@ -1,17 +1,31 @@
 """Extract PSF parameters (focal depth, Rayleigh length) from a stitched mosaic."""
 
 import numpy as np
-from scipy.ndimage import binary_dilation, binary_fill_holes, gaussian_filter
+from scipy.ndimage import gaussian_filter
 from scipy.stats import zscore
-from skimage.filters import threshold_li
-from skimage.morphology import disk
+from skimage.filters import threshold_otsu
 
 from linumpy.geometry.interface import find_tissue_interface
 from linumpy.intensity.psf_model import confocal_psf, fit_tissue_confocal_model
 
 
-# TODO: Fine-tune default values for 10x microscope or give heuristic
-# for fixing them.
+# NOTE: ``zr_0`` is an *initial* Rayleigh length (microns) used to bootstrap
+# the confocal-PSF fit; the iterative refinement updates it from the data.
+#
+# Defaults / known objectives:
+#   * 3X objective .................. zr_0 ≈ 610 µm (current default)
+#   * 10X Mitutoyo M Plan Apo NIR ... zr_0 ≈ 1060 µm (empirical, see below)
+#
+# The 10X configuration uses a Mitutoyo M Plan Apo NIR 10X (NA = 0.26, WD =
+# 30.5 mm) with a water immersion cap around the objective. As a rough
+# Gaussian-beam estimate zr ≈ π·n·w0² / λ with w0 ≈ λ/(π·NA) yields ~8 µm for
+# NA = 0.26, n = 1.33, λ = 1.31 µm — but in practice the model fits a
+# slowly-varying axial envelope rather than the diffraction-limited beam
+# waist. Empirical multi-seed fit on sub-19 / slice_z27 (10 µm/voxel,
+# stitched mosaic, seeds zr_0 ∈ {50, 100, 200, 400, 610}) converged to
+# zr ∈ [935, 1145] µm with median ≈ 1060 µm (zf clamped to 0). Callers
+# using a 10X objective should pass ``--zr_initial 1060`` (or a value
+# refitted on their own data) to ``linum_compensate_psf_from_model.py``.
 def extract_psf_parameters_from_mosaic(
     vol: np.ndarray,
     f: float = 0.01,
@@ -31,7 +45,8 @@ def extract_psf_parameters_from_mosaic(
     n_profiles : int
         Number of intensity profile to use.
     zr_0 : float
-        Initial Rayleigh length to use in micron (default=%(default)s for a 3X objective)
+        Initial Rayleigh length in micron. Default ``610`` is calibrated for a
+        3X objective. For other objectives (e.g. 10X) pass a measured value.
     res : float
         Z resolution (in micron).
     n_iterations : int
@@ -44,18 +59,28 @@ def extract_psf_parameters_from_mosaic(
 
     """
     nx, ny, nz = vol.shape
-    k = int(0.5 * f * (nx + ny))
     aip = vol.mean(axis=2)
 
     # Compute water-tissue interface
     interface = find_tissue_interface(vol).astype(int)
 
-    # Compute the agarose mask with the li thresholding method
-    thresh = threshold_li(aip)
-    mask_tissue = binary_fill_holes(aip > thresh)
-    mask_agarose = ~binary_fill_holes(binary_dilation(mask_tissue, disk(k)))
-    mask_agarose[aip == 0] = 0
-    del mask_tissue
+    # Agarose mask: Otsu on smoothed AIP, restricted to non-zero (valid) pixels.
+    # Mirrors linumpy.intensity.normalization.get_agarose_mask so behaviour is
+    # consistent with the normalization step and robust to darkfield-corrected
+    # inputs, where Li thresholding tends to over-segment and collapse the mask.
+    aip_smooth = gaussian_filter(aip, sigma=max(0.5, f * (nx + ny) * 0.25))
+    valid = aip > 0
+    if not valid.any():
+        msg = "extract_psf_parameters_from_mosaic: AIP is all zero; cannot estimate agarose mask"
+        raise RuntimeError(msg)
+    thresh = threshold_otsu(aip_smooth[valid])
+    mask_agarose = (aip_smooth < thresh) & valid
+    if not mask_agarose.any():
+        msg = (
+            "extract_psf_parameters_from_mosaic: agarose mask is empty after Otsu thresholding "
+            "(tissue likely fills the FOV). Use compensate_psf_method='model_free' for this slice."
+        )
+        raise RuntimeError(msg)
 
     # Get min and max interface depth for the agarose
     zmin = np.percentile(interface[mask_agarose], 2.5)
