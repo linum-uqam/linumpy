@@ -108,11 +108,7 @@ def read_zarr_via_zarr_gpu(array_path: str | Path) -> Any:
     except ImportError as exc:  # pragma: no cover - hardware-dependent
         raise RuntimeError("cupy + zarr are required for the zarr-gpu fallback path.") from exc
 
-    from linumpy.gpu.nvcomp_zstd import gpu_zstd_config, register_nvcomp_zstd
-
-    extra_cfg = gpu_zstd_config() if register_nvcomp_zstd() else {}
-
-    with zarr.config.enable_gpu(), zarr.config.set(extra_cfg):
+    with zarr.config.enable_gpu():
         z = zarr.open_array(str(array_path), mode="r")
         dev = z[:]
     cupy.cuda.Stream.null.synchronize()
@@ -194,9 +190,5 @@ def gpu_zarr_context() -> Iterator[None]:
     except ImportError as exc:  # pragma: no cover - zarr is a hard dep
         raise RuntimeError("zarr is required for gpu_zarr_context().") from exc
 
-    from linumpy.gpu.nvcomp_zstd import gpu_zstd_config, register_nvcomp_zstd
-
-    extra_cfg = gpu_zstd_config() if register_nvcomp_zstd() else {}
-
-    with zarr.config.enable_gpu(), zarr.config.set(extra_cfg):
+    with zarr.config.enable_gpu():
         yield
