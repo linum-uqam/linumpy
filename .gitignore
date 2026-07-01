@@ -173,10 +173,6 @@ cython_debug/
 .nextflow/
 *.nextflow.log*
 
-# nf-test
-.nf-test/
-.nf-test.log
-
 # Standalone tools (separate git repos)
 tools/
 workflows/work/
@@ -210,5 +206,3 @@ draft.py
 sub-*
 
 .python-version
-# Sphinx auto-generated API docs (autoapi)
-docs/api/
