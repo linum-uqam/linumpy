@@ -1,23 +1,22 @@
 #! /usr/bin/env python
-"""Brain segmentation utilities."""
 
 import numpy as np
 import SimpleITK as sitk
 from scipy.ndimage import binary_erosion, binary_fill_holes
 
 
-def segment_oct_3d(vol: np.ndarray, k: int = 5, use_log: bool = True, threshold_method: str = "otsu") -> np.ndarray:
+def segmentOCT3D(vol: np.ndarray, k: int = 5, useLog: bool = True, thresholdMethod: str = "otsu") -> np.ndarray:
     """To segment an S-OCT brain in 3D using thresholding and morphological watershed.
 
-    Parameters
+    Parameters.
     ----------
     vol
         The OCT brain to segment
     k
         Median smoothing kernel size in pixel
-    use_log
+    useLog
         Transform the pixel intensity with a log before computing mask
-    threshold_method
+    thresholdMethod
         'ostu', 'triangle'
 
     Returns
@@ -26,7 +25,7 @@ def segment_oct_3d(vol: np.ndarray, k: int = 5, use_log: bool = True, threshold_
         The brain mask
     """
     vol_p = np.copy(vol)
-    if use_log:
+    if useLog:
         vol_p[vol > 0] = np.log(vol_p[vol > 0])
 
     # Creating a sitk image + smoothing
@@ -34,9 +33,9 @@ def segment_oct_3d(vol: np.ndarray, k: int = 5, use_log: bool = True, threshold_
     img = sitk.Median(img, [k, k, k])
 
     # Segmenting using an Otsu threshold
-    if threshold_method == "otsu":
+    if thresholdMethod == "otsu":
         marker_img = ~sitk.OtsuThreshold(img)
-    elif threshold_method == "triangle":
+    elif thresholdMethod == "triangle":
         marker_img = ~sitk.TriangleThreshold(img)
     else:
         marker_img = ~sitk.OtsuThreshold(img)
@@ -48,15 +47,15 @@ def segment_oct_3d(vol: np.ndarray, k: int = 5, use_log: bool = True, threshold_
     seg = sitk.ConnectedComponent(ws != ws[0, 0, 0])
 
     # Filling holes and returning the mask
-    mask = fill_holes_2d_and_3d(sitk.GetArrayFromImage(seg))
+    mask = fillHoles_2Dand3D(sitk.GetArrayFromImage(seg))
 
     return mask
 
 
-def fill_holes_2d_and_3d(mask: np.ndarray) -> np.ndarray:
+def fillHoles_2Dand3D(mask: np.ndarray) -> np.ndarray:
     """Fill holes in a 2D or 3D mask.
 
-    Parameters
+    Parameters.
     ----------
     mask
         The mask to fill
@@ -83,10 +82,10 @@ def fill_holes_2d_and_3d(mask: np.ndarray) -> np.ndarray:
     return mask
 
 
-def remove_bottom(mask: np.ndarray, k: int = 10, axis: int = 2, inverse: bool = False, fill_holes: bool = False) -> np.ndarray:
+def removeBottom(mask: np.ndarray, k: int = 10, axis: int = 2, inverse: bool = False, fillHoles: bool = False) -> np.ndarray:
     """Remove the bottom side of the mask.
 
-    Parameters
+    Parameters.
     ----------
     mask
         Mask to modify. The 3rd axis is assumed to be the dimension direction to modify.
@@ -96,7 +95,7 @@ def remove_bottom(mask: np.ndarray, k: int = 10, axis: int = 2, inverse: bool = 
         Axis to erode
     inverse
         Inverse the operation
-    fill_holes
+    fillHoles
         Fill holes in the mask
 
     Returns
@@ -105,7 +104,6 @@ def remove_bottom(mask: np.ndarray, k: int = 10, axis: int = 2, inverse: bool = 
         Modified mask
     """
     assert axis >= 0 and axis <= 2, "axis must be between 0 and 2"
-    kernel: np.ndarray = np.empty(0)
     if axis == 0:
         kernel = np.zeros((2 * k, 1, 1), dtype=bool)
     elif axis == 1:
@@ -116,8 +114,8 @@ def remove_bottom(mask: np.ndarray, k: int = 10, axis: int = 2, inverse: bool = 
         kernel[0:k] = True
     else:
         kernel[k::] = True
-    if fill_holes:
-        mask_p = binary_erosion(fill_holes_2d_and_3d(mask), kernel)
+    if fillHoles:
+        mask_p = binary_erosion(fillHoles_2Dand3D(mask), kernel)
         mask_p = mask_p * mask
     else:
         mask_p = binary_erosion(mask, kernel)
