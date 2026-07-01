@@ -1,8 +1,6 @@
 # Nextflow Workflows Guide
 
 
----
-
 ## Overview
 
 linumpy uses [Nextflow](https://www.nextflow.io/) for orchestrating complex processing pipelines. Nextflow provides:
@@ -271,7 +269,7 @@ gaps are not interpolated (insufficient information) and remain as holes.
 
 When zmorph's quality gates fail the slot is left as a genuine gap (no zarr
 output); a manifest fragment and diagnostics JSON are still emitted. See
-[SLICE_INTERPOLATION_FEATURE.md](SLICE_INTERPOLATION_FEATURE.md) for details.
+{doc}`SLICE_INTERPOLATION_FEATURE` for details.
 
 #### Automatic Slice Quality Assessment
 
@@ -609,7 +607,7 @@ Both workflows support GPU acceleration using NVIDIA CUDA via CuPy. GPU processi
 | `preproc_rawtiles.nf` | `create_mosaic_grid` | Galvo detection, volume resize |
 | `preproc_rawtiles.nf` | `generate_aip` | Mean projection |
 | `soct_3d_reconst.nf` | `resample_mosaic_grid` | Volume resize |
-| `soct_3d_reconst.nf` | `fix_illumination` | BaSiCPy background correction (JAX on GPU) |
+| `soct_3d_reconst.nf` | `fix_illumination` | BaSiCPy background correction (PyTorch on GPU) |
 | `soct_3d_reconst.nf` | `normalize` | Intensity normalization, percentile clipping |
 
 ### Usage
@@ -640,7 +638,7 @@ params {
 For GPU support:
 - NVIDIA GPU with CUDA support
 - CuPy installed: `uv pip install cupy-cuda12x`
-- See [GPU_ACCELERATION.md](GPU_ACCELERATION.md) for detailed setup
+- See {doc}`GPU_ACCELERATION` for detailed setup
 
 ### Expected Speedups
 
@@ -660,13 +658,16 @@ The pipelines provide fine-grained control over CPU usage, allowing you to reser
 
 ### Configuration Options
 
-Both pipelines support two approaches:
+Both pipelines support two approaches. Defaults differ between workflows:
+the **preproc** pipeline ships with `max_cpus = null` and `reserved_cpus = 2`,
+while the **3D reconstruction** pipeline uses `max_cpus = 16` and
+`reserved_cpus = 4` (see `workflows/<pipeline>/nextflow.config`).
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `max_cpus` | `null` | Explicit maximum CPUs to use (takes precedence) |
-| `reserved_cpus` | `2` | Number of cores to keep free for overhead |
-| `processes` | `1` | Python processes per Nextflow task |
+| Parameter | preproc default | reconst_3d default | Description |
+|-----------|-----------------|--------------------|-------------|
+| `max_cpus` | `null` | `16` | Explicit maximum CPUs to use (takes precedence) |
+| `reserved_cpus` | `2` | `4` | Number of cores to keep free for overhead |
+| `processes` | `1` | `1` | Python processes per Nextflow task |
 
 ### Usage Examples
 
@@ -1123,7 +1124,7 @@ without exhaustion.
 zmorph's quality gates reject the interpolation it emits a manifest fragment
 with `interpolation_failed=true` and no zarr; `finalise_interpolation`
 stamps that into `slice_config_final.csv` and the slot stays a genuine gap
-in the stacked volume. See [`SLICE_INTERPOLATION_FEATURE.md`](SLICE_INTERPOLATION_FEATURE.md)
+in the stacked volume. See {doc}`SLICE_INTERPOLATION_FEATURE`
 for the full policy.
 
 ### `finalise_interpolation` is published-only

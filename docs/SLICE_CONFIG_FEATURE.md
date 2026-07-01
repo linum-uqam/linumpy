@@ -29,7 +29,7 @@ The reconstruction pipeline would process all slices found in the input director
 
 ### The Bug
 
-The `linum-align-mosaics-3d-from-shifts` script had a critical bug where slice IDs extracted from filenames were used as array indices:
+The `linum_align_mosaics_3d_from_shifts.py` script had a critical bug where slice IDs extracted from filenames were used as array indices:
 
 ```python
 # BUG: slice IDs used as array indices
@@ -72,16 +72,16 @@ The schema is defined by `linumpy.io.slice_config.CANONICAL_COLUMNS` and is enfo
 | `slice_id` | string | generator | Two-digit slice identifier (e.g., "00", "01"). **Required key.** |
 | `use` | boolean | generator / quality / galvo | Whether to include this slice. `false` → filtered out downstream. |
 | `quality_score` | float | `linum_assess_slice_quality[_gpu].py` | Weighted quality score in [0, 1]. |
-| `galvo_confidence` | float | `linum-generate-slice-config`, `linum-fix-galvo-shift-zarr` | Galvo detection confidence (0–1). |
-| `galvo_fix` | boolean | `linum-generate-slice-config`, `linum-fix-galvo-shift-zarr` | Whether the galvo shift fix was applied. |
-| `rehomed` | boolean | `linum-detect-rehoming` | `true` if the slice was corrected for a rehoming event (tile-column expansion or encoder glitch). |
-| `rehoming_reliable` | boolean | `linum-detect-rehoming` | `true` if the motor-based correction was within `max_shift_mm`; `false` flags it for image-based verification. |
-| `auto_excluded` | boolean | `linum-auto-exclude-slices` | `true` if the slice was automatically excluded by the low-quality cluster detector. |
-| `auto_exclude_reason` | string | `linum-auto-exclude-slices` | Short human-readable reason (e.g. `noisy cluster (3 consecutive)`). |
-| `interpolated` | boolean | `linum-interpolate-missing-slice --finalise` | `true` if this slice was successfully interpolated from its neighbours (a zarr was produced). |
-| `interpolation_failed` | boolean | `linum-interpolate-missing-slice --finalise` | `true` if zmorph was attempted but hit a quality gate; no zarr was produced and the slot is a gap in the final volume. |
-| `interpolation_method_used` | string | `linum-interpolate-missing-slice --finalise` | Method actually used (`zmorph`, `weighted`, `average`). Empty when `interpolation_failed=true`. |
-| `interpolation_fallback_reason` | string | `linum-interpolate-missing-slice --finalise` | Reason zmorph hard-skipped (`low_overlap_ncc`, `reg_did_not_improve`, ...), or empty on success. |
+| `galvo_confidence` | float | `linum_generate_slice_config.py`, `linum_fix_galvo_shift_zarr.py` | Galvo detection confidence (0–1). |
+| `galvo_fix` | boolean | `linum_generate_slice_config.py`, `linum_fix_galvo_shift_zarr.py` | Whether the galvo shift fix was applied. |
+| `rehomed` | boolean | `linum_detect_rehoming.py` | `true` if the slice was corrected for a rehoming event (tile-column expansion or encoder glitch). |
+| `rehoming_reliable` | boolean | `linum_detect_rehoming.py` | `true` if the motor-based correction was within `max_shift_mm`; `false` flags it for image-based verification. |
+| `auto_excluded` | boolean | `linum_auto_exclude_slices.py` | `true` if the slice was automatically excluded by the low-quality cluster detector. |
+| `auto_exclude_reason` | string | `linum_auto_exclude_slices.py` | Short human-readable reason (e.g. `noisy cluster (3 consecutive)`). |
+| `interpolated` | boolean | `linum_interpolate_missing_slice.py --finalise` | `true` if this slice was successfully interpolated from its neighbours (a zarr was produced). |
+| `interpolation_failed` | boolean | `linum_interpolate_missing_slice.py --finalise` | `true` if zmorph was attempted but hit a quality gate; no zarr was produced and the slot is a gap in the final volume. |
+| `interpolation_method_used` | string | `linum_interpolate_missing_slice.py --finalise` | Method actually used (`zmorph`, `weighted`, `average`). Empty when `interpolation_failed=true`. |
+| `interpolation_fallback_reason` | string | `linum_interpolate_missing_slice.py --finalise` | Reason zmorph hard-skipped (`low_overlap_ncc`, `reg_did_not_improve`, ...), or empty on success. |
 | `notes` | string | any stage | Free-form human-readable annotation. Stages append with `; ` separators. |
 
 > **Raw numeric metrics** (SSIM, edge score, variance ratio, NCC values, affine determinants, ...) are deliberately **not** in `slice_config.csv`. They live in per-slice JSON diagnostics and in the end-of-pipeline quality report.
@@ -106,13 +106,13 @@ When `detect_galvo = true` in the preprocessing pipeline:
 
 ### Rehoming columns
 
-When `detect_rehoming = true` in the 3D reconstruction pipeline, `linum-detect-rehoming` stamps:
+When `detect_rehoming = true` in the 3D reconstruction pipeline, `linum_detect_rehoming.py` stamps:
 - **rehomed** (`true`/`false`) — the slice transition had an N×`tile_fov_mm` step or an encoder glitch that was corrected.
 - **rehoming_reliable** (`true`/`false`) — whether the motor-based fix was within `max_shift_mm`. `false` means the downstream `common_space_refine_unreliable` stage should verify the correction against image data.
 
 ### Auto-exclusion columns
 
-`linum-auto-exclude-slices` reads pairwise registration metrics and stamps:
+`linum_auto_exclude_slices.py` reads pairwise registration metrics and stamps:
 - **auto_excluded** (`true`/`false`) — slice is in a noisy cluster.
 - **auto_exclude_reason** (string) — short human-readable reason.
 
@@ -120,7 +120,7 @@ This replaces the old `auto_exclude.csv` side-file.
 
 ### Interpolation columns
 
-After `finalise_interpolation`, any slice that reached `linum-interpolate-missing-slice` gets one of two states:
+After `finalise_interpolation`, any slice that reached `linum_interpolate_missing_slice.py` gets one of two states:
 
 - **Success** — a reconstructed zarr was produced:
   - `interpolated=true`, `interpolation_failed=false`
@@ -140,7 +140,7 @@ The pipeline never fabricates a slice from a weighted blend when registration fa
 
 ### Automatic Quality Detection
 
-The `linum-assess-slice-quality` script can analyze mosaic grids to detect quality issues and update the slice configuration. GPU acceleration is enabled by default (pass `--no-use_gpu` to disable).
+The `linum_assess_slice_quality.py` script can analyze mosaic grids to detect quality issues and update the slice configuration. GPU acceleration is enabled by default (pass `--no-use_gpu` to disable).
 
 **Quality Metrics:**
 | Metric | Weight | Description |
@@ -179,21 +179,21 @@ Raw per-metric numbers (SSIM, edge, variance, tissue depth) are available in the
 
 ```bash
 # Create new config with quality assessment (exclude first slice)
-linum-assess-slice-quality /path/to/mosaics slice_config.csv
+linum_assess_slice_quality.py /path/to/mosaics slice_config.csv
 
 # Update existing config with quality info
-linum-assess-slice-quality /path/to/mosaics slice_config.csv \
+linum_assess_slice_quality.py /path/to/mosaics slice_config.csv \
     --update_existing --existing_config existing_config.csv
 
 # Automatically exclude low quality slices
-linum-assess-slice-quality /path/to/mosaics slice_config.csv \
+linum_assess_slice_quality.py /path/to/mosaics slice_config.csv \
     --min_quality 0.3
 
 # GPU-accelerated quality assessment (default; pass --no-use_gpu to disable)
-linum-assess-slice-quality /path/to/mosaics slice_config.csv --use_gpu
+linum_assess_slice_quality.py /path/to/mosaics slice_config.csv --use_gpu
 
 # Report only (don't write file)
-linum-assess-slice-quality /path/to/mosaics slice_config.csv --report_only
+linum_assess_slice_quality.py /path/to/mosaics slice_config.csv --report_only
 ```
 
 ---
@@ -380,45 +380,45 @@ The detection runs on **raw tiles** (single tile per slice) because:
 
 ## Implementation
 
-### New Script: `linum-generate-slice-config`
+### New Script: `linum_generate_slice_config.py`
 
 Generates a slice configuration file from existing data:
 
 ```bash
 # From mosaic grids directory
-linum-generate-slice-config /path/to/mosaics slice_config.csv
+linum_generate_slice_config.py /path/to/mosaics slice_config.csv
 
 # From raw tiles directory
-linum-generate-slice-config /path/to/raw_tiles slice_config.csv --from_tiles
+linum_generate_slice_config.py /path/to/raw_tiles slice_config.csv --from_tiles
 
 # From existing shifts file
-linum-generate-slice-config /path/to/shifts_xy.csv slice_config.csv --from_shifts
+linum_generate_slice_config.py /path/to/shifts_xy.csv slice_config.csv --from_shifts
 
 # With pre-excluded slices
-linum-generate-slice-config /path/to/shifts_xy.csv slice_config.csv --from_shifts --exclude 2 5
+linum_generate_slice_config.py /path/to/shifts_xy.csv slice_config.csv --from_shifts --exclude 2 5
 
 # With galvo detection (requires raw tiles)
-linum-generate-slice-config /path/to/raw_tiles slice_config.csv --from_tiles --detect_galvo
+linum_generate_slice_config.py /path/to/raw_tiles slice_config.csv --from_tiles --detect_galvo
 
 # From shifts file with galvo detection
-linum-generate-slice-config /path/to/shifts_xy.csv slice_config.csv --from_shifts \
+linum_generate_slice_config.py /path/to/shifts_xy.csv slice_config.csv --from_shifts \
     --detect_galvo --tiles_dir /path/to/raw_tiles
 
 # With custom galvo threshold
-linum-generate-slice-config /path/to/raw_tiles slice_config.csv --from_tiles \
+linum_generate_slice_config.py /path/to/raw_tiles slice_config.csv --from_tiles \
     --detect_galvo --galvo_threshold 0.4
 ```
 
-### Updated Script: `linum-align-mosaics-3d-from-shifts`
+### Updated Script: `linum_align_mosaics_3d_from_shifts.py`
 
 Fixed bugs and added slice config support:
 
 ```bash
 # Without slice config (backward compatible)
-linum-align-mosaics-3d-from-shifts inputs shifts_xy.csv output
+linum_align_mosaics_3d_from_shifts.py inputs shifts_xy.csv output
 
 # With slice config
-linum-align-mosaics-3d-from-shifts inputs shifts_xy.csv output --slice_config slice_config.csv
+linum_align_mosaics_3d_from_shifts.py inputs shifts_xy.csv output --slice_config slice_config.csv
 ```
 
 **Key Improvements:**
@@ -451,7 +451,7 @@ process generate_slice_config {
     String galvo_opts = params.detect_galvo ? 
         "--detect_galvo --tiles_dir ${input_dir} --galvo_threshold ${params.galvo_confidence_threshold}" : ""
     """
-    linum-generate-slice-config ${shifts_file} slice_config.csv --from_shifts ${galvo_opts}
+    linum_generate_slice_config.py ${shifts_file} slice_config.csv --from_shifts ${galvo_opts}
     """
 }
 ```
@@ -477,7 +477,7 @@ current_slice_config = Channel.fromPath(slice_config_path)
     // ... the final slice_config.csv is what `stack` reads via --slice_config
 ```
 
-All Python-side slice filtering (e.g. `linum-estimate-global-transform`) uses `linumpy.io.slice_config.filter_slices_to_use()` — there is no Groovy `parseSliceConfig` helper to maintain.
+All Python-side slice filtering (e.g. `linum_estimate_global_transform.py`) uses `linumpy.io.slice_config.filter_slices_to_use()` — there is no Groovy `parseSliceConfig` helper to maintain.
 
 ---
 
@@ -575,7 +575,7 @@ nextflow run soct_3d_reconst.nf \
 
 ```bash
 # Generate config from existing shifts file
-linum-generate-slice-config /output/shifts_xy.csv slice_config.csv --from_shifts
+linum_generate_slice_config.py /output/shifts_xy.csv slice_config.csv --from_shifts
 
 # Edit to exclude slice 2 (only canonical columns are needed)
 # slice_id,use,notes
@@ -678,7 +678,7 @@ finalise_interpolation        ──►  slice_config_final.csv
 auto_exclude_slices           ──►  slice_config.csv (+auto_excluded, +auto_exclude_reason)
         │
         ▼
-stack (linum-stack-slices-motor --slice_config)
+stack (linum_stack_slices_motor.py --slice_config)
         │   — reads the final slice_config.csv, uses force_skip_slices()
         ▼
 downstream stages (normalize_z, align_to_ras, generate_report)
@@ -714,15 +714,15 @@ See `linumpy/io/slice_config.py` for the concurrency contract in the module docs
 | File | Changes |
 |------|---------|
 | `linumpy/io/slice_config.py` | **NEW** — canonical schema + `read`/`write`/`stamp`/`stamp_many`/`merge_fragments`/`filter_slices_to_use`/`force_skip_slices`. |
-| `scripts/analysis/linum_generate_slice_config.py` | Uses `linumpy.io.slice_config` for writes; canonical columns only. |
-| `scripts/analysis/linum_assess_slice_quality[_gpu].py` | Refactored to use `linumpy.io.slice_config`; dropped `ssim_mean`/`edge_score`/`variance_score`/`depth` columns. |
-| `scripts/analysis/linum_detect_rehoming.py` | Added `--slice_config_in`/`--slice_config_out`; stamps `rehomed` + `rehoming_reliable`. |
-| `scripts/analysis/linum_auto_exclude_slices.py` | Stamps `auto_excluded` + `auto_exclude_reason` directly on `slice_config.csv` (no more side-file). |
-| `scripts/stacking/linum_interpolate_missing_slice.py` | Added `--finalise` mode: merges per-slice manifest fragments into `slice_config.csv`. |
-| `scripts/stacking/linum_stack_slices_motor.py` | Accepts `--slice_config`; uses `slice_config_io.force_skip_slices()`. `--force_skip_slices` removed. |
-| `scripts/stitching/linum_align_mosaics_3d_from_shifts.py` | Fixed indexing bug, added `--slice_config`, now uses shared reader. |
-| `scripts/stitching/linum_estimate_global_transform[_gpu].py`, `linum-analyze-stitch-affine`, `linum-fix-galvo-shift-zarr` | Switched to shared `linumpy.io.slice_config` reader/writer. |
-| `scripts/linum_update_slice_config_with_interpolation.py` | **REMOVED** — replaced by `linum-interpolate-missing-slice --finalise`. |
+| `scripts/linum_generate_slice_config.py` | Uses `linumpy.io.slice_config` for writes; canonical columns only. |
+| `scripts/linum_assess_slice_quality[_gpu].py` | Refactored to use `linumpy.io.slice_config`; dropped `ssim_mean`/`edge_score`/`variance_score`/`depth` columns. |
+| `scripts/linum_detect_rehoming.py` | Added `--slice_config_in`/`--slice_config_out`; stamps `rehomed` + `rehoming_reliable`. |
+| `scripts/linum_auto_exclude_slices.py` | Stamps `auto_excluded` + `auto_exclude_reason` directly on `slice_config.csv` (no more side-file). |
+| `scripts/linum_interpolate_missing_slice.py` | Added `--finalise` mode: merges per-slice manifest fragments into `slice_config.csv`. |
+| `scripts/linum_stack_slices_motor.py` | Accepts `--slice_config`; uses `slice_config_io.force_skip_slices()`. `--force_skip_slices` removed. |
+| `scripts/linum_align_mosaics_3d_from_shifts.py` | Fixed indexing bug, added `--slice_config`, now uses shared reader. |
+| `scripts/linum_estimate_global_transform[_gpu].py`, `linum_analyze_stitch_affine.py`, `linum_fix_galvo_shift_zarr.py` | Switched to shared `linumpy.io.slice_config` reader/writer. |
+| `scripts/linum_update_slice_config_with_interpolation.py` | **REMOVED** — replaced by `linum_interpolate_missing_slice.py --finalise`. |
 | `workflows/preproc/preproc_rawtiles.nf` | Adds `generate_slice_config` process. |
 | `workflows/reconst_3d/soct_3d_reconst.nf` | Threads `slice_config.csv` through `detect_rehoming_events` → `finalise_interpolation` → `auto_exclude_slices` → `stack`. |
 | `workflows/reconst_3d/nextflow.config` | `slice_config` parameter; `auto_assess_quality` can bootstrap one. |
@@ -733,19 +733,19 @@ See `linumpy/io/slice_config.py` for the concurrency contract in the module docs
 
 ```bash
 # Test help
-linum-generate-slice-config --help
+linum_generate_slice_config.py --help
 
 # Test generation from shifts file
-linum-generate-slice-config shifts_xy.csv test_config.csv --from_shifts
+linum_generate_slice_config.py shifts_xy.csv test_config.csv --from_shifts
 
 # Test with exclusions
-linum-generate-slice-config shifts_xy.csv test_config.csv --from_shifts --exclude 1 2
+linum_generate_slice_config.py shifts_xy.csv test_config.csv --from_shifts --exclude 1 2
 
 # Test with galvo detection
-linum-generate-slice-config /path/to/tiles test_config.csv --from_tiles --detect_galvo
+linum_generate_slice_config.py /path/to/tiles test_config.csv --from_tiles --detect_galvo
 
 # Test align script with config
-linum-align-mosaics-3d-from-shifts inputs shifts_xy.csv output --slice_config test_config.csv
+linum_align_mosaics_3d_from_shifts.py inputs shifts_xy.csv output --slice_config test_config.csv
 ```
 
 ---

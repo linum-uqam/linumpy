@@ -227,7 +227,7 @@ CPU path with `params.processes` threads. No per-process flag is needed:
 process correct_bias_field {
     def backend_flag = params.use_gpu ? "auto" : "cpu"
     """
-    linum-correct-bias-field ${stacked_zarr} ${subject_name}.ome.zarr \\
+    linum_correct_bias_field.py ${stacked_zarr} ${subject_name}.ome.zarr \\
         --mode ${params.bias_mode} \\
         --strength ${params.bias_strength} \\
         --backend ${backend_flag} \\
