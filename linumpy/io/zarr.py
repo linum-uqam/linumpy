@@ -19,9 +19,8 @@ from ome_zarr.dask_utils import resize as da_resize
 from ome_zarr.format import CurrentFormat
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Multiscales, Reader
-from ome_zarr.scale import Scaler
+from ome_zarr.scale import Methods
 from ome_zarr.writer import write_image, write_multiscales_metadata
-from skimage.transform import resize
 
 configure_dask()
 
@@ -51,80 +50,6 @@ def create_tempstore(dir: str | None = None, suffix: str | None = None) -> zarr.
     atexit.register(shutil.rmtree, tempdir, ignore_errors=True)
     zarr_store = zarr.storage.LocalStore(tempdir)
     return zarr_store
-
-
-class CustomScaler(Scaler):
-    """
-    Custom ome_zarr.scale.Scaler class for handling downscaling up to 3D.
-
-    Only `resize_image` method is implemented. Interpolation is ALWAYS done
-    using 1-st order (linear) interpolation.
-    """
-
-    def resize_image(self, image: np.ndarray | da.Array) -> np.ndarray | da.Array:
-        """
-        Resize a numpy array OR a dask array to a smaller array (not pyramid).
-
-        This method is the only method from the Scaler class called from
-        `ome_zarr.writer.write_image`.
-        """
-        if isinstance(image, da.Array):
-
-            def _resize(image: Any, out_shape: tuple, **kwargs: Any) -> da.Array:  # type: ignore[override]
-                return da_resize(image, out_shape, **kwargs)
-
-        else:
-            _resize = resize
-
-        # downsample in X, Y, and Z.
-        new_shape = list(image.shape)
-        new_shape[-1] = image.shape[-1] // self.downscale
-        new_shape[-2] = image.shape[-2] // self.downscale
-        if len(new_shape) > 2:
-            new_shape[-3] = image.shape[-3] // self.downscale
-        out_shape = tuple(new_shape)
-
-        dtype = image.dtype
-        if np.iscomplexobj(image):
-            image = _resize(
-                image.real.astype(np.float64),
-                out_shape,
-                order=1,
-                mode="reflect",
-                anti_aliasing=False,
-            ) + 1j * _resize(
-                image.imag.astype(np.float64),
-                out_shape,
-                order=1,
-                mode="reflect",
-                anti_aliasing=False,
-            )
-        else:
-            image = _resize(
-                image.astype(np.float64),
-                out_shape,
-                order=1,
-                mode="reflect",
-                anti_aliasing=False,
-            )
-        return image.astype(dtype)
-
-    def linear(self, base: np.ndarray) -> list:
-        """Downsample using :func:`skimage.transform.resize` with linear interpolation."""
-        pyramid: list[np.ndarray | da.Array] = [base]
-        max_axes_resize = min(len(base.shape), 3)
-        level = self.max_layer
-        while level > 0 and np.all(np.asarray(pyramid[-1].shape[:-max_axes_resize]) >= self.downscale):
-            pyramid.append(self.resize_image(pyramid[-1]))
-            level -= 1
-        return pyramid
-
-    def _by_plane(self, base: np.ndarray, func: object) -> np.ndarray:
-        # This method is called by base class when interpolation methods (e.g. nearest)
-        # are called directly. Because `write_image` never call these methods, we don't
-        # need to implement it here. We raise an error to make sure the CustomScaler class
-        # is not used for this purpose.
-        raise NotImplementedError("_by_plane method not implemented for CustomScaler")
 
 
 def create_transformation_dict(nlevels: int, voxel_size: Sequence, ndims: int = 3) -> list:
@@ -229,6 +154,7 @@ def save_omezarr(
     chunks: tuple | Sequence = (128, 128, 128),
     n_levels: int = 5,
     overwrite: bool = True,
+    shards: tuple | Sequence | None = None,
 ) -> zarr.Group:
     """Save array to disk in OME-NGFF zarr format.
 
@@ -243,27 +169,49 @@ def save_omezarr(
     :type chunks: tuple of n `int`, with n the number of dimensions.
     :param chunks: Chunk size on disk.
     :type n_levels: int
-    :param n_levels: Number of levels in Gaussian pyramid.
+    :param n_levels: Number of pyramid levels (downsamples by 2 along all spatial
+        axes including Z).
     :type overwrite: bool
     :param overwrite: Overwrite `store_path` if it already exists.
+    :type shards: tuple of n `int` or None
+    :param shards: If provided, group multiple chunks together into a single
+        shard on disk (zarr v3 native sharding). Must be a multiple of
+        ``chunks`` along every dimension. Sharding reduces the number of files
+        on disk dramatically for large pyramids while keeping per-chunk random
+        access; useful for stacked volumes whose chunk size is far smaller than
+        the per-axis extent. ``None`` disables sharding.
 
     :type zarr_group: zarr.hierarchy.group
     :return zarr_group: Resulting zarr group saved to disk.
     """
     n_levels = validate_n_levels(n_levels, data.shape)
 
-    # pyramidal decomposition (ome_zarr.scale.Scaler) keywords
-    pyramid_kw = {"max_layer": int(n_levels), "method": "linear", "downscale": 2}
-
-    ome_zarr_version = version("ome-zarr")
-    metadata = {"method": "ome_zarr.scale.Scaler", "version": ome_zarr_version, "args": pyramid_kw}
-
-    # # axes and coordinate transformations
+    # axes and coordinate transformations (c, z, y, x order)
     ndims = len(data.shape)
     axes = generate_axes_dict(ndims)
     coordinate_transformations = create_transformation_dict(n_levels + 1, voxel_size=voxel_size, ndims=ndims)
 
-    # create directory for zarr storage
+    # ome-zarr's default ``scale_factors`` (e.g. ``(2, 4, 8, 16)``) applies
+    # downsampling only to spatial axes *except z*. linumpy datasets are
+    # acquired with isotropic-ish voxel sizes, so we want true 3D downsampling
+    # at every level. Build the per-level dict explicitly.
+    spatial_axes = [a["name"] for a in axes if a.get("type") == "space"]
+    scale_factors: list[dict[str, int]] = [dict.fromkeys(spatial_axes, 2**i) for i in range(1, n_levels + 1)]
+
+    # storage_options: one dict per dataset (level0 + n_levels). Each level
+    # gets the same chunk shape; sharding (when requested) likewise applies
+    # to every level.
+    storage_options: list[dict[str, Any]] = []
+    for _ in range(n_levels + 1):
+        opts: dict[str, Any] = {"chunks": tuple(chunks)}
+        if shards is not None:
+            opts["shards"] = tuple(shards)
+        storage_options.append(opts)
+
+    pyramid_kw = {"max_layer": int(n_levels), "method": Methods.RESIZE.value, "downscale": 2}
+    ome_zarr_version = version("ome-zarr")
+    metadata = {"method": "ome_zarr.writer.write_image", "version": ome_zarr_version, "args": pyramid_kw}
+
     create_directory(store_path, overwrite)
     _loc = parse_url(store_path, mode="w")
     assert _loc is not None
@@ -273,16 +221,50 @@ def save_omezarr(
     write_image(
         data,
         zarr_group,
+        scale_factors=scale_factors,
+        method=Methods.RESIZE,
         axes=axes,
-        scaler=CustomScaler(max_layer=int(n_levels), method="linear", downscale=2),
-        storage_options={"chunks": chunks},
+        storage_options=storage_options,
         coordinate_transformations=coordinate_transformations,
         compute=True,
         metadata=metadata,
     )
 
-    # return zarr group containing saved data
     return zarr_group
+
+
+def resolve_omezarr_level_path(zarr_path: Path, level: int = 0) -> Path:
+    """Return the on-disk path of the array for *level* of an OME-Zarr group.
+
+    Resolves the multiscale dataset path advertised by the OME-Zarr metadata
+    (``zarr_path / multiscale.datasets[level]``) without opening the array.
+    This is the backend-agnostic way to locate the actual chunked store on
+    disk — independent of any particular ``zarr.storage`` implementation.
+
+    Parameters
+    ----------
+    zarr_path
+        Path to the OME-Zarr group.
+    level
+        Pyramid level (0 = full resolution).
+
+    Returns
+    -------
+    Path
+        On-disk path of the level's zarr array.
+    """
+    _zarr_loc = parse_url(zarr_path)
+    assert _zarr_loc is not None
+    reader = Reader(_zarr_loc)
+    nodes = list(reader())
+    image_node = nodes[0]
+
+    multiscale = None
+    for spec in image_node.specs:
+        if isinstance(spec, Multiscales):
+            multiscale = spec
+    assert multiscale is not None, "No Multiscales spec found in zarr file"
+    return Path(zarr_path) / multiscale.datasets[level]
 
 
 def read_omezarr(zarr_path: Path, level: int = 0) -> tuple:
@@ -300,18 +282,12 @@ def read_omezarr(zarr_path: Path, level: int = 0) -> tuple:
     :type res: tuple (3,)
     :return res: Voxel size of zarr array.
     """
-    # read the image data
     _zarr_loc = parse_url(zarr_path)
     assert _zarr_loc is not None
     reader = Reader(_zarr_loc)
-    # nodes may include images, labels etc
     nodes = list(reader())
-
-    # first node will be the image pixel data
     image_node = nodes[0]
 
-    # By default omezarr will return dask array (vol = image_node.data[level]).
-    # Here we load a zarr array directly and let the user convert to dask if needed.
     multiscale = None
     for spec in image_node.specs:
         if isinstance(spec, Multiscales):
@@ -327,6 +303,55 @@ def read_omezarr(zarr_path: Path, level: int = 0) -> tuple:
             break
 
     return vol, scale
+
+
+def read_omezarr_array(
+    zarr_path: Path,
+    level: int = 0,
+    *,
+    use_gpu: bool = False,
+) -> tuple[Any, list[float]]:
+    """Read an OME-Zarr image and materialise it into a single in-memory array.
+
+    Unlike :func:`read_omezarr` (which returns a lazy ``zarr.Array``), this helper
+    returns a fully-loaded array sized to fit in host or device memory, plus the
+    voxel size for *level*.
+
+    When ``use_gpu=True`` the underlying multiscale array is loaded via
+    :func:`linumpy.gpu.zarr_io.read_zarr_to_gpu`, which selects the fastest path
+    available at runtime (kvikio / GPUDirect Storage when native mode is on and
+    the array is uncompressed; otherwise ``zarr.config.enable_gpu``). The
+    returned array is a ``cupy.ndarray``.
+
+    When ``use_gpu=False`` (default) the array is returned as a contiguous
+    ``numpy.ndarray`` — keeps existing CPU-only pipelines working unchanged.
+
+    Parameters
+    ----------
+    zarr_path
+        Path to the OME-Zarr group.
+    level
+        Pyramid level to load (0 = full resolution).
+    use_gpu
+        If True and CuPy is available, return a device-resident ``cupy.ndarray``
+        loaded through the GPU dispatcher.
+
+    Returns
+    -------
+    array : numpy.ndarray or cupy.ndarray
+        Fully-materialised volume.
+    scale : list of float
+        Voxel size for the requested pyramid level.
+    """
+    vol, scale = read_omezarr(zarr_path, level=level)
+    if use_gpu:
+        # Resolve the on-disk path of the actual array (level subdirectory) so
+        # the GPU dispatcher can hit kvikio's raw-bytes fast path when possible.
+        from linumpy.gpu.zarr_io import read_zarr_to_gpu
+
+        array_path = resolve_omezarr_level_path(zarr_path, level=level)
+        return read_zarr_to_gpu(array_path), scale
+    return np.asarray(vol[:]), scale
 
 
 class OmeZarrWriter:
@@ -480,10 +505,18 @@ class OmeZarrWriter:
         for p, t in zip(paths, transformations, strict=False):
             datasets.append({"path": p, "coordinateTransformations": t})
 
-        pyramid_kw = {"max_layer": n_levels, "method": "linear", "downscale": self.downscale_factor}
+        pyramid_kw = {
+            "max_layer": n_levels,
+            "method": "resize",
+            "downscale": self.downscale_factor,
+        }
 
         ome_zarr_version = version("ome-zarr")
-        metadata = {"method": "ome_zarr.scale.Scaler", "version": ome_zarr_version, "args": pyramid_kw}
+        metadata = {
+            "method": "linumpy.io.zarr.OmeZarrWriter._downsample_pyramid_on_disk",
+            "version": ome_zarr_version,
+            "args": pyramid_kw,
+        }
 
         write_multiscales_metadata(self.root, datasets, axes=self.axes, metadata=metadata)
 
