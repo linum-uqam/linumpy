@@ -1,5 +1,8 @@
-"""Quick-stitch tiles into a single 2D mosaic image and detect tissue ROI."""
+#!/usr/bin/env python3
 
+""" "Quick reconstruction and processing methods for the S-OCT data."""
+
+import os.path
 import re
 from pathlib import Path
 
@@ -10,15 +13,146 @@ from matplotlib.patches import Rectangle
 from scipy.ndimage import binary_fill_holes, median_filter
 from skimage.color import label2rgb
 from skimage.filters import threshold_otsu
+from skimage.measure import label
 from skimage.transform import resize
 from tqdm.auto import tqdm
 
 from linumpy.microscope.oct import OCT
-from linumpy.mosaic.discovery import get_largest_cc, get_mosaic_info
+
+
+def getLargestCC(segmentation: np.ndarray) -> np.ndarray:
+    """Get the largest connected component in a binary image.
+
+    Parameters.
+    ----------
+    segmentation : np.ndarray
+        The binary image to process.
+
+    Returns
+    -------
+    np.ndarray
+        The largest connected component.
+    """
+    labels = label(segmentation)
+    assert labels.max() != 0  # assume at least 1 CC
+    largestCC = labels == np.argmax(np.bincount(labels.flat)[1:]) + 1
+    return largestCC
+
+
+DEFAULT_TILE_FILE_PATTERN = r"tile_x(?P<x>\d+)_y(?P<y>\d+)_z(?P<z>\d+)"
+
+
+def get_tiles_ids(directory, z: int | None = None):
+    """Analyzes a directory and detects all the tiles in contains."""
+    input_directory = Path(directory)
+
+    # Get a list of the input tiles
+    tiles_to_process = f"*z{z:02d}" if z is not None else "tile_*"
+    tiles = list(input_directory.rglob(tiles_to_process))
+    tiles = [t for t in tiles if t.name.startswith("tile_") and not os.path.isfile(t)]
+    tile_ids = get_tiles_ids_from_list(tiles)
+    return tiles, tile_ids
+
+
+def get_tiles_ids_from_list(tiles_list, file_pattern=DEFAULT_TILE_FILE_PATTERN):
+    tiles_list.sort()
+
+    # Get the tile positions
+    tile_ids = []
+    n_tiles = len(tiles_list)
+    for t in tqdm(tiles_list, desc="Extracting tile ids", total=n_tiles):
+        # Extract the tile's mosaic position.
+        match = re.match(file_pattern, t.name)
+        mx = int(match.group("x"))
+        my = int(match.group("y"))
+        mz = int(match.group("z"))
+        tile_ids.append((mx, my, mz))
+
+    return tile_ids
+
+
+def get_mosaic_info(directory, z: int, overlap_fraction: float = 0.2, use_stage_positions: bool = False):
+    # Get a list of the input tiles
+    tiles, _tile_ids = get_tiles_ids(directory, z)
+
+    # Get the tile positions (in pixel and mm)
+    file_pattern = r"tile_x(?P<x>\d+)_y(?P<y>\d+)_z(?P<z>\d+)"
+    tiles_positions_px = []
+    tiles_positions_mm = []
+    mosaic_tile_pos = []
+    # Progress bars overlap as the position is the same in all threads. Position is 1 to avoid overlap with outer loop.
+    # No better solution has been found.
+    for t in tqdm(tiles, desc="Reading mosaic info", leave=False, position=1):
+        oct = OCT(t)
+
+        # Extract the tile's mosaic position.
+        match = re.match(file_pattern, t.name)
+        mx = int(match.group("x"))
+        my = int(match.group("y"))
+
+        if oct.position_available and use_stage_positions:
+            x_mm, y_mm, _ = oct.position
+        else:
+            # Compute the tile position in mm
+            x_mm = oct.dimension[0] * (1 - overlap_fraction) * mx
+            y_mm = oct.dimension[1] * (1 - overlap_fraction) * my
+
+        x_px = int(np.floor(x_mm / oct.resolution[0]))
+        y_px = int(np.floor(y_mm / oct.resolution[1]))
+
+        mosaic_tile_pos.append((mx, my))
+        tiles_positions_mm.append((x_mm, y_mm))
+        tiles_positions_px.append((x_px, y_px))
+
+    # Compute the mosaic shape
+    x_min = min([x for x, _ in tiles_positions_px])
+    y_min = min([y for _, y in tiles_positions_px])
+    x_max = max([x for x, _ in tiles_positions_px]) + oct.shape[0]
+    y_max = max([y for _, y in tiles_positions_px]) + oct.shape[1]
+    mosaic_nrows = x_max - x_min
+    mosaic_ncols = y_max - y_min
+
+    # Get the mosaic grid shape
+    n_mx = len(np.unique([x[0] for x in mosaic_tile_pos]))
+    n_my = len(np.unique([x[1] for x in mosaic_tile_pos]))
+
+    # Get the mosaic limits in mm
+    xmin_mm = np.min([p[0] for p in tiles_positions_mm]) - oct.dimension[0] / 2
+    ymin_mm = np.min([p[1] for p in tiles_positions_mm]) - oct.dimension[1] / 2
+    xmax_mm = np.max([p[0] for p in tiles_positions_mm]) + oct.dimension[0] / 2
+    ymax_mm = np.max([p[1] for p in tiles_positions_mm]) + oct.dimension[1] / 2
+    mosaic_center_mm = ((xmin_mm + xmax_mm) / 2, (ymin_mm + ymax_mm) / 2)
+    mosaic_width_mm = xmax_mm - xmin_mm
+    mosaic_height_mm = ymax_mm - ymin_mm
+
+    info = {
+        "tiles": tiles,
+        "tiles_pos_px": tiles_positions_px,
+        "tiles_pos_mm": tiles_positions_mm,
+        "mosaic_tile_pos": mosaic_tile_pos,
+        "mosaic_nrows": mosaic_nrows,
+        "mosaic_ncols": mosaic_ncols,
+        "mosaic_xmin_px": x_min,
+        "mosaic_ymin_px": y_min,
+        "mosaic_xmax_px": x_max,
+        "mosaic_ymax_px": y_max,
+        "mosaic_xmin_mm": xmin_mm,
+        "mosaic_ymin_mm": ymin_mm,
+        "mosaic_xmax_mm": xmax_mm,
+        "mosaic_ymax_mm": ymax_mm,
+        "mosaic_center_mm": mosaic_center_mm,
+        "mosaic_width_mm": mosaic_width_mm,
+        "mosaic_height_mm": mosaic_height_mm,
+        "mosaic_grid_shape": (n_mx, n_my),
+        "tile_shape_px": oct.shape,
+        "tile_shape_mm": oct.dimension,
+        "tile_resolution": oct.resolution,
+    }
+    return info
 
 
 def quick_stitch(
-    directory: Path,
+    directory,
     z: int,
     overlap_fraction: float = 0.2,
     n_rot: int = 3,
@@ -29,9 +163,8 @@ def quick_stitch(
     flip_ud: bool = True,
     flip_lr: bool = False,
     galvo_shift: int | None = None,
-    galvo_shift_first_tile: tuple = (0, 0),
-) -> np.ndarray:
-    """Quickly stitch tiles at a given z slice into a mosaic image."""
+    galvo_shift_first_tile=(0, 0),
+):
     # TODO: accelerate the stitching by preprocessing the tiles in parallel
     input_directory = Path(directory)
 
@@ -43,51 +176,47 @@ def quick_stitch(
     file_pattern = r"tile_x(?P<x>\d+)_y(?P<y>\d+)_z(?P<z>\d+)"
     tiles_positions_px = []
     tiles_positions_mm = []
-    oct_tile: OCT | None = None
     for t in tiles:
-        oct_tile = OCT(t)
-        if oct_tile.position_available and use_stage_positions:
-            x_mm, y_mm, _ = oct_tile.position
+        oct = OCT(t)
+        if oct.position_available and use_stage_positions:
+            x_mm, y_mm, _ = oct.position
         else:
             # Extract the tile's mosaic position.
             match = re.match(file_pattern, t.name)
-            assert match is not None
             mx = int(match.group("x"))
             my = int(match.group("y"))
 
             # Compute the tile position in mm
-            x_mm = oct_tile.dimension[0] * (1 - overlap_fraction) * mx
-            y_mm = oct_tile.dimension[1] * (1 - overlap_fraction) * my
+            x_mm = oct.dimension[0] * (1 - overlap_fraction) * mx
+            y_mm = oct.dimension[1] * (1 - overlap_fraction) * my
 
-        x_px = int(np.floor(x_mm / oct_tile.resolution[0]))
-        y_px = int(np.floor(y_mm / oct_tile.resolution[1]))
+        x_px = int(np.floor(x_mm / oct.resolution[0]))
+        y_px = int(np.floor(y_mm / oct.resolution[1]))
 
         tiles_positions_mm.append((x_mm, y_mm))
         tiles_positions_px.append((x_px, y_px))
 
-    assert oct_tile is not None
     # Compute the mosaic shape
     x_min = min([x for x, _ in tiles_positions_px])
     y_min = min([y for _, y in tiles_positions_px])
-    x_max = max([x for x, _ in tiles_positions_px]) + oct_tile.shape[0]
-    y_max = max([y for _, y in tiles_positions_px]) + oct_tile.shape[1]
+    x_max = max([x for x, _ in tiles_positions_px]) + oct.shape[0]
+    y_max = max([y for _, y in tiles_positions_px]) + oct.shape[1]
     mosaic_nrows = x_max - x_min
     mosaic_ncols = y_max - y_min
     mosaic = np.zeros((mosaic_nrows, mosaic_ncols), dtype=np.float32)
 
     # Perform stitching
     for i in tqdm(range(len(tiles)), desc="Quick Stitch"):
-        oct_tile = OCT(tiles[i])
+        oct = OCT(tiles[i])
 
         # Compute the pixel position within the mosaic
         rmin = tiles_positions_px[i][0] - x_min
-        rmax = rmin + oct_tile.shape[0]
+        rmax = rmin + oct.shape[0]
         cmin = tiles_positions_px[i][1] - y_min
-        cmax = cmin + oct_tile.shape[1]
+        cmax = cmin + oct.shape[1]
 
         # Get the tile id
         match = re.match(file_pattern, tiles[i].name)
-        assert match is not None
         mx = int(match.group("x"))
         my = int(match.group("y"))
 
@@ -96,11 +225,7 @@ def quick_stitch(
             apply_shift = False
 
         # Load the fringes
-        img = (
-            oct_tile.load_image(fix_galvo_shift=galvo_shift if galvo_shift is not None else True)
-            if apply_shift
-            else oct_tile.load_image()
-        )
+        img = oct.load_image(fix_galvo_shift=galvo_shift) if apply_shift else oct.load_image()
 
         # Log transform
         if use_log:
@@ -110,9 +235,8 @@ def quick_stitch(
         img = img[zmin:zmax, :, :].mean(axis=0)
 
         # BUG: there are sometimes missing bscans
-        oct_shape_2d = (int(oct_tile.shape[0]), int(oct_tile.shape[1]))
-        if img.shape != oct_shape_2d:
-            img = np.zeros(oct_shape_2d) if np.any(np.array(img.shape) == 0) else resize(img, oct_shape_2d)
+        if img.shape != oct.shape[0:2]:
+            img = np.zeros(oct.shape[0:2]) if np.any(np.array(img.shape) == 0) else resize(img, oct.shape[0:2])
 
         # Apply rotations
         img = np.rot90(img, k=n_rot)
@@ -131,38 +255,34 @@ def quick_stitch(
 
 
 def detect_mosaic(
-    directory: Path,
+    directory: str,
     z: int,
-    img: np.ndarray | None = None,
+    img: np.ndarray = None,
     margin: float = 0.5,
     display: bool = False,
-    image_file: Path | None = None,
+    image_file: str | None = None,
     roi_file: str | None = None,
     keep_largest_island: bool = False,
     stitching_settings: dict | None = None,
-) -> tuple[float, float, float, float]:
+):
     """Detect the tissue in the mosaic and compute the limits of the tissue.
 
-    Parameters
+    Parameters.
     ----------
     directory : str
         The directory containing the tiles.
     z : int
         The z slices to process
-    img : ndarray, optional
-        Pre-computed quickstitch image. If None, it will be computed.
     margin : float
         The margin to add to the tissue limits (in mm).
     display : bool
         Display the result in a matplotlib window.
-    image_file : str, optional
+    image_file : str
         The filename to save the quickstitch image.
-    roi_file : str, optional
+    roi_file : str
         The filename to save the ROI image.
     keep_largest_island : bool
         Keep the largest connected component in the mask.
-    stitching_settings : dict, optional
-        Settings dict to pass to the stitching function.
     """
     # Additional parameters
     threshold_size = 1024  # maximum image size to use for the thresholding
@@ -183,8 +303,7 @@ def detect_mosaic(
 
     # Stitch the image using the tile position
     if img is None:
-        extra = stitching_settings if stitching_settings is not None else {}
-        img = quick_stitch(directory, z=z, use_stage_positions=True, **extra)
+        img = quick_stitch(directory, z=z, use_stage_positions=True, **stitching_settings)
 
     # Save the quick stitch image
     if image_file is not None:
@@ -208,7 +327,7 @@ def detect_mosaic(
 
     # Keep the largest connected component
     if keep_largest_island:
-        mask = get_largest_cc(mask)
+        mask = getLargestCC(mask)
 
     # Compute the mosaic limits
     n_rows, n_cols = img.shape
@@ -260,10 +379,7 @@ def detect_mosaic(
 
         ax.set_ylabel("x axis (mm)")
         ax.set_xlabel("y axis (mm)")
-        title = (
-            f"xmin={roi_x_min_margin:.4f}mm, xmax={roi_x_max_margin:.4f}mm\n"
-            f"ymin={roi_y_min_margin:.4f}mm, ymax={roi_y_max_margin:.4f}mm"
-        )
+        title = f"xmin={roi_x_min_margin:.4f}mm, xmax={roi_x_max_margin:.4f}mm\nymin={roi_y_min_margin:.4f}mm, ymax={roi_y_max_margin:.4f}mm"
         ax.set_title(title)
         ax.legend()
 
@@ -278,8 +394,7 @@ def detect_mosaic(
     return roi_x_min_margin, roi_x_max_margin, roi_y_min_margin, roi_y_max_margin
 
 
-def save_quickstitch(img: np.ndarray, quickstitch_file: Path) -> None:
-    """Normalize and save a quick-stitch mosaic image to disk."""
+def save_quickstitch(img, quickstitch_file) -> None:
     filename = Path(quickstitch_file)
     # Normalize the intensity
     mask = img > 0
