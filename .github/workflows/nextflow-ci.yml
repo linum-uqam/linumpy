@@ -55,4 +55,4 @@ jobs:
           nextflow config workflows/reconst_3d/nextflow.config -profile standard || true
 
       - name: Run nf-test stub runs
-        run: nf-test test workflows/preproc/tests/ workflows/reconst_3d/tests/
+        run: nf-test test --stop-on-first-failure workflows/preproc/tests/ workflows/reconst_3d/tests/ workflows/reconst_2.5d/tests/
