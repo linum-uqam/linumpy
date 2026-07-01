@@ -20,14 +20,12 @@ Usage
 import argparse
 import json
 import logging
-import operator
 import os
 import re
 from pathlib import Path
 from typing import Any
 
 from linumpy.io import slice_config as slice_config_io
-from linumpy.metrics import collect_auto_exclude_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +88,7 @@ def load_registration_metrics(transforms_dir: Path) -> Any:
         if z_corr is not None:
             metrics.append((slice_id, float(z_corr)))
 
-    metrics.sort(key=operator.itemgetter(0))
+    metrics.sort(key=lambda x: x[0])
     return metrics
 
 
@@ -158,16 +156,6 @@ def main() -> None:
         len(updates),
         len(clusters),
         args.slice_config_out,
-    )
-
-    excluded_slice_ids = sorted({int(s) for cluster in clusters for s, _ in cluster})
-    collect_auto_exclude_metrics(
-        output_path=Path(args.slice_config_out),
-        num_total_slices=len(metrics) + 1,  # n pairwise pairs + 1 ≈ slice count
-        excluded_ids=excluded_slice_ids,
-        cluster_count=len(clusters),
-        z_corr_threshold=float(args.z_corr_threshold),
-        consecutive_threshold=int(args.consecutive_threshold),
     )
 
 

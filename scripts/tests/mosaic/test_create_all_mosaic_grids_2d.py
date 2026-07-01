@@ -2,5 +2,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_create_all_mosaic_grids_2d.py", "--help"])
+    ret = script_runner.run(["linum-create-all-mosaic-grids-2d", "--help"])
     assert ret.success

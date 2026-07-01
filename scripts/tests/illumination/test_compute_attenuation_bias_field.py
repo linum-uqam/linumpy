@@ -2,5 +2,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_compute_attenuation_bias_field.py", "--help"])
+    ret = script_runner.run(["linum-compute-attenuation-bias-field", "--help"])
     assert ret.success

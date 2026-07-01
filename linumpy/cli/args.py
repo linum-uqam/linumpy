@@ -1,6 +1,7 @@
 """Common argument-parsing helpers for linumpy CLI scripts."""
 
 import argparse
+import multiprocessing
 import os
 import shutil
 from pathlib import Path
@@ -18,7 +19,7 @@ def get_available_cpus() -> int:
     -------
         int: Number of available CPUs
     """
-    total_cpus = os.process_cpu_count() or os.cpu_count() or 1
+    total_cpus = multiprocessing.cpu_count()
 
     # Check for explicit max CPUs limit
     max_cpus = os.environ.get("LINUMPY_MAX_CPUS")

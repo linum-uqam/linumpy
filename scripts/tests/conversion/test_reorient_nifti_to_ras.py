@@ -2,5 +2,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_reorient_nifti_to_ras.py", "--help"])
+    ret = script_runner.run(["linum-reorient-nifti-to-ras", "--help"])
     assert ret.success

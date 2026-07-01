@@ -31,7 +31,7 @@ before installing (see [issue #45](https://github.com/linum-uqam/linumpy/issues/
 To execute the scripts, you can use the following command:
 
 ```
-linum_view_omezarr.py --help
+linum-view-omezarr --help
 ```
 
 [LINUM]:https://linum-lab.ca

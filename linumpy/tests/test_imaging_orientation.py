@@ -27,59 +27,63 @@ def _make_gradient_vol(shape=(4, 6, 8)):
 
 
 class TestParseOrientationCodeValid:
-    def test_identity_SAR(self):
-        """SAR is the native target order → identity permutation."""
-        perm, flips = parse_orientation_code("SAR")
+    def test_identity_SRA(self):
+        """SRA is the native target order → identity permutation."""
+        perm, flips = parse_orientation_code("SRA")
         assert perm == (0, 1, 2)
         assert flips == (1, 1, 1)
 
     def test_identity_lowercase(self):
         """Input is case-insensitive."""
-        perm, flips = parse_orientation_code("sar")
+        perm, flips = parse_orientation_code("sra")
         assert perm == (0, 1, 2)
         assert flips == (1, 1, 1)
 
     def test_PIR(self):
         """PIR is a common OCT orientation."""
         perm, flips = parse_orientation_code("PIR")
-        # P→target dim1 (flip), I→target dim0 (flip), R→target dim2.
-        # target_to_source: 0→(1,-1), 1→(0,-1), 2→(2,1)
-        assert perm == (1, 0, 2)
-        assert flips == (-1, -1, 1)
+        assert perm == (1, 2, 0)
+        assert flips == (-1, 1, -1)
 
     def test_RAS(self):
-        """RAS source orientation."""
+        """RAS orientation (Allen/NIfTI default, but dim0=R not S)."""
         perm, flips = parse_orientation_code("RAS")
-        # R→target dim2, A→target dim1, S→target dim0.
-        # target_to_source: 0→(2,1), 1→(1,1), 2→(0,1)
-        assert perm == (2, 1, 0)
+        # R→target-dim1, A→target-dim2, S→target-dim0
+        # source: dim0=R, dim1=A, dim2=S
+        # target order (S, R, A): dim0←source_dim2, dim1←source_dim0, dim2←source_dim1
+        assert perm == (2, 0, 1)
         assert flips == (1, 1, 1)
 
     def test_LPS(self):
         """LPS (opposite of RAS)."""
         perm, flips = parse_orientation_code("LPS")
-        # L→target dim2(flip), P→target dim1(flip), S→target dim0.
-        # target_to_source: 0→(2,1), 1→(1,-1), 2→(0,-1)
-        assert perm == (2, 1, 0)
+        # L→target-dim1(flip), P→target-dim2(flip), S→target-dim0
+        # source: dim0=L, dim1=P, dim2=S
+        # S in dim2 → target dim0, so source_dim2 for target dim0
+        # L in dim0 → target dim1, flip; P in dim1 → target dim2, flip
+        assert perm == (2, 0, 1)
         assert flips == (1, -1, -1)
 
     def test_all_flipped_ILP(self):
         """ILP: all three axes need to be flipped (I→S, L→R, P→A)."""
         perm, flips = parse_orientation_code("ILP")
-        # I→target 0(flip), L→target 2(flip), P→target 1(flip)
+        # I at dim0 → target dim0 (Superior), flip; L at dim1 → target dim1 (Right), flip;
+        # P at dim2 → target dim2 (Anterior), flip
         assert all(f == -1 for f in flips)
         assert sorted(perm) == [0, 1, 2]
 
     def test_AIR(self):
         """AIR: A in dim0, I in dim1, R in dim2."""
         perm, flips = parse_orientation_code("AIR")
-        # A→target 1, I→target 0(flip), R→target 2.
-        # target_to_source: 0→(1,-1), 1→(0,1), 2→(2,1)
-        assert perm == (1, 0, 2)
+        # A at dim0 → target dim2, sign=+1
+        # I at dim1 → target dim0, sign=-1
+        # R at dim2 → target dim1, sign=+1
+        # target_to_source: {0: (1, -1), 1: (2, 1), 2: (0, 1)}
+        assert perm == (1, 2, 0)
         assert flips == (-1, 1, 1)
 
     def test_output_type_is_tuple(self):
-        perm, flips = parse_orientation_code("SAR")
+        perm, flips = parse_orientation_code("SRA")
         assert isinstance(perm, tuple)
         assert isinstance(flips, tuple)
 
@@ -90,12 +94,12 @@ class TestParseOrientationCodeValid:
 
     def test_perm_is_valid_permutation(self):
         """axis_permutation must be a valid permutation of (0,1,2)."""
-        for code in ("SAR", "PIR", "RAS", "LPS", "AIR", "ILP", "SRA"):
+        for code in ("SRA", "PIR", "RAS", "LPS", "AIR", "ILP", "SAR"):
             perm, _ = parse_orientation_code(code)
             assert sorted(perm) == [0, 1, 2], f"Bad permutation for {code}: {perm}"
 
     def test_flips_only_1_or_minus1(self):
-        for code in ("SAR", "PIR", "RAS", "LPS", "AIR", "ILP", "SRA"):
+        for code in ("SRA", "PIR", "RAS", "LPS", "AIR", "ILP", "SAR"):
             _, flips = parse_orientation_code(code)
             for f in flips:
                 assert f in (1, -1), f"Unexpected flip value {f} for {code}"
@@ -252,13 +256,13 @@ class TestOrientationSemantics:
     output dimension.
     """
 
-    def test_SAR_dim0_is_superior(self):
-        """With 'SAR', dim0 is already Superior.  Reorientation is identity."""
+    def test_SRA_dim0_is_superior(self):
+        """With 'SRA', dim0 is already Superior.  Reorientation is identity."""
         # Volume increases only along dim0 (Superior direction)
         vol = np.zeros((10, 5, 5), dtype=np.float32)
         vol[:, 2, 2] = np.arange(10)
 
-        perm, flips = parse_orientation_code("SAR")
+        perm, flips = parse_orientation_code("SRA")
         result = apply_orientation_transform(vol, perm, flips)
 
         # After identity reorientation, variation should still be along dim0
@@ -266,15 +270,15 @@ class TestOrientationSemantics:
         col = result[:, 2, 2]
         assert col[-1] > col[0], "Superior direction should still increase along dim0"
 
-    def test_IAR_superior_flipped_to_dim0(self):
-        """With 'IAR', dim0 is Inferior → after reorientation it becomes Superior (flipped)."""
+    def test_IRA_superior_flipped_to_dim0(self):
+        """With 'IRA', dim0 is Inferior → after reorientation it becomes Superior (flipped)."""
         vol = np.zeros((10, 5, 5), dtype=np.float32)
         vol[:, 2, 2] = np.arange(10)  # value increases in Inferior direction
 
-        perm, flips = parse_orientation_code("IAR")
+        perm, flips = parse_orientation_code("IRA")
         result = apply_orientation_transform(vol, perm, flips)
 
-        # 'IAR': I at dim0 → target dim0 with flip=-1 (Inferior→Superior).
+        # 'IRA': I at dim0 → target dim0 with flip=-1 (Inferior→Superior).
         # Values increasing along Inferior (dim0 source) should decrease along dim0 output.
         slice_col = result[:, 2, 2]
         assert slice_col[0] > slice_col[-1], "After I→S flip, values should decrease along output dim0 (Superior direction)"
@@ -317,16 +321,16 @@ class TestReorderResolution:
 
     def test_matches_orientation_permutation(self):
         """reorder_resolution must be consistent with parse_orientation_code."""
-        # For 'PIR': perm=(1, 0, 2)
-        # Source resolution: (0.01, 0.02, 0.03) in (P, I, R) order
-        # After reorientation to (S, A, R):
+        # For 'PIR': perm=(1,2,0)
+        # Source resolution: (res_z=0.01, res_x=0.02, res_y=0.03) in (P, I, R) order
+        # After reorientation to (S, R, A):
         #   target_dim0 = source_dim1 (I), so resolution[target0] = 0.02
-        #   target_dim1 = source_dim0 (P), so resolution[target1] = 0.01
-        #   target_dim2 = source_dim2 (R), so resolution[target2] = 0.03
+        #   target_dim1 = source_dim2 (R), so resolution[target1] = 0.03
+        #   target_dim2 = source_dim0 (P), so resolution[target2] = 0.01
         perm, _ = parse_orientation_code("PIR")
         source_res = (0.01, 0.02, 0.03)
         result = reorder_resolution(source_res, perm)
-        assert result == (0.02, 0.01, 0.03)
+        assert result == (0.02, 0.03, 0.01)
 
     def test_reorder_preserves_len(self):
         perm, _ = parse_orientation_code("AIR")

@@ -2,5 +2,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_convert_tiff_to_nifti.py", "--help"])
+    ret = script_runner.run(["linum-convert-tiff-to-nifti", "--help"])
     assert ret.success

@@ -2,5 +2,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_intensity_normalization.py", "--help"])
+    ret = script_runner.run(["linum-intensity-normalization", "--help"])
     assert ret.success

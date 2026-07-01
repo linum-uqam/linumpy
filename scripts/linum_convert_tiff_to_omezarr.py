@@ -89,7 +89,7 @@ def check_folders(parser: Any, folder: Path) -> list:
             parser.error("No tiff files or subfolder found in the folder.")
         else:
             logging.info("Found subfolders in the folder.")
-            for subfolder in subfolders:
+            for _index, subfolder in enumerate(subfolders):
                 if not list(Path(subfolder).glob("*.tif")):
                     parser.error("No tiff files found in the subfolder.")
                 else:
