@@ -57,9 +57,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 def process_tile(params: dict) -> tuple:
     """Process a tile and add it to the output mosaic."""
-    from linumpy.config.threads import apply_threadpool_limits
+    from linumpy.config.threads import configure_all_libraries
 
-    apply_threadpool_limits()
+    # configure_all_libraries() also caps PyTorch intra-/inter-op threads
+    # (used by BaSiCPy). apply_threadpool_limits() alone misses torch and
+    # lets it default to ~half the host cores, oversubscribing the node.
+    configure_all_libraries()
 
     file = params["slice_file"]
     z = params["z"]
