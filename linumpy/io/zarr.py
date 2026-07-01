@@ -3,6 +3,7 @@
 # Configure dask thread pool based on environment variables
 from linumpy.config.threads import configure_dask
 
+import atexit
 import shutil
 import tempfile
 from collections.abc import Sequence
@@ -29,14 +30,25 @@ def create_tempstore(dir: str | None = None, suffix: str | None = None) -> zarr.
     """
     Create a zarr store inside a temporary directory.
 
+    Defaults to creating the temp directory inside the current working
+    directory (typically a Nextflow task scratch dir) rather than ``/tmp``,
+    so leaked temp zarrs are reclaimed when the work dir is cleaned and do
+    not pile up on small ``/tmp`` partitions.
+
     :type dir: str
     :param dir: Directory inside which to create the temporary directory.
+                Defaults to the current working directory.
     :type suffix: str
     :param suffix: Suffix of temporary directory.
     :type zarr_store: zarr.storage.LocalStore
     :return zarr_store: Temporary ZarrStore.
     """
-    tempdir = Path(tempfile.TemporaryDirectory(dir=dir, suffix=suffix).name)
+    parent = dir if dir is not None else "."
+    tempdir = Path(tempfile.mkdtemp(dir=parent, suffix=suffix))
+    # Register cleanup explicitly. mkdtemp does not auto-clean, but atexit
+    # is more reliable than TemporaryDirectory's finalizer when zarr keeps
+    # handles open until interpreter shutdown.
+    atexit.register(shutil.rmtree, tempdir, ignore_errors=True)
     zarr_store = zarr.storage.LocalStore(tempdir)
     return zarr_store
 
