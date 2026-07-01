@@ -1,5 +1,7 @@
 """Integration tests for the n4_correct backend dispatcher."""
 
+from __future__ import annotations
+
 import numpy as np
 import pytest
 
