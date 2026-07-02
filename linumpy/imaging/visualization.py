@@ -52,17 +52,17 @@ def save_orthogonal_views(
 
     width_ratio = [i.shape[1] for i in (image_z, image_x, image_y)]
 
-    allvals = np.concatenate([image_x.flatten(), image_y.flatten(), image_z.flatten()])
-    vmin = float(np.min(allvals))
-    vmax = float(np.percentile(allvals, percentile_max))
+    def _panel_vmax(arr: np.ndarray) -> float:
+        pos = arr[arr > 0]
+        return float(np.percentile(pos, percentile_max)) if pos.size > 0 else 1.0
 
     fig, ax = plt.subplots(1, 3, width_ratios=width_ratio)
     fig.set_size_inches(24, 10)
     fig.set_dpi(512)
 
-    ax[0].imshow(image_z, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax)
-    ax[1].imshow(image_x, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax)
-    ax[2].imshow(image_y, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax)
+    ax[0].imshow(image_z, cmap=cmap, origin="lower", vmin=0, vmax=_panel_vmax(image_z))
+    ax[1].imshow(image_x, cmap=cmap, origin="lower", vmin=0, vmax=_panel_vmax(image_x))
+    ax[2].imshow(image_y, cmap=cmap, origin="lower", vmin=0, vmax=_panel_vmax(image_y))
 
     for a in ax:
         a.set_axis_off()
@@ -261,7 +261,7 @@ def _panel_labels_from_orientation(orientation: str) -> tuple | None:
     code = orientation.strip("'\" ").upper()
     try:
         parse_orientation_code(code)  # validation only
-    except (ValueError, KeyError):
+    except ValueError, KeyError:
         return None
 
     a0, a1, a2 = code  # anatomical letter for source dim0, dim1, dim2
@@ -415,9 +415,9 @@ def save_annotated_views(
     y_slice = y_slice if y_slice is not None else n_cols // 2
 
     # Derive panel titles and axis labels from orientation when available.
-    _orient = _panel_labels_from_orientation(orientation) if orientation else None
-    if _orient:
-        p1_name, p1_xlabel, p1_ylabel, p1_fixed, p2_name, p2_xlabel, p2_ylabel, p2_fixed = _orient
+    orient = _panel_labels_from_orientation(orientation) if orientation else None
+    if orient:
+        p1_name, p1_xlabel, p1_ylabel, p1_fixed, p2_name, p2_xlabel, p2_ylabel, p2_fixed = orient
         title1 = f"{p1_name} ({p1_ylabel}\u00d7{p1_xlabel}) view at {p1_fixed}={x_slice}"
         title2 = f"{p2_name} ({p2_ylabel}\u00d7{p2_xlabel}) view at {p2_fixed}={y_slice}"
         xlabel1, ylabel1 = p1_xlabel, p1_ylabel
@@ -453,9 +453,10 @@ def save_annotated_views(
         aspect1 = "equal"
         aspect2 = "equal"
 
-    allvals = np.concatenate([image_zy.flatten(), image_zx.flatten()])
-    vmin = float(np.min(allvals))
-    vmax = float(np.percentile(allvals, 99.9))
+    allvals = np.concatenate([image_zy.ravel(), image_zx.ravel()])
+    display_vals = allvals[np.isfinite(allvals) & (allvals > 0)]
+    vmin = 0.0
+    vmax = float(np.percentile(display_vals, 99.9)) if display_vals.size > 0 else 1.0
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 12), facecolor="black")
     for ax in [ax1, ax2]:

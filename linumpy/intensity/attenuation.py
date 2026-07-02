@@ -4,7 +4,7 @@ from linumpy.config.threads import worker_initializer
 
 import itertools
 import multiprocessing
-from typing import Literal, overload
+from typing import Any, Literal, overload
 
 import numpy as np
 import SimpleITK as sitk
@@ -22,41 +22,116 @@ from skimage.filters import threshold_li
 from linumpy.cli.args import get_available_cpus
 from linumpy.geometry.crop import mask_under_interface
 from linumpy.geometry.interface import find_tissue_interface, get_interface_depth_from_mask
+from linumpy.gpu import GPU_AVAILABLE
 from linumpy.intensity.normalize import eqhist, normalize
+
+# ---------------------------------------------------------------------------
+# Shared helpers used by Vermeer / Smith / Liu / Li
+# ---------------------------------------------------------------------------
+
+
+def _median_xy_filter(vol: np.ndarray, k: int) -> np.ndarray:
+    """XY median filter (no axial smoothing). ``k <= 0`` is a no-op."""
+    if k <= 0:
+        return vol
+    return sitk.GetArrayFromImage(sitk.Median(sitk.GetImageFromArray(vol), (0, k, k)))
+
+
+def _auto_tissue_mask(vol: np.ndarray, zshift: int) -> np.ndarray:
+    """Detect the water/tissue interface and return the under-interface mask."""
+    interface = find_tissue_interface(vol, s_xy=3, s_z=1, order=1, use_log=True)
+    return mask_under_interface(vol, interface + zshift, return_mask=True)
+
+
+def _finalize_attenuation(attn: np.ndarray, mask: np.ndarray, fill_holes: bool) -> np.ndarray:
+    """Replace NaNs with 0, zero out voxels outside ``mask``, optionally fill holes."""
+    attn[np.isnan(attn)] = 0
+    attn[~mask.astype(bool)] = 0
+    if fill_holes:
+        attn = sitk.GetArrayFromImage(sitk.GrayscaleFillhole(sitk.GetImageFromArray(attn)))
+    return attn
+
+
+def _lstsq_tail_slope(bot: np.ndarray) -> np.ndarray:
+    """Per-A-line LSQ slope of ``ln I`` vs voxel index over the supplied tail.
+
+    ``bot`` has shape ``(X, Y, n_tail)``. A per-A-line relative floor is used
+    so that A-lines decaying below float epsilon (clean exponentials with
+    ``mu*z >> 1``) still produce an unbiased slope.
+    """
+    n_tail = bot.shape[-1]
+    z_idx = np.arange(n_tail, dtype=float)
+    bot64 = bot.astype(np.float64)
+    floor = np.maximum(bot64.max(axis=-1, keepdims=True) * 1e-12, 1e-30)
+    log_bot = np.log(np.maximum(bot64, floor))
+    z_mean = z_idx.mean()
+    log_mean = log_bot.mean(axis=-1)
+    cov = ((z_idx - z_mean) * (log_bot - log_mean[..., None])).sum(axis=-1)
+    var = ((z_idx - z_mean) ** 2).sum()
+    return cov / var  # dimensionless ln(I) per voxel
+
+
+def _exact_tail_C(i_max: np.ndarray, mu_E_per_m: np.ndarray, dz_m: float) -> np.ndarray:
+    """Exact finite-range tail integral C = I[imax] / (exp(2 mu_E dz) - 1)."""
+    denom = np.expm1(2.0 * mu_E_per_m * dz_m)
+    C = np.zeros_like(i_max, dtype=np.float64)
+    valid = denom > 1e-12
+    C[valid] = i_max[valid] / denom[valid]
+    return C
+
+
+def _vermeer_core_gpu(vol: np.ndarray, dz: float, mask: np.ndarray, C: np.ndarray) -> np.ndarray:
+    """CuPy implementation of the Vermeer Eq. 17 core (cumsum + log)."""
+    import cupy as cp
+
+    vol_g = cp.asarray(vol, dtype=cp.float32)
+    mask_g = cp.asarray(mask, dtype=cp.bool_)
+    C_g = cp.asarray(C, dtype=cp.float32)
+    masked = cp.where(mask_g, vol_g, 0)
+    cum_rev = cp.cumsum(masked[:, :, ::-1], axis=-1)
+    tail = cp.zeros_like(cum_rev)
+    tail[:, :, 1:] = cum_rev[:, :, :-1]
+    profile = tail[:, :, ::-1] + C_g
+    mu = cp.zeros_like(vol_g)
+    pos = profile > 0
+    ratio = cp.where(pos, vol_g / cp.where(pos, profile, 1), 0)
+    mu = cp.where(pos, cp.log1p(ratio) / (2.0 * dz * 100.0), 0)
+    return cp.asnumpy(mu)
 
 
 def get_attenuation_vermeer2013(
-    vol: np.ndarray, dz: float = 6.5e-6, mask: np.ndarray | None = None, C: np.ndarray | int | float | None = None
+    vol: np.ndarray,
+    dz: float = 6.5e-6,
+    mask: np.ndarray | None = None,
+    C: np.ndarray | int | float | None = None,
+    use_gpu: bool = False,
 ) -> np.ndarray:
-    """Estimates the attenuation coefficient using the Vermeer2013 model.
+    r"""Vermeer 2014 depth-resolved attenuation estimator (Eq. 17).
+
+    Implements ``mu[i] = (1/2dz) * ln(1 + I[i] / (sum_{j>i} I[j] + C))``.
+    See ``docs/ATTENUATION_METHODS.md`` for the math and Smith / Liu / Li
+    extensions.
 
     Parameters
     ----------
     vol : ndarray
-        3D Reflectivity OCT data
+        OCT intensity volume in ``(X, Y, Z)`` order.
     dz : float
-        Axial resolution (in microns/pixel)
-    mask : ndarray
-        Tissue mask (optional). Every pixel above the mask will be attributed null attenuation,
-        and pixel under the mask will be set to the last computed Aline attenuation.
-    C: ndarray, int or float
-        The bottom constant (DEV)
-
-    Return
-    ------
-    ndarray
-        Estimated attenuation coefficient map (same size as vol)
-
-    Notes
-    -----
-    - This algorithm is inspired by an ultrasound attenuation compensation method.
+        Axial pixel size in metres. Output is rescaled to ``1/cm``.
+    mask : ndarray, optional
+        Boolean tissue mask. Voxels above the interface are zeroed,
+        voxels below inherit the bottom in-mask value.
+    C : ndarray, int, float, optional
+        Finite-range tail constant. ``None`` (default) reproduces the
+        original ``C = 0`` form.
+    use_gpu : bool
+        Run the cumsum/log core on CuPy when ``True`` and a GPU is
+        available; falls back to NumPy otherwise.
 
     References
     ----------
-    - Vermeer et al. Depth-resolved model-based reconstruction of attenuation
-      coefficients in optical coherence tomography. Biomed. Opt. Exp., vol5,
-      no1, pp332-337, 2013
-
+    Vermeer et al., Biomed. Opt. Express 5, 322 (2014).
+    Neubrand et al., J. Biomed. Opt. 28, 066001 (2023).
     """
     # Prepare the bottom constant (to better consider the finite Bscan dimension)
     if C is None:
@@ -70,38 +145,39 @@ def get_attenuation_vermeer2013(
     if mask is None:
         mask = np.ones_like(vol, dtype=bool)
 
-    # Compensation profile with depth for each A-line
-    vol_p = np.ma.masked_array(vol, ~mask)
-    profile = np.cumsum(vol_p[:, :, ::-1], axis=-1) + C
-    profile = profile[:, :, ::-1]
+    if use_gpu and GPU_AVAILABLE:
+        mu = _vermeer_core_gpu(vol, dz, mask, C)
+    else:
+        # Compensation profile with depth for each A-line. See Vermeer 2014
+        # / Neubrand 2023 Appendix B for the derivation.
+        vol_p = np.ma.masked_array(vol, ~mask)
+        cum_rev = np.cumsum(vol_p[:, :, ::-1], axis=-1)
+        tail = np.zeros_like(cum_rev)
+        tail[:, :, 1:] = cum_rev[:, :, :-1]  # exclude I[i]
+        profile = tail[:, :, ::-1] + C
 
-    # Estimating the attenuation coefficient for each A-line
-    mu = np.zeros_like(vol)
-    mu[profile > 0] = vol[profile > 0] / profile[profile > 0]
-    mu[profile > 0] = np.log(1 + mu[profile > 0]) / (2.0 * dz)
+        mu = np.zeros_like(vol)
+        mu[profile > 0] = vol[profile > 0] / profile[profile > 0]
+        mu[profile > 0] = np.log(1 + mu[profile > 0]) / (2.0 * dz)
+        mu /= 100.0
 
-    # Convert attenuation in cm-1
-    mu /= 100.0
+    # Masking the result (interface propagation)
+    interface = get_interface_depth_from_mask(mask)
+    mask_above_interface = ~mask_under_interface(mask, interface, return_mask=True)
+    mu[mask_above_interface] = 0
 
-    # Masking the result
-    if mask is not None:
-        interface = get_interface_depth_from_mask(mask)
-        mask_above_interface = ~mask_under_interface(mask, interface, return_mask=True)
-        mu[mask_above_interface] = 0
-
-        # Find bottom interface
-        nx, ny, nz = mask.shape
-        bottom_interface = (nz - get_interface_depth_from_mask(mask[:, :, ::-1]) - 1).astype(int)
-        xx, yy = np.meshgrid(list(range(nx)), list(range(ny)), indexing="ij")
-        bottom_mu = mu[xx, yy, bottom_interface]
-        bottom_mu = np.tile(np.reshape(bottom_mu, (nx, ny, 1)), (1, 1, nz))
-        bottom_mask = mask_under_interface(mask, bottom_interface, return_mask=True)
-        mu[bottom_mask] = bottom_mu[bottom_mask]
+    nx, ny, nz = mask.shape
+    bottom_interface = (nz - get_interface_depth_from_mask(mask[:, :, ::-1]) - 1).astype(int)
+    xx, yy = np.meshgrid(list(range(nx)), list(range(ny)), indexing="ij")
+    bottom_mu = mu[xx, yy, bottom_interface]
+    bottom_mu = np.tile(np.reshape(bottom_mu, (nx, ny, 1)), (1, 1, nz))
+    bottom_mask = mask_under_interface(mask, bottom_interface, return_mask=True)
+    mu[bottom_mask] = bottom_mu[bottom_mask]
 
     return mu
 
 
-def get_extended_attenuation_vermeer2013(
+def get_attenuation_smith2015(
     vol: np.ndarray,
     mask: np.ndarray | None = None,
     k: int = 10,
@@ -111,117 +187,257 @@ def get_extended_attenuation_vermeer2013(
     res: float = 6.5,
     zshift: int = 3,
     fill_holes: bool = False,
+    use_gpu: bool = False,
 ) -> np.ndarray:
-    """Compute the local effective tissue attenuation using the extended Vermeer model.
+    r"""Smith 2015 depth-resolved attenuation: Vermeer + linearized tail extension.
+
+    Adds a finite-range tail constant ``C ~= I[imax] / (2 mu_E dz)``
+    estimated from a log-gradient fit averaged inside the tissue mask.
+    See ``docs/ATTENUATION_METHODS.md`` for the math.
 
     Parameters
     ----------
-    vol: ndarray
-        OCT volume to process
-    mask: ndarray
-        Optional tissue mask. If none is given the water/tissue
-        interface will be detected from the data.
-    k: int
-        Median filter kernel size (px) applied before the attenuation
-        coefficient computation (applied in the XY direction).
+    vol : ndarray
+        OCT volume in ``(X, Y, Z)`` order.
+    mask : ndarray, optional
+        Tissue mask; auto-detected via :func:`find_tissue_interface` if
+        ``None``.
+    k : int
+        XY median-filter kernel (voxels); ``0`` disables denoising.
     sigma : int
-        Gaussian filter kernel size (px) applied axially before the
-        exponential signal fit used to extend the Alines for the extended
-        Vermeer signal evalution.
+        Axial Gaussian sigma (voxels) for the gradient-based ``mu_E``
+        fit.
     sigma_bottom : int
-        Gaussian filter kernel size (px) applied axially on the bottom slice
-        signal before the extension fit.
-    fill_holes : bool
-        If True, fill holes in the tissue mask before computing attenuation.
+        XY Gaussian sigma applied to the per-A-line ``C`` map.
     dz : int
-        Number of axial pixel to consider when computing the bottom slice
-        signal for the signal extension.
-    res: float
-        Axial resolution in micron / pixel
-    zshift: int
-        Number of pixel under the water-tissue interface to ignore while
-        fitting the exponential function for signal extension.
+        Axial integration window (voxels) for ``I[imax]``.
+    res : float
+        Axial resolution in ``micron/pixel``.
+    zshift : int
+        Voxels below the auto-detected interface to skip.
+    fill_holes : bool
+        Apply morphological hole-filling.
+    use_gpu : bool
+        Forward to the Vermeer core (CuPy when available).
 
-    Returns
-    -------
-    ndarray
-        Computed attenuation coefficients.
+    References
+    ----------
+    Smith et al., IEEE Trans. Med. Imaging 34, 2592 (2015).
     """
-    # First the slice is denoised with a small median filter
-    if k > 0:
-        vol = sitk.GetArrayFromImage(sitk.Median(sitk.GetImageFromArray(vol), (0, k, k)))
-
-    # Computing tissue mask
+    vol = _median_xy_filter(vol, k)
     if mask is None:
-        # Detecting the water / tissue interface
-        interface = find_tissue_interface(vol, s_xy=3, s_z=1, order=1, use_log=True)
-        mask = mask_under_interface(vol, interface + zshift, return_mask=True)
+        mask = _auto_tissue_mask(vol, zshift)
 
-    # Lets fit an exponential function on each Aline to extend the tissue slice.
+    # Per-A-line slope estimate mu*dz (round-trip), averaged inside the mask.
     exp_fit = get_gradient_attenuation(gaussian_filter(vol, (0, 0, sigma)))
     exp_fit = np.ma.masked_array(exp_fit, ~mask).mean(axis=2)
-
-    # Fill holes left by NaN values
     exp_fit[np.isnan(exp_fit)] = 0
 
-    # Get the signal at the interface for each Aline
+    # Mean intensity in a window of `dz` voxels above the bottom interface.
     interface_bottom = vol.shape[2] - get_interface_depth_from_mask(mask[:, :, ::-1]) - 1 - dz
     mask_bottom = mask_under_interface(vol, interface_bottom, return_mask=True)
     mask_bottom = (mask_bottom * mask).astype(bool)
     i0 = np.ma.masked_array(vol, ~mask_bottom).mean(axis=2)
 
-    # Compute the end-of-scan bias
+    # Linearized end-of-scan tail integral C ~= I[imax] / (2 * mu_E * dz).
     epsilon = 1e-3
     C = np.zeros_like(i0)
-    C[exp_fit > epsilon] = i0[exp_fit > epsilon] / exp_fit[exp_fit > epsilon]
+    C[exp_fit > epsilon] = i0[exp_fit > epsilon] / (2.0 * exp_fit[exp_fit > epsilon])
     C = gaussian_filter(C, sigma_bottom)
 
-    # Compute the attenuation
-    attn_cropped = get_attenuation_vermeer2013(vol, dz=res * 1e-06, mask=mask, C=C)
+    attn = get_attenuation_vermeer2013(vol, dz=res * 1e-6, mask=mask, C=C, use_gpu=use_gpu)
+    return _finalize_attenuation(attn, mask, fill_holes)
 
-    # Remove NaN
-    attn_cropped[np.isnan(attn_cropped)] = 0
 
-    # Only keep attn within the mask
-    attn_cropped[~mask.astype(bool)] = 0
+# Backwards-compatible alias for the previous name.
+def get_extended_attenuation_vermeer2013(*args: Any, **kwargs: Any) -> np.ndarray:
+    """Forward to :func:`get_attenuation_smith2015` (deprecated alias)."""
+    import warnings
 
-    # Fill holes
-    if fill_holes:
-        attn_cropped = sitk.GetArrayFromImage(sitk.GrayscaleFillhole(sitk.GetImageFromArray(attn_cropped)))
+    warnings.warn(
+        "get_extended_attenuation_vermeer2013 has been renamed to "
+        "get_attenuation_smith2015 (Smith et al., IEEE TMI 2015). The "
+        "old name is kept for backwards compatibility and will be "
+        "removed in a future release.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return get_attenuation_smith2015(*args, **kwargs)
 
-    return attn_cropped
+
+def get_attenuation_liu2019(
+    vol: np.ndarray,
+    mask: np.ndarray | None = None,
+    k: int = 10,
+    res: float = 6.5,
+    zshift: int = 3,
+    tail_fit_voxels: int = 20,
+    fill_holes: bool = False,
+    use_gpu: bool = False,
+) -> np.ndarray:
+    r"""Liu 2019 optimized depth-resolved attenuation estimator.
+
+    Vermeer 2014 with the *exact* finite-range tail
+    ``C = I[imax] / (exp(2 mu_E dz) - 1)`` and a per-A-line
+    least-squares fit for ``mu_E``. See
+    ``docs/ATTENUATION_METHODS.md`` for the math.
+
+    Parameters
+    ----------
+    vol : ndarray
+        OCT volume in ``(X, Y, Z)`` order.
+    mask : ndarray, optional
+        Tissue mask; auto-detected if ``None``.
+    k : int
+        XY median-filter kernel (voxels).
+    res : float
+        Axial resolution in ``micron/pixel``.
+    zshift : int
+        Voxels to skip below the auto-detected interface.
+    tail_fit_voxels : int
+        Bottom-of-A-line voxels for the ``mu_E`` LSQ fit
+        (``2 <= tail_fit_voxels <= nz``).
+    fill_holes : bool
+        Apply morphological hole-filling.
+    use_gpu : bool
+        Forward to the Vermeer core (CuPy when available).
+
+    References
+    ----------
+    Liu et al., J. Biomed. Opt. 24, 035002 (2019).
+    Neubrand et al., J. Biomed. Opt. 28, 066001 (2023).
+    """
+    vol = _median_xy_filter(vol, k)
+    if mask is None:
+        mask = _auto_tissue_mask(vol, zshift)
+
+    nz = vol.shape[2]
+    n_tail = int(np.clip(tail_fit_voxels, 2, nz))
+    dz_m = res * 1e-6
+
+    slope = _lstsq_tail_slope(vol[:, :, -n_tail:])
+    mu_E_per_m = np.maximum(-slope / (2.0 * dz_m), 0.0)
+    C = _exact_tail_C(vol[:, :, -1].astype(np.float64), mu_E_per_m, dz_m)
+
+    attn = get_attenuation_vermeer2013(vol, dz=dz_m, mask=mask, C=C.astype(np.float32), use_gpu=use_gpu)
+    return _finalize_attenuation(attn, mask, fill_holes)
+
+
+def get_attenuation_li2020(
+    vol: np.ndarray,
+    mask: np.ndarray | None = None,
+    k: int = 10,
+    res: float = 6.5,
+    zshift: int = 3,
+    snr_threshold_db: float = 6.0,
+    noise_floor: float | None = None,
+    tail_fit_voxels: int = 20,
+    fill_holes: bool = False,
+    use_gpu: bool = False,
+) -> np.ndarray:
+    r"""Li 2020 robust depth-resolved attenuation: noise-floor + tail truncation.
+
+    Subtracts a constant noise floor, truncates each A-line where SNR
+    falls below ``snr_threshold_db``, then runs Liu 2019. See
+    ``docs/ATTENUATION_METHODS.md`` for the math.
+
+    Parameters
+    ----------
+    vol : ndarray
+        OCT volume in ``(X, Y, Z)`` order.
+    mask : ndarray, optional
+        Tissue mask; auto-detected if ``None``.
+    k : int
+        XY median-filter kernel (voxels).
+    res : float
+        Axial resolution in ``micron/pixel``.
+    zshift : int
+        Voxels to skip below the auto-detected interface.
+    snr_threshold_db : float
+        Per-voxel SNR (vs noise floor) below which the A-line is
+        truncated. ``6 dB`` is the Li 2020 value.
+    noise_floor : float, optional
+        Constant to subtract; estimated from out-of-mask voxels (or
+        the deepest 5 voxels) when ``None``.
+    tail_fit_voxels : int
+        Bottom-of-A-line voxels for the ``mu_E`` LSQ fit.
+    fill_holes : bool
+        Apply morphological hole-filling.
+    use_gpu : bool
+        Forward to the Vermeer core (CuPy when available).
+
+    References
+    ----------
+    Li et al., Biomed. Opt. Express 11, 672 (2020).
+    """
+    vol = _median_xy_filter(vol, k)
+    if mask is None:
+        mask = _auto_tissue_mask(vol, zshift)
+    mask = mask.astype(bool)
+
+    if noise_floor is None:
+        out_of_mask = vol[~mask]
+        noise_floor = float(np.median(out_of_mask)) if out_of_mask.size > 100 else float(np.median(vol[:, :, -5:]))
+    vol_clean = np.clip(vol.astype(np.float32) - noise_floor, 0.0, None)
+
+    # Per-A-line truncation depth where SNR drops below threshold.
+    snr_signal_threshold = max(noise_floor, 1e-6) * (10.0 ** (snr_threshold_db / 10.0))
+    above = vol > snr_signal_threshold
+    nz = vol.shape[2]
+    z_idx = np.arange(nz)
+    z_above = np.where(above, z_idx[None, None, :], -1)
+    cutoff = z_above.max(axis=2)
+    cutoff = np.where(cutoff >= 0, cutoff, nz - 1)
+    z_grid = np.broadcast_to(z_idx[None, None, :], vol.shape)
+    trunc_mask = (z_grid <= cutoff[..., None]) & mask
+
+    return get_attenuation_liu2019(
+        vol_clean,
+        mask=trunc_mask,
+        k=0,
+        res=res,
+        zshift=zshift,
+        tail_fit_voxels=tail_fit_voxels,
+        fill_holes=fill_holes,
+        use_gpu=use_gpu,
+    )
 
 
 def get_attenuation_faber2004(
     vol: np.ndarray, mask: np.ndarray | None = None, dz: float = 6.5e-6, N: int = 4
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Estimates the attenuation coefficient using the Faber2004 model.
+    r"""Faber 2004 single-scattering attenuation estimate (one mu_t per A-line).
+
+    Fits the confocal-PSF / Beer-Lambert model
+    ``I(z) ~ 1/(1 + ((z-z0)/zR)**2) * exp(-2 mu_t z)`` per A-line. See
+    ``docs/ATTENUATION_METHODS.md`` for the model and its limitations.
 
     Parameters
     ----------
     vol : ndarray
-        3D Reflectivity OCT data
-    mask : ndarray
-        Tissue mask to control which points to use in each A-lines. (if None, the whole A-line is used)
+        OCT volume in ``(X, Y, Z)`` order.
+    mask : ndarray, optional
+        Per-voxel mask. Only masked samples are passed to the optimizer;
+        the depth axis is rebuilt from ``z[mask_aline]``.
     dz : float
-        Axial resolution (in microns/pixel)
+        Axial pixel size in metres.
     N : int
-        Size of the XY uniform filter used to average A-lines together
+        XY uniform-filter window before fitting (``0`` skips).
 
-    Return
-    ------
-    ndarray
-        Estimated attenuation coefficient map (computes a single mu_t per A-line)
+    Returns
+    -------
+    attn, r_length, z_focus : ndarray
+        Per-A-line ``mu_t`` (1/m), Rayleigh length ``zR`` (m), and focal
+        depth ``z0`` (m).
 
     Notes
     -----
-    - This algorithm uses the confocal PSF and an single-scattering photon model.
-    - Assumes a 4X objective setup for now.
+    Hard-coded for a 4x objective (``w0 = 4.88 um``, ``lambda0 = 1030 nm``,
+    ``n = 1.33``); adjust the constants in the body for other setups.
 
     References
     ----------
-    - Faber et al. Quantitative measurement of attenuation coefficients of weakly
-      scattering media using optical coherence tomography. Opt. Express 12, 4353-4365 (2004).
+    Faber et al., Opt. Express 12, 4353 (2004).
     """
     # Average the A-line together in the XY plane
     if N > 0:
@@ -252,10 +468,13 @@ def get_attenuation_faber2004(
                 zp = np.where(mask_aline)[0][0]
                 data = vol[x, y, :][mask_aline]
                 data /= 1.0 * data.max()
+                # Use the masked depth samples so `data` and `z_aligned`
+                # have the same length even when the mask is non-contiguous.
+                z_aligned = z[mask_aline] - z[zp]
                 p_opt = minimize(
                     f,
                     p0,
-                    args=(data, z[zp::] - z[zp]),
+                    args=(data, z_aligned),
                     bounds=((None, None), (zr / 2.0, 2.0 * zr), (0.0, None)),
                 )
                 if p_opt.success:

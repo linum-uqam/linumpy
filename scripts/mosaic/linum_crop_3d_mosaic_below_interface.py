@@ -76,11 +76,14 @@ def main() -> None:
     # Load volume
     vol, res = read_omezarr(input_path, level=0)
     print("Loaded volume shape:", vol.shape)
+    vol_shape = vol.shape
+    vol_chunks = vol.chunks
+    vol_data = np.nan_to_num(vol[:], nan=0.0, posinf=0.0, neginf=0.0)
     # res may be stored in mm (NGFF convention) or µm (legacy). Convert to µm.
     resolution_um = res[0] * 1000 if resolution_is_mm(res) else float(res[0])
 
     vol_crop, avg_iface = crop_below_interface(
-        vol,
+        vol_data,
         depth_um=args.depth,
         resolution_um=resolution_um,
         sigma_xy=args.sigma_xy,
@@ -96,25 +99,24 @@ def main() -> None:
     print(f"Cropping depth: {depth_px} voxels ({args.depth} um)")
 
     # Compute end index for cropping
-    surface_idx = max(0, min(avg_iface, vol.shape[0] - 1))
+    surface_idx = max(0, min(avg_iface, vol_shape[0] - 1))
     end_idx = surface_idx + depth_px
-    if end_idx > vol.shape[0]:
-        out_shape = (end_idx, vol.shape[1], vol.shape[2]) if args.pad_after else vol.shape
+    if end_idx > vol_shape[0]:
+        out_shape = (end_idx, vol_shape[1], vol_shape[2]) if args.pad_after else vol_shape
         store = create_tempstore()
-        out_vol = zarr.open_array(store, mode="w", shape=out_shape, dtype=np.float32, chunks=vol.chunks)
-        out_vol[: vol.shape[0]] = vol[:]
-        vol = out_vol
+        out_vol = zarr.open_array(store, mode="w", shape=out_shape, dtype=np.float32, chunks=vol_chunks)
+        out_vol[: vol_shape[0]] = vol_data
         start_idx = 0 if not args.crop_before_interface else surface_idx
-        vol_crop = np.asarray(vol[start_idx:end_idx, :, :])
+        vol_crop = np.asarray(out_vol[start_idx:end_idx, :, :])
     else:
         start_idx = 0 if not args.crop_before_interface else surface_idx
 
-    crop_dask = da.from_array(vol_crop, chunks=vol.chunks)
+    crop_dask = da.from_array(vol_crop, chunks=vol_chunks)
     # Save cropped volume as OME-Zarr
-    save_omezarr(crop_dask, output_path, voxel_size=res, chunks=vol.chunks, n_levels=args.n_levels)
+    save_omezarr(crop_dask, output_path, voxel_size=res, chunks=vol_chunks, n_levels=args.n_levels)
 
     # Collect metrics using helper function
-    original_shape = vol.shape
+    original_shape = vol_shape
     collect_interface_crop_metrics(
         detected_interface=avg_iface,
         crop_depth_px=depth_px,

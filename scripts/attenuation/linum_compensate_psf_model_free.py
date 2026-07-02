@@ -50,12 +50,19 @@ def main() -> None:
     # Load ome-zarr data
     vol, res = read_omezarr(args.input_zarr, level=0)
     vol_data = vol[:]
+    finite_mask = np.isfinite(vol_data)
     if args.percentile_max is not None:
-        vol_data = np.clip(vol_data, None, np.percentile(vol_data, args.percentile_max))
+        finite_values = vol_data[finite_mask]
+        if finite_values.size:
+            vol_data = np.clip(vol_data, None, np.percentile(finite_values, args.percentile_max))
 
+    vol_data = np.nan_to_num(vol_data, nan=0.0, posinf=0.0, neginf=0.0)
     aip = np.mean(vol_data, axis=0)
-    otsu = threshold_otsu(aip)
-    agarose_mask = aip < otsu
+    if np.any(aip > 0.0):
+        otsu = threshold_otsu(aip[aip > 0.0])
+        agarose_mask = np.logical_and(aip < otsu, aip > 0.0)
+    else:
+        agarose_mask = np.zeros_like(aip, dtype=bool)
 
     interface = find_tissue_interface(vol[:])
     mask = mask_under_interface(vol[:], interface, return_mask=True)
@@ -65,8 +72,8 @@ def main() -> None:
     agarose_mask = np.logical_and(agarose_mask, ~mask_all)
 
     profile = np.reshape(vol_data, (len(vol_data), -1))
-    profile = np.array([profile[:, i] for i in range(profile.shape[-1]) if agarose_mask.reshape(-1)[i]]).T
-    profile = np.mean(profile, axis=-1)
+    profile = profile[:, agarose_mask.reshape(-1)]
+    profile = np.mean(profile, axis=-1) if profile.size else np.zeros(len(vol_data), dtype=vol_data.dtype)
 
     # TODO: Prevent this from happening (happens when the profile is all 0s).
     background = 0.0
@@ -107,7 +114,7 @@ def main() -> None:
     if args.percentile_max is not None:
         # Reload original data
         vol, res = read_omezarr(args.input_zarr, level=0)
-        vol_data = vol[:]
+        vol_data = np.nan_to_num(vol[:], nan=0.0, posinf=0.0, neginf=0.0)
 
     # apply correction
     vol_corr = vol_data / (1.0 + psf.reshape((-1, 1, 1)))
