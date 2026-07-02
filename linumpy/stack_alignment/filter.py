@@ -1,9 +1,14 @@
-"""Outlier filtering and tile-offset correction for inter-slice shift fields."""
-
-from typing import cast
+"""Outlier filtering for inter-slice shift fields."""
 
 import numpy as np
 import pandas as pd
+
+
+def _get_loc_int(index: pd.Index, key: int) -> int:
+    """Return integer position for a unique-index key."""
+    loc = index.get_loc(key)
+    assert isinstance(loc, int)
+    return loc
 
 
 def filter_outlier_shifts(
@@ -48,7 +53,8 @@ def filter_outlier_shifts(
         Filtered DataFrame with outlier shifts corrected.
     """
     df = shifts_df.copy()
-    shift_mag = (df["x_shift_mm"] ** 2 + df["y_shift_mm"] ** 2) ** 0.5
+    _sm = np.sqrt(df["x_shift_mm"].to_numpy() ** 2 + df["y_shift_mm"].to_numpy() ** 2)
+    shift_mag = pd.Series(_sm, index=df.index)
 
     if method == "iqr":
         q1 = shift_mag.quantile(0.25)
@@ -91,7 +97,7 @@ def filter_outlier_shifts(
 
     elif method in ["local", "iqr"]:
         for idx in df[outlier_mask].index:
-            pos: int = cast("int", df.index.get_loc(idx))
+            pos = _get_loc_int(df.index, idx)
             neighbor_vals_x, neighbor_vals_y = [], []
             for offset in [-2, -1, 1, 2]:
                 neighbor_pos = pos + offset
@@ -126,7 +132,7 @@ def filter_outlier_shifts(
             return False
 
         for idx in df[outlier_mask].index:
-            pos: int = cast("int", df.index.get_loc(idx))
+            pos = _get_loc_int(df.index, idx)
             step_x = df.loc[idx, "x_shift_mm"]
             step_y = df.loc[idx, "y_shift_mm"]
             step_mag = shift_mag[idx]
@@ -306,14 +312,20 @@ def filter_step_outliers(
         Filtered DataFrame.
     """
     df = shifts_df.copy()
-    shift_mag = (df["x_shift_mm"] ** 2 + df["y_shift_mm"] ** 2) ** 0.5
+    _sm2 = np.sqrt(df["x_shift_mm"].to_numpy() ** 2 + df["y_shift_mm"].to_numpy() ** 2)
+    shift_mag = pd.Series(_sm2, index=df.index)
 
     if method == "local_mad":
         outlier_mask = pd.Series(False, index=df.index)
         for i in range(len(df)):
             lo = max(0, i - window)
             hi = min(len(df), i + window + 1)
-            neighbour_mags = np.concatenate([shift_mag.iloc[lo:i].to_numpy(), shift_mag.iloc[i + 1 : hi].to_numpy()])
+            neighbour_mags = np.concatenate(
+                [
+                    np.asarray(shift_mag.iloc[lo:i]),
+                    np.asarray(shift_mag.iloc[i + 1 : hi]),
+                ]
+            )
             if len(neighbour_mags) == 0:
                 continue
             local_med = float(np.median(neighbour_mags))
@@ -333,7 +345,8 @@ def filter_step_outliers(
             return df
 
     for idx in df[outlier_mask].index:
-        pos: int = cast("int", df.index.get_loc(idx))
+        df.loc[idx]
+        pos = _get_loc_int(df.index, idx)
         step_x = df.loc[idx, "x_shift_mm"]
         step_y = df.loc[idx, "y_shift_mm"]
         step_mag = float(shift_mag.iloc[pos])
@@ -364,7 +377,7 @@ def filter_step_outliers(
                 df.loc[idx, "x_shift"] *= scale
                 df.loc[idx, "y_shift"] *= scale
         else:
-            pos = cast("int", df.index.get_loc(idx))
+            pos = _get_loc_int(df.index, idx)
             neighbor_vals_x, neighbor_vals_y = [], []
             for offset in range(-window, window + 1):
                 if offset == 0:
@@ -378,15 +391,16 @@ def filter_step_outliers(
                 df.loc[idx, "x_shift_mm"] = float(np.median(neighbor_vals_x))
                 df.loc[idx, "y_shift_mm"] = float(np.median(neighbor_vals_y))
                 if "x_shift" in df.columns:
+                    idx_loc = _get_loc_int(df.index, idx)
                     neighbor_px_x = [
-                        df.loc[df.index[pos + o], "x_shift"]
+                        df.loc[df.index[idx_loc + o], "x_shift"]
                         for o in range(-window, window + 1)
-                        if o != 0 and 0 <= pos + o < len(df) and "x_shift" in df.columns
+                        if o != 0 and 0 <= idx_loc + o < len(df) and "x_shift" in df.columns
                     ]
                     neighbor_px_y = [
-                        df.loc[df.index[pos + o], "y_shift"]
+                        df.loc[df.index[idx_loc + o], "y_shift"]
                         for o in range(-window, window + 1)
-                        if o != 0 and 0 <= pos + o < len(df) and "x_shift" in df.columns
+                        if o != 0 and 0 <= idx_loc + o < len(df) and "x_shift" in df.columns
                     ]
                     if neighbor_px_x:
                         df.loc[idx, "x_shift"] = float(np.median(neighbor_px_x))

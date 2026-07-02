@@ -84,11 +84,7 @@ def apply_xy_shift(img: np.ndarray, reference: np.ndarray, dx: int, dy: int) -> 
     resampler = sitk.ResampleImageFilter()
     resampler.SetReferenceImage(fixed)
     resampler.SetInterpolator(sitk.sitkLinear)
-
-    # Use a small positive value instead of zero to avoid black dots at boundaries
-    nonzero_vals = img[img > 0]
-    default_val = float(np.percentile(nonzero_vals, 1)) if len(nonzero_vals) > 0 else 0.0
-    resampler.SetDefaultPixelValue(default_val)
+    resampler.SetDefaultPixelValue(0)
     resampler.SetTransform(transform)
     warped_moving_image = resampler.Execute(moving)
     img_warped = sitk.GetArrayFromImage(warped_moving_image)

@@ -1,7 +1,5 @@
 """Attenuation estimation and profile recovery models for OCT volumes."""
 
-from linumpy.config.threads import worker_initializer
-
 import itertools
 import multiprocessing
 from typing import Literal, overload
@@ -20,6 +18,7 @@ from scipy.optimize import minimize
 from skimage.filters import threshold_li
 
 from linumpy.cli.args import get_available_cpus
+from linumpy.config.threads import worker_initializer
 from linumpy.geometry.crop import mask_under_interface
 from linumpy.geometry.interface import find_tissue_interface, get_interface_depth_from_mask
 from linumpy.intensity.normalize import eqhist, normalize

@@ -3,28 +3,27 @@
 """Detect and fix the focal curvature in a 3D mosaic grid."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy.config.threads  # noqa: F401
+import linumpy._thread_config  # noqa: F401
 
 import argparse
-from pathlib import Path
 
 import dask.array as da
 import numpy as np
 import zarr
 from basicpy import BaSiC
 
-from linumpy.geometry.interface import find_tissue_interface
 from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
+from linumpy.preproc.xyzcorr import findTissueInterface
 
 # TODO: Replace by interpolation using deformation field
 # TODO: optimize for full resolution data
 # TODO: parallelize the correction
 
 
-def _build_arg_parser() -> argparse.ArgumentParser:
+def _build_arg_parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_zarr", type=Path, help="Path to file (.ome.zarr) containing the 3D mosaic grid.")
-    p.add_argument("output_zarr", type=Path, help="Corrected 3D mosaic grid file path (.ome.zarr).")
+    p.add_argument("input_zarr", help="Path to file (.ome.zarr) containing the 3D mosaic grid.")
+    p.add_argument("output_zarr", help="Corrected 3D mosaic grid file path (.ome.zarr).")
     p.add_argument("--n_levels", type=int, default=5, help="Number of levels in pyramid representation.")
     p.add_argument(
         "--sigma_xy",
@@ -40,7 +39,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    """Run the focal curvature detection script."""
     # Parse the arguments
     parser = _build_arg_parser()
     args = parser.parse_args()
@@ -52,9 +50,9 @@ def main() -> None:
     # Load ome-zarr data
     vol, res = read_omezarr(input_zarr, level=0)
     dtype = vol.dtype
-    data = np.moveaxis(np.asarray(vol), 0, -1)
+    data = np.moveaxis(vol, 0, -1)
     # Estimate the water-tissue interface
-    z0 = find_tissue_interface(np.abs(data), s_xy=args.sigma_xy, s_z=args.sigma_z, use_log=args.use_log)
+    z0 = findTissueInterface(np.abs(data), s_xy=args.sigma_xy, s_z=args.sigma_z, useLog=args.use_log)
 
     # Extract the tile shape from the filename
     tile_shape = vol.chunks
@@ -85,9 +83,7 @@ def main() -> None:
     corr = ((flatfield - 1) * z0.mean()).astype(int)
 
     temp_store = create_tempstore()
-    _vol_corr = zarr.open(temp_store, mode="w", shape=vol.shape, dtype=dtype, chunks=tile_shape)
-    assert isinstance(_vol_corr, zarr.Array)
-    vol_corr = _vol_corr
+    vol_corr = zarr.open(temp_store, mode="w", shape=vol.shape, dtype=dtype, chunks=tile_shape)
 
     for i in range(nx):
         for j in range(ny):
@@ -95,7 +91,7 @@ def main() -> None:
             rmax = (i + 1) * tile_shape[1]
             cmin = j * tile_shape[2]
             cmax = (j + 1) * tile_shape[2]
-            tile = np.asarray(vol[:, rmin:rmax, cmin:cmax])
+            tile = vol[:, rmin:rmax, cmin:cmax]
 
             # Apply the correction (shift the focal plane to flatten it)
             for m in range(tile.shape[1]):
