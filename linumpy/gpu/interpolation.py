@@ -155,7 +155,9 @@ def _resize_gpu(image: Any, output_shape: Any, order: Any, anti_aliasing: Any) -
     from cupyx.scipy.ndimage import zoom as cp_zoom
 
     input_was_gpu = is_cupy_array(image)
-    img_gpu = cp.asarray(image if image.dtype == np.float32 else image.astype(np.float32))
+    # Cast to float32 *after* H2D so PCIe carries the smaller (or unchanged) dtype.
+    # `copy=False` skips the device copy when the array is already float32.
+    img_gpu = cp.asarray(image).astype(np.float32, copy=False)
 
     # Scale factors: input/output for Gaussian sigma, output/input for zoom.
     scale_factors = tuple(i / o for i, o in zip(image.shape, output_shape, strict=False))

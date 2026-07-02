@@ -18,6 +18,8 @@ blending quality at tile boundaries.
 """
 
 # Configure thread limits before numpy/scipy imports
+import linumpy.config.threads  # noqa: F401
+
 import argparse
 import json
 import logging
@@ -26,7 +28,6 @@ from typing import Any
 
 import numpy as np
 
-import linumpy.config.threads  # noqa: F401
 from linumpy.io.zarr import read_omezarr
 from linumpy.mosaic.grid import add_volume_to_mosaic
 from linumpy.mosaic.motor import (
@@ -83,6 +84,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--output_refinements", type=str, default=None, help="Output JSON file to save computed refinements for analysis."
     )
     p.add_argument("--overwrite", "-f", action="store_true", help="Overwrite output if it exists.")
+    p.add_argument("--n_levels", type=int, default=3, help="Number of levels in pyramid representation. [%(default)s]")
     return p
 
 
@@ -291,7 +293,7 @@ def main() -> None:
 
     from linumpy.io.zarr import save_omezarr
 
-    save_omezarr(da.from_array(output), output_file, resolution, n_levels=3)
+    save_omezarr(da.from_array(output), output_file, resolution, n_levels=args.n_levels)
 
     # Collect metrics
     from linumpy.metrics import PipelineMetrics

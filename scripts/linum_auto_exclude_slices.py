@@ -20,12 +20,14 @@ Usage
 import argparse
 import json
 import logging
+import operator
 import os
 import re
 from pathlib import Path
 from typing import Any
 
 from linumpy.io import slice_config as slice_config_io
+from linumpy.metrics import collect_auto_exclude_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +90,7 @@ def load_registration_metrics(transforms_dir: Path) -> Any:
         if z_corr is not None:
             metrics.append((slice_id, float(z_corr)))
 
-    metrics.sort(key=lambda x: x[0])
+    metrics.sort(key=operator.itemgetter(0))
     return metrics
 
 
@@ -122,7 +124,7 @@ def main() -> None:
 
     metrics = load_registration_metrics(args.transforms_dir)
     if not metrics:
-        logger.warning("No registration metrics found in %s — copying slice_config unchanged", args.transforms_dir)
+        logger.warning("No registration metrics found in %s -- copying slice_config unchanged", args.transforms_dir)
         slice_config_io.stamp_many(args.slice_config_in, args.slice_config_out, {})
         return
 
@@ -135,7 +137,7 @@ def main() -> None:
         ids = [s[0] for s in cluster]
         corrs = [s[1] for s in cluster]
         logger.info(
-            "Bad cluster: slices z%s–z%s (%d pairs, z_corr range %.3f–%.3f)",
+            "Bad cluster: slices z%s-z%s (%d pairs, z_corr range %.3f-%.3f)",
             str(ids[0]).zfill(2),
             str(ids[-1]).zfill(2),
             len(cluster),
@@ -156,6 +158,16 @@ def main() -> None:
         len(updates),
         len(clusters),
         args.slice_config_out,
+    )
+
+    excluded_slice_ids = sorted({int(s) for cluster in clusters for s, _ in cluster})
+    collect_auto_exclude_metrics(
+        output_path=Path(args.slice_config_out),
+        num_total_slices=len(metrics) + 1,  # n pairwise pairs + 1 ≈ slice count
+        excluded_ids=excluded_slice_ids,
+        cluster_count=len(clusters),
+        z_corr_threshold=float(args.z_corr_threshold),
+        consecutive_threshold=int(args.consecutive_threshold),
     )
 
 

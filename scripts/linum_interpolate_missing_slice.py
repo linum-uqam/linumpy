@@ -49,6 +49,7 @@ import numpy as np
 from linumpy.cli.args import add_overwrite_arg, assert_output_exists
 from linumpy.io import slice_config as slice_config_io
 from linumpy.io.zarr import read_omezarr, save_omezarr
+from linumpy.metrics import collect_slice_interpolation_metrics
 from linumpy.mosaic.interpolation import (
     interpolate_average,
     interpolate_weighted,
@@ -366,6 +367,8 @@ def _finalise(args: argparse.Namespace) -> None:
     updates: dict[str, dict[str, object]] = {}
     interpolated_ids: set[str] = set()
     failed_ids: set[str] = set()
+    fallback_reasons: dict[str, int] = {}
+    method_counts: dict[str, int] = {}
     import csv
 
     for frag_path in fragment_paths:
@@ -387,6 +390,12 @@ def _finalise(args: argparse.Namespace) -> None:
                     target = _FRAGMENT_COLUMN_MAP.get(col)
                     if target:
                         entry[target] = val
+                method = (raw.get("method_used") or "").strip()
+                if method:
+                    method_counts[method] = method_counts.get(method, 0) + 1
+                reason = (raw.get("fallback_reason") or "").strip()
+                if reason:
+                    fallback_reasons[reason] = fallback_reasons.get(reason, 0) + 1
                 if failed:
                     failed_ids.add(sid)
                     entry["interpolation_method_used"] = ""
@@ -398,6 +407,14 @@ def _finalise(args: argparse.Namespace) -> None:
     print(
         f"Finalise: merged {len(fragment_paths)} fragment(s), "
         f"{len(interpolated_ids)} interpolated, {len(failed_ids)} failed → {args.slice_config_out}"
+    )
+    collect_slice_interpolation_metrics(
+        output_path=Path(args.slice_config_out),
+        n_fragments=len(fragment_paths),
+        interpolated_ids=list(interpolated_ids),
+        failed_ids=list(failed_ids),
+        fallback_reasons=fallback_reasons,
+        method_counts=method_counts,
     )
 
 
