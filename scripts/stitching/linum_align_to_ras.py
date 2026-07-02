@@ -10,6 +10,7 @@ directly to the zarr file (resampling) or stored in OME-Zarr metadata.
 
 # Configure thread limits before numpy/scipy imports
 import linumpy.config.threads  # noqa: F401
+from linumpy.config.threads import configure_all_libraries
 
 import argparse
 import json
@@ -23,15 +24,22 @@ import numpy as np
 import SimpleITK as sitk
 from tqdm.auto import tqdm
 
+from linumpy.imaging import orientation as orientation_lib
 from linumpy.imaging.orientation import (
     apply_orientation_transform,
+    compute_centered_reference_and_transform,
     parse_orientation_code,
     reorder_resolution,
+    store_transform_in_metadata,
 )
 from linumpy.io.zarr import AnalysisOmeZarrWriter, read_omezarr
 from linumpy.reference import allen
 
 matplotlib.use("Agg")  # Non-interactive backend
+configure_all_libraries()
+
+# Preserve direct helper imports for characterization tests and downstream reuse.
+sitk_transform_to_affine_matrix = orientation_lib.sitk_transform_to_affine_matrix
 
 # Constants
 DEFAULT_ALLEN_RESOLUTION = 100
@@ -220,91 +228,6 @@ def create_registration_progress_callback(
 
 
 # =============================================================================
-# Transform utilities
-# =============================================================================
-
-
-def sitk_transform_to_affine_matrix(transform: sitk.Transform) -> np.ndarray:
-    """
-    Convert SimpleITK transform to 4x4 affine matrix.
-
-    Parameters
-    ----------
-    transform : sitk.Transform
-        SimpleITK Euler3DTransform or AffineTransform
-
-    Returns
-    -------
-    np.ndarray
-        4x4 affine matrix in (Z, Y, X) coordinate ordering, matching the
-        OME-NGFF axis declaration used by the pipeline.
-    """
-    if isinstance(transform, sitk.Euler3DTransform):
-        center = np.array(transform.GetCenter())
-        params = transform.GetParameters()
-        rx, ry, rz = params[:3]
-        translation = np.array(params[3:6])
-
-        # Build rotation matrix from Euler angles
-        cx, cy, cz = np.cos([rx, ry, rz])
-        sx, sy, sz = np.sin([rx, ry, rz])
-
-        r = np.array(
-            [
-                [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx],
-                [sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx],
-                [-sy, cy * sx, cy * cx],
-            ]
-        )
-
-        matrix = np.eye(4)
-        matrix[:3, :3] = r
-        matrix[:3, 3] = translation + center - r @ center
-
-    elif isinstance(transform, sitk.AffineTransform):
-        r = np.array(transform.GetMatrix()).reshape(3, 3)
-        translation = np.array(transform.GetTranslation())
-        center = np.array(transform.GetCenter())
-
-        matrix = np.eye(4)
-        matrix[:3, :3] = r
-        matrix[:3, 3] = translation + center - r @ center
-    else:
-        raise ValueError(f"Unsupported transform type: {type(transform)}")
-
-    # Permute from SimpleITK (X, Y, Z) to our (Z, Y, X) ordering (OME-NGFF axis order).
-    permute = np.array([[0, 0, 1, 0], [0, 1, 0, 0], [1, 0, 0, 0], [0, 0, 0, 1]])
-    return permute @ matrix @ permute.T
-
-
-def store_transform_in_metadata(zarr_path: Path, transform: sitk.Transform) -> None:
-    """Store transform in OME-Zarr metadata as affine coordinate transformation."""
-    affine_matrix = sitk_transform_to_affine_matrix(transform)
-    zattrs_path = Path(zarr_path) / ".zattrs"
-
-    if not zattrs_path.exists():
-        raise FileNotFoundError(f".zattrs not found: {zarr_path}")
-
-    with Path(zattrs_path).open(encoding="utf-8") as f:
-        metadata = json.load(f)
-
-    affine_transform = {"type": "affine", "affine": affine_matrix.flatten().tolist()}
-
-    multiscales = metadata.get("multiscales", [])
-    if not multiscales:
-        raise ValueError("No multiscales entry found in metadata")
-
-    for dataset in multiscales[0].get("datasets", []):
-        existing = dataset.get("coordinateTransformations", [])
-        dataset["coordinateTransformations"] = [affine_transform, *existing]
-
-    with Path(zattrs_path).open("w", encoding="utf-8") as f:
-        json.dump(metadata, f, indent=2)
-
-    print(f"Stored affine transform in metadata: {zattrs_path}")
-
-
-# =============================================================================
 # Resolution utilities
 # =============================================================================
 
@@ -353,96 +276,6 @@ def get_pyramid_resolutions_from_zarr(zarr_path: Path) -> list[float] | None:
             return resolutions
 
     return None
-
-
-# =============================================================================
-# Core processing functions
-# =============================================================================
-
-
-def compute_centered_reference_and_transform(
-    moving_sitk: sitk.Image, transform: sitk.Transform, output_spacing: tuple | None = None
-) -> tuple[sitk.Image, sitk.Transform]:
-    """
-    Compute a reference image and modified transform that centers the output volume.
-
-    This creates an output that is centered in the volume (brain in the middle),
-    preserving the original resolution.
-
-    Parameters
-    ----------
-    moving_sitk : sitk.Image
-        The input moving image
-    transform : sitk.Transform
-        Transform to apply (moving -> fixed/RAS space)
-    output_spacing : tuple, optional
-        Output voxel spacing. If None, uses moving image spacing.
-
-    Returns
-    -------
-    ref : sitk.Image
-        Reference image for resampling, with origin at 0
-    composite_transform : sitk.Transform
-        Modified transform that maps moving image to centered output
-    """
-    if output_spacing is None:
-        output_spacing = moving_sitk.GetSpacing()
-
-    # Get corners of the moving image in physical coordinates
-    size = moving_sitk.GetSize()
-    corners = [
-        (0, 0, 0),
-        (size[0] - 1, 0, 0),
-        (0, size[1] - 1, 0),
-        (0, 0, size[2] - 1),
-        (size[0] - 1, size[1] - 1, 0),
-        (size[0] - 1, 0, size[2] - 1),
-        (0, size[1] - 1, size[2] - 1),
-        (size[0] - 1, size[1] - 1, size[2] - 1),
-    ]
-
-    # Map brain corners to FIXED/RAS space.
-    # The registration transform maps fixed→moving (ResampleImageFilter convention),
-    # so we use its inverse (moving→fixed) to find where the brain corners land
-    # in the fixed (RAS/Allen) coordinate system.
-    inv_transform = transform.GetInverse()
-    transformed_pts = []
-    for idx in corners:
-        phys = moving_sitk.TransformContinuousIndexToPhysicalPoint(idx)
-        transformed_pts.append(inv_transform.TransformPoint(phys))
-
-    pts = np.array(transformed_pts)
-    pts_min = pts.min(axis=0)
-    pts_max = pts.max(axis=0)
-
-    # Compute output size to cover the full transformed brain extent
-    spacing = np.array(output_spacing)
-    extent = pts_max - pts_min
-    new_size = np.ceil(extent / spacing).astype(int)
-
-    # Reference image: origin at (0,0,0), spanning [0, new_size*spacing].
-    # Output voxel p maps to fixed-space coordinate (p + pts_min).
-    ref = sitk.Image([int(s) for s in new_size], moving_sitk.GetPixelIDValue())
-    ref.SetSpacing(tuple(spacing))
-    ref.SetOrigin((0.0, 0.0, 0.0))
-    ref.SetDirection((1, 0, 0, 0, 1, 0, 0, 0, 1))  # Identity direction (RAS)
-
-    # Shift transform: output space → fixed space (translate by pts_min).
-    # This maps output origin (0,0,0) to the brain's fixed-space bounding box minimum.
-    shift_transform = sitk.TranslationTransform(3)
-    shift_transform.SetOffset(tuple(pts_min))
-
-    # Composite transform for resampling:
-    #   output point → (shift) → fixed space → (T) → moving space
-    # SimpleITK CompositeTransform applies transforms in REVERSE order of
-    # addition (the most recently added transform is applied first, matching
-    # ITK's stack convention).  To obtain ``transform(shift(p))`` we must add
-    # ``transform`` first and ``shift`` last.
-    composite = sitk.CompositeTransform(3)
-    composite.AddTransform(transform)  # added first  → applied last (fixed → moving)
-    composite.AddTransform(shift_transform)  # added last → applied first (output → fixed)
-
-    return ref, composite
 
 
 def apply_transform_to_zarr(

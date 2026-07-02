@@ -10,6 +10,8 @@ from linumpy.geometry import galvo as xyzcorr
 # TODO: consider the 'n_repeat' parameter when loading the data
 # TODO: reorder the dimension, position, etc to be n_depths, n_alines and n_bscans
 
+_AXIAL_RES_KEYS = ("axial_resolution", "z_resolution", "axial_res", "dz")
+
 
 class OCT:
     """
@@ -40,8 +42,7 @@ class OCT:
         filename
             Path to the scan_file written by the OCT (.txt)
         """
-        with Path(filename).open() as f:
-            foo = f.read()
+        foo = Path(filename).read_text()
 
         # Process the file input
         foo = foo.split("\n")
@@ -53,6 +54,20 @@ class OCT:
             if val.isnumeric() or val.strip("-").isnumeric():
                 val = int(val)
             self.info[key] = val
+
+        self._apply_axial_res_from_info()
+
+    def _apply_axial_res_from_info(self) -> None:
+        """Set ``self.rz`` from info.txt when an axial-resolution key is present."""
+        for key in _AXIAL_RES_KEYS:
+            if key not in self.info:
+                continue
+            raw = self.info[key]
+            try:
+                self.rz = float(raw)
+            except TypeError, ValueError:
+                warnings.warn(f"Ignoring invalid axial resolution {key}={raw!r}", stacklevel=2)
+            return
 
     def load_image(
         self, crop: bool = True, fix_galvo_shift: bool | int | None = True, fix_camera_shift: bool = False
@@ -72,16 +87,15 @@ class OCT:
 
         Notes
         -----
-        * The returned volume is in this order : z (depth), x (a-line), y (b-scan)
-        * This method doesn't consider repeated a-lines or b-scans yet.
+        * The returned volume is in ``(Z, Y, X)`` order: depth (z), b-scan (y), a-line (x).
+        * When ``info['n_repeat'] > 1``, repeated frames are averaged before galvo/camera correction.
         """
-        # Create numpy array
-        # n_avg is not used yet (n_repeat from info)  # TODO: use the number of averages when loading the data
         n_alines = self.info["nx"]
         n_bscans = self.info["ny"]
         n_extra = self.info["n_extra"]
         n_alines_per_bscan = n_alines + n_extra
         n_z = self.info["bottom_z"] - self.info["top_z"] + 1
+        n_repeat = self.info.get("n_repeat", 1)
 
         # Load the fringe
         files = list(self.directory.glob("image_*.bin"))
@@ -94,6 +108,17 @@ class OCT:
             foo = np.reshape(foo, (n_z, n_alines_per_bscan, n_frames), order="F")
             chunks.append(foo)
         vol = np.concatenate(chunks, axis=2) if len(chunks) > 1 else chunks[0]
+
+        if n_repeat > 1:
+            n_frames = vol.shape[2]
+            if n_frames % n_repeat != 0:
+                warnings.warn(
+                    f"n_repeat={n_repeat} does not divide frame count {n_frames}; skipping averaging.",
+                    stacklevel=2,
+                )
+            else:
+                n_bscans_raw = n_frames // n_repeat
+                vol = vol.reshape(n_z, n_alines_per_bscan, n_bscans_raw, n_repeat).mean(axis=3)
 
         # Compensate camera shift (required for old acquisitions on polymtl server)
         aip = None  # cache for vol.mean(axis=0)
@@ -128,7 +153,8 @@ class OCT:
         if crop:
             vol = vol[:, 0:n_alines, 0:n_bscans]
 
-        return vol
+        # (Z, X, Y) from reshape/crop -> (Z, Y, X) lab convention (D-75)
+        return vol.transpose(0, 2, 1)
 
     @property
     def position_available(self) -> bool:
@@ -137,10 +163,10 @@ class OCT:
 
     @property
     def dimension(self) -> tuple[float, float, float]:
-        """Return the OCT physical dimension in mm. Will be (1, 1, 1) if not found."""
+        """Return the OCT physical dimension in mm as ``(X, Y, Z)`` stage extent."""
         try:
             nz = self.shape[2]
-            rz = self.resolution[2]
+            rz = self.rz / 1000.0
             return self.info["width"] / 1000.0, self.info["height"] / 1000.0, nz * rz
         except KeyError:
             return 1, 1, 1
@@ -158,15 +184,15 @@ class OCT:
 
     @property
     def resolution(self) -> tuple[float, float, float]:
-        """Return the OCT physical resolution in mm.
+        """Return the OCT physical resolution in mm as ``(rz, ry, rx)`` matching ``(Z, Y, X)``.
 
-        Will be (1, 1, 1) if not found.
+        Will be ``(1, 1, 1)`` if lateral keys are missing.
         """
         try:
             rx = self.info["width"] / self.info["nx"] / 1000.0
             ry = self.info["height"] / self.info["ny"] / 1000.0
-            rz = self.rz / 1000.0  # TODO: add this info to the info.txt file
-            return rx, ry, rz
+            rz = self.rz / 1000.0
+            return rz, ry, rx
         except KeyError:
             return 1, 1, 1
 

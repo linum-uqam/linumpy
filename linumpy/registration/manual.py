@@ -1,11 +1,15 @@
 """Manual image registration and correction GUI for z-slice stacks."""
 
+import re
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.widgets import RadioButtons, RangeSlider, Slider
 from scipy.interpolate import RegularGridInterpolator
+
+from linumpy.io.zarr import read_omezarr
 
 PREV_REF_LABEL = "Previous slice as reference"
 NEXT_REF_LABEL = "Next slice as reference"
@@ -438,3 +442,327 @@ def transform_and_rescale_slice(slice: np.ndarray, ty: float, tx: float, theta: 
     transformed_image = apply_scaling(transformed_image, vmin, vmax)
 
     return transformed_image
+
+
+# ---------------------------------------------------------------------------
+# Manual alignment data package export (linum_export_manual_align.py)
+#
+# Reads common-space slices (OME-Zarr) and pairwise registration outputs and
+# produces the AIPs / cross-sections / transforms consumed by the
+# ``linumpy-manual-align`` Napari plugin. Extracted from the script per D-84
+# (#8) / D-86 -- the script remains a thin CLI wrapper around these helpers.
+# ---------------------------------------------------------------------------
+
+
+def _save_aip_npz(
+    aip: np.ndarray,
+    scale: np.ndarray,
+    out_path: Path,
+    center_pos: int | None = None,
+) -> None:
+    """Save one AIP projection to NPZ using the standard schema.
+
+    *center_pos* is the Y index (for XZ cross-sections) or X index (for YZ
+    cross-sections) at which the cross-section was taken.  Stored so the
+    plugin can initialise its interactive slider at the tissue centroid.
+    """
+    kwargs: dict[str, Any] = {"aip": aip.astype(np.float32), "scale": np.array(scale, dtype=float)}
+    if center_pos is not None:
+        kwargs["center_pos"] = np.array(center_pos, dtype=np.int32)
+    np.savez_compressed(str(out_path), **kwargs)
+
+
+def _brightest_index(volume: np.ndarray, axis: int) -> int:
+    """Return the index along *axis* whose summed intensity is highest."""
+    return int(np.argmax(volume.sum(axis=tuple(i for i in range(volume.ndim) if i != axis))))
+
+
+def _save_axis_views(
+    volume: np.ndarray,
+    scale: np.ndarray,
+    sid: int,
+    aips_xz_dir: Path,
+    aips_yz_dir: Path,
+) -> None:
+    """Save XZ and YZ cross-sections as NPZ files.
+
+    Unlike mean projections, single-slice cross-sections preserve structural
+    detail (e.g. tissue boundaries) needed to judge Z-overlap alignment.
+    The slice is chosen at the Y/X position with the highest integrated
+    intensity, so the image is guaranteed to contain tissue even when the
+    tissue does not occupy the geometric center of the field.
+
+    Volume axis order is (Z, Y, X). The cross-sections are:
+      XZ: brightest Y row  → shape (Z, X), scale (Z, X)
+      YZ: brightest X col  → shape (Z, Y), scale (Z, Y)
+    Both are flipped along Z so depth increases downward in the viewer.
+    """
+    if volume.ndim != 3 or min(volume.shape) == 0:
+        return
+
+    scale_arr = np.array(scale, dtype=float)
+    cy = _brightest_index(volume, axis=1)  # best Y row for XZ view
+    cx = _brightest_index(volume, axis=2)  # best X col for YZ view
+
+    views = [
+        # XZ: brightest row (fix Y = cy) → (Z, X), flip Z; center_pos = cy
+        (aips_xz_dir, volume[:, cy, :][::-1, :], scale_arr[[0, 2]] if scale_arr.size >= 3 else scale_arr, cy),
+        # YZ: brightest column (fix X = cx) → (Z, Y), flip Z; center_pos = cx
+        (aips_yz_dir, volume[:, :, cx][::-1, :], scale_arr[[0, 1]] if scale_arr.size >= 3 else scale_arr, cx),
+    ]
+
+    for out_dir, img, img_scale, cp in views:
+        _save_aip_npz(img, img_scale, out_dir / f"slice_z{sid:02d}.npz", center_pos=cp)
+
+
+def _tissue_centroid(profile: np.ndarray) -> float:
+    """Return the intensity-weighted centroid of a 1-D column/row profile.
+
+    Weights are squared so that bright tissue dominates over low-level
+    background noise.  Falls back to the mid-point if the profile is flat.
+    """
+    w = profile.astype(float) ** 2
+    total = w.sum()
+    if total == 0:
+        return float(profile.size) / 2.0
+    return float(np.dot(np.arange(profile.size, dtype=float), w) / total)
+
+
+def _save_xy_aips_for_pair(
+    fixed_arr: np.ndarray,
+    moving_arr: np.ndarray,
+    fixed_scale: np.ndarray,
+    moving_scale: np.ndarray,
+    overlap_px: int,
+    fid: int,
+    mid: int,
+    aips_dir: Path,
+) -> None:
+    """Save paired XY AIPs covering the overlap zone at the edges of each volume.
+
+    ``overlap_px`` is the number of Z voxels (at the working pyramid level) to
+    average at each boundary:
+
+    - **Fixed slice**: last *overlap_px* voxels of Z -- the bottom of the fixed
+      volume, which physically overlaps with the top of the moving volume.
+    - **Moving slice**: first *overlap_px* voxels of Z -- the top of the moving
+      volume, which physically overlaps with the bottom of the fixed volume.
+
+    Both projections cover the same tissue depth, giving matching structure in
+    the XY overlay without relying on registration-derived Z offsets.
+
+    Output filenames follow the same convention as paired XZ/YZ files:
+    ``pair_z{fid:02d}_z{mid:02d}_fixed.npz`` and
+    ``pair_z{fid:02d}_z{mid:02d}_moving.npz``.
+    """
+    if fixed_arr.ndim != 3 or moving_arr.ndim != 3:
+        return
+    if min(fixed_arr.shape) == 0 or min(moving_arr.shape) == 0:
+        return
+
+    nz_f = fixed_arr.shape[0]
+    nz_m = moving_arr.shape[0]
+    slab_f = min(overlap_px, nz_f)
+    slab_m = min(overlap_px, nz_m)
+
+    fixed_slab = fixed_arr[nz_f - slab_f :]
+    moving_slab = moving_arr[:slab_m]
+
+    fixed_aip = fixed_slab.mean(axis=0).astype(np.float32)
+    moving_aip = moving_slab.mean(axis=0).astype(np.float32)
+
+    pair_stem = f"pair_z{fid:02d}_z{mid:02d}"
+    _save_aip_npz(fixed_aip, np.array(fixed_scale, dtype=float), aips_dir / f"{pair_stem}_fixed.npz")
+    _save_aip_npz(moving_aip, np.array(moving_scale, dtype=float), aips_dir / f"{pair_stem}_moving.npz")
+
+
+def _save_axis_views_for_pair(
+    fixed_arr: np.ndarray,
+    moving_arr: np.ndarray,
+    fixed_scale: np.ndarray,
+    moving_scale: np.ndarray,
+    fixed_z: int,
+    moving_z: int,
+    fid: int,
+    mid: int,
+    aips_xz_dir: Path,
+    aips_yz_dir: Path,
+) -> None:
+    """Save paired XZ/YZ cross-sections that share the same column position.
+
+    Column selection strategy
+    -------------------------
+    Rather than picking the global intensity peak (which is biased toward
+    whichever slice is brighter), we:
+
+    1. Average a ±5 % Z-slab around each volume's overlap depth to suppress
+       noisy single-slice artefacts at the section boundary.
+    2. Compute the intensity-weighted centroid of the column profile for each
+       slice independently and take their average.  The centroid is robust to
+       lateral tissue displacement between consecutive slices, which is exactly
+       the misalignment the plugin is designed to correct.
+
+    Both slices are then cut at this shared Y (XZ) and X (YZ) column,
+    guaranteeing that consecutive slices always show the same anatomical
+    cross-section plane.
+
+    Output filenames: ``pair_z{fid:02d}_z{mid:02d}_fixed.npz`` and
+    ``pair_z{fid:02d}_z{mid:02d}_moving.npz``.
+    """
+    if fixed_arr.ndim != 3 or moving_arr.ndim != 3:
+        return
+    if min(fixed_arr.shape) == 0 or min(moving_arr.shape) == 0:
+        return
+
+    # Clamp overlap indices to valid range
+    fz = max(0, min(fixed_z, fixed_arr.shape[0] - 1))
+    mz = max(0, min(moving_z, moving_arr.shape[0] - 1))
+
+    # Average a ±5 % Z-slab so a single noisy boundary slice does not dominate
+    slab = max(1, int(0.05 * fixed_arr.shape[0]))
+    fo_slab = fixed_arr[max(0, fz - slab) : min(fixed_arr.shape[0], fz + slab + 1)]
+    mo_slab = moving_arr[max(0, mz - slab) : min(moving_arr.shape[0], mz + slab + 1)]
+
+    def _mean2d(vol_slab: np.ndarray) -> np.ndarray:
+        """Mean over Z slab, normalised to [0, 1]."""
+        img = vol_slab.mean(axis=0).astype(float)
+        mx = img.max()
+        return img / mx if mx > 0 else img
+
+    fo = _mean2d(fo_slab)  # (Y, X)
+    mo = _mean2d(mo_slab)  # (Y, X)
+
+    ny = min(fo.shape[0], mo.shape[0])
+    nx = min(fo.shape[1], mo.shape[1])
+    fo, mo = fo[:ny, :nx], mo[:ny, :nx]
+
+    # Centroid of each slice's column profile, averaged to find the shared column.
+    # Using the average of two centroids rather than argmax of the combined sum
+    # handles the common case where the two slices have laterally shifted tissue.
+    cy_f = _tissue_centroid(fo.sum(axis=1))
+    cy_m = _tissue_centroid(mo.sum(axis=1))
+    cy = round((cy_f + cy_m) / 2.0)
+
+    cx_f = _tissue_centroid(fo.sum(axis=0))
+    cx_m = _tissue_centroid(mo.sum(axis=0))
+    cx = round((cx_f + cx_m) / 2.0)
+
+    pair_stem = f"pair_z{fid:02d}_z{mid:02d}"
+
+    for role, arr, scale_arr in [
+        ("fixed", fixed_arr, fixed_scale),
+        ("moving", moving_arr, moving_scale),
+    ]:
+        # Clamp to this volume's actual dimensions
+        cy_i = min(cy, arr.shape[1] - 1)
+        cx_i = min(cx, arr.shape[2] - 1)
+        sc = np.array(scale_arr, dtype=float)
+        sc_xz = sc[[0, 2]] if sc.size >= 3 else sc
+        sc_yz = sc[[0, 1]] if sc.size >= 3 else sc
+
+        # XZ: fix Y = cy_i → (Z, X), flip Z so depth increases downward
+        _save_aip_npz(arr[:, cy_i, :][::-1, :], sc_xz, aips_xz_dir / f"{pair_stem}_{role}.npz", center_pos=cy_i)
+        # YZ: fix X = cx_i → (Z, Y), flip Z
+        _save_aip_npz(arr[:, :, cx_i][::-1, :], sc_yz, aips_yz_dir / f"{pair_stem}_{role}.npz", center_pos=cx_i)
+
+
+def _is_interpolated(path: Path) -> bool:
+    """Return True if this slice was produced by the interpolation step.
+
+    Interpolated slices are named ``slice_z{N}_interpolated.ome.zarr``
+    (the ``_interpolated`` suffix is set by ``linum_interpolate_missing_slice.py``).
+    """
+    return "_interpolated" in path.name
+
+
+def _discover_slices(slices_dir: Path) -> dict[int, Path]:
+    """Discover common-space slice files."""
+    pattern = re.compile(r"slice_z(\d+)")
+    slices = {}
+    for p in sorted(slices_dir.iterdir()):
+        m = pattern.search(p.name)
+        if m and p.name.endswith(".ome.zarr"):
+            slices[int(m.group(1))] = p
+    return dict(sorted(slices.items()))
+
+
+def _discover_transforms(transforms_dir: Path) -> dict[int, Path]:
+    """Discover pairwise transform directories."""
+    pattern = re.compile(r"slice_z(\d+)")
+    transforms = {}
+    for p in sorted(transforms_dir.iterdir()):
+        if p.is_dir():
+            m = pattern.search(p.name)
+            if m:
+                transforms[int(m.group(1))] = p
+    return dict(sorted(transforms.items()))
+
+
+def _read_overlap_z_offsets(offsets_file: Path) -> tuple[int, int]:
+    """Load (fixed_z, moving_z) from pairwise ``offsets.txt``, or (0, 0) if missing/invalid."""
+    if not offsets_file.exists():
+        return 0, 0
+    try:
+        arr_off = np.loadtxt(str(offsets_file), dtype=int)
+        if arr_off.size >= 2:
+            return int(arr_off[0]), int(arr_off[1])
+    except OSError, ValueError:
+        pass
+    return 0, 0
+
+
+def _slice_task(args: tuple) -> int:
+    """Worker for Pass 1: load one zarr slice, write XY AIP + per-slice XZ/YZ NPZ files."""
+    sid, spath_str, level, aips_dir, aips_xz_dir, aips_yz_dir = args
+    vol, scale = read_omezarr(spath_str, level=level)
+    arr = np.asarray(vol)
+    scale_arr = np.array(scale, dtype=float)
+    _save_aip_npz(arr.mean(axis=0), scale_arr, Path(aips_dir) / f"slice_z{sid:02d}.npz")
+    _save_axis_views(arr, scale_arr, sid, Path(aips_xz_dir), Path(aips_yz_dir))
+    return sid
+
+
+def _pair_task(args: tuple) -> tuple[int, int]:
+    """Worker for Pass 2: load two zarr slices, write paired XY, XZ, and YZ NPZ files."""
+    (
+        fid,
+        mid,
+        fpath_str,
+        mpath_str,
+        fixed_z,
+        moving_z,
+        level,
+        overlap_px,
+        aips_dir,
+        aips_xz_dir,
+        aips_yz_dir,
+    ) = args
+    fixed_vol, fixed_scale = read_omezarr(fpath_str, level=level)
+    moving_vol, moving_scale = read_omezarr(mpath_str, level=level)
+    fixed_arr = np.asarray(fixed_vol)
+    moving_arr = np.asarray(moving_vol)
+    fixed_scale_arr = np.array(fixed_scale, dtype=float)
+    moving_scale_arr = np.array(moving_scale, dtype=float)
+    _save_axis_views_for_pair(
+        fixed_arr,
+        moving_arr,
+        fixed_scale_arr,
+        moving_scale_arr,
+        fixed_z,
+        moving_z,
+        fid,
+        mid,
+        Path(aips_xz_dir),
+        Path(aips_yz_dir),
+    )
+    _save_xy_aips_for_pair(
+        fixed_arr,
+        moving_arr,
+        fixed_scale_arr,
+        moving_scale_arr,
+        overlap_px,
+        fid,
+        mid,
+        Path(aips_dir),
+    )
+    return fid, mid

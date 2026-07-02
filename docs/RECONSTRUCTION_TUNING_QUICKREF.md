@@ -4,6 +4,11 @@ Cheat sheet for tuning the 3D reconstruction pipeline. Assumes you know what
 the stages do. For background and recipes, see the full {doc}`Reconstruction
 Parameter Tuning Guide <RECONSTRUCTION_TUNING>`.
 
+Setting up a new subject from scratch? Start with
+{doc}`Subject-Specific Reconstruction Tuning <SUBJECT_TUNING>` — the
+step-by-step workflow (template → `linum-suggest-params` → upstream gates
+1-5 → downstream tuning) this cheat sheet supports.
+
 ---
 
 ## Profiles first
@@ -103,6 +108,19 @@ Parameter Tuning Guide <RECONSTRUCTION_TUNING>`.
 
 ---
 
+## Upstream-first diagnostic checklist
+
+Run in order. **Do not tune downstream parameters until all steps pass.**
+
+1. **Raw shifts** — `{input}/shifts_xy.csv`: no `x_shift_mm`/`y_shift_mm` step > 0.5 mm without a tile-FOV explanation
+2. **Rehoming** — `output/detect_rehoming_events/shifts_xy_clean.csv`: `reliable=0` rows handled (e.g. `common_space_refine_unreliable=true`)
+3. **Common space** — `output/common_space_previews/*.png`: no slice-to-slice XY jumps
+4. **Pairwise** — `output/register_pairwise/*_metrics.json`: no unexplained `mag` > 100 px
+5. **Stack** — `output/stack/stacking_decisions.csv`: no `transform_loaded=False` gaps
+6. **Proceed** — tune `bias_*`, `align_to_ras_*` only after steps 1–5 pass
+
+---
+
 ## Diagnostic file map
 
 | File | What to look at |
@@ -129,3 +147,19 @@ Use `-resume` — Nextflow caches everything upstream automatically.
 | `apply_*`, `stack_*`, `load_transform_*`, `transform_confidence_*` | `stack` → all downstream |
 | `bias_*`, `correct_bias_field` | `correct_bias_field` → atlas |
 | `align_to_ras_*`, `allen_*`, `ras_*` | `align_to_ras` only |
+| `stitch_*`, `use_motor_positions_for_stitching` | `stitch_3d_with_refinement` → all downstream |
+| `fix_focal_*`, `fix_illumination*`, `normalize*` | respective preprocess process → all downstream |
+| `auto_assess_*` | `auto_assess_quality` → all downstream |
+
+### Code-change invalidation
+
+| Code change in | Re-run from |
+|---|---|
+| `detect_rehoming` script/library | `detect_rehoming_events` → all downstream |
+| `common_space` / shift alignment code | `bring_to_common_space` → all downstream |
+| Pairwise registration code | `register_pairwise` → all downstream |
+| Stacking code | `stack` → all downstream |
+| Bias correction code | `correct_bias_field` → `align_to_ras` |
+| Atlas registration code | `align_to_ras` only |
+
+Always use `-resume`. Upstream cached tasks reuse automatically when the Nextflow task hash is unchanged. Config changes only invalidate a stage when they alter that process's inputs or script.

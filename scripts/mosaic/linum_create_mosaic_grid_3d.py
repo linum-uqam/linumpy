@@ -305,7 +305,7 @@ def main() -> None:
         oct = OCT(tiles[0], args.axial_resolution)
         vol = oct.load_image(crop=crop)
         vol = preprocess_volume(vol, apply=preprocess)
-        resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
+        resolution = list(oct.resolution)
         n_extra = oct.info.get("n_extra", 0)
     elif data_type == "PSOCT":
         oct = ThorOCT(tiles[0], config=psoct_config)
@@ -319,7 +319,7 @@ def main() -> None:
         vol = ThorOCT.orient_volume_psoct(vol)
         resolution = [oct.resolution[2], oct.resolution[0], oct.resolution[1]]
         n_extra = 0
-    print(f"Resolution: z = {resolution[0]} , x = {resolution[1]} , y = {resolution[2]} ")
+    print(f"Resolution: z = {resolution[0]} , y = {resolution[1]} , x = {resolution[2]} ")
 
     galvo_shift = 0
     if fix_galvo_shift and data_type == "OCT" and n_extra > 0:

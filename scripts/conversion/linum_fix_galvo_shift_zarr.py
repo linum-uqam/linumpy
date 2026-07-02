@@ -67,7 +67,13 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from linumpy.cli.args import add_overwrite_arg, assert_output_exists
-from linumpy.geometry.galvo import detect_galvo_band_in_tile, detect_galvo_shift, fix_galvo_shift
+from linumpy.geometry.galvo import (
+    aggregate_band_detections,
+    decide_tile_shift,
+    detect_galvo_band_in_tile,
+    detect_galvo_shift,
+    fix_galvo_shift,
+)
 from linumpy.io import slice_config as slice_config_io
 from linumpy.io.zarr import OmeZarrWriter, read_omezarr
 
@@ -403,36 +409,7 @@ def _auto_detect(zarr_root: Path, n_extra: int | None = None, verbose: bool = Fa
 
         detections.append((bs, bw, conf))
 
-    if not detections:
-        return 0, 0, 0.0
-
-    # Use confidence-weighted median for band_start to reduce outlier influence.
-    confs = np.array([d[2] for d in detections])
-    starts = np.array([d[0] for d in detections])
-    widths = np.array([d[1] for d in detections])
-
-    best_conf = float(confs.max())
-    # Weighted median approximation: sort by start, pick at cumulative weight 0.5
-    order = np.argsort(starts)
-    cum_w = np.cumsum(confs[order])
-    half = cum_w[-1] / 2.0
-    med_idx = int(np.searchsorted(cum_w, half))
-    med_start = float(starts[order[med_idx]])
-    med_width = float(np.median(widths))
-
-    # Penalise inconsistency across chunks.
-    if len(detections) > 1:
-        tol = max(chunk_x * 0.04, 3)
-        n_consistent = int(np.sum(np.abs(starts - med_start) <= tol))
-        consistency = n_consistent / len(detections)
-        best_conf *= consistency**0.5
-        if verbose:
-            print(
-                f"  Consistency: {n_consistent}/{len(detections)} chunks within "
-                f"±{tol:.0f}px → confidence penalty factor {consistency**0.5:.3f}"
-            )
-
-    return round(med_start), round(med_width), best_conf
+    return aggregate_band_detections(detections, chunk_x, verbose=verbose)
 
 
 # ---------------------------------------------------------------------------
@@ -686,18 +663,6 @@ def _apply_fix(
     n_skipped = np.zeros(n_cx, dtype=np.int32)
     shifts_used: list[list[int]] = [[] for _ in range(n_cx)]
 
-    def _detect_tile_shift(tile_aip: np.ndarray) -> tuple[int, float, bool]:
-        """Return (shift, confidence, used_per_tile) for a single tile AIP."""
-        if n_extra:
-            sh, cf = detect_galvo_shift(tile_aip, n_pixel_return=n_extra)
-            sh = int(sh)
-        else:
-            bs, bw, cf = detect_galvo_band_in_tile(tile_aip)
-            sh = chunk_x - int(bs) - int(bw) if bw else default_shift
-        if float(cf) >= min_confidence:
-            return sh, float(cf), True
-        return default_shift, float(cf), False
-
     def _process_column(kx: int) -> None:
         xs = kx * chunk_x
         xe = xs + chunk_x
@@ -726,7 +691,7 @@ def _apply_fix(
                 out[:, :, ys:ye] = strip[:, :, ys:ye]
                 n_skipped[kx] += 1
                 continue
-            sh, _cf, used = _detect_tile_shift(tile_aip)
+            sh, _cf, used = decide_tile_shift(tile_aip, default_shift, min_confidence, n_extra)
             out[:, :, ys:ye] = _roll_cpu(strip[:, :, ys:ye], sh)
             shifts_used[kx].append(sh)
             if used:

@@ -1,0 +1,87 @@
+// Subject-specific Nextflow config template for workflows/reconst_3d/soct_3d_reconst.nf
+//
+// Usage: copy this file to /scratch/workspace/sub-XX/nextflow.config on the
+// reconstruction server, replace every `sub-XX` placeholder with the real
+// subject ID, and fill in values discovered via `linum-suggest-params`.
+//
+// Full workflow: docs/SUBJECT_TUNING.md
+// Symptom -> parameter lookup: docs/RECONSTRUCTION_TUNING_QUICKREF.md
+// Parameter deep-dives: docs/RECONSTRUCTION_TUNING.md
+//
+// Do NOT commit this file with real subject values — it is a template only.
+// Values here are placeholders (D-68); the defaults mirror
+// workflows/reconst_3d/nextflow.config.
+
+params {
+    // =========================================================================
+    // INPUT/OUTPUT
+    // =========================================================================
+    input = "/scratch/workspace/sub-XX/mosaic-grids/"
+    output = "/scratch/workspace/sub-XX/output/"
+    subject_name = "sub-XX"
+
+    // =========================================================================
+    // TILE STITCHING
+    // Run `linum-suggest-params` first — it emits a `stitch_overlap_fraction`
+    // (3D) / `initial_overlap` (2.5D) value sourced from acquisition metadata.
+    // Paste that value here rather than guessing. See QUICKREF "Tile stitching".
+    // =========================================================================
+    stitch_overlap_fraction = 0.2   // <- overwrite with suggest_params `stitch_overlap_fraction` value
+    // initial_overlap = 0.2        // <- 2.5D pipeline equivalent (soct_2.5d_reconst.nf); uncomment if used
+
+    // =========================================================================
+    // SHIFTS / REHOMING (upstream gate 1-2 — RECON-DIAGNOSTIC-PLAYBOOK.md)
+    // Tune BEFORE common_space/stack/bias/atlas. See QUICKREF "Common-space
+    // alignment" and the playbook's tile_fov_mm / detect_rehoming notes.
+    // =========================================================================
+    detect_rehoming = true
+    rehoming_return_fraction = 0.4
+    rehoming_max_shift_mm = 0.5
+    tile_fov_mm = null              // Set to the acquisition tile FOV (e.g. 0.875) only if
+                                     // shifts_xy.csv shows repeating near-equal large steps.
+
+    // =========================================================================
+    // COMMON SPACE ALIGNMENT (upstream gate 3)
+    // =========================================================================
+    common_space_refine_unreliable = false
+    common_space_refine_max_discrepancy_px = 0
+    common_space_refine_min_correlation = 0.0
+
+    // =========================================================================
+    // PAIRWISE REGISTRATION (upstream gate 4)
+    // =========================================================================
+    registration_transform = 'euler'
+    registration_max_rotation = 5.0
+
+    // =========================================================================
+    // STACKING (upstream gate 5)
+    // =========================================================================
+    apply_pairwise_transforms = true
+    apply_rotation_only = false
+    load_transform_max_rotation = 0.0
+    stack_max_cumulative_drift_px = 50
+    stack_max_pairwise_translation = 0
+
+    // =========================================================================
+    // ILLUMINATION (BaSiC)
+    // =========================================================================
+    fix_illum_enabled = true
+    fix_illum_backend = 'linum-basic'
+
+    // =========================================================================
+    // BIAS FIELD CORRECTION — DOWNSTREAM.
+    // Only tune after upstream gates 1-5 PASS (docs/SUBJECT_TUNING.md).
+    // =========================================================================
+    correct_bias_field = false
+    bias_mode = 'two_pass'
+    bias_strength = 1.0
+
+    // =========================================================================
+    // ATLAS REGISTRATION — DOWNSTREAM.
+    // Only tune after upstream gates 1-5 PASS (docs/SUBJECT_TUNING.md).
+    // =========================================================================
+    align_to_ras_enabled = false
+    allen_resolution = 25
+    ras_input_orientation = ''
+    ras_initial_rotation = ''
+}

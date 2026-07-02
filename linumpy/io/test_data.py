@@ -108,6 +108,81 @@ def _get_scan_info(
     return scan_info
 
 
+def write_synthetic_oct_tile(
+    directory: Path,
+    *,
+    nx: int = 16,
+    ny: int = 8,
+    nz: int = 8,
+    n_repeat: int = 1,
+    n_extra: int = 0,
+    axial_res: float | None = None,
+    axial_res_key: str = "axial_resolution",
+    vol_zyx: np.ndarray | None = None,
+) -> Path:
+    """Write a minimal synthetic ThorLabs OCT tile for unit tests.
+
+    Parameters
+    ----------
+    directory
+        Parent directory; a ``tile_x00_y00_z00`` subfolder is created.
+    nx, ny, nz
+        Tile dimensions (capped small for test speed / DoS safety).
+    n_repeat
+        Number of repeated frames per b-scan written into the raw ``.bin``.
+    n_extra
+        Extra a-lines per b-scan (galvo return region).
+    axial_res
+        If set, appended to ``info.txt`` under *axial_res_key*.
+    axial_res_key
+        Metadata key for axial resolution (``axial_resolution``, ``axial_res``, etc.).
+    vol_zyx
+        Optional target volume in ``(Z, Y, X)`` order. When omitted, a gradient
+        pattern ``z * 1e6 + y * 1e3 + x`` is used so axis order is checkable.
+
+    Returns
+    -------
+    Path
+        Path to the created tile directory.
+    """
+    nx = min(nx, 16)
+    ny = min(ny, 16)
+    nz = min(nz, 8)
+
+    tile_dir = directory / "tile_x00_y00_z00"
+    tile_dir.mkdir(parents=True, exist_ok=True)
+
+    if vol_zyx is None:
+        zz, yy, xx = np.meshgrid(np.arange(nz), np.arange(ny), np.arange(nx), indexing="ij")
+        vol_zyx = (zz * 1e6 + yy * 1e3 + xx).astype(np.float32)
+    else:
+        vol_zyx = np.asarray(vol_zyx, dtype=np.float32)
+        if vol_zyx.shape != (nz, ny, nx):
+            msg = f"vol_zyx shape {vol_zyx.shape} != ({nz}, {ny}, {nx})"
+            raise ValueError(msg)
+
+    n_alines_per_bscan = nx + n_extra
+    n_frames = ny * n_repeat
+    raw = np.zeros((nz, n_alines_per_bscan, n_frames), dtype=np.float32)
+    vol_xzy = vol_zyx.transpose(0, 2, 1)  # (Z, X, Y) — loader pre-transpose layout
+    for y in range(ny):
+        for r in range(n_repeat):
+            frame_idx = y * n_repeat + r
+            raw[:, :nx, frame_idx] = vol_xzy[:, :, y]
+
+    raw.reshape(-1, order="F").tofile(tile_dir / "image_00000.bin")
+
+    top_z = 0
+    bottom_z = nz - 1
+    info = _get_scan_info(nx, ny, top_z, bottom_z, float(nx), float(ny), 0.0, 0.0, 0.0)
+    info = info.replace("n_repeat: 1", f"n_repeat: {n_repeat}")
+    info = info.replace("n_extra: 0", f"n_extra: {n_extra}")
+    if axial_res is not None:
+        info += f"{axial_res_key}: {axial_res}\n"
+    (tile_dir / "info.txt").write_text(info)
+    return tile_dir
+
+
 def _get_raw_tiles() -> Path:
     _create_linumpy_home_if_not_exists()
     folder = Path(LINUMPY_HOME) / "raw_tiles"

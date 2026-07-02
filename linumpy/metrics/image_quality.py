@@ -55,6 +55,23 @@ def normalize_image(img: np.ndarray) -> np.ndarray:
     return result
 
 
+def compute_normalized_cross_correlation(img1: np.ndarray, img2: np.ndarray) -> float:
+    """Compute normalized cross-correlation between two images."""
+    if img1.shape != img2.shape:
+        common_shape = tuple(min(dim1, dim2) for dim1, dim2 in zip(img1.shape, img2.shape, strict=False))
+        slices = tuple(slice(0, dim) for dim in common_shape)
+        img1 = img1[slices]
+        img2 = img2[slices]
+
+    if img1.size == 0 or img2.size == 0:
+        return float("nan")
+
+    norm1 = normalize_image(img1)
+    norm2 = normalize_image(img2)
+    corr = np.corrcoef(norm1.ravel(), norm2.ravel())[0, 1]
+    return float(corr)
+
+
 def compute_ssim_2d(img1: np.ndarray, img2: np.ndarray, win_size: int = 7) -> float:
     """
     Compute SSIM between two 2D images.
@@ -94,9 +111,7 @@ def compute_ssim_2d(img1: np.ndarray, img2: np.ndarray, win_size: int = 7) -> fl
         return float(ssim(i1, i2, win_size=actual_win_size, data_range=1.0))
     except Exception:
         # Fallback to normalized cross-correlation
-        i1 = normalize_image(img1)
-        i2 = normalize_image(img2)
-        corr = np.corrcoef(i1.flatten(), i2.flatten())[0, 1]
+        corr = compute_normalized_cross_correlation(img1, img2)
         return float(max(0.0, corr)) if not np.isnan(corr) else 0.0
 
 

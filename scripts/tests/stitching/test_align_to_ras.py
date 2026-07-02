@@ -68,6 +68,42 @@ class TestSitkTransformToAffine:
         np.testing.assert_allclose(mat[2, :3], [0.0, 0.0, 1.0], atol=1e-9)
         np.testing.assert_allclose(mat[:3, 2], [0.0, 0.0, 1.0], atol=1e-9)
 
+    def test_affine_transform_identity_yields_identity_matrix(self, align_module):
+        """An identity AffineTransform must also produce a 4x4 identity matrix."""
+        t = sitk.AffineTransform(3)
+        mat = align_module.sitk_transform_to_affine_matrix(t)
+        assert mat.shape == (4, 4)
+        np.testing.assert_allclose(mat, np.eye(4), atol=1e-12)
+
+    def test_affine_transform_translation_is_permuted_to_zyx(self, align_module):
+        """AffineTransform translation must follow the same (X,Y,Z)->(Z,Y,X)
+        permutation as the Euler3DTransform branch."""
+        t = sitk.AffineTransform(3)
+        t.SetTranslation((1.0, 2.0, 3.0))
+        mat = align_module.sitk_transform_to_affine_matrix(t)
+        np.testing.assert_allclose(mat[:3, 3], [3.0, 2.0, 1.0], atol=1e-12)
+        np.testing.assert_allclose(mat[:3, :3], np.eye(3), atol=1e-12)
+
+    def test_affine_transform_matrix_and_center_are_permuted(self, align_module):
+        """A non-identity linear matrix + center must be permuted consistently
+        with the Euler3DTransform branch (row/col swap X<->Z)."""
+        t = sitk.AffineTransform(3)
+        # Scale SITK X by 2 (numpy axis 2 after permutation).
+        t.SetMatrix((2.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+        t.SetCenter((1.0, 1.0, 1.0))
+        mat = align_module.sitk_transform_to_affine_matrix(t)
+        assert mat.shape == (4, 4)
+        # Scale on SITK X (numpy axis 2) must land on matrix[2, 2].
+        np.testing.assert_allclose(mat[2, 2], 2.0, atol=1e-12)
+        np.testing.assert_allclose(mat[0, 0], 1.0, atol=1e-12)
+        np.testing.assert_allclose(mat[1, 1], 1.0, atol=1e-12)
+
+    def test_unsupported_transform_type_raises(self, align_module):
+        """Transform types other than Euler3D/Affine must raise ValueError."""
+        t = sitk.TranslationTransform(3)
+        with pytest.raises(ValueError, match="Unsupported transform type"):
+            align_module.sitk_transform_to_affine_matrix(t)
+
 
 # ---------------------------------------------------------------------------
 # compute_centered_reference_and_transform

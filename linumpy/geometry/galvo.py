@@ -1,7 +1,5 @@
 """Galvanometric XY shift detection and correction."""
 
-from __future__ import annotations
-
 import numpy as np
 from scipy.ndimage import median_filter
 
@@ -272,3 +270,106 @@ def fix_galvo_shift(vol: np.ndarray, shift: int = 0, axis: int = 1) -> np.ndarra
     if shift == 0:
         return vol
     return np.roll(vol, shift, axis=axis)
+
+
+def aggregate_band_detections(
+    detections: list[tuple[float, float, float]],
+    chunk_size: float,
+    verbose: bool = False,
+) -> tuple[int, int, float]:
+    """Combine per-chunk galvo-band detections into one confidence-weighted estimate.
+
+    Companion to :func:`detect_galvo_band_in_tile` / :func:`detect_galvo_shift` for
+    callers that sample several chunks/tiles (e.g. assembled OME-Zarr mosaics where
+    the raw ``.bin`` tiles are unavailable) and need to reconcile the per-chunk
+    ``(band_start, band_width, confidence)`` results into a single robust estimate.
+
+    Parameters
+    ----------
+    detections : list of (band_start, band_width, confidence)
+        Per-chunk detections, e.g. one entry per sampled zarr chunk.
+    chunk_size : float
+        Width of one tile/chunk along the detection axis, used to size the
+        consistency tolerance.
+    verbose : bool
+        If True, print the consistency penalty details.
+
+    Returns
+    -------
+    tuple
+        ``(band_start, band_width, confidence)`` -- rounded band position and
+        combined confidence. Returns ``(0, 0, 0.0)`` when *detections* is empty.
+    """
+    if not detections:
+        return 0, 0, 0.0
+
+    confs = np.array([d[2] for d in detections])
+    starts = np.array([d[0] for d in detections])
+    widths = np.array([d[1] for d in detections])
+
+    best_conf = float(confs.max())
+    # Weighted median approximation: sort by start, pick at cumulative weight 0.5
+    order = np.argsort(starts)
+    cum_w = np.cumsum(confs[order])
+    half = cum_w[-1] / 2.0
+    med_idx = int(np.searchsorted(cum_w, half))
+    med_start = float(starts[order[med_idx]])
+    med_width = float(np.median(widths))
+
+    # Penalise inconsistency across chunks.
+    if len(detections) > 1:
+        tol = max(chunk_size * 0.04, 3)
+        n_consistent = int(np.sum(np.abs(starts - med_start) <= tol))
+        consistency = n_consistent / len(detections)
+        best_conf *= consistency**0.5
+        if verbose:
+            print(
+                f"  Consistency: {n_consistent}/{len(detections)} chunks within "
+                f"±{tol:.0f}px → confidence penalty factor {consistency**0.5:.3f}"
+            )
+
+    return round(med_start), round(med_width), best_conf
+
+
+def decide_tile_shift(
+    tile_aip: np.ndarray,
+    default_shift: int,
+    min_confidence: float,
+    n_extra: int | None = None,
+) -> tuple[int, float, bool]:
+    """Decide the per-tile galvo roll shift for a single tile AIP.
+
+    Uses the gradient-pair detector (:func:`detect_galvo_shift`) when *n_extra*
+    is given, otherwise the threshold-based :func:`detect_galvo_band_in_tile`.
+    Falls back to *default_shift* when the per-tile detection confidence is
+    below *min_confidence*.
+
+    Parameters
+    ----------
+    tile_aip : np.ndarray
+        Average intensity projection of a single tile, shape (n_alines, n_bscans).
+    default_shift : int
+        Fallback shift to use when per-tile detection confidence is too low.
+    min_confidence : float
+        Minimum confidence required to use the per-tile detected shift.
+    n_extra : int or None
+        Number of galvo-return pixels from acquisition metadata; enables the
+        gradient-pair detector when set.
+
+    Returns
+    -------
+    tuple
+        ``(shift, confidence, used_per_tile)`` -- the chosen roll shift, its
+        detection confidence, and whether the per-tile value was used
+        (``True``) or the fallback (``False``).
+    """
+    n_alines = tile_aip.shape[0]
+    if n_extra:
+        sh, cf = detect_galvo_shift(tile_aip, n_pixel_return=n_extra)
+        sh = int(sh)
+    else:
+        bs, bw, cf = detect_galvo_band_in_tile(tile_aip)
+        sh = n_alines - int(bs) - int(bw) if bw else default_shift
+    if float(cf) >= min_confidence:
+        return sh, float(cf), True
+    return default_shift, float(cf), False

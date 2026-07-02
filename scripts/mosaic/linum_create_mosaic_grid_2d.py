@@ -84,10 +84,10 @@ def get_volume(filename: Path, config: dict | None = None) -> np.ndarray:
         vol = np.rot90(vol, k=n_rots, axes=(1, 2))
 
     if config.get("flip_alines", False):
-        vol = np.flip(vol, axis=1)
+        vol = np.flip(vol, axis=2)
 
     if config.get("flip_bscans", False):
-        vol = np.flip(vol, axis=2)
+        vol = np.flip(vol, axis=1)
 
     # Compute AIP
     img = np.mean(vol, axis=0)
@@ -156,7 +156,7 @@ def main() -> None:
     f = tiles[0]
     oct = OCT(f)
     vol = get_volume(f, config=mosaic_config)
-    resolution = [oct.resolution[0], oct.resolution[1]]
+    resolution = [oct.resolution[1], oct.resolution[2]]
 
     # Compute the rescaled tile size based on the minimum target output resolution
     if output_resolution == -1:

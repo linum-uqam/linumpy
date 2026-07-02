@@ -45,7 +45,7 @@ def main() -> None:
 
     imin = max(vol.min(), 0)
     imax = np.percentile(vol, 99.9)
-    scale = (data.resolution[2], data.resolution[0], data.resolution[1])
+    scale = data.resolution
 
     # Prepare the viewer
     viewer = napari.Viewer()

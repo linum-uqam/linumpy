@@ -101,7 +101,7 @@ def get_mosaic_info(directory: Path, z: int, overlap_fraction: float = 0.2, use_
             x_mm = oct_tile.dimension[0] * (1 - overlap_fraction) * mx
             y_mm = oct_tile.dimension[1] * (1 - overlap_fraction) * my
 
-        x_px = int(np.floor(x_mm / oct_tile.resolution[0]))
+        x_px = int(np.floor(x_mm / oct_tile.resolution[2]))
         y_px = int(np.floor(y_mm / oct_tile.resolution[1]))
 
         mosaic_tile_pos.append((mx, my))
@@ -198,7 +198,7 @@ def quick_stitch(
             x_mm = oct_tile.dimension[0] * (1 - overlap_fraction) * mx
             y_mm = oct_tile.dimension[1] * (1 - overlap_fraction) * my
 
-        x_px = int(np.floor(x_mm / oct_tile.resolution[0]))
+        x_px = int(np.floor(x_mm / oct_tile.resolution[2]))
         y_px = int(np.floor(y_mm / oct_tile.resolution[1]))
 
         tiles_positions_mm.append((x_mm, y_mm))
@@ -243,7 +243,7 @@ def quick_stitch(
             img = np.log(img)
 
         # Compute an AIP
-        img = img[zmin:zmax, :, :].mean(axis=0)
+        img = img[zmin:zmax, :, :].mean(axis=0).T
 
         # BUG: there are sometimes missing bscans
         if img.shape != oct_tile.shape[0:2]:

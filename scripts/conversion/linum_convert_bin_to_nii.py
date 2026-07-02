@@ -42,13 +42,12 @@ def main() -> None:
     oct = OCT(args.input)
     vol = oct.load_image()
 
-    # Swap axes to have XYZ instead of ZXY
-    vol = np.moveaxis(vol, (0, 1, 2), (2, 0, 1))
+    # NIfTI XYZ: volume from loader is (Z, Y, X)
+    vol = vol.transpose(2, 1, 0)
 
-    # Prepare the affine matrix
     res_x_um = oct.info["width"] / oct.info["nx"]
     res_y_um = oct.info["height"] / oct.info["ny"]
-    res_z_um = 3.5  # TODO: add the axial resolution to the oct scan info file.
+    res_z_um = oct.rz
     affine = np.eye(4)
     affine[0, 0] = res_x_um
     affine[1, 1] = res_y_um

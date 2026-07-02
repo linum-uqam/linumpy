@@ -43,6 +43,11 @@ params.basic_working_size = 128
 
 // Position Estimation options
 params.initial_overlap    = 0.2
+// Expected tile overlap fraction (0.0-1.0); registration is the source of
+// truth, this is only the initial/fallback value. Set from the
+// `initial_overlap` key in the linum_suggest_params.py config snippet
+// (sourced from state.json/metadata.json overlap_fraction). Mirrors
+// stitch_overlap_fraction in reconst_3d/nextflow.config.
 
 // Nifti resampled resolution in microns
 params.resolution_nifti   = 10.0
