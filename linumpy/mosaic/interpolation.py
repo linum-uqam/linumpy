@@ -1,6 +1,6 @@
 """Slice interpolation utilities for missing serial sections.
 
-Single strategy: :func:`interpolate_z_morph` -- z-aware morphing via fractional
+Single strategy: :func:`interpolate_z_morph` — z-aware morphing via fractional
 affine warps (``T**alpha``, :func:`scipy.linalg.fractional_matrix_power`).
 Reconstructs a synthetic slice that transitions along Z from ``vol_before[-1]``
 to ``vol_after[0]``, matching the physical geometry of serial sectioning.
@@ -9,7 +9,7 @@ When any quality gate fails, :func:`interpolate_z_morph` **does not fabricate
 a volume**. It returns ``(None, diagnostics)`` with
 ``diagnostics["interpolation_failed"] = True`` and a specific
 ``fallback_reason``. The caller must honour this by *not* emitting a
-reconstructed slice -- a blend of the two neighbours would also be
+reconstructed slice — a blend of the two neighbours would also be
 fabricated data, with the added failure mode of ghost/double-contour
 artefacts whenever the two neighbours differ.
 
@@ -25,6 +25,8 @@ See ``docs/SLICE_INTERPOLATION_FEATURE.md`` for the scientific rationale,
 failure modes, and the connection to ``slice_config.csv`` (``interpolated``,
 ``interpolation_failed``, ``interpolation_fallback_reason`` columns).
 """
+
+from __future__ import annotations
 
 import logging
 from typing import Any
@@ -145,7 +147,7 @@ def _fractional_affine_parts(
     dim = matrix.shape[0]
     identity = np.eye(dim)
 
-    # Exact shortcuts for alpha∈{0, 1} -- avoids numerical drift from
+    # Exact shortcuts for alpha∈{0, 1} — avoids numerical drift from
     # fractional_matrix_power that would move identity pixels around and
     # break the "boundary planes match sources exactly" guarantee.
     if alpha == 0.0:
@@ -241,7 +243,7 @@ def find_best_overlap_planes(
     roi = (slice(margin, h - margin), slice(margin, w - margin))
     # Normalise on the ROI (not the full plane) so the resulting arrays are
     # zero-mean / unit-std over the region that actually goes into the NCC.
-    # Normalising on the full plane -- where OCT backgrounds are mostly zero --
+    # Normalising on the full plane — where OCT backgrounds are mostly zero —
     # leaves the central tissue ROI with a strongly positive mean, which
     # inflates `mean(a*b)` well beyond the [-1, 1] range expected for NCC.
     before_norms = {z: _normalize_plane_for_ncc(vol_before[z][roi]) for z in before_zs}
@@ -403,7 +405,7 @@ def interpolate_z_morph(
     ``reg_did_not_improve``, ``affine_determinant_non_positive``) the function
     returns ``(None, diagnostics)`` with
     ``diagnostics["interpolation_failed"] = True`` and a specific
-    ``fallback_reason``. **No fabricated volume is produced** -- blending the
+    ``fallback_reason``. **No fabricated volume is produced** — blending the
     two neighbours would also be made-up data, with the added failure mode of
     ghost/double-contour artefacts whenever the two neighbours differ.
 
