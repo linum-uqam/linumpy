@@ -29,80 +29,80 @@ linumpy provides a comprehensive set of command-line scripts for microscopy data
 
 ## Data Conversion
 
-### linum-convert-tiff-to-nifti
+### linum_convert_tiff_to_nifti.py
 
 Convert TIFF stack to NIfTI format.
 
 ```bash
-linum-convert-tiff-to-nifti <input.tiff> <output.nii.gz>
+linum_convert_tiff_to_nifti.py <input.tiff> <output.nii.gz>
 ```
 
-### linum-convert-tiff-to-omezarr
+### linum_convert_tiff_to_omezarr.py
 
 Convert TIFF to OME-Zarr format.
 
 ```bash
-linum-convert-tiff-to-omezarr <input.tiff> <output.ome.zarr>
+linum_convert_tiff_to_omezarr.py <input.tiff> <output.ome.zarr>
 ```
 
-### linum-convert-nifti-to-nrrd
+### linum_convert_nifti_to_nrrd.py
 
 Convert NIfTI to NRRD format.
 
 ```bash
-linum-convert-nifti-to-nrrd <input.nii.gz> <output.nrrd>
+linum_convert_nifti_to_nrrd.py <input.nii.gz> <output.nrrd>
 ```
 
-### linum-convert-nifti-to-zarr
+### linum_convert_nifti_to_zarr.py
 
 Convert NIfTI to Zarr format.
 
 ```bash
-linum-convert-nifti-to-zarr <input.nii.gz> <output.zarr>
+linum_convert_nifti_to_zarr.py <input.nii.gz> <output.zarr>
 ```
 
-### linum-convert-omezarr-to-nifti
+### linum_convert_omezarr_to_nifti.py
 
 Convert OME-Zarr to NIfTI format.
 
 ```bash
-linum-convert-omezarr-to-nifti <input.ome.zarr> <output.nii.gz>
+linum_convert_omezarr_to_nifti.py <input.ome.zarr> <output.nii.gz>
 ```
 
-### linum-convert-zarr-to-omezarr
+### linum_convert_zarr_to_omezarr.py
 
 Convert Zarr to OME-Zarr format.
 
 ```bash
-linum-convert-zarr-to-omezarr <input.zarr> <output.ome.zarr>
+linum_convert_zarr_to_omezarr.py <input.zarr> <output.ome.zarr>
 ```
 
-### linum-convert-bin-to-nii
+### linum_convert_bin_to_nii.py
 
 Convert binary file to NIfTI.
 
 ```bash
-linum-convert-bin-to-nii <input.bin> <output.nii.gz>
+linum_convert_bin_to_nii.py <input.bin> <output.nii.gz>
 ```
 
 ---
 
 ## Mosaic Grid Operations
 
-### linum-create-mosaic-grid-2d
+### linum_create_mosaic_grid_2d.py
 
 Create 2D mosaic grid from tiles.
 
 ```bash
-linum-create-mosaic-grid-2d <output.ome.zarr> --from_tiles_list <tiles...>
+linum_create_mosaic_grid_2d.py <output.ome.zarr> --from_tiles_list <tiles...>
 ```
 
-### linum-create-mosaic-grid-3d
+### linum_create_mosaic_grid_3d.py
 
 Create 3D mosaic grid from raw OCT tiles.
 
 ```bash
-linum-create-mosaic-grid-3d <output.ome.zarr> \
+linum_create_mosaic_grid_3d.py <output.ome.zarr> \
     --from_tiles_list <tiles...> \
     --resolution <res> \
     --n_processes <n> \
@@ -118,20 +118,20 @@ linum-create-mosaic-grid-3d <output.ome.zarr> \
 - `--fix_galvo_shift`: Correct galvo shifts
 - `--fix_camera_shift`: Correct camera shifts
 
-### linum-create-all-mosaic-grids-2d
+### linum_create_all_mosaic_grids_2d.py
 
 Create all 2D mosaic grids from a tiles directory.
 
 ```bash
-linum-create-all-mosaic-grids-2d <tiles_dir> <output_dir>
+linum_create_all_mosaic_grids_2d.py <tiles_dir> <output_dir>
 ```
 
-### linum-generate-mosaic-aips
+### linum_generate_mosaic_aips.py
 
 Generate AIP (Average Intensity Projection) PNG previews from a directory of mosaic grid OME-Zarr files. Useful for quick QC visualization of all slices at once.
 
 ```bash
-linum-generate-mosaic-aips <mosaics_dir> <output_dir> \
+linum_generate_mosaic_aips.py <mosaics_dir> <output_dir> \
     [--level <pyramid_level>]
 ```
 
@@ -139,34 +139,34 @@ linum-generate-mosaic-aips <mosaics_dir> <output_dir> \
 |--------|---------|-------------|
 | `--level` | `0` | Pyramid level to use (higher = faster, lower resolution) |
 
-### linum-resample-mosaic-grid
+### linum_resample_mosaic_grid.py
 
 Resample mosaic grid to different resolution.
 
 ```bash
-linum-resample-mosaic-grid <input.ome.zarr> <output.ome.zarr> -r <resolution>
+linum_resample_mosaic_grid.py <input.ome.zarr> <output.ome.zarr> -r <resolution>
 ```
 
 ---
 
 ## Preprocessing
 
-### linum-fix-illumination-3d
+### linum_fix_illumination_3d.py
 
 Correct illumination inhomogeneity using BaSiC algorithm.
 
 ```bash
-linum-fix-illumination-3d <input.ome.zarr> <output.ome.zarr> \
+linum_fix_illumination_3d.py <input.ome.zarr> <output.ome.zarr> \
     --n_processes <n> \
     --percentile_max <pmax>
 ```
 
-### linum-detect-focal-curvature
+### linum_detect_focal_curvature.py
 
 Detect and correct focal plane curvature in a 3D mosaic.
 
 ```bash
-linum-detect-focal-curvature <input.ome.zarr> <output.ome.zarr> \
+linum_detect_focal_curvature.py <input.ome.zarr> <output.ome.zarr> \
     [--n_levels <n>] \
     [--n_processes <n>] \
     [--block_size <n>] \
@@ -175,36 +175,36 @@ linum-detect-focal-curvature <input.ome.zarr> <output.ome.zarr> \
     [--verbose]
 ```
 
-### linum-compensate-illumination
+### linum_compensate_illumination.py
 
 Apply illumination compensation.
 
 ```bash
-linum-compensate-illumination <input> <output> <illumination_profile>
+linum_compensate_illumination.py <input> <output> <illumination_profile>
 ```
 
-### linum-estimate-illumination
+### linum_estimate_illumination.py
 
 Estimate illumination profile from data.
 
 ```bash
-linum-estimate-illumination <input> <output_profile>
+linum_estimate_illumination.py <input> <output_profile>
 ```
 
-### linum-compensate-attenuation
+### linum_compensate_attenuation.py
 
 Compensate for signal attenuation with depth using a precomputed bias field.
 
 ```bash
-linum-compensate-attenuation <input.ome.zarr> <bias.ome.zarr> <output.ome.zarr>
+linum_compensate_attenuation.py <input.ome.zarr> <bias.ome.zarr> <output.ome.zarr>
 ```
 
-### linum-compensate-attenuation-inplace
+### linum_compensate_attenuation_inplace.py
 
 Per-slice depth-attenuation compensation from a single OME-Zarr volume. Computes the Vermeer 2014 (or Liu 2019 / Li 2020) attenuation map and applies the gain in one pass. This is the script invoked by the Nextflow reconstruction workflow.
 
 ```bash
-linum-compensate-attenuation-inplace <input.ome.zarr> <output.ome.zarr> \
+linum_compensate_attenuation_inplace.py <input.ome.zarr> <output.ome.zarr> \
     [--method {li,liu,smith,vermeer}] \
     [--strength <0.0-1.0>] \
     [--k <voxels>] \
@@ -226,37 +226,37 @@ linum-compensate-attenuation-inplace <input.ome.zarr> <output.ome.zarr> \
 | `--mask_smoothing_sigma` | `2.0` | Gaussian sigma (XY voxels) for the Otsu tissue mask. |
 | `--n_levels` | `0` | Pyramid levels in the output (0 = single resolution). |
 
-### linum-compute-attenuation
+### linum_compute_attenuation.py
 
 Compute attenuation profile.
 
 ```bash
-linum-compute-attenuation <input> <output_profile>
+linum_compute_attenuation.py <input> <output_profile>
 ```
 
-### linum-compute-attenuation-bias-field
+### linum_compute_attenuation_bias_field.py
 
 Compute attenuation bias field.
 
 ```bash
-linum-compute-attenuation-bias-field <input> <output_field>
+linum_compute_attenuation_bias_field.py <input> <output_field>
 ```
 
-### linum-compensate-psf-model-free
+### linum_compensate_psf_model_free.py
 
 Model-free PSF compensation (beam profile correction).
 
 ```bash
-linum-compensate-psf-model-free <input.ome.zarr> <output.ome.zarr> \
+linum_compensate_psf_model_free.py <input.ome.zarr> <output.ome.zarr> \
     --percentile_max <pmax>
 ```
 
-### linum-compensate-psf-from-model
+### linum_compensate_psf_from_model.py
 
 Fit a confocal-PSF parametric model (focal depth + Rayleigh length) on a few axial profiles, then divide each A-line by the synthesized 3D PSF.
 
 ```bash
-linum-compensate-psf-from-model <input.ome.zarr> <output.ome.zarr> \
+linum_compensate_psf_from_model.py <input.ome.zarr> <output.ome.zarr> \
     [--zr_initial <µm>] \
     [--percentile_max <p>]
 ```
@@ -265,56 +265,56 @@ linum-compensate-psf-from-model <input.ome.zarr> <output.ome.zarr> \
 |--------|---------|-------------|
 | `--zr_initial` | `610` | Initial Rayleigh length seed (µm) for the fit. Use `1060` for the 10× Mitutoyo objective on the current rig. Sensitive to acquisition geometry — refit per instrument when in doubt (see script docstring). |
 
-### linum-clip-percentile
+### linum_clip_percentile.py
 
 Clip image intensities at percentiles.
 
 ```bash
-linum-clip-percentile <input> <output> --lower <low> --upper <high>
+linum_clip_percentile.py <input> <output> --lower <low> --upper <high>
 ```
 
-### linum-crop-tiles
+### linum_crop_tiles.py
 
 Crop tiles to specific region.
 
 ```bash
-linum-crop-tiles <input_dir> <output_dir> --region <x1> <y1> <x2> <y2>
+linum_crop_tiles.py <input_dir> <output_dir> --region <x1> <y1> <x2> <y2>
 ```
 
-### linum-crop-3d-mosaic-below-interface
+### linum_crop_3d_mosaic_below_interface.py
 
 Crop 3D mosaic below sample interface.
 
 ```bash
-linum-crop-3d-mosaic-below-interface <input.ome.zarr> <output.ome.zarr> \
+linum_crop_3d_mosaic_below_interface.py <input.ome.zarr> <output.ome.zarr> \
     --depth <depth_um> \
     --crop_before_interface \
     --percentile_max <pmax>
 ```
 
-### linum-normalize-intensities-per-slice
+### linum_normalize_intensities_per_slice.py
 
 Normalize intensities per slice.
 
 ```bash
-linum-normalize-intensities-per-slice <input.ome.zarr> <output.ome.zarr> \
+linum_normalize_intensities_per_slice.py <input.ome.zarr> <output.ome.zarr> \
     --percentile_max <pmax>
 ```
 
-### linum-intensity-normalization
+### linum_intensity_normalization.py
 
 General intensity normalization.
 
 ```bash
-linum-intensity-normalization <input> <output>
+linum_intensity_normalization.py <input> <output>
 ```
 
-### linum-correct-bias-field
+### linum_correct_bias_field.py
 
 Correct slow intensity drift and bias field across serial sections after stacking using N4 bias field correction (SimpleITK). Three modes are supported: `per_section` (N4 applied independently per thick section), `global` (single N4 pass over the whole volume), and `two_pass` (per-section pass followed by a global pass).
 
 ```bash
-linum-correct-bias-field <input.ome.zarr> <output.ome.zarr> \
+linum_correct_bias_field.py <input.ome.zarr> <output.ome.zarr> \
     [--mode {per_section,global,two_pass}] \
     [--strength <0.0-1.0>] \
     [--n_serial_slices <n>] \
@@ -345,36 +345,36 @@ linum-correct-bias-field <input.ome.zarr> <output.ome.zarr> \
 
 ## Reconstruction
 
-### linum-aip
+### linum_aip.py
 
 Generate Average Intensity Projection.
 
 ```bash
-linum-aip <input.ome.zarr> <output.ome.zarr>
+linum_aip.py <input.ome.zarr> <output.ome.zarr>
 ```
 
-### linum-stitch-2d
+### linum_stitch_2d.py
 
 Stitch 2D tiles into mosaic.
 
 ```bash
-linum-stitch-2d <input.ome.zarr> <output>
+linum_stitch_2d.py <input.ome.zarr> <output>
 ```
 
-### linum-stitch-3d
+### linum_stitch_3d.py
 
 Stitch 3D tiles into volume using a pre-computed transform.
 
 ```bash
-linum-stitch-3d <mosaic_grid.ome.zarr> <transform.npy> <output.ome.zarr>
+linum_stitch_3d.py <mosaic_grid.ome.zarr> <transform.npy> <output.ome.zarr>
 ```
 
-### linum-stitch-3d-refined
+### linum_stitch_3d_refined.py
 
 Stitch 3D tiles with image-registration-refined blend transitions to reduce visible tile seams.
 
 ```bash
-linum-stitch-3d-refined <mosaic_grid.ome.zarr> <output.ome.zarr> \
+linum_stitch_3d_refined.py <mosaic_grid.ome.zarr> <output.ome.zarr> \
     [--overlap_fraction <frac>] \
     [--blending_method {none,average,diffusion}] \
     [--refinement_mode blend_shift] \
@@ -389,10 +389,10 @@ linum-stitch-3d-refined <mosaic_grid.ome.zarr> <output.ome.zarr> \
 | `--blending_method` | Tile blending method: `none`, `average`, `diffusion` |
 | `--refinement_mode` | How refinement shifts are used (e.g. `blend_shift`) |
 | `--max_refinement_px` | Maximum sub-pixel refinement shift (pixels) |
-| `--input_transform` | Pre-computed global 2×2 affine (from `linum-estimate-global-transform`) |
+| `--input_transform` | Pre-computed global 2×2 affine (from `linum_estimate_global_transform.py`) |
 | `--output_refinements` | Optional JSON file to save refinement data |
 
-### linum-estimate-global-transform
+### linum_estimate_global_transform.py
 
 Estimate a single 2×2 tile-placement affine pooled across many 3D mosaic grids.
 Instrument geometry is slice-invariant, so using one fitted transform for every
@@ -400,7 +400,7 @@ slice removes per-slice scale/rotation jitter that the default refined stitcher
 introduces when the least-squares fit is underdetermined on small or sparse grids.
 
 ```bash
-linum-estimate-global-transform <mosaics_dir> <output_transform.npy> \
+linum_estimate_global_transform.py <mosaics_dir> <output_transform.npy> \
     [--slices <id1,id2,...>] \
     [--histogram_match] \
     [--max_empty_fraction <frac>] \
@@ -408,51 +408,51 @@ linum-estimate-global-transform <mosaics_dir> <output_transform.npy> \
     [--seed <seed>]
 ```
 
-The output `.npy` can be passed to `linum-stitch-3d-refined --input_transform`.
+The output `.npy` can be passed to `linum_stitch_3d_refined.py --input_transform`.
 
-### linum-analyze-stitch-affine
+### linum_analyze_stitch_affine.py
 
 Per-slice affine diagnostic for the refined stitching step. Inspects
 `estimate_xy_transformation` outputs (or the refined stitcher's
 `refinements.json`) and reports scale / rotation drift across slices.
 
 ```bash
-linum-analyze-stitch-affine <input_dir> <output_dir>
+linum_analyze_stitch_affine.py <input_dir> <output_dir>
 ```
 
-### linum-stitch-motor-only
+### linum_stitch_motor_only.py
 
 Stitch tiles using motor encoder positions only (no image registration). Useful for diagnostics and comparing against refined stitching.
 
 ```bash
-linum-stitch-motor-only <mosaic_grid.ome.zarr> <output.ome.zarr> \
+linum_stitch_motor_only.py <mosaic_grid.ome.zarr> <output.ome.zarr> \
     [--overlap_fraction <frac>] \
     [--blending_method {none,average,diffusion}]
 ```
 
-### linum-stack-slices-2d
+### linum_stack_slices_2d.py
 
 Stack 2D AIPs into a 3D volume using `shifts_xy.csv`.
 
 ```bash
-linum-stack-slices-2d <slices_dir> <output> --xy_shifts <shifts.csv>
+linum_stack_slices_2d.py <slices_dir> <output> --xy_shifts <shifts.csv>
 ```
 
-### linum-stack-slices-3d
+### linum_stack_slices_3d.py
 
-> **Deprecated.** Use `linum-stack-slices-motor` with `--no_xy_shift` instead.
+> **Deprecated.** Use `linum_stack_slices_motor.py` with `--no_xy_shift` instead.
 
 Stack 3D mosaics into final volume using pairwise registration transforms.
-This script is superseded by `linum-stack-slices-motor`, which provides
+This script is superseded by `linum_stack_slices_motor.py`, which provides
 confidence-based transform degradation, translation filtering/accumulation,
 rotation smoothing, auto-exclude, and richer diagnostics.
 
-### linum-stack-slices-motor
+### linum_stack_slices_motor.py
 
 Stack slices into a 3D volume using motor positions for XY placement and correlation-based Z matching. This is the primary stacking script used by the pipeline.
 
 ```bash
-linum-stack-slices-motor <slices_dir> <shifts_file> <output.ome.zarr> \
+linum_stack_slices_motor.py <slices_dir> <shifts_file> <output.ome.zarr> \
     [--transforms_dir <dir>] \
     [--rotation_only] \
     [--max_rotation_deg 1.0] \
@@ -506,12 +506,12 @@ linum-stack-slices-motor <slices_dir> <shifts_file> <output.ome.zarr> \
 | `--slice_config` | — | CSV to filter which slices are included / motor-only |
 | `--load_max_rotation` | — | Metric-based gate: skip transforms with rotation above this threshold |
 
-### linum-stack-motor-only
+### linum_stack_motor_only.py
 
 Stack slices using motor positions only (no pairwise registration). Used for diagnostics to isolate the motor-position contribution.
 
 ```bash
-linum-stack-motor-only <slices_dir> <shifts_file> <output.ome.zarr> \
+linum_stack_motor_only.py <slices_dir> <shifts_file> <output.ome.zarr> \
     [--blending {none,average,max,feather}] \
     [--preview <preview.png>]
 ```
@@ -520,33 +520,33 @@ linum-stack-motor-only <slices_dir> <shifts_file> <output.ome.zarr> \
 
 ## Registration & Stitching
 
-### linum-estimate-transform
+### linum_estimate_transform.py
 
 Estimate XY transformation from mosaic grid.
 
 ```bash
-linum-estimate-transform <aip.ome.zarr> <output_transform.npy>
+linum_estimate_transform.py <aip.ome.zarr> <output_transform.npy>
 ```
 
-### linum-estimate-xy-shift-from-metadata
+### linum_estimate_xy_shift_from_metadata.py
 
 Estimate XY shifts from tile metadata.
 
 ```bash
-linum-estimate-xy-shift-from-metadata <tiles_dir> <output.csv> \
+linum_estimate_xy_shift_from_metadata.py <tiles_dir> <output.csv> \
     --n_processes <n>
 ```
 
-### linum-align-mosaics-3d-from-shifts
+### linum_align_mosaics_3d_from_shifts.py
 
 Align mosaics to a common XY canvas using the shifts CSV. Each mosaic is resampled to a common shape and translated using cumulative shifts; when slices are excluded via `--slice_config`, their shifts are accumulated so the remaining slices stay aligned.
 
 Large erroneous shifts should be corrected **upstream** with
-`linum-detect-rehoming` (see below) before running this script. This script
+`linum_detect_rehoming.py` (see below) before running this script. This script
 no longer implements outlier filtering directly.
 
 ```bash
-linum-align-mosaics-3d-from-shifts <mosaics_dir> <shifts.csv> <output_dir> \
+linum_align_mosaics_3d_from_shifts.py <mosaics_dir> <shifts.csv> <output_dir> \
     [--slice_config <config.csv>] \
     [--excluded_slice_mode {keep,local_median,median,zero}] \
     [--excluded_slice_window <n>] \
@@ -566,7 +566,7 @@ linum-align-mosaics-3d-from-shifts <mosaics_dir> <shifts.csv> <output_dir> \
 | `--refine_max_discrepancy_px` | `0` | Reject image-based estimates differing from metadata by more than this many pixels (0 = accept all) |
 | `--refine_min_correlation` | `0.0` | Minimum NCC to accept an image-based refinement |
 
-### linum-detect-rehoming
+### linum_detect_rehoming.py
 
 Detect and correct two classes of spurious inter-slice shifts in a shifts CSV:
 
@@ -579,7 +579,7 @@ Detect and correct two classes of spurious inter-slice shifts in a shifts CSV:
    zeroed out, while genuine re-homing events (large step that stays) are preserved.
 
 ```bash
-linum-detect-rehoming <in_shifts.csv> <out_shifts.csv> \
+linum_detect_rehoming.py <in_shifts.csv> <out_shifts.csv> \
     [--tile_fov_mm <mm>] \
     [--tile_fov_tolerance <frac>] \
     [--return_fraction <frac>] \
@@ -599,9 +599,9 @@ linum-detect-rehoming <in_shifts.csv> <out_shifts.csv> \
 
 Output CSV columns include a `reliable` flag (0 when the corrected step is still
 large or uncertain), consumed downstream by
-`linum-align-mosaics-3d-from-shifts --refine_unreliable`.
+`linum_align_mosaics_3d_from_shifts.py --refine_unreliable`.
 
-### linum-auto-exclude-slices
+### linum_auto_exclude_slices.py
 
 Detect extended clusters of consecutive low-quality pairwise registrations and
 produce a slice-config fragment listing slice IDs to force-skip (motor-only)
@@ -609,7 +609,7 @@ during stacking. Reads `pairwise_registration_metrics.json` files from each
 `register_pairwise` output subdirectory.
 
 ```bash
-linum-auto-exclude-slices <register_pairwise_dir> <output_slice_config.csv> \
+linum_auto_exclude_slices.py <register_pairwise_dir> <output_slice_config.csv> \
     [--existing_slice_config <config.csv>] \
     [--consecutive <n>] \
     [--z_corr <threshold>]
@@ -621,7 +621,7 @@ linum-auto-exclude-slices <register_pairwise_dir> <output_slice_config.csv> \
 | `--consecutive` | `3` | Minimum consecutive low-quality pairs to trigger exclusion |
 | `--z_corr` | `0.6` | Z-correlation threshold below which a pair is low-quality |
 
-### linum-interpolate-missing-slice
+### linum_interpolate_missing_slice.py
 
 Interpolate a single missing slice from its two neighbours. Uses **z-aware
 morphing** (`zmorph`) by default: an affine transform between the boundary
@@ -636,7 +636,7 @@ See {doc}`SLICE_INTERPOLATION_FEATURE` for the
 physical model and parameter-tuning guidance.
 
 ```bash
-linum-interpolate-missing-slice <slice_before.ome.zarr> <slice_after.ome.zarr> <output.ome.zarr> \
+linum_interpolate_missing_slice.py <slice_before.ome.zarr> <slice_after.ome.zarr> <output.ome.zarr> \
     [--method {zmorph,average,weighted}] \
     [--blend_method {gaussian,linear}] \
     [--registration_metric {MSE,MI,CC,AntsCC}] \
@@ -650,12 +650,12 @@ linum-interpolate-missing-slice <slice_before.ome.zarr> <slice_after.ome.zarr> <
     [--diagnostics <diag.json>]
 
 # Finalise mode: merge per-slice manifest fragments into slice_config.csv
-linum-interpolate-missing-slice --finalise \
+linum_interpolate_missing_slice.py --finalise \
     --slice_config_in <in.csv> --slice_config_out <out.csv> \
     --fragments_dir <manifests/>
 ```
 
-### linum-export-manual-align
+### linum_export_manual_align.py
 
 Export a lightweight data package (AIP images + automated transforms) for
 interactive manual alignment. Consumed by the `tools/manual-align/` web tool;
@@ -663,12 +663,12 @@ outputs land in `export_manual_align/` when `--export_manual_align` is set in
 the reconstruction pipeline.
 
 ```bash
-linum-export-manual-align <common_space_dir> <register_pairwise_dir> <output_dir> \
+linum_export_manual_align.py <common_space_dir> <register_pairwise_dir> <output_dir> \
     [--level <pyramid_level>] \
     [--slice_config <config.csv>]
 ```
 
-### linum-refine-manual-transforms
+### linum_refine_manual_transforms.py
 
 Refine manually-corrected pairwise slice transforms with tight image-based
 registration. For each pair with a manual transform, warps the moving slice
@@ -678,29 +678,29 @@ with `source="manual_refined"`. Pairs without a manual transform are copied
 through unchanged.
 
 ```bash
-linum-refine-manual-transforms <slices_dir> <transforms_dir> <out_dir> \
+linum_refine_manual_transforms.py <slices_dir> <transforms_dir> <out_dir> \
     [--manual_transforms_dir <dir>] \
     [--max_translation_px <px>] \
     [--max_rotation_deg <deg>]
 ```
 
-### linum-apply-slices-transforms
+### linum_apply_slices_transforms.py
 
 Apply transforms to slices.
 
 ```bash
-linum-apply-slices-transforms <input_dir> <transforms_dir> <output_dir>
+linum_apply_slices_transforms.py <input_dir> <transforms_dir> <output_dir>
 ```
 
-### linum-estimate-slices-transforms-gui
+### linum_estimate_slices_transforms_gui.py
 
 GUI for manual slice transform estimation.
 
 ```bash
-linum-estimate-slices-transforms-gui <slices_dir>
+linum_estimate_slices_transforms_gui.py <slices_dir>
 ```
 
-### linum-register-pairwise
+### linum_register_pairwise.py
 
 Perform pairwise registration between consecutive slices to compute small rotation and Z-overlap corrections. This is the primary registration script used by the motor-based reconstruction pipeline. It **does not** compute large XY translations (those are handled by motor positions from `shifts_xy.csv`).
 
@@ -710,7 +710,7 @@ Two outputs are produced per pair:
 - `metrics.json`: Registration quality metrics
 
 ```bash
-linum-register-pairwise <fixed.ome.zarr> <moving.ome.zarr> <output_dir> \
+linum_register_pairwise.py <fixed.ome.zarr> <moving.ome.zarr> <output_dir> \
     [--slicing_interval_mm 0.200] \
     [--search_range_mm 0.100] \
     [--moving_z_index 0] \
@@ -738,12 +738,12 @@ linum-register-pairwise <fixed.ome.zarr> <moving.ome.zarr> <output_dir> \
 
 ---
 
-### linum-align-to-ras
+### linum_align_to_ras.py
 
 Align a 3D brain volume to RAS orientation by rigid registration to the Allen Mouse Brain Atlas (CCF). The result is an OME-Zarr at all pyramid resolutions in RAS space.
 
 ```bash
-linum-align-to-ras <input.ome.zarr> <output_ras.ome.zarr> \
+linum_align_to_ras.py <input.ome.zarr> <output_ras.ome.zarr> \
     [--allen-resolution {10,25,50,100}] \
     [--metric {MI,MSE,CC,AntsCC}] \
     [--max-iterations N] \
@@ -772,32 +772,32 @@ linum-align-to-ras <input.ome.zarr> <output_ras.ome.zarr> \
 
 ## Slice Configuration
 
-### linum-generate-slice-config
+### linum_generate_slice_config.py
 
 Generate slice configuration file with optional galvo shift detection.
 
 ```bash
 # From mosaic grids
-linum-generate-slice-config <mosaics_dir> <output.csv>
+linum_generate_slice_config.py <mosaics_dir> <output.csv>
 
 # From raw tiles
-linum-generate-slice-config <tiles_dir> <output.csv> --from_tiles
+linum_generate_slice_config.py <tiles_dir> <output.csv> --from_tiles
 
 # From shifts file
-linum-generate-slice-config <shifts.csv> <output.csv> --from_shifts
+linum_generate_slice_config.py <shifts.csv> <output.csv> --from_shifts
 
 # With exclusions
-linum-generate-slice-config <input> <output.csv> --exclude 1 2 5
+linum_generate_slice_config.py <input> <output.csv> --exclude 1 2 5
 
 # With galvo detection (adds galvo_confidence and galvo_fix columns)
-linum-generate-slice-config <tiles_dir> <output.csv> --from_tiles --detect_galvo
+linum_generate_slice_config.py <tiles_dir> <output.csv> --from_tiles --detect_galvo
 
 # From shifts with galvo detection
-linum-generate-slice-config <shifts.csv> <output.csv> --from_shifts \
+linum_generate_slice_config.py <shifts.csv> <output.csv> --from_shifts \
     --detect_galvo --tiles_dir <tiles_dir>
 
 # Custom galvo threshold
-linum-generate-slice-config <tiles_dir> <output.csv> --from_tiles \
+linum_generate_slice_config.py <tiles_dir> <output.csv> --from_tiles \
     --detect_galvo --galvo_threshold 0.6
 ```
 
@@ -814,12 +814,12 @@ linum-generate-slice-config <tiles_dir> <output.csv> --from_tiles \
 
 Scripts for troubleshooting reconstruction artifacts. These are typically invoked by the pipeline's diagnostic mode but can also be run standalone.
 
-### linum-analyze-shifts
+### linum_analyze_shifts.py
 
 Analyze XY shifts from a shifts file and generate a drift analysis report with summary statistics, outlier detection, and cumulative drift visualization.
 
 ```bash
-linum-analyze-shifts <shifts_xy.csv> <output_dir> \
+linum_analyze_shifts.py <shifts_xy.csv> <output_dir> \
     [--resolution <um>] \
     [--iqr_multiplier <mult>] \
     [--slice_config <config.csv>]
@@ -831,12 +831,12 @@ linum-analyze-shifts <shifts_xy.csv> <output_dir> \
 | `--iqr_multiplier` | `1.5` | IQR multiplier for outlier detection |
 | `--slice_config` | — | Optional slice config CSV to filter slices |
 
-### linum-assess-slice-quality
+### linum_assess_slice_quality.py
 
 Assess mosaic grid slice quality and optionally create or update a slice configuration file. Uses SSIM, edge preservation, and variance consistency metrics.
 
 ```bash
-linum-assess-slice-quality <mosaics_dir> <output_slice_config.csv> \
+linum_assess_slice_quality.py <mosaics_dir> <output_slice_config.csv> \
     [--min_quality <0.0-1.0>] \
     [--exclude_first <n>] \
     [--update_existing]
@@ -848,72 +848,72 @@ linum-assess-slice-quality <mosaics_dir> <output_slice_config.csv> \
 | `--exclude_first` | Exclude the first N calibration slices |
 | `--update_existing` | Update an existing slice config with quality info |
 
-### linum-analyze-registration-transforms
+### linum_analyze_registration_transforms.py
 
 Analyze cumulative rotation and translation across pairwise registration transforms to detect drift.
 
 ```bash
-linum-analyze-registration-transforms <register_pairwise_dir> <output_dir> \
+linum_analyze_registration_transforms.py <register_pairwise_dir> <output_dir> \
     [--resolution <um>] \
     [--rotation_threshold <degrees>]
 ```
 
-### linum-analyze-acquisition-rotation
+### linum_analyze_acquisition_rotation.py
 
 Analyze acquisition-time rotation from the shifts file combined with registration outputs.
 
 ```bash
-linum-analyze-acquisition-rotation <shifts_file> <output_dir> \
+linum_analyze_acquisition_rotation.py <shifts_file> <output_dir> \
     [--registration_dir <register_pairwise_dir>] \
     [--resolution <um>]
 ```
 
-### linum-analyze-tile-dilation
+### linum_analyze_tile_dilation.py
 
 Analyze tile position refinements to detect scale drift (mosaic dilation).
 
 ```bash
-linum-analyze-tile-dilation <mosaic_grid.ome.zarr> <transform.npy> <output_dir> \
+linum_analyze_tile_dilation.py <mosaic_grid.ome.zarr> <transform.npy> <output_dir> \
     [--resolution <um>] \
     [--overlap_fraction <frac>] \
     [--slice_id <id>]
 ```
 
-### linum-aggregate-dilation-analysis
+### linum_aggregate_dilation_analysis.py
 
 Aggregate per-slice tile dilation analysis results across the full sample.
 
 ```bash
-linum-aggregate-dilation-analysis <input_dir> <output_dir> \
+linum_aggregate_dilation_analysis.py <input_dir> <output_dir> \
     [--pattern <glob_pattern>]
 ```
 
-### linum-compare-stitching
+### linum_compare_stitching.py
 
 Compare motor-only vs refined stitching side-by-side by computing seam sharpness metrics and generating comparison visualizations.
 
 ```bash
-linum-compare-stitching <motor_stitch.ome.zarr> <refined_stitch.ome.zarr> <output_dir> \
+linum_compare_stitching.py <motor_stitch.ome.zarr> <refined_stitch.ome.zarr> <output_dir> \
     [--label1 <name>] \
     [--label2 <name>] \
     [--tile_step <pixels>]
 ```
 
-### linum-diagnose-pipeline
+### linum_diagnose_pipeline.py
 
 High-level pipeline diagnostic script. Aggregates metrics and produces a summarized diagnostic report.
 
 ```bash
-linum-diagnose-pipeline <pipeline_output_dir> <output_dir> \
+linum_diagnose_pipeline.py <pipeline_output_dir> <output_dir> \
     [--resolution <um>]
 ```
 
-### linum-diagnose-reconstruction
+### linum_diagnose_reconstruction.py
 
 Detailed reconstruction diagnostic script. Checks registration transforms, rotation drift, and alignment quality.
 
 ```bash
-linum-diagnose-reconstruction <pipeline_output_dir> <output_dir> \
+linum_diagnose_reconstruction.py <pipeline_output_dir> <output_dir> \
     [--resolution <um>] \
     [--rotation_threshold <degrees>]
 ```
@@ -922,44 +922,44 @@ linum-diagnose-reconstruction <pipeline_output_dir> <output_dir> \
 
 ## Visualization
 
-### linum-view-omezarr
+### linum_view_omezarr.py
 
 Interactive OME-Zarr viewer.
 
 ```bash
-linum-view-omezarr <input.ome.zarr>
+linum_view_omezarr.py <input.ome.zarr>
 ```
 
-### linum-view-zarr
+### linum_view_zarr.py
 
 Interactive Zarr viewer.
 
 ```bash
-linum-view-zarr <input.zarr>
+linum_view_zarr.py <input.zarr>
 ```
 
-### linum-view-oct-raw-tile
+### linum_view_oct_raw_tile.py
 
 View raw OCT tile.
 
 ```bash
-linum-view-oct-raw-tile <tile_dir>
+linum_view_oct_raw_tile.py <tile_dir>
 ```
 
-### linum-screenshot-omezarr
+### linum_screenshot_omezarr.py
 
 Generate screenshot from OME-Zarr.
 
 ```bash
-linum-screenshot-omezarr <input.ome.zarr> <output.png>
+linum_screenshot_omezarr.py <input.ome.zarr> <output.png>
 ```
 
-### linum-screenshot-omezarr-annotated
+### linum_screenshot_omezarr_annotated.py
 
 Generate annotated orthogonal view screenshots from an OME-Zarr volume. Adds Z-slice index labels to the coronal and sagittal views so each input slice can be easily identified in the reconstruction.
 
 ```bash
-linum-screenshot-omezarr-annotated <input.ome.zarr> <output.png> \
+linum_screenshot_omezarr_annotated.py <input.ome.zarr> <output.png> \
     [--x_slice <idx>] \
     [--y_slice <idx>] \
     [--n_slices <n>] \
@@ -979,22 +979,22 @@ linum-screenshot-omezarr-annotated <input.ome.zarr> <output.png> \
 | `--label_every` | `1` | Label every Nth slice |
 | `--show_lines` | off | Draw horizontal lines at slice boundaries |
 
-### linum-generate-pipeline-report
+### linum_generate_pipeline_report.py
 
 Generate a quality report from pipeline metrics. Aggregates metrics JSON files from all processing steps and produces an HTML or text report.
 
 ```bash
 # Generate HTML report (default)
-linum-generate-pipeline-report <pipeline_output_dir> report.html
+linum_generate_pipeline_report.py <pipeline_output_dir> report.html
 
 # Generate text report
-linum-generate-pipeline-report <pipeline_output_dir> report.txt --format text
+linum_generate_pipeline_report.py <pipeline_output_dir> report.txt --format text
 
 # Verbose report with all metric details
-linum-generate-pipeline-report <pipeline_output_dir> report.html --verbose
+linum_generate_pipeline_report.py <pipeline_output_dir> report.html --verbose
 
 # Custom title
-linum-generate-pipeline-report <pipeline_output_dir> report.html --title "My Pipeline Report"
+linum_generate_pipeline_report.py <pipeline_output_dir> report.html --title "My Pipeline Report"
 ```
 
 **Parameters:**
@@ -1011,7 +1011,7 @@ linum-generate-pipeline-report <pipeline_output_dir> report.html --title "My Pip
 ## Utilities
 
 
-### linum-clean-raw-data
+### linum_clean_raw_data.py
 
 Clean up raw S-OCT acquisitions by removing processed `.bin` files and keeping
 only the metadata (`metadata.json`, `info.txt`). Moves quick-stitch images to
@@ -1020,10 +1020,10 @@ directory structure. Useful for archiving subjects once mosaic grids have been
 generated.
 
 ```bash
-linum-clean-raw-data <data_directory> [--dry-run] [-v]
+linum_clean_raw_data.py <data_directory> [--dry-run] [-v]
 ```
 
-### linum-fix-galvo-shift-zarr
+### linum_fix_galvo_shift_zarr.py
 
 Fix galvo-shift artefacts directly on an already-assembled mosaic grid
 OME-Zarr when the raw `.bin` files are no longer available. Each zarr chunk
@@ -1033,7 +1033,7 @@ of each chunk. `--mode undo` reverses a previously applied fix (for false-
 positive detections).
 
 ```bash
-linum-fix-galvo-shift-zarr <input.ome.zarr> <output.ome.zarr> \
+linum_fix_galvo_shift_zarr.py <input.ome.zarr> <output.ome.zarr> \
     [--detect_only] \
     [--mode {apply,undo}] \
     [--band_shift <pixels>] \
@@ -1042,76 +1042,76 @@ linum-fix-galvo-shift-zarr <input.ome.zarr> <output.ome.zarr> \
     [--galvo_threshold <0-1>]
 ```
 
-### linum-extract-pyramid-levels
+### linum_extract_pyramid_levels.py
 
 Extract one or more pyramid levels from an OME-Zarr volume and save as NIfTI files. Useful for exporting analysis-specific resolutions without converting the full volume.
 
 ```bash
 # List available pyramid levels
-linum-extract-pyramid-levels <input.ome.zarr> --list
+linum_extract_pyramid_levels.py <input.ome.zarr> --list
 
 # Extract specific levels
-linum-extract-pyramid-levels <input.ome.zarr> 0 2
+linum_extract_pyramid_levels.py <input.ome.zarr> 0 2
 ```
 
 Output files are named `<zarr_stem>_level<N>_<resolution>.nii.gz` and saved next to the input.
 
-### linum-resample-nifti
+### linum_resample_nifti.py
 
 Resample a NIfTI image to a target isotropic resolution.
 
 ```bash
-linum-resample-nifti <input.nii.gz> <output.nii.gz> -r <resolution>
+linum_resample_nifti.py <input.nii.gz> <output.nii.gz> -r <resolution>
 ```
 
-For resampling 2D mosaic grids see `linum-resample-mosaic-grid`.
+For resampling 2D mosaic grids see `linum_resample_mosaic_grid.py`.
 
-### linum-reorient-nifti-to-ras
+### linum_reorient_nifti_to_ras.py
 
 Reorient NIfTI to RAS orientation.
 
 ```bash
-linum-reorient-nifti-to-ras <input.nii.gz> <output.nii.gz>
+linum_reorient_nifti_to_ras.py <input.nii.gz> <output.nii.gz>
 ```
 
-### linum-axis-xyz-to-zyx
+### linum_axis_xyz_to_zyx.py
 
 Transpose axes from XYZ to ZYX.
 
 ```bash
-linum-axis-xyz-to-zyx <input> <output>
+linum_axis_xyz_to_zyx.py <input> <output>
 ```
 
-### linum-segment-brain-3d
+### linum_segment_brain_3d.py
 
 Segment brain tissue in 3D volume.
 
 ```bash
-linum-segment-brain-3d <input> <output_mask>
+linum_segment_brain_3d.py <input> <output_mask>
 ```
 
-### linum-download-allen
+### linum_download_allen.py
 
 Download Allen Brain Atlas data.
 
 ```bash
-linum-download-allen <output_dir>
+linum_download_allen.py <output_dir>
 ```
 
-### linum-merge-slices-into-folders
+### linum_merge_slices_into_folders.py
 
 Organize slices into folder structure.
 
 ```bash
-linum-merge-slices-into-folders <input_dir> <output_dir>
+linum_merge_slices_into_folders.py <input_dir> <output_dir>
 ```
 
-### linum-suggest-params
+### linum_suggest_params.py
 
 Suggest 3D reconstruction pipeline parameters from raw input files. Analyses the motor-positions file (`shifts_xy.csv`) and, optionally, the raw data directory produced by the preprocessing pipeline to automatically estimate suitable `nextflow.config` parameters.
 
 ```bash
-linum-suggest-params <shifts_file> <output_dir> \
+linum_suggest_params.py <shifts_file> <output_dir> \
     [--data_dir <raw_data_dir>] \
     [--n_calibration_slices N] \
     [--axial_res_um UM] \
@@ -1148,7 +1148,7 @@ From `--data_dir` (raw data directory):
 
 **Example:**
 ```bash
-linum-suggest-params /data/sub-01/shifts_xy.csv /tmp/sub-01_params \
+linum_suggest_params.py /data/sub-01/shifts_xy.csv /tmp/sub-01_params \
     --data_dir /data/sub-01/raw \
     --n_calibration_slices 1
 ```
@@ -1159,40 +1159,40 @@ linum-suggest-params /data/sub-01/shifts_xy.csv /tmp/sub-01_params \
 
 GPU-accelerated versions of key scripts. These use NVIDIA CUDA via CuPy for acceleration and automatically fall back to CPU if no GPU is available.
 
-### linum-gpu-info
+### linum_gpu_info.py
 
 Check GPU availability and run quick benchmarks.
 
 ```bash
 # Show GPU info
-linum-gpu-info
+linum_gpu_info.py
 
 # Run quick performance test
-linum-gpu-info --test
+linum_gpu_info.py --test
 
 # Output as JSON
-linum-gpu-info --json
+linum_gpu_info.py --json
 ```
 
-### linum-benchmark-gpu
+### linum_benchmark_gpu.py
 
 Comprehensive CPU vs GPU benchmark suite.
 
 ```bash
 # Quick benchmark (512x512)
-linum-benchmark-gpu
+linum_benchmark_gpu.py
 
 # Full benchmark with multiple sizes
-linum-benchmark-gpu --full
+linum_benchmark_gpu.py --full
 
 # Custom sizes
-linum-benchmark-gpu --sizes 1024 2048 4096
+linum_benchmark_gpu.py --sizes 1024 2048 4096
 
 # With real data
-linum-benchmark-gpu --input /path/to/mosaic.ome.zarr
+linum_benchmark_gpu.py --input /path/to/mosaic.ome.zarr
 
 # Save results
-linum-benchmark-gpu --output results.json --iterations 10
+linum_benchmark_gpu.py --output results.json --iterations 10
 ```
 
 | Option | Description |
@@ -1225,5 +1225,5 @@ Most scripts support these common options:
 linum_<script_name>.py --help
 
 # Example
-linum-create-mosaic-grid-3d --help
+linum_create_mosaic_grid_3d.py --help
 ```
