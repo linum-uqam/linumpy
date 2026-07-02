@@ -300,4 +300,82 @@ class Helpers {
         if (params.stack_translation_min_zcorr > 0) opts += " --translation_min_zcorr ${params.stack_translation_min_zcorr}"
         return opts
     }
+
+    // -------------------------------------------------------------------------
+    // GPU pinning
+    // -------------------------------------------------------------------------
+
+    /**
+     * Bash block that pins the current task to the least-loaded physical GPU.
+     *
+     * In-process pinning via `cp.cuda.Device(N).use()` is leaky — zarr's GPU
+     * buffer prototype and the kvikio/GDS path still allocate on device 0
+     * regardless. Setting `CUDA_VISIBLE_DEVICES` in the shell hides the other
+     * cards from the process so no library can route around the choice.
+     *
+     * The returned snippet maintains per-GPU PID directories under /tmp guarded
+     * by `flock`. On entry it prunes dead PIDs, picks the GPU with the fewest
+     * live forks, and registers `$$` in that GPU's directory. On shell exit
+     * (`trap ... EXIT`) it removes its own PID file. SIGKILL skips the trap, so
+     * the dead-PID prune at next acquire reclaims any leaked slot — this matters
+     * because OOM-kills (exit 137) used to leave slots permanently incremented,
+     * skewing the load balancer toward the surviving GPU.
+     *
+     * Pass `params` and a short `tag` used for the per-task log line.
+     * When `params.use_gpu` is false this returns an empty string.
+     */
+    static String gpuPinBlock(params, String tag) {
+        if (!params.use_gpu) return ''
+        def n = params.gpu_count as int
+        return """
+        UID_=\$(id -u)
+        GPU_DIR=/tmp/linumpy_nf_gpu_slots_\${UID_}
+        mkdir -p \$GPU_DIR
+        for i in \$(seq 0 \$((${n} - 1))); do mkdir -p \$GPU_DIR/\$i; done
+        _gpu_acquire() {
+            exec 9>\$GPU_DIR/.lock
+            flock 9
+            local best=0 best_n=999999 i n_alive pid_file pid
+            for i in \$(seq 0 \$((${n} - 1))); do
+                n_alive=0
+                for pid_file in \$GPU_DIR/\$i/*; do
+                    [ -f "\$pid_file" ] || continue
+                    pid=\$(basename "\$pid_file")
+                    if kill -0 "\$pid" 2>/dev/null; then
+                        n_alive=\$((n_alive + 1))
+                    else
+                        rm -f "\$pid_file"
+                    fi
+                done
+                if [ "\$n_alive" -lt "\$best_n" ]; then best=\$i; best_n=\$n_alive; fi
+            done
+            : > \$GPU_DIR/\$best/\$\$
+            echo \$best
+        }
+        _gpu_release() {
+            rm -f \$GPU_DIR/\$1/\$\$
+        }
+        export CUDA_VISIBLE_DEVICES=\$(_gpu_acquire)
+        trap "_gpu_release \$CUDA_VISIBLE_DEVICES" EXIT
+        echo "[${tag}] CUDA_VISIBLE_DEVICES=\$CUDA_VISIBLE_DEVICES"
+        """
+    }
+
+    /**
+     * Expose every GPU to the task for intra-process multi-GPU work (e.g.
+     * linum-basic ``fit_mosaic`` z-level fan-out).  Pair with ``maxForks = 1``
+     * on the calling process so concurrent tasks do not oversubscribe devices.
+     *
+     * When ``gpu_count <= 1`` this falls back to :meth:`gpuPinBlock`.
+     */
+    static String gpuExposeAllBlock(params, String tag) {
+        if (!params.use_gpu) return ''
+        def n = params.gpu_count as int
+        if (n <= 1) return gpuPinBlock(params, tag)
+        def devices = (0..(n - 1)).join(',')
+        return """
+        export CUDA_VISIBLE_DEVICES=${devices}
+        echo "[${tag}] CUDA_VISIBLE_DEVICES=\$CUDA_VISIBLE_DEVICES (all GPUs for multi-GPU fit)"
+        """
+    }
 }

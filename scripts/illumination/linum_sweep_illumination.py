@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""Parameter sweep tool for illumination-correction tuning.
 
-Runs the BaSiC-based illumination correction for every combination of the
+Runs the linum-basic illumination correction for every combination of the
 supplied parameters and writes a labelled PNG for each configuration, so the
 effect of each choice is immediately visible without re-running the full
 pipeline.
@@ -49,7 +49,6 @@ import linumpy.config.threads  # noqa: F401
 import argparse
 import csv
 import itertools
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import matplotlib
@@ -57,9 +56,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from basicpy import BaSiC
-from scipy.ndimage import gaussian_filter
-from tqdm.auto import tqdm
 
 from linumpy.io.zarr import read_omezarr
 
@@ -111,12 +107,13 @@ def run_one_config(
     darkfield_smooth_sigma: float = 0.0,
     darkfield_z_window: int = 0,
     flatfield_smooth_sigma: float = 0.0,
+    use_gpu: bool = False,
     n_workers: int = 1,
 ) -> tuple[dict[int, np.ndarray], np.ndarray, np.ndarray | None, dict]:
-    """Fit BaSiC and apply the model to ``apply_z``.
+    """Fit linum-basic and apply the model to ``apply_z``.
 
-    When ``per_z_fit=False`` (default) fits on the pooled Z-tile stack.
-    When ``per_z_fit=True`` fits a separate model per plane in ``apply_z``.
+    When ``per_z_fit=False`` (default) fits a global field on pooled Z planes.
+    When ``per_z_fit=True`` fits a separate model per axial plane.
 
     Returns
     -------
@@ -125,152 +122,100 @@ def run_one_config(
     darkfield : (ty, tx) float32 array or None — the model applied to ``preview_z``
     stats     : dict with fit diagnostics for ``preview_z``
     """
+    from linum_basic.fit import apply_fit, fit_mosaic
+    from linum_basic.mosaic import MosaicGrid
+
     n_axial = vol.shape[0]
     plane_shape: tuple[int, int] = (vol.shape[1], vol.shape[2])
-    tiles_per_plane = (plane_shape[0] // tile_shape[0]) * (plane_shape[1] // tile_shape[1])
+    th, tw = tile_shape
+    h, w = plane_shape
+    h_crop = (h // th) * th
+    w_crop = (w // tw) * tw
+    if h_crop != h or w_crop != w:
+        print(f"Cropping mosaic from ({h},{w}) to ({h_crop},{w_crop}) to match tile grid (tile={tile_shape}).")
+    vol_crop = vol[:, :h_crop, :w_crop]
+    crop_shape: tuple[int, int] = (h_crop, w_crop)
 
-    def _fit_basic_on(pool_arr: np.ndarray) -> np.ndarray | None:
-        basic_kwargs: dict = {"get_darkfield": False, "max_iterations": max_iterations}
-        if smoothness_flatfield is not None:
-            basic_kwargs["smoothness_flatfield"] = smoothness_flatfield
-        if working_size is not None:
-            basic_kwargs["working_size"] = working_size
-        # (flatfield_smooth_sigma applied after fit, see below)
-        opt = BaSiC(**basic_kwargs)
-        opt.fit(pool_arr)
-        ff = np.asarray(opt.flatfield, dtype=np.float32)
-        if np.isnan(ff).any() or ff.max() <= 0:
-            return None
-        if flatfield_smooth_sigma > 0:
-            ff = gaussian_filter(ff, sigma=flatfield_smooth_sigma).astype(np.float32)
-        return ff
+    tiles_per_plane = (crop_shape[0] // tile_shape[0]) * (crop_shape[1] // tile_shape[1])
+    if percentile_max is not None:
+        print("Note: percentile_max is ignored by linum-basic backend.")
+    if darkfield_smooth_sigma > 0:
+        print("Note: darkfield_smooth_sigma is ignored by linum-basic backend.")
+    if darkfield_z_window != 0:
+        print("Note: darkfield_z_window is ignored by linum-basic backend.")
+    if flatfield_smooth_sigma > 0:
+        print("Note: flatfield_smooth_sigma is ignored by linum-basic backend.")
+    if working_size is not None:
+        print("Note: working_size is ignored by linum-basic backend.")
+    if darkfield_percentile != 5.0:
+        print("Note: darkfield_percentile is accepted for compatibility but ignored by linum-basic backend.")
 
-    def _apply_ff(tiles: np.ndarray, ff: np.ndarray, df: np.ndarray | None) -> np.ndarray:
-        x = tiles.astype(np.float32, copy=False)
-        if df is not None:
-            x = x - df[None]
-        return x / ff[None]
+    fit_max_eff = max(fit_max_samples, tiles_per_plane)
+    n_planes = min(n_axial, max(1, fit_max_eff // tiles_per_plane))
+    z_indices = list(range(n_axial)) if n_planes >= n_axial else np.linspace(0, n_axial - 1, n_planes, dtype=int).tolist()
 
-    def _prep(tiles_arr: np.ndarray, df: np.ndarray | None) -> np.ndarray:
-        if percentile_max is not None:
-            tiles_arr = np.clip(tiles_arr, None, float(np.percentile(tiles_arr, percentile_max)))
-        if df is not None:
-            tiles_arr = np.clip(tiles_arr - df[None], 0.0, None)
-        return tiles_arr
+    field_mode = "per-z" if per_z_fit else "global"
+    backend = "numpy"
+    device: str | None = None
+    if use_gpu:
+        try:
+            import torch as _torch
 
-    corrected: dict[int, np.ndarray] = {}
-
-    if not per_z_fit:
-        # ── Global fit ───────────────────────────────────────────────────────
-        fit_max_eff = max(fit_max_samples, tiles_per_plane)
-        n_planes = min(n_axial, max(1, fit_max_eff // tiles_per_plane))
-        fit_z = np.arange(n_axial) if n_planes >= n_axial else np.linspace(0, n_axial - 1, n_planes, dtype=int)
-
-        pool_parts = [_split_into_tiles(vol[int(z)], tile_shape) for z in fit_z]
-        pool = np.concatenate(pool_parts, axis=0)
-        del pool_parts
-
-        keep = np.mean(pool != 0, axis=(1, 2)) > 0.5
-        pool = pool[keep]
-        n_fit = pool.shape[0]
-        if n_fit == 0:
-            msg = "No non-empty tiles in fit pool."
-            raise RuntimeError(msg)
-
-        darkfield: np.ndarray | None = (
-            np.percentile(pool, darkfield_percentile, axis=0).astype(np.float32) if use_darkfield else None
-        )
-        if darkfield is not None and darkfield_smooth_sigma > 0:
-            darkfield = gaussian_filter(darkfield, sigma=darkfield_smooth_sigma).astype(np.float32)
-        pool = _prep(pool, darkfield)
-
-        flatfield = _fit_basic_on(pool)
-        del pool
-        if flatfield is None:
-            msg = f"BaSiC flatfield diverged: fit on {n_fit} tiles."
-            raise RuntimeError(msg)
-
-        for z in tqdm(apply_z, desc="  Applying", leave=False):
-            plane = vol[z]
-            tiles = _split_into_tiles(plane, tile_shape)
-            empty_mask = np.all(tiles == 0, axis=(1, 2))
-            c = _apply_ff(tiles, flatfield, darkfield)
-            if empty_mask.any():
-                c[empty_mask] = 0.0
-            c = np.nan_to_num(c, nan=0.0, posinf=0.0, neginf=0.0)
-            corrected[z] = np.clip(_assemble_from_tiles(c, plane_shape, tile_shape), 0.0, None)
-
-    else:
-        # ── Per-Z fit ────────────────────────────────────────────────────────
-        min_tiles = max(4, tiles_per_plane // 4)
-        ff_per_z: dict[int, np.ndarray] = {}
-        df_per_z: dict[int, np.ndarray | None] = {}
-        nfit_per_z: dict[int, int] = {}
-
-        def _process_plane(z: int) -> tuple[int, np.ndarray, np.ndarray | None, np.ndarray | None, int]:
-            plane = vol[z]
-            tiles = _split_into_tiles(plane, tile_shape)
-            keep = np.mean(tiles != 0, axis=(1, 2)) > 0.5
-            tiles_fit = tiles[keep].astype(np.float32)
-            fallback = np.clip(_assemble_from_tiles(tiles.astype(np.float32), plane_shape, tile_shape), 0.0, None)
-
-            if tiles_fit.shape[0] < min_tiles:
-                return z, fallback, None, None, 0
-
-            if use_darkfield:
-                if darkfield_z_window != 0:
-                    # -1 = all planes; >0 = z±window neighbours
-                    z_range = (
-                        range(n_axial)
-                        if darkfield_z_window == -1
-                        else range(max(0, z - darkfield_z_window), min(n_axial, z + darkfield_z_window + 1))
-                    )
-                    df_parts = []
-                    for zz in z_range:
-                        t = _split_into_tiles(vol[zz], tile_shape)
-                        ok = np.mean(t != 0, axis=(1, 2)) > 0.5
-                        df_parts.append(t[ok].astype(np.float32))
-                    df_pool = np.concatenate(df_parts, axis=0)
-                    df_z: np.ndarray | None = np.percentile(df_pool, darkfield_percentile, axis=0).astype(np.float32)
-                    del df_pool
-                else:
-                    df_z = np.percentile(tiles_fit, darkfield_percentile, axis=0).astype(np.float32)
-                if darkfield_smooth_sigma > 0:
-                    df_z = gaussian_filter(df_z, sigma=darkfield_smooth_sigma).astype(np.float32)
+            if _torch.cuda.is_available():
+                backend = "torch"
+                device = "cuda"
+                print(f"GPU acceleration enabled: {_torch.cuda.get_device_name(0)}")
+            elif _torch.backends.mps.is_available():
+                backend = "torch"
+                device = "mps"
+                print("GPU acceleration enabled: Apple MPS")
             else:
-                df_z = None
-            ff_z = _fit_basic_on(_prep(tiles_fit, df_z))
-            if ff_z is None:
-                return z, fallback, None, None, 0
+                print("--use_gpu requested but no CUDA/MPS device found; using NumPy CPU.")
+        except ImportError:
+            print("--use_gpu requested but PyTorch is not installed; using NumPy CPU.")
 
-            empty_mask = np.all(tiles == 0, axis=(1, 2))
-            c = _apply_ff(tiles.astype(np.float32), ff_z, df_z)
-            if empty_mask.any():
-                c[empty_mask] = 0.0
-            c = np.nan_to_num(c, nan=0.0, posinf=0.0, neginf=0.0)
-            return z, np.clip(_assemble_from_tiles(c, plane_shape, tile_shape), 0.0, None), ff_z, df_z, tiles_fit.shape[0]
+    basic_kwargs: dict[str, object] = {
+        "estimate_darkfield": use_darkfield,
+        "max_reweighting_iterations": max_iterations,
+        "backend": backend,
+        "verbose": False,
+    }
+    if device is not None:
+        basic_kwargs["device"] = device
+    if smoothness_flatfield is not None:
+        basic_kwargs["l_s"] = smoothness_flatfield
 
-        with ThreadPoolExecutor(max_workers=n_workers) as executor:
-            plane_futures = [executor.submit(_process_plane, z) for z in apply_z]
-            for fut in tqdm(as_completed(plane_futures), total=len(apply_z), desc="  Per-Z fit+apply", leave=False):
-                z_idx, plane_result, ff_z, df_z, n = fut.result()
-                corrected[z_idx] = plane_result
-                if ff_z is not None:
-                    ff_per_z[z_idx] = ff_z
-                    df_per_z[z_idx] = df_z
-                    nfit_per_z[z_idx] = n
+    mosaic = MosaicGrid(array=vol_crop, tile_shape=tile_shape)
+    fit = fit_mosaic(
+        mosaic,
+        z_indices=z_indices,
+        field_mode=field_mode,
+        basic_kwargs=basic_kwargs,
+        n_extra_rows=0,
+        n_workers=n_workers,
+        verbose=True,
+    )
 
-        if not ff_per_z:
-            msg = "Per-Z fit: no plane had enough tiles for a successful BaSiC fit."
-            raise RuntimeError(msg)
+    corrected_crop = np.asarray(apply_fit(mosaic, fit, n_extra_rows=0), dtype=np.float32)
+    corrected_full = vol.astype(np.float32, copy=True)
+    corrected_full[:, :h_crop, :w_crop] = corrected_crop
+    corrected = {z: np.clip(corrected_full[z], 0.0, None) for z in apply_z}
 
-        # Pick the preview slice's model if available, else the nearest fitted plane.
-        chosen_z = preview_z if preview_z in ff_per_z else min(ff_per_z.keys(), key=lambda z: abs(z - preview_z))
-        flatfield = ff_per_z[chosen_z]
-        darkfield = df_per_z[chosen_z]
-        n_fit = nfit_per_z[chosen_z]
+    z_fit_indices = list(getattr(fit, "z_indices", z_indices))
+    if fit.flatfields.ndim == 2:
+        flatfield = np.asarray(fit.flatfields, dtype=np.float32)
+        darkfield = np.asarray(fit.darkfields, dtype=np.float32) if fit.darkfields is not None else None
+    else:
+        if preview_z in z_fit_indices:
+            model_idx = z_fit_indices.index(preview_z)
+        else:
+            nearest_z = min(z_fit_indices, key=lambda z: abs(z - preview_z))
+            model_idx = z_fit_indices.index(nearest_z)
+        flatfield = np.asarray(fit.flatfields[model_idx], dtype=np.float32)
+        darkfield = np.asarray(fit.darkfields[model_idx], dtype=np.float32) if fit.darkfields is not None else None
 
-    df = darkfield  # alias for stats
+    n_fit = len(z_indices) * tiles_per_plane
+    df = darkfield
     stats: dict = {
         "n_fit_tiles": n_fit,
         "ff_min": float(flatfield.min()),
@@ -489,6 +434,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "Each worker runs an independent BaSiC fit; set to number of available\n"
         "CPU cores for maximum throughput. Has no effect for global fits.  [%(default)s]",
     )
+    p.add_argument(
+        "--use_gpu",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        help="Use linum-basic torch backend on a CUDA/MPS device when available. [%(default)s]",
+    )
 
     # output control
     p.add_argument(
@@ -649,6 +600,7 @@ def main() -> None:
                 darkfield_smooth_sigma=df_sig if df_sig is not None else 0.0,
                 darkfield_z_window=df_zw,
                 flatfield_smooth_sigma=ff_sig if ff_sig is not None else 0.0,
+                use_gpu=args.use_gpu,
                 n_workers=args.n_workers,
             )
         except Exception as exc:

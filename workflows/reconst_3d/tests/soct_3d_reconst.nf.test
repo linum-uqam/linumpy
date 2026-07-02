@@ -35,6 +35,7 @@ nextflow_pipeline {
             // Verify mandatory pipeline stages all ran
             assert tasks.any { it.name =~ /stitch_3d_with_refinement/ }
             assert tasks.any { it.name =~ /beam_profile_correction/ }
+            assert tasks.any { it.name =~ /compensate_attenuation/ }
             assert tasks.any { it.name =~ /crop_interface/ }
             assert tasks.any { it.name =~ /normalize/ }
             assert tasks.any { it.name =~ /bring_to_common_space/ }
@@ -46,6 +47,90 @@ nextflow_pipeline {
             // Optional stages should NOT have run
             assert !tasks.any { it.name =~ /detect_rehoming_events/ }
             assert !tasks.any { it.name =~ /correct_bias_field/ }
+        }
+    }
+
+    test("Should run illumination correction with linum-basic backend in stub mode") {
+        options "-stub"
+
+        when {
+            params {
+                input = "${projectDir}/workflows/reconst_3d/tests/data"
+                output = "${outputDir}"
+                use_gpu = false
+                resolution = -1
+                fix_curvature_enabled = false
+                fix_illum_enabled = true
+                fix_illum_backend = 'linum-basic'
+                stitch_global_transform = false
+                detect_rehoming = false
+                auto_assess_quality = false
+                analyze_shifts = false
+                stitch_preview = false
+                common_space_preview = false
+                interpolate_missing_slices = false
+                export_manual_align = false
+                refine_manual_transforms = false
+                auto_exclude_enabled = false
+                correct_bias_field = false
+                align_to_ras_enabled = false
+                apply_pairwise_transforms = true
+                processes = 2
+            }
+        }
+
+        then {
+            assert workflow.success
+            def tasks = workflow.trace.tasks()
+            // linum-basic backend should use fix_illumination_basic process
+            assert tasks.any { it.name =~ /fix_illumination_basic/ }
+            // BaSiCPy process should NOT have run (fix_illumination without _basic suffix)
+            assert !tasks.any { it.name =~ /fix_illumination/ && !(it.name =~ /fix_illumination_basic/) }
+            // Core stages still ran
+            assert tasks.any { it.name =~ /stitch_3d_with_refinement/ }
+            assert tasks.any { it.name =~ /normalize/ }
+        }
+    }
+
+    test("Should run illumination correction with basicpy backend in stub mode") {
+        options "-stub"
+
+        when {
+            params {
+                input = "${projectDir}/workflows/reconst_3d/tests/data"
+                output = "${outputDir}"
+                use_gpu = false
+                resolution = -1
+                fix_curvature_enabled = false
+                fix_illum_enabled = true
+                fix_illum_backend = 'basicpy'
+                stitch_global_transform = false
+                detect_rehoming = false
+                auto_assess_quality = false
+                analyze_shifts = false
+                stitch_preview = false
+                common_space_preview = false
+                interpolate_missing_slices = false
+                export_manual_align = false
+                refine_manual_transforms = false
+                auto_exclude_enabled = false
+                correct_bias_field = false
+                align_to_ras_enabled = false
+                apply_pairwise_transforms = true
+                processes = 2
+            }
+        }
+
+        then {
+            assert workflow.success
+            def tasks = workflow.trace.tasks()
+            // basicpy backend should use fix_illumination process (not fix_illumination_basic)
+            assert tasks.any { it.name =~ /fix_illumination/ && !(it.name =~ /fix_illumination_basic/) }
+            // linum-basic process should NOT have run
+            assert !tasks.any { it.name =~ /fix_illumination_basic/ }
+            // Core stages still ran
+            assert tasks.any { it.name =~ /stitch_3d_with_refinement/ }
+            assert tasks.any { it.name =~ /normalize/ }
         }
     }
 

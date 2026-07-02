@@ -30,16 +30,12 @@ import linumpy.config.threads  # noqa: F401
 
 import argparse
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import numpy as np
 
 from linumpy.cli.args import add_processes_arg
 from linumpy.io.zarr import read_omezarr, save_omezarr
 from linumpy.metrics import PipelineMetrics
-
-if TYPE_CHECKING:
-    from linum_basic import MosaicFit, MosaicGrid
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -310,11 +306,11 @@ def main() -> None:
 
 def _write_diagnostics(
     *,
-    mosaic: MosaicGrid,
-    fit: MosaicFit,
+    mosaic: object,
+    fit: object,
     corrected_crop: np.ndarray,
     corrected_full: np.ndarray,
-    resolution: tuple | None,
+    resolution: object,
     seam_pairs: list,
     eval_metrics: dict,
     diagnostics_dir: Path,

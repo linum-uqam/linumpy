@@ -12,6 +12,7 @@ import linumpy.config.threads  # noqa: F401
 
 import argparse
 import base64
+import contextlib
 import io as _io
 import json
 import re
@@ -27,6 +28,7 @@ try:
 except ImportError:
     _PIL_AVAILABLE = False
 
+import operator
 from typing import Any
 
 import numpy as np
@@ -35,40 +37,69 @@ from linumpy.metrics import aggregate_metrics, compute_summary_statistics
 
 # Logical pipeline step ordering
 STEP_ORDER = [
+    "slice_quality_assessment",
+    "fix_illumination_basic",
     "stitch_3d",
+    "stitch_3d_refined",
+    "rehoming_detection",
     "xy_transform_estimation",
     "normalize_intensities",
     "psf_compensation",
     "crop_interface",
     "pairwise_registration",
+    "auto_exclude",
+    "common_space_alignment",
+    "slice_interpolation",
     "stack_slices",
 ]
 
 # Human-readable display names (step_name → display label)
 STEP_DISPLAY_NAMES = {
+    "slice_quality_assessment": "Slice Quality Assessment",
+    "fix_illumination_basic": "Illumination Correction (BaSiC)",
     "stitch_3d": "Stitch 3D",
+    "stitch_3d_refined": "Stitch 3D (refined)",
+    "rehoming_detection": "Rehoming Detection",
     "xy_transform_estimation": "XY Transform Estimation",
     "normalize_intensities": "Normalize Intensities",
     "psf_compensation": "PSF Compensation",
     "crop_interface": "Crop Interface",
     "pairwise_registration": "Pairwise Registration",
+    "auto_exclude": "Auto-Exclude Slices",
+    "common_space_alignment": "Common-Space Alignment",
+    "slice_interpolation": "Slice Interpolation",
     "stack_slices": "Stack Slices",
 }
 
 # Human-readable descriptions for pipeline steps
 STEP_DESCRIPTIONS = {
+    "slice_quality_assessment": "Scores each slice (SSIM, edges, variance) and proposes exclusions.",
+    "fix_illumination_basic": (
+        "Corrects lateral illumination inhomogeneities across mosaic tiles using the BaSiC "
+        "(Background and Shading Correction) algorithm (linum-basic backend). "
+        "Metrics report seam consistency before and after correction."
+    ),
     "stitch_3d": "Stitches individual mosaic tiles into a single 2D slice.",
+    "stitch_3d_refined": (
+        "Stitches mosaic tiles using refined per-pair shift estimates (rotation, overlap fraction, scan/stage angles)."
+    ),
+    "rehoming_detection": "Detects and corrects motor rehoming events in the per-slice XY shifts.",
     "xy_transform_estimation": "Estimates the affine transformation for tile overlap correction.",
     "normalize_intensities": "Normalizes per-slice intensities using agarose background.",
     "psf_compensation": "Compensates for beam profile / PSF attenuation along the optical axis.",
     "crop_interface": "Detects and crops the tissue-agarose interface.",
     "pairwise_registration": "Registers consecutive serial sections to align the 3D volume.",
+    "auto_exclude": "Auto-excludes clusters of consecutive low-quality pairwise registrations.",
+    "common_space_alignment": "Brings every slice into common space using motor + image-based refinement.",
+    "slice_interpolation": "Reconstructs missing or low-quality slices by interpolating from neighbours.",
     "stack_slices": "Stacks registered slices into the final 3D volume.",
 }
 
 # Maps pipeline step_name → image category shown in that step section
 STEP_PREVIEW_CATEGORY = {
+    "fix_illumination_basic": "fix_illum_basic_preview",
     "stitch_3d": "stitch_preview",
+    "stitch_3d_refined": "stitch_preview",
     "pairwise_registration": "common_space_preview",
 }
 
@@ -138,6 +169,11 @@ def sort_steps(aggregated: dict) -> dict:
     return dict(sorted(aggregated.items(), key=lambda x: step_key(x[0])))
 
 
+def slug(name: str) -> str:
+    """Slugify a string for use as an HTML id."""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
 def extract_slice_id(source_file: str) -> str:
     """Extract a meaningful slice identifier from a source file path."""
     path = Path(source_file)
@@ -177,7 +213,7 @@ def group_issues(issues: list[str]) -> list[dict]:
     groups = defaultdict(list)
     for issue in issues:
         parsed = parse_issue(issue)
-        key = parsed["metric"] if parsed["metric"] else "__other__"
+        key = parsed["metric"] or "__other__"
         groups[key].append(parsed)
 
     result = []
@@ -330,11 +366,11 @@ def generate_trend_line_svg(
         )
 
     # Y-axis labels
-    elements.append(
-        f'<text x="{pad_x - 3}" y="{to_svg_y(max_y):.1f}" text-anchor="end" font-size="8" fill="#888">{max_y:.3g}</text>'
-    )
-    elements.append(
-        f'<text x="{pad_x - 3}" y="{to_svg_y(min_y):.1f}" text-anchor="end" font-size="8" fill="#888">{min_y:.3g}</text>'
+    elements.extend(
+        (
+            f'<text x="{pad_x - 3}" y="{to_svg_y(max_y):.1f}" text-anchor="end" font-size="8" fill="#888">{max_y:.3g}</text>',
+            f'<text x="{pad_x - 3}" y="{to_svg_y(min_y):.1f}" text-anchor="end" font-size="8" fill="#888">{min_y:.3g}</text>',
+        )
     )
 
     title_text = f"n={len(numeric)}, range [{min_y:.3g}, {max_y:.3g}]"
@@ -360,7 +396,7 @@ def compute_cross_slice_trends(aggregated: dict[str, list[dict]]) -> dict:
             val = m.get("metrics", {}).get(key, {}).get("value")
             if isinstance(val, (int, float)):
                 pairs.append((src, val))
-        pairs.sort(key=lambda p: p[0])  # sort by source file path
+        pairs.sort(key=operator.itemgetter(0))  # sort by source file path
         return [v for _, v in pairs]
 
     # XY tile transform: scale and shear across slices
@@ -543,7 +579,7 @@ def discover_interpolation_data(input_dir: Path) -> dict | None:
             return None
         try:
             return float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     for r in rows:
@@ -661,6 +697,98 @@ def discover_diagnostic_data(input_dir: Path) -> dict[str, dict]:
     return diagnostics
 
 
+def discover_slice_config_summary(input_dir: Path) -> dict | None:
+    """Find the deepest-enriched ``slice_config.csv`` and summarise it.
+
+    Looks (in priority order) at:
+
+    1. ``slice_config_final.csv`` at the top level (promoted by update_files.sh);
+    2. ``interpolate_missing_slice/`` (post-finalise CSVs);
+    3. ``auto_exclude_slices/``;
+    4. ``detect_rehoming_events/``;
+    5. ``auto_assess_quality/``;
+    6. ``input_dir`` itself.
+
+    Returns ``None`` when no slice_config CSV is found.
+    """
+    from linumpy.io import slice_config as slice_config_io
+
+    candidates: list[Path] = []
+    top_final = input_dir / "slice_config_final.csv"
+    if top_final.exists():
+        candidates.append(top_final)
+    for sub in (
+        "interpolate_missing_slice",
+        "auto_exclude_slices",
+        "detect_rehoming_events",
+        "auto_assess_quality",
+    ):
+        d = input_dir / sub
+        if d.is_dir():
+            csvs = sorted(d.glob("slice_config*.csv"))
+            if csvs:
+                # Prefer "_final" variants, else most-recently modified.
+                csvs.sort(key=lambda p: (0 if "final" in p.name else 1, -p.stat().st_mtime))
+                candidates.append(csvs[0])
+    candidates.extend(sorted(input_dir.glob("slice_config*.csv")))
+
+    if not candidates:
+        return None
+
+    chosen = candidates[0]
+    try:
+        rows = slice_config_io.read(chosen)
+    except Exception:
+        return None
+    if not rows:
+        return None
+
+    def _is_truthy(value: object) -> bool:
+        return str(value).strip().lower() in ("true", "1", "yes", "y", "t")
+
+    n_total = len(rows)
+    n_use_true = sum(1 for r in rows.values() if str(r.get("use", "true")).strip().lower() in ("true", "1", "yes", "y", "t"))
+    n_use_false = n_total - n_use_true
+    n_auto_excluded = sum(1 for r in rows.values() if _is_truthy(r.get("auto_excluded")))
+    n_interpolated = sum(1 for r in rows.values() if _is_truthy(r.get("interpolated")))
+    n_interp_failed = sum(1 for r in rows.values() if _is_truthy(r.get("interpolation_failed")))
+    n_rehomed = sum(1 for r in rows.values() if _is_truthy(r.get("rehomed")))
+    n_rehoming_unreliable = sum(
+        1
+        for r in rows.values()
+        if "rehoming_reliable" in r and str(r.get("rehoming_reliable")).strip() in ("0", "false", "False")
+    )
+
+    reasons: dict[str, int] = {}
+    for r in rows.values():
+        reason = str(r.get("exclude_reason") or r.get("auto_exclude_reason") or "").strip()
+        if reason:
+            reasons[reason] = reasons.get(reason, 0) + 1
+
+    quality_scores: list[float] = []
+    for r in rows.values():
+        raw = r.get("quality_score")
+        if raw in (None, ""):
+            continue
+        with contextlib.suppress(TypeError, ValueError):
+            quality_scores.append(float(raw))
+
+    return {
+        "source": str(chosen),
+        "n_total": n_total,
+        "n_use_true": n_use_true,
+        "n_use_false": n_use_false,
+        "n_auto_excluded": n_auto_excluded,
+        "n_interpolated": n_interpolated,
+        "n_interpolation_failed": n_interp_failed,
+        "n_rehomed": n_rehomed,
+        "n_rehoming_unreliable": n_rehoming_unreliable,
+        "reasons": reasons,
+        "quality_score_mean": float(np.mean(quality_scores)) if quality_scores else None,
+        "quality_score_min": float(np.min(quality_scores)) if quality_scores else None,
+    }
+
+
 def discover_images(
     input_dir: Path, overview_png: Path | None = None, annotated_png: Path | None = None
 ) -> dict[str, list[Path]]:
@@ -696,13 +824,26 @@ def discover_images(
 
     # Auto-detect overview from stack output directories if not provided via CLI
     if not images["overview"]:
-        for stack_dir_name in ("stack_motor", "stack", "correct_bias_field", "normalize_z_intensity"):
+        for stack_dir_name in (
+            "align_to_ras",
+            "normalize_z_intensity",
+            "correct_bias_field",
+            "stack_motor",
+            "stack",
+        ):
             d = input_dir / stack_dir_name
             if d.exists():
                 pngs = sorted(d.glob("*.png"))
                 if pngs:
                     images["overview"] = pngs[:2]  # at most overview + annotated
                     break
+
+    # Illumination correction diagnostics (linum-basic)
+    fix_illum_diag_dir = input_dir / "fix_illumination_basic" / "diagnostics"
+    if fix_illum_diag_dir.exists():
+        pngs = sorted(fix_illum_diag_dir.glob("*.png"))
+        if pngs:
+            images["fix_illum_basic_preview"] = pngs
 
     # Diagnostic images: add one category per diagnostics subdir
     diag_dir = input_dir / "diagnostics"
@@ -887,7 +1028,7 @@ def _render_interpolation_section_html(
     if n_failed > 0 and count > 0:
         status = "warning" if n_failed < count else "error"
 
-    html = '\n    <div class="diag-section">\n'
+    html = '\n    <div class="diag-section" id="interpolation">\n'
     html += "        <h2>Slice Interpolation</h2>\n"
     html += (
         '        <p style="color:#555;font-size:0.9em;">'
@@ -1018,12 +1159,16 @@ def _render_interpolation_section_text(interpolation: dict) -> str:
     imp_mean = summary.get("ncc_improvement_mean")
 
     lines = []
-    lines.append("")
-    lines.append(f"{get_status_emoji('info')} SLICE INTERPOLATION")
-    lines.append("-" * 70)
-    lines.append(f"  Gaps detected          : {count}")
-    lines.append(f"  Successfully interp'd  : {n_succeeded}")
-    lines.append(f"  Hard-skipped (gap)     : {n_failed}")
+    lines.extend(
+        (
+            "",
+            f"{get_status_emoji('info')} SLICE INTERPOLATION",
+            "-" * 70,
+            f"  Gaps detected          : {count}",
+            f"  Successfully interp'd  : {n_succeeded}",
+            f"  Hard-skipped (gap)     : {n_failed}",
+        )
+    )
     if pre_mean is not None:
         lines.append(f"  Mean pre-reg NCC       : {pre_mean:.3f}")
     if post_mean is not None:
@@ -1041,9 +1186,9 @@ def _render_interpolation_section_text(interpolation: dict) -> str:
         lines.append(f"  Hard-skip reasons      : {fb_parts}")
 
     if rows:
-        lines.append("")
-        lines.append(f"  {'Slice':<6} {'Status':<8} {'Used':<14} {'Reason':<28} {'PreNCC':>7} {'PostNCC':>7}")
-        lines.append("  " + "-" * 80)
+        lines.extend(
+            ("", f"  {'Slice':<6} {'Status':<8} {'Used':<14} {'Reason':<28} {'PreNCC':>7} {'PostNCC':>7}", "  " + "-" * 80)
+        )
         for r in rows[:50]:
             sid = (r.get("slice_id", "") or "?")[:6]
             failed = bool(r.get("interpolation_failed"))
@@ -1054,11 +1199,11 @@ def _render_interpolation_section_text(interpolation: dict) -> str:
             post = r.get("post_reg_ncc", "")
             try:
                 pre_fmt = f"{float(pre):.3f}" if pre not in ("", None) else "-"
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 pre_fmt = "-"
             try:
                 post_fmt = f"{float(post):.3f}" if post not in ("", None) else "-"
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 post_fmt = "-"
             lines.append(f"  {sid:<6} {status:<8} {method_used:<14} {fb:<28} {pre_fmt:>7} {post_fmt:>7}")
         if len(rows) > 50:
@@ -1078,6 +1223,7 @@ def generate_html_report(
     trends: dict | None = None,
     diagnostics: dict | None = None,
     interpolation: dict | None = None,
+    slice_config_summary: dict | None = None,
 ) -> str:
     """Generate an HTML report from aggregated metrics."""
     aggregated = sort_steps(aggregated)
@@ -1462,6 +1608,105 @@ def generate_html_report(
         }}
         .diag-kv-table td:first-child {{ color: #555; font-weight: 500; width: 40%; }}
         .diag-kv-table td:last-child  {{ color: #333; font-family: monospace; }}
+
+        /* Sticky top navigation */
+        .topnav {{
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(255,255,255,0.96);
+            backdrop-filter: blur(6px);
+            border-bottom: 1px solid #dee2e6;
+            margin: -20px -20px 20px;
+            padding: 8px 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        }}
+        .topnav-inner {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px 12px;
+            align-items: center;
+            font-size: 0.85em;
+            max-width: 1160px;
+            margin: 0 auto;
+        }}
+        .topnav-label {{
+            font-weight: 600;
+            color: #495057;
+            margin-right: 4px;
+        }}
+        .topnav a {{
+            color: #3d4db7;
+            text-decoration: none;
+            padding: 2px 6px;
+            border-radius: 3px;
+            white-space: nowrap;
+        }}
+        .topnav a:hover {{ background: #f0f4ff; }}
+        .topnav a .nav-dot {{
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            margin-right: 4px;
+            vertical-align: middle;
+        }}
+
+        /* Section anchor offset for sticky nav */
+        :target {{ scroll-margin-top: 60px; }}
+        section[id], details[id] {{ scroll-margin-top: 60px; }}
+
+        /* Step accordion (details replaces div) */
+        details.step-section {{ padding: 0; }}
+        details.step-section > summary.step-header {{
+            cursor: pointer;
+            user-select: none;
+            list-style: none;
+            padding: 16px 20px;
+            margin: 0;
+            border-bottom: none;
+        }}
+        details.step-section[open] > summary.step-header {{
+            border-bottom: 1px solid #eee;
+            padding-bottom: 12px;
+        }}
+        details.step-section > summary.step-header::-webkit-details-marker {{ display: none; }}
+        details.step-section > summary.step-header::after {{
+            content: "▾";
+            color: #999;
+            margin-left: 12px;
+            transition: transform 0.2s;
+        }}
+        details.step-section:not([open]) > summary.step-header::after {{
+            transform: rotate(-90deg);
+        }}
+        details.step-section > *:not(summary) {{
+            margin-left: 20px;
+            margin-right: 20px;
+        }}
+        details.step-section > *:last-child {{
+            margin-bottom: 20px;
+        }}
+        details.step-section[data-status="error"]   {{ border-left: 4px solid #dc3545; }}
+        details.step-section[data-status="warning"] {{ border-left: 4px solid #ffc107; }}
+        details.step-section[data-status="ok"]      {{ border-left: 4px solid #28a745; }}
+
+        /* Print stylesheet */
+        @media print {{
+            body {{ background: white; max-width: none; padding: 0; font-size: 10pt; }}
+            .topnav {{ display: none; }}
+            .header {{ background: #444 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+            .summary, .trends-section, .diag-section, details.step-section {{
+                box-shadow: none;
+                border: 1px solid #ccc;
+                page-break-inside: avoid;
+            }}
+            details:not([open]) {{ display: block; }}
+            details > summary::after, details > summary::before {{ display: none !important; }}
+            details > *:not(summary) {{ display: block !important; }}
+            .image-gallery {{ max-height: none; overflow: visible; }}
+            a {{ color: inherit; text-decoration: none; }}
+        }}
     </style>
 </head>
 <body>
@@ -1470,7 +1715,9 @@ def generate_html_report(
         <div class="timestamp">Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</div>
     </div>
 
-    <div class="summary">
+__TOPNAV_PLACEHOLDER__
+
+    <div class="summary" id="summary">
         <h2>Summary</h2>
         <div class="summary-status" style="background-color: {get_status_color(overall_status)};">
             {overall_message}
@@ -1503,7 +1750,7 @@ def generate_html_report(
     # Overview images in the summary section
     overview_imgs = images.get("overview", [])
     if overview_imgs:
-        html += '    <div class="summary" style="padding-top:10px;">\n'
+        html += '    <div class="summary" id="overview" style="padding-top:10px;">\n'
         html += '        <div class="section-label">Volume Overview</div>\n'
         html += '        <div class="overview-container">\n'
         for p in overview_imgs:
@@ -1519,10 +1766,44 @@ def generate_html_report(
             )
         html += "        </div>\n    </div>\n"
 
+    # Slice configuration summary section
+    if slice_config_summary:
+        sc = slice_config_summary
+        html += '\n    <div class="summary" id="slice-config" style="padding-top:10px;">\n'
+        html += '        <div class="section-label">Slice Configuration</div>\n'
+        html += f'        <p style="color:#555;font-size:0.9em;">Source: <code>{sc["source"]}</code></p>\n'
+        html += '        <div class="summary-stats">\n'
+        cells = [
+            (sc["n_total"], "Total slices"),
+            (sc["n_use_true"], "Used"),
+            (sc["n_use_false"], "Excluded"),
+            (sc["n_auto_excluded"], "Auto-excluded"),
+            (sc["n_interpolated"], "Interpolated"),
+            (sc["n_interpolation_failed"], "Interpolation failed"),
+            (sc["n_rehomed"], "Rehomed"),
+            (sc["n_rehoming_unreliable"], "Rehoming unreliable"),
+        ]
+        for value, label in cells:
+            html += (
+                f'            <div class="stat-box">'
+                f'<div class="stat-value">{value}</div>'
+                f'<div class="stat-label">{label}</div></div>\n'
+            )
+        html += "        </div>\n"
+        if sc.get("quality_score_mean") is not None:
+            html += (
+                f'        <p style="color:#555;font-size:0.9em;">Quality score: '
+                f"mean={sc['quality_score_mean']:.3f}, min={sc['quality_score_min']:.3f}</p>\n"
+            )
+        if sc.get("reasons"):
+            reasons_str = ", ".join(f"{k}={v}" for k, v in sorted(sc["reasons"].items()))
+            html += f'        <p style="color:#555;font-size:0.9em;">Exclusion reasons: {reasons_str}</p>\n'
+        html += "    </div>\n"
+
     # Cross-slice trends section
     if trends:
         colors = ["#4a90d9", "#e67e22", "#27ae60", "#8e44ad", "#c0392b"]
-        html += '\n    <div class="trends-section">\n'
+        html += '\n    <div class="trends-section" id="trends">\n'
         html += "        <h2>Cross-Slice Trends</h2>\n"
         html += (
             '        <p style="color:#555;font-size:0.9em;">'
@@ -1554,13 +1835,13 @@ def generate_html_report(
         quality_metrics, info_fields = separate_metrics_by_type(metrics_list)
 
         html += f"""
-    <div class="step-section">
-        <div class="step-header">
+    <details class="step-section" id="step-{slug(step_name)}" data-status="{step_status}" open>
+        <summary class="step-header">
             <span class="step-title">{STEP_DISPLAY_NAMES.get(step_name, step_name.replace("_", " ").title())}</span>
             <span class="status-badge" style="background-color: {get_status_color(step_status)};">
                 {summary["count"]} items &mdash; {step_status.upper()}
             </span>
-        </div>
+        </summary>
 """
         if description:
             html += f'        <div class="step-description">{description}</div>\n'
@@ -1728,7 +2009,7 @@ def generate_html_report(
                     step_imgs, mode=image_mode, category=preview_category, max_width=max_thumb_width
                 )
 
-        html += "    </div>\n"
+        html += "    </details>\n"
 
     # Slice interpolation section (only if interpolation happened)
     if interpolation:
@@ -1736,7 +2017,7 @@ def generate_html_report(
 
     # Diagnostics section (only if diagnostic data was found)
     if diagnostics:
-        html += '\n    <div class="diag-section">\n'
+        html += '\n    <div class="diag-section" id="diagnostics">\n'
         html += "        <h2>Diagnostic Outputs</h2>\n"
         html += (
             '        <p style="color:#555;font-size:0.9em;">'
@@ -1793,6 +2074,34 @@ def generate_html_report(
 </body>
 </html>
 """
+
+    # Build the sticky top navigation now that all sections are known.
+    nav_links: list[str] = [
+        f'<a href="#summary"><span class="nav-dot" style="background:{get_status_color(overall_status)};"></span>Summary</a>'
+    ]
+    if overview_imgs:
+        nav_links.append('<a href="#overview">Overview</a>')
+    if slice_config_summary:
+        nav_links.append('<a href="#slice-config">Slice Config</a>')
+    if trends:
+        nav_links.append('<a href="#trends">Trends</a>')
+    for step_name, metrics_list in aggregated.items():
+        step_status_nav = get_step_status(metrics_list)
+        label = STEP_DISPLAY_NAMES.get(step_name, step_name.replace("_", " ").title())
+        nav_links.append(
+            f'<a href="#step-{slug(step_name)}">'
+            f'<span class="nav-dot" style="background:{get_status_color(step_status_nav)};"></span>'
+            f"{label}</a>"
+        )
+    if interpolation:
+        nav_links.append('<a href="#interpolation">Interpolation</a>')
+    if diagnostics:
+        nav_links.append('<a href="#diagnostics">Diagnostics</a>')
+    nav_html = (
+        '    <nav class="topnav"><div class="topnav-inner">'
+        '<span class="topnav-label">Jump to:</span>' + "".join(nav_links) + "</div></nav>\n"
+    )
+    html = html.replace("__TOPNAV_PLACEHOLDER__", nav_html)
     return html
 
 
@@ -1801,46 +2110,75 @@ def generate_text_report(
     title: str,
     verbose: bool = False,
     interpolation: dict | None = None,
+    slice_config_summary: dict | None = None,
 ) -> str:
     """Generate a plain text report from aggregated metrics."""
     aggregated = sort_steps(aggregated)
 
     lines = []
-    lines.append("=" * 70)
-    lines.append(title.center(70))
-    lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}".center(70))
-    lines.append("=" * 70)
-    lines.append("")
+    lines.extend(
+        ("=" * 70, title.center(70), f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}".center(70), "=" * 70, "")
+    )
 
     _, error_count, warning_count, ok_count = compute_overall_status(aggregated)
 
-    lines.append("SUMMARY")
-    lines.append("-" * 70)
-    lines.append(f"  Pipeline Steps: {len(aggregated)}")
-    lines.append(f"  Total Metrics Files: {sum(len(v) for v in aggregated.values())}")
-    lines.append(
-        f"  Status: {get_status_emoji('ok')} OK: {ok_count}  "
-        f"{get_status_emoji('warning')} Warnings: {warning_count}  "
-        f"{get_status_emoji('error')} Errors: {error_count}"
+    lines.extend(
+        (
+            "SUMMARY",
+            "-" * 70,
+            f"  Pipeline Steps: {len(aggregated)}",
+            f"  Total Metrics Files: {sum(len(v) for v in aggregated.values())}",
+            f"  Status: {get_status_emoji('ok')} OK: {ok_count}  "
+            f"{get_status_emoji('warning')} Warnings: {warning_count}  "
+            f"{get_status_emoji('error')} Errors: {error_count}",
+            "",
+        )
     )
-    lines.append("")
+
+    if slice_config_summary:
+        sc = slice_config_summary
+        lines.extend(
+            (
+                "SLICE CONFIGURATION",
+                "-" * 70,
+                f"  Source: {sc['source']}",
+                f"  Total: {sc['n_total']}  Used: {sc['n_use_true']}  Excluded: {sc['n_use_false']}",
+                f"  Auto-excluded: {sc['n_auto_excluded']}  "
+                f"Interpolated: {sc['n_interpolated']}  Interp. failed: {sc['n_interpolation_failed']}",
+                f"  Rehomed: {sc['n_rehomed']}  Rehoming unreliable: {sc['n_rehoming_unreliable']}",
+            )
+        )
+        if sc.get("quality_score_mean") is not None:
+            lines.append(f"  Quality score: mean={sc['quality_score_mean']:.3f} min={sc['quality_score_min']:.3f}")
+        if sc.get("reasons"):
+            reasons_str = ", ".join(f"{k}={v}" for k, v in sorted(sc["reasons"].items()))
+            lines.append(f"  Exclusion reasons: {reasons_str}")
+        lines.append("")
 
     for step_name, metrics_list in aggregated.items():
         summary = compute_summary_statistics(metrics_list)
         step_status = get_step_status(metrics_list)
 
-        lines.append("")
-        lines.append(f"{get_status_emoji(step_status)} {step_name.replace('_', ' ').upper()}")
-        lines.append("-" * 70)
-        lines.append(f"  Items: {summary['count']} | Status: {step_status.upper()}")
+        lines.extend(
+            (
+                "",
+                f"{get_status_emoji(step_status)} {step_name.replace('_', ' ').upper()}",
+                "-" * 70,
+                f"  Items: {summary['count']} | Status: {step_status.upper()}",
+            )
+        )
 
         # Quality metrics stats
         quality_metrics, _ = separate_metrics_by_type(metrics_list)
         if quality_metrics:
-            lines.append("")
-            lines.append("  Quality Metrics:")
-            lines.append(f"  {'Metric':<25} {'Mean':>12} {'Median':>12} {'Std':>12} {'Min':>12} {'Max':>12}")
-            lines.append("  " + "-" * 77)
+            lines.extend(
+                (
+                    "",
+                    "  Quality Metrics:",
+                    f"  {'Metric':<25} {'Mean':>12} {'Median':>12} {'Std':>12} {'Min':>12} {'Max':>12}",
+                    "  " + "-" * 77,
+                )
+            )
             for metric_name, mdata in quality_metrics.items():
                 entries = mdata["entries"]
                 numeric_vals = [e["value"] for e in entries if isinstance(e.get("value"), (int, float))]
@@ -1859,8 +2197,7 @@ def generate_text_report(
         all_warnings, all_errors = collect_issues(metrics_list)
 
         if all_errors:
-            lines.append("")
-            lines.append(f"  {get_status_emoji('error')} ERRORS:")
+            lines.extend(("", f"  {get_status_emoji('error')} ERRORS:"))
             for g in group_issues(all_errors):
                 if g["count"] == 1:
                     lines.append(f"    - {g['details'][0]}")
@@ -1870,8 +2207,7 @@ def generate_text_report(
                     lines.append(f"    - {g['metric']}: {g['count']} slices ({val_str})")
 
         if all_warnings:
-            lines.append("")
-            lines.append(f"  {get_status_emoji('warning')} WARNINGS:")
+            lines.extend(("", f"  {get_status_emoji('warning')} WARNINGS:"))
             for g in group_issues(all_warnings):
                 if g["count"] == 1:
                     lines.append(f"    - {g['details'][0]}")
@@ -1881,8 +2217,7 @@ def generate_text_report(
                     lines.append(f"    - {g['metric']}: {g['count']} slices ({val_str})")
 
         if verbose:
-            lines.append("")
-            lines.append("  Individual Results:")
+            lines.extend(("", "  Individual Results:"))
             for m in metrics_list:
                 source = extract_slice_id(m.get("source_file", "unknown"))
                 m_status = m.get("overall_status", "unknown")
@@ -1896,10 +2231,7 @@ def generate_text_report(
     if interpolation:
         lines.append(_render_interpolation_section_text(interpolation))
 
-    lines.append("")
-    lines.append("=" * 70)
-    lines.append("End of Report".center(70))
-    lines.append("=" * 70)
+    lines.extend(("", "=" * 70, "End of Report".center(70), "=" * 70))
 
     return "\n".join(lines)
 
@@ -1973,6 +2305,11 @@ def main() -> None:
         if output_format == "zip" and not args.no_images and interpolation.get("images"):
             images["diag_interpolate_missing_slice"] = list(interpolation["images"])
 
+    # Discover slice_config summary (deepest-enriched slice_config CSV)
+    slice_config_summary = discover_slice_config_summary(input_dir)
+    if slice_config_summary:
+        print(f"Found slice_config summary: {slice_config_summary['source']}")
+
     # Discover diagnostic outputs
     diagnostics = discover_diagnostic_data(input_dir)
     if diagnostics:
@@ -1996,21 +2333,26 @@ def main() -> None:
             image_mode=image_mode,
             max_overview_width=args.max_overview_width,
             max_thumb_width=args.max_thumb_width,
-            trends=trends if trends else None,
-            diagnostics=diagnostics if diagnostics else None,
+            trends=trends or None,
+            diagnostics=diagnostics or None,
             interpolation=interpolation,
+            slice_config_summary=slice_config_summary,
         )
         if output_format == "zip":
             if output_file.suffix.lower() != ".zip":
                 output_file = output_file.with_suffix(".zip")
             generate_zip_bundle(report, images, output_file)
         else:
-            with Path(output_file).open("w") as f:
-                f.write(report)
+            Path(output_file).write_text(report)
     else:
-        report = generate_text_report(aggregated, args.title, args.verbose, interpolation=interpolation)
-        with Path(output_file).open("w") as f:
-            f.write(report)
+        report = generate_text_report(
+            aggregated,
+            args.title,
+            args.verbose,
+            interpolation=interpolation,
+            slice_config_summary=slice_config_summary,
+        )
+        Path(output_file).write_text(report)
 
     print(f"Report saved to: {output_file}")
 

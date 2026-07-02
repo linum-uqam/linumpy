@@ -281,12 +281,19 @@ def main() -> None:
 
     logger.info("z%d: refining from manual transform", slice_id)
 
-    # Load Z-indices from automated offsets.txt
+    # Load Z-indices (fixed_z, moving_z). Prefer the manual offsets.txt: the
+    # user may have corrected the Z-overlap in the manual-align tool's Z mode,
+    # and that correction must drive which depth slabs are registered here.
+    # Fall back to the automated offsets when the manual file is absent.
+    manual_offsets_path = manual_tfm_path.parent / "offsets.txt"
     auto_offsets_path = auto_transform_dir / "offsets.txt"
-    if auto_offsets_path.exists():
-        offsets_arr = np.loadtxt(str(auto_offsets_path), dtype=int)
+    offsets_path = manual_offsets_path if manual_offsets_path.exists() else auto_offsets_path
+    if offsets_path.exists():
+        offsets_arr = np.loadtxt(str(offsets_path), dtype=int)
         fixed_z = int(offsets_arr[0]) if offsets_arr.size >= 1 else 0
         moving_z = int(offsets_arr[1]) if offsets_arr.size >= 2 else 0
+        offsets_source = "manual" if offsets_path == manual_offsets_path else "automated"
+        logger.info("z%d: using %s Z offsets (fixed_z=%d, moving_z=%d)", slice_id, offsets_source, fixed_z, moving_z)
     else:
         fixed_z, moving_z = 0, 0
         logger.warning("z%d: offsets.txt missing, using z=0 for both slices", slice_id)

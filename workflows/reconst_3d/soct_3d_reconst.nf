@@ -40,48 +40,32 @@ workflow {
 
     def inputDir = Helpers.normalizePath(params.input)
     def subject_name = Helpers.resolveSubjectName(inputDir, params.subject_name)
-    log.info("Subject: ${subject_name}")
-    log.info("GPU: ${params.use_gpu ? 'ENABLED' : 'DISABLED'}")
 
-    def debugSlices = Helpers.parseDebugSlices(params.debug_slices)
-    if (debugSlices) {
-        log.info("DEBUG MODE: Processing only slices ${debugSlices.sort().join(', ')}")
-    }
+    def resLabel   = params.resolution > 0 ? "${params.resolution} µm/px" : 'skip'
+    def illumLabel = params.fix_illum_enabled ? "${params.fix_illum_backend}" : 'disabled'
+    def rehomLabel = params.detect_rehoming
+        ? (params.tile_fov_mm ? "enabled (tile_fov=${params.tile_fov_mm} mm)" : 'enabled')
+        : 'disabled'
+    def biasLabel  = params.correct_bias_field ? "enabled (mode=${params.bias_mode})" : 'disabled'
+    def manualLabel = (params.refine_manual_transforms && params.manual_transforms_dir)
+        ? "${params.manual_transforms_dir}"
+        : 'disabled'
 
-    // Shifts file
-    def shifts_xy_path = params.shifts_xy ?: "${inputDir}/shifts_xy.csv"
-    log.info("Shifts file: ${shifts_xy_path}")
-
-    if (!file(shifts_xy_path).exists()) {
-        error(
-            """
-        Shifts file not found: ${shifts_xy_path}
-
-        Please ensure shifts_xy.csv exists in your input directory,
-        or specify the path with --shifts_xy /path/to/shifts_xy.csv
-        """
-        )
-    }
-    // Value channel — fans out to many consumers; see "Authoring Notes" in
-    // docs/NEXTFLOW_WORKFLOWS.md.
-    shifts_xy = channel.value(file(shifts_xy_path))
-
-    // Slice config (optional)
+    // Pre-compute slice info for the banner (synchronous file I/O)
     def slice_config_path = params.slice_config ?: Helpers.joinPath(inputDir, "slice_config.csv")
     def slicesToUse = null
+    def sliceConfigLabel = 'none'
     if (file(slice_config_path).exists()) {
-        log.info("Slice config: ${slice_config_path}")
         def parsed = Helpers.parseSliceConfig(slice_config_path)
         slicesToUse = parsed.use
         def total = slicesToUse.size() + parsed.excluded.size()
-        log.info("Slice config: ${total} entries (${slicesToUse.size()} included, ${parsed.excluded.size()} excluded)")
+        sliceConfigLabel = "${slice_config_path} (${total} entries: ${slicesToUse.size()} included, ${parsed.excluded.size()} excluded)"
     }
     else if (params.slice_config) {
         error("Slice config file not found: ${slice_config_path}")
     }
 
-    // Discover input mosaic grids
-    log.info("Looking for mosaic grids in: ${inputDir}")
+    def debugSlices = Helpers.parseDebugSlices(params.debug_slices)
 
     def inputDirFile = file(inputDir)
     def mosaicFiles = inputDirFile
@@ -105,14 +89,56 @@ workflow {
             return true
         }
     def skippedCount = mosaicFiles.size() - selectedIds.size()
-    if (skippedCount > 0) {
-        def reason = debugSlices != null ? "debug_slices filter" : "slice_config"
-        log.info("Found ${mosaicFiles.size()} mosaic grids; ${selectedIds.size()} selected, ${skippedCount} skipped (${reason})")
-    }
-    else {
-        log.info("Found ${mosaicFiles.size()} mosaic grids; all selected")
+    def slicesLabel = skippedCount > 0
+        ? "${mosaicFiles.size()} found, ${selectedIds.size()} selected (${skippedCount} skipped by ${debugSlices != null ? 'debug_slices filter' : 'slice_config'})"
+        : "${mosaicFiles.size()} found, all selected"
+
+    log.info("""
+    ============================================================
+     3D Reconstruction Pipeline
+    ============================================================
+     Subject           : ${subject_name}
+     Input             : ${inputDir}
+     Output            : ${params.output}
+     GPU               : ${params.use_gpu ? 'enabled' : 'disabled'}
+    ------------------------------------------------------------
+     Slices            : ${slicesLabel}
+     Slice config      : ${sliceConfigLabel}
+    ------------------------------------------------------------
+     Resolution        : ${resLabel}
+     Illumination      : ${illumLabel}
+     Focal curvature   : ${params.fix_curvature_enabled ? 'enabled' : 'disabled'}
+     Global transform  : ${params.stitch_global_transform ? 'enabled' : 'disabled'}
+     Rehoming detect   : ${rehomLabel}
+     Attenuation comp. : ${params.compensate_attenuation_enabled ? 'enabled' : 'disabled'}
+     Bias field corr.  : ${biasLabel}
+     Manual transforms : ${manualLabel}
+     Atlas alignment   : ${params.align_to_ras_enabled ? 'enabled' : 'disabled'}
+    ============================================================
+    """)
+
+    if (debugSlices) {
+        log.info("DEBUG MODE: Processing only slices ${debugSlices.sort().join(', ')}")
     }
 
+    // Shifts file
+    def shifts_xy_path = params.shifts_xy ?: "${inputDir}/shifts_xy.csv"
+
+    if (!file(shifts_xy_path).exists()) {
+        error(
+            """
+        Shifts file not found: ${shifts_xy_path}
+
+        Please ensure shifts_xy.csv exists in your input directory,
+        or specify the path with --shifts_xy /path/to/shifts_xy.csv
+        """
+        )
+    }
+    // Value channel — fans out to many consumers; see "Authoring Notes" in
+    // docs/NEXTFLOW_WORKFLOWS.md.
+    shifts_xy = channel.value(file(shifts_xy_path))
+
+    // Discover input mosaic grids (slice_config + mosaicFiles already computed above)
     inputSlices = channel.fromList(mosaicFiles)
         .map { f -> Helpers.toSliceTuple(f) }
         .filter { slice_id, _files ->
@@ -142,9 +168,16 @@ workflow {
     // Stage 1: Preprocessing
     resampled = params.resolution > 0 ? resample_mosaic_grid(inputSlices) : inputSlices
     focal_fixed = params.fix_curvature_enabled ? fix_focal_curvature(resampled) : resampled
-    illum_fixed = params.fix_illum_enabled \
-        ? (params.fix_illum_backend == 'linum-basic' ? fix_illumination_basic(focal_fixed) : fix_illumination(focal_fixed)) \
-        : focal_fixed
+    if (params.fix_illum_enabled) {
+        if (params.fix_illum_backend == 'linum-basic') {
+            fix_illumination_basic(focal_fixed)
+            illum_fixed = fix_illumination_basic.out.corrected
+        } else {
+            illum_fixed = fix_illumination(focal_fixed)
+        }
+    } else {
+        illum_fixed = focal_fixed
+    }
 
     // Stage 2: XY Stitching (image-registration-based blend refinement)
     if (params.stitch_global_transform) {
@@ -284,8 +317,6 @@ workflow {
     }
 
     // Stage 6: Pairwise Registration
-    log.info("Registering slices pairwise")
-
     fixed_slices = all_slices
         .map { list -> list.size() > 1 ? list.subList(0, list.size() - 1) : [] }
         .flatten()
@@ -311,7 +342,6 @@ workflow {
     // registration initialised from each manual transform; non-manual pairs
     // are copied unchanged. Refined outputs replace automated transforms.
     if (params.refine_manual_transforms && params.manual_transforms_dir) {
-        log.info("Refining manual transforms from: ${params.manual_transforms_dir}")
         // Re-derive pairs from all_slices (value channel, safe to reuse)
         refine_fixed = all_slices
             .map { list -> list.size() > 1 ? list.subList(0, list.size() - 1) : [] }
@@ -340,8 +370,6 @@ workflow {
     }
 
     // Stage 7: Stacking
-    log.info("Stacking slices with registration refinements")
-
     // Auto-exclude: detect clusters of consecutive low-quality registrations.
     // Stamps auto_excluded/auto_exclude_reason into slice_config so stack
     // sees them via --slice_config. Requires a real slice_config.
@@ -370,7 +398,6 @@ workflow {
 
     // Stage 8: Bias Field Correction (optional)
     if (params.correct_bias_field) {
-        log.info("Running N4 bias field correction (mode=${params.bias_mode})")
         znorm_input = stack_output
             .combine(stack_metadata)
             .map { zarr, _zip, _png, _annotated, name, n, ids_str -> tuple(zarr, name, n, ids_str) }
@@ -607,7 +634,7 @@ process fix_illumination_basic {
     tuple val(slice_id), path(mosaic_grid)
 
     output:
-    tuple val(slice_id), path("mosaic_grid_z${slice_id}_illum_fix.ome.zarr")
+    tuple val(slice_id), path("mosaic_grid_z${slice_id}_illum_fix.ome.zarr"), emit: corrected
     path "*_metrics.json", optional: true, emit: diagnostics
     path "diagnostics/*.png", optional: true, emit: figures
 
@@ -616,7 +643,15 @@ process fix_illumination_basic {
     def darkfield_flag = params.fix_illum_darkfield ? "--use_darkfield" : "--no-use_darkfield"
     def tile_fov_flag = params.tile_fov_mm != null ? "--tile_fov_mm ${params.tile_fov_mm}" : ""
     def per_z_fit_flag = params.fix_illum_per_z_fit ? "--per_z_fit" : "--no-per_z_fit"
+    // D-14: pin one GPU per fork when not in multi-GPU z-fan mode (compile-time params; avoids maxForks closure compare)
+    def gpu_pin_block = (params.use_gpu && !params.fix_illum_multi_gpu && ((params.gpu_count as int) > 1))
+        ? Helpers.gpuPinBlock(params, "fix_illumination_basic slice=${slice_id}")
+        : Helpers.gpuExposeAllBlock(params, "fix_illumination_basic slice=${slice_id}")
     """
+    ${gpu_pin_block}
+    export TORCHINDUCTOR_CACHE_DIR="\${TORCHINDUCTOR_CACHE_DIR:-\$HOME/.cache/linum-basic/inductor}"
+    export TORCHINDUCTOR_FX_GRAPH_CACHE=1
+    mkdir -p "\$TORCHINDUCTOR_CACHE_DIR"
     linum-fix-illumination-basic ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" \
         --n_processes ${params.processes} \
         --percentile_max ${params.clip_percentile_upper} ${gpu_flag} --n_levels 0 \
