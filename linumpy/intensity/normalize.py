@@ -173,7 +173,7 @@ def get_smooth_intensity_transition(vol: np.ndarray, slices_start: list[int]) ->
     References
     ----------
     * Wang, H., et al. (2014). Serial optical coherence scanner for large-scale brain imaging at microscopic resolution.
-      NeuroImage, 84, 1007–1017. http://doi.org/10.1016/j.neuroimage.2013.09.063
+      NeuroImage, 84, 1007-1017. http://doi.org/10.1016/j.neuroimage.2013.09.063
 
     """
     volume = np.copy(vol)
@@ -221,13 +221,13 @@ def get_smooth_intensity_transition(vol: np.ndarray, slices_start: list[int]) ->
         L1 = np.exp(-(2 * z[:, :, 0 : nz / 2] - nz) / (1.0 * nz) * f1)
 
         # If z > N/2
-        nz_2 = factor[:, :, nz / 2 : :].shape[2]
+        nz_2 = factor[:, :, nz / 2 :].shape[2]
         f2 = np.log((a_next + b_current) / (2.0 * b_current + epsilon))
         f2 = np.tile(np.reshape(f2, (nx, ny, 1)), (1, 1, nz_2))
-        L2 = np.exp((2 * z[:, :, nz / 2 : :] - nz) / (1.0 * nz) * f2)
+        L2 = np.exp((2 * z[:, :, nz / 2 :] - nz) / (1.0 * nz) * f2)
 
         L[:, :, 0 : nz / 2] = L1
-        L[:, :, nz / 2 : :] = L2
+        L[:, :, nz / 2 :] = L2
 
         # Apply correction to this slice
         volume[:, :, z1:z2] = L * volume[:, :, z1:z2]

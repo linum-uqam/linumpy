@@ -1,0 +1,57 @@
+#! /usr/bin/env python
+
+"""Compute the tissue attenuation compensation bias field."""
+
+# Configure thread limits before numpy/scipy imports
+import linumpy.config.threads  # noqa: F401
+
+import argparse
+from pathlib import Path
+
+import numpy as np
+from scipy.integrate import cumulative_trapezoid
+
+from linumpy.io.zarr import read_omezarr, save_omezarr
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+
+    # Mandatory parameters
+    p.add_argument("input", type=Path, help="Input attenuation (OME-zarr).")
+    p.add_argument("output", type=Path, help="Output bias field (OME-zarr).")
+
+    # Optional argument
+    p.add_argument("--is_in_cm", action="store_true", help="The provided attenuation map is in 1/cm")
+
+    return p
+
+
+def main() -> None:
+    """Run the attenuation bias field computation script."""
+    # Parse arguments
+    p = _build_arg_parser()
+    args = p.parse_args()
+
+    # Loading the attn volume
+    vol, res = read_omezarr(args.input, level=0)
+    res_axial_microns = res[0] * 1000
+    attn = np.moveaxis(np.asarray(vol), (0, 1, 2), (2, 1, 0))
+
+    # Converting this in 1 / voxel if it was given in 1/cm
+    if args.is_in_cm:
+        attn = attn * 100 * 1.0e-6  # This is now in 1 / micron
+        attn = attn * res_axial_microns  # This is now in 1 / voxel
+
+    # Compute the attenuation bias field
+    # by integrating over 0 -> z for each A-Lines
+    bias_field = cumulative_trapezoid(attn, axis=2, initial=0)
+    bias_field = np.exp(-2 * bias_field)
+
+    # Saving this bias field
+    bias_field = np.moveaxis(bias_field, (0, 1, 2), (2, 1, 0))
+    save_omezarr(bias_field.astype(np.float32), args.output, voxel_size=res, chunks=vol.chunks)
+
+
+if __name__ == "__main__":
+    main()

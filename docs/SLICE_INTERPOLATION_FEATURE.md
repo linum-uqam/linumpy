@@ -1,7 +1,5 @@
 # Slice Interpolation Feature
 
----
-
 ## Overview
 
 The slice interpolation feature reconstructs missing slices in Serial OCT
@@ -27,7 +25,7 @@ survives to the final quality report.
   therefore fabricated slice.
 - Per-slice JSON diagnostics and per-slice manifest fragments are merged
   directly into `slice_config.csv` — the single source of truth for per-slice
-  decisions, see [`SLICE_CONFIG_FEATURE.md`](SLICE_CONFIG_FEATURE.md).
+  decisions, see {doc}`SLICE_CONFIG_FEATURE`.
   Successful interpolations stamp `interpolated=true`; failures stamp
   `interpolation_failed=true` plus the specific `fallback_reason`.
 - Downstream propagation: `linum_register_pairwise.py` automatically marks
@@ -62,7 +60,7 @@ constraints.
 ### Driving the interpolator from `slice_config.csv`
 
 The preprocessing pipeline generates an initial `slice_config.csv`
-(see [`SLICE_CONFIG_FEATURE.md`](SLICE_CONFIG_FEATURE.md)). The user
+(see {doc}`SLICE_CONFIG_FEATURE`). The user
 (or the automated quality assessment) may mark additional slices with
 `use=false`. In the reconstruction pipeline those slices are filtered out
 *before* common-space alignment, which leaves a gap in the numeric slice ID
@@ -82,6 +80,26 @@ in `slice_config.csv`. No separate flag is needed.
 The only scientifically motivated reconstruction method is `zmorph`.
 `average` and `weighted` are simpler baselines kept for comparison and as
 fallbacks; they do not use any 2D registration.
+
+### Decision flow at a glance
+
+```mermaid
+flowchart TD
+    START([Missing slice between<br/>vol_before and vol_after]) --> PLANES[find_best_overlap_planes<br/>foreground filter + NCC search]
+    PLANES -->|no foreground planes| F1[fallback_reason:<br/>no_foreground_planes]
+    PLANES -->|best NCC < min_overlap_correlation| F2[fallback_reason:<br/>low_overlap_ncc]
+    PLANES -->|good pair| REG[2D ITK registration<br/>boundary plane → reference]
+    REG -->|optimiser raised| F3[fallback_reason:<br/>registration_exception]
+    REG -->|det T ≤ 0| F4[fallback_reason:<br/>affine_determinant_non_positive]
+    REG -->|post-reg NCC ↑ < threshold| F5[fallback_reason:<br/>reg_did_not_improve]
+    REG -->|gates pass| WARP[For each output plane at α = z / (nz_out-1):<br/>warp vol_before by T^α<br/>warp vol_after by T^(α-1)<br/>gaussian-feathered cross-fade]
+    WARP --> OUT([Interpolated zarr<br/>+ manifest + diagnostics])
+    F1 --> SKIP([Hard skip:<br/>no zarr written,<br/>genuine gap in stack])
+    F2 --> SKIP
+    F3 --> SKIP
+    F4 --> SKIP
+    F5 --> SKIP
+```
 
 ### `zmorph` — z-aware morphing (default)
 
@@ -288,7 +306,7 @@ Each interpolation run also emits a human-readable JSON file at
 `${output}/interpolate_missing_slice/slice_z{NN}_interpolated_diagnostics.json`
 with the full trace:
 
-```jsonc
+```json
 {
   "method": "zmorph",
   "method_used": "zmorph",
@@ -466,9 +484,9 @@ consider masking interpolated slices when computing volumetric statistics.
 | File | Description |
 |------|-------------|
 | `linumpy/stitching/interpolation.py` | Interpolation algorithms (`interpolate_z_morph`, `interpolate_weighted`, `interpolate_average`, helpers) |
-| `scripts/linum_interpolate_missing_slice.py` | Standalone CLI (also provides `--finalise` for merging manifest fragments) |
-| `scripts/linum_register_pairwise.py` | Automatically flags registrations touching interpolated slices |
-| `scripts/linum_stack_slices_motor.py` | Uses `reliable=0` to down-weight interpolated-slice transforms |
+| `scripts/stacking/linum_interpolate_missing_slice.py` | Standalone CLI (also provides `--finalise` for merging manifest fragments) |
+| `scripts/stitching/linum_register_pairwise.py` | Automatically flags registrations touching interpolated slices |
+| `scripts/stacking/linum_stack_slices_motor.py` | Uses `reliable=0` to down-weight interpolated-slice transforms |
 | `workflows/reconst_3d/soct_3d_reconst.nf` | `interpolate_missing_slice` + `finalise_interpolation` processes |
 | `workflows/reconst_3d/nextflow.config` | Interpolation parameters |
 | `linumpy/tests/test_stitching_interpolation.py` | Unit tests and synthetic ground-truth benchmarks |

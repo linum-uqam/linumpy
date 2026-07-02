@@ -172,13 +172,13 @@ workflow{
     mosaic_grids_compensated = compensate_illumination_bias.out
 
     // Estimate the position the tile->position transform
-    estimate_position(mosaic_grids_compensated.map{it[1]}.collect())
+    estimate_position(mosaic_grids_compensated.map{ item -> item[1] }.collect())
 
     // Apply 2D stitching to all mosaic grids
     stitch_mosaic(mosaic_grids_compensated.combine(estimate_position.out))
 
     // Stack the mosaic to get an estimate of the 3D volume
-    stack_mosaic(stitch_mosaic.out.map{it[1]}.collect(), shifts)
+    stack_mosaic(stitch_mosaic.out.map{ item -> item[1] }.collect(), shifts)
 
     // Compress the stack to zip for transfer
     compress_stack(stack_mosaic.out)

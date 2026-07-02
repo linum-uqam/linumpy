@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""Axial beam profile correction.
+
+The script estimates the beam profile from agarose voxels and then applies the inverse profile to each a-line.
+"""
+
+# Configure thread limits before numpy/scipy imports
+import linumpy.config.threads  # noqa: F401
+
+import argparse
+
+import dask.array as da
+import matplotlib
+import numpy as np
+from skimage.filters import threshold_otsu
+
+from linumpy.geometry.crop import mask_under_interface
+from linumpy.geometry.interface import find_tissue_interface
+from linumpy.io.zarr import read_omezarr, save_omezarr
+from linumpy.metrics import collect_psf_compensation_metrics
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Run function."""
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("input_zarr", help="Path to file (.ome.zarr) containing the 3D mosaic grid.")
+    p.add_argument("output_zarr", help="Corrected 3D mosaic grid file path (.ome.zarr).")
+    p.add_argument("--n_levels", type=int, default=5, help="Number of levels in pyramid representation.")
+    p.add_argument("--fit_gaussian", action="store_true", help="Fit a gaussian on the beam profile.")
+    p.add_argument("--output_plot", help="Optional output plot filename.")
+    p.add_argument(
+        "--percentile_max",
+        type=float,
+        help="Values above the ith percentile will be clipped *prior\n"
+        "to profile estimation*. Original values will\n"
+        "remain in output corrected volume (range [0-100]).",
+    )
+    return p
+
+
+def main() -> None:
+    """Run function operation."""
+    # Parse the arguments
+    parser = _build_arg_parser()
+    args = parser.parse_args()
+
+    # Load ome-zarr data
+    vol, res = read_omezarr(args.input_zarr, level=0)
+    vol_data = vol[:]
+    if args.percentile_max is not None:
+        vol_data = np.clip(vol_data, None, np.percentile(vol_data, args.percentile_max))
+
+    aip = np.mean(vol_data, axis=0)
+    otsu = threshold_otsu(aip)
+    agarose_mask = aip < otsu
+
+    interface = find_tissue_interface(vol[:])
+    mask = mask_under_interface(vol[:], interface, return_mask=True)
+
+    # Exclude out of bounds columns
+    mask_all = mask.all(axis=0)  # True where mask is True for every voxel along the aline
+    agarose_mask = np.logical_and(agarose_mask, ~mask_all)
+
+    profile = np.reshape(vol_data, (len(vol_data), -1))
+    profile = np.array([profile[:, i] for i in range(profile.shape[-1]) if agarose_mask.reshape(-1)[i]]).T
+    profile = np.mean(profile, axis=-1)
+
+    # TODO: Prevent this from happening (happens when the profile is all 0s).
+    background = 0.0
+    try:
+        profile = np.clip(profile, np.min(profile[profile > 0.0]), None)
+
+        background = np.min(profile)
+        psf = (profile - background) / background
+    except Exception:
+        psf = np.zeros_like(profile)
+
+    if args.fit_gaussian:
+        psf_max = np.max(psf)
+        psf_mu = np.argmax(psf)
+        half_max = psf_max / 2
+        half_max_right = psf_mu
+        for i in range(psf_mu, len(profile)):
+            if psf[i] < half_max:
+                half_max_right = i
+                break
+        fwhm = (half_max_right - psf_mu) * 2.0
+        sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))
+        psf = psf_max * np.exp(-((np.arange(len(profile)) - psf_mu) ** 2) / (2 * sigma**2))
+
+    if args.output_plot is not None:
+        fig, ax = plt.subplots(1, 3)
+
+        ax[0].imshow(agarose_mask, cmap="gray")
+        ax[0].set_title("Agarose mask")
+        ax[1].plot(np.arange(len(profile)), profile)
+        ax[1].plot(np.repeat(background, len(profile)))
+        ax[1].set_title("Agarose profile")
+        ax[2].plot(np.arange(len(profile)), psf)
+        ax[2].set_title("Estimated PSF")
+        fig.set_size_inches(12, 5)
+        fig.savefig(args.output_plot)
+
+    if args.percentile_max is not None:
+        # Reload original data
+        vol, res = read_omezarr(args.input_zarr, level=0)
+        vol_data = vol[:]
+
+    # apply correction
+    vol_corr = vol_data / (1.0 + psf.reshape((-1, 1, 1)))
+
+    # save to ome-zarr
+    dask_arr = da.from_array(vol_corr)
+    save_omezarr(dask_arr, args.output_zarr, voxel_size=res, chunks=vol.chunks, n_levels=args.n_levels)
+
+    # Collect metrics using helper function
+    agarose_coverage = float(np.sum(agarose_mask)) / agarose_mask.size
+    collect_psf_compensation_metrics(
+        psf=psf,
+        agarose_coverage=agarose_coverage,
+        output_path=args.output_zarr,
+        input_path=args.input_zarr,
+        fit_gaussian=args.fit_gaussian,
+    )
+
+
+if __name__ == "__main__":
+    main()
