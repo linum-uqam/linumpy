@@ -35,6 +35,7 @@ nextflow_pipeline {
             // Verify mandatory pipeline stages all ran
             assert tasks.any { it.name =~ /stitch_3d_with_refinement/ }
             assert tasks.any { it.name =~ /beam_profile_correction/ }
+            assert tasks.any { it.name =~ /compensate_attenuation/ }
             assert tasks.any { it.name =~ /crop_interface/ }
             assert tasks.any { it.name =~ /normalize/ }
             assert tasks.any { it.name =~ /bring_to_common_space/ }
@@ -74,6 +75,9 @@ nextflow_pipeline {
                 apply_pairwise_transforms = true
                 correct_bias_field = true
                 generate_report = false
+                // GitHub-hosted runners have only 4 CPUs; the default of 8
+                // causes 'Process requirement exceeds available CPUs'.
+                processes = 2
             }
         }
 
