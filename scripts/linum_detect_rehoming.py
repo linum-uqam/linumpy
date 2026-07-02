@@ -43,7 +43,6 @@ import linumpy.config.threads  # noqa: F401
 
 import argparse
 import json
-import operator
 from pathlib import Path
 
 import numpy as np
@@ -51,7 +50,6 @@ import pandas as pd
 
 from linumpy.cli.args import add_overwrite_arg, assert_output_exists
 from linumpy.io import slice_config as slice_config_io
-from linumpy.metrics import collect_rehoming_metrics
 from linumpy.stack_alignment.filter import correct_tile_offset_shifts, filter_outlier_shifts
 
 
@@ -171,7 +169,7 @@ def _save_diagnostics(
                 "corrected_y_shift_mm": float(row_after["y_shift_mm"]),
             }
         )
-    records.sort(key=operator.itemgetter("index"))
+    records.sort(key=lambda r: r["index"])
     report = {
         "n_corrected": len(records),
         "corrected_spikes": [r for r in records if r["correction_type"] == "spike"],
@@ -366,17 +364,6 @@ def main() -> None:
 
     shifts_after.to_csv(args.out_shifts, index=False)
     print(f"Corrected shifts written to {args.out_shifts}")
-
-    shift_mag_after_arr = np.asarray(shift_mag_after, dtype=float)
-    max_correction_mm = float(np.max(shift_mag_after_arr)) if shift_mag_after_arr.size > 0 else 0.0
-    collect_rehoming_metrics(
-        output_path=Path(args.out_shifts),
-        n_total_transitions=len(shifts_before),
-        tile_corrected_indices=list(tile_corrected_indices),
-        spike_corrected_indices=list(corrected_indices),
-        n_unreliable=n_unreliable,
-        max_correction_mm=max_correction_mm,
-    )
 
     if args.slice_config_out:
         if not args.slice_config_in:

@@ -2,5 +2,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_apply_slices_transforms.py", "--help"])
+    ret = script_runner.run(["linum-apply-slices-transforms", "--help"])
     assert ret.success

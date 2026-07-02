@@ -5,7 +5,7 @@ For each input ``mosaic_grid_*.ome.zarr`` volume, load only the central Z
 plane and call
 :func:`linumpy.mosaic.motor.compute_registration_refinements` to
 measure per-pair absolute tile displacements via phase correlation.
-Pairs from every input are concatenated into one pool and a single 2×2
+Pairs from every input are concatenated into one pool and a single 2x2
 affine transform is fitted via
 :func:`~linumpy.mosaic.motor.estimate_affine_from_pairs`.
 
@@ -96,7 +96,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--slice_config",
         type=str,
         default=None,
-        help="Optional slice_config.csv — rows with use=false are skipped.",
+        help="Optional slice_config.csv -- rows with use=false are skipped.",
     )
     p.add_argument(
         "--include_slice",

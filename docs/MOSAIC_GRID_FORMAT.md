@@ -1,8 +1,6 @@
 # Mosaic Grid Format (OME-Zarr)
 
 
----
-
 ## Overview
 
 Mosaic grids in linumpy are stored in the **OME-Zarr** format, a cloud-optimized, chunked array format designed for large microscopy datasets. The format supports multi-resolution pyramids, metadata, and efficient partial reads.
@@ -53,7 +51,7 @@ For the final stacked 3D volume, specific analysis-friendly resolutions are used
 | 2 | 50 µm | Overview, atlas registration |
 | 3 | 100 µm | Quick visualization, large-scale |
 
-This is controlled by the `--pyramid_resolutions` parameter in `linum_stack_slices_motor.py` or the `pyramid_resolutions` parameter in the Nextflow workflow.
+This is controlled by the `--pyramid_resolutions` parameter in `linum-stack-slices-motor` or the `pyramid_resolutions` parameter in the Nextflow workflow.
 
 **Note:** Only resolutions ≥ the base processing resolution are included. For example, processing at 25 µm will create levels at 25, 50, and 100 µm.
 
@@ -64,19 +62,19 @@ This is controlled by the `--pyramid_resolutions` parameter in `linum_stack_slic
 ### 3D Mosaic Grid
 
 ```
-Shape: (Z, X, Y)
+Shape: (Z, Y, X)
 ```
 
 | Dimension | Description |
 |-----------|-------------|
 | Z | Depth/axial dimension |
-| X | First lateral dimension |
-| Y | Second lateral dimension |
+| Y | First lateral dimension |
+| X | Second lateral dimension |
 
 ### 2D Mosaic Grid (AIP)
 
 ```
-Shape: (X, Y)
+Shape: (Y, X)
 ```
 
 ---
@@ -136,8 +134,8 @@ from linumpy.io.zarr import read_omezarr
 # Read image and resolution
 image, resolution = read_omezarr("mosaic_grid_3d_z00.ome.zarr")
 
-# image: dask.array.Array with shape (Z, X, Y)
-# resolution: tuple (res_z, res_x, res_y) in mm/pixel
+# image: dask.array.Array with shape (Z, Y, X)
+# resolution: tuple (res_z, res_y, res_x) in mm/pixel
 
 print(f"Shape: {image.shape}")
 print(f"Resolution: {resolution} mm/pixel")
@@ -241,7 +239,7 @@ Sharding groups multiple chunks into larger files, reducing filesystem overhead:
 sharding_factor = 4  # 4x4 chunks per shard
 ```
 
-Controlled by `--sharding_factor` parameter in `linum_create_mosaic_grid_3d.py`.
+Controlled by `--sharding_factor` parameter in `linum-create-mosaic-grid-3d`.
 
 ---
 
@@ -320,10 +318,10 @@ OME-Zarr files can be viewed in Neuroglancer if hosted on a web server.
 
 ```bash
 # View OME-Zarr
-linum_view_omezarr.py mosaic_grid_3d_z00.ome.zarr
+linum-view-omezarr mosaic_grid_3d_z00.ome.zarr
 
 # Take screenshot
-linum_screenshot_omezarr.py mosaic_grid_3d_z00.ome.zarr screenshot.png
+linum-screenshot-omezarr mosaic_grid_3d_z00.ome.zarr screenshot.png
 ```
 
 ---
@@ -378,8 +376,8 @@ Check the axes metadata in `.zattrs` to verify dimension order.
 
 | Tool | Purpose |
 |------|---------|
-| `linum_create_mosaic_grid_3d.py` | Create mosaic from raw tiles |
-| `linum_resample_mosaic_grid.py` | Resample to different resolution |
-| `linum_convert_omezarr_to_nifti.py` | Convert to NIfTI format |
-| `linum_view_omezarr.py` | Interactive viewer |
-| `linum_screenshot_omezarr.py` | Generate preview images |
+| `linum-create-mosaic-grid-3d` | Create mosaic from raw tiles |
+| `linum-resample-mosaic-grid` | Resample to different resolution |
+| `linum-convert-omezarr-to-nifti` | Convert to NIfTI format |
+| `linum-view-omezarr` | Interactive viewer |
+| `linum-screenshot-omezarr` | Generate preview images |

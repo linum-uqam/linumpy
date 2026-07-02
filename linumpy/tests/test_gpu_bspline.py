@@ -112,8 +112,7 @@ def test_bspline_smooth_recovery():
     centre = (10.0, 16.0, 16.0)
     sigma = 8.0
     vals = (
-        1.0
-        + 0.3 * np.exp(-((zz - centre[0]) ** 2 + (yy - centre[1]) ** 2 + (xx - centre[2]) ** 2) / (2 * sigma**2))
+        1.0 + 0.3 * np.exp(-((zz - centre[0]) ** 2 + (yy - centre[1]) ** 2 + (xx - centre[2]) ** 2) / (2 * sigma**2))
     ).astype(np.float32)
 
     field = _iterative_fit(vals, n_control_points=(8, 12, 12))

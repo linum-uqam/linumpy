@@ -3,7 +3,7 @@
 """Convert a zarr file to an ome-zarr file."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 from pathlib import Path
@@ -14,17 +14,17 @@ import zarr
 from linumpy.io.zarr import save_omezarr
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input", help="Full path to a zarr file (.zarr)")
-    p.add_argument("output", help="Full path to the output ome-zarr file (.ome-zarr)")
+    p.add_argument("input", type=Path, help="Full path to a zarr file (.zarr)")
+    p.add_argument("output", type=Path, help="Full path to the output ome-zarr file (.ome-zarr)")
     p.add_argument(
         "-r",
         "--resolution",
         nargs="+",
         type=float,
         default=[1.0],
-        help="Resolution of the image in microns. (default=%(default)s)",
+        help="Resolution of the image in microns. [%(default)s]",
     )
     p.add_argument("--n_levels", type=int, default=5, help="Number of levels in pyramidal decomposition. [%(default)s]")
 
@@ -32,6 +32,7 @@ def _build_arg_parser():
 
 
 def main() -> None:
+    """Run the zarr-to-OME-Zarr conversion script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()

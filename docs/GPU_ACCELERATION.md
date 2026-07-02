@@ -137,35 +137,6 @@ separate `_gpu.py` variant is needed.
 
 ---
 
-## CuPy acceleration backends (`CUPY_ACCELERATORS`)
-
-CuPy can route some array ops through additional NVIDIA backends. By default CuPy
-enables only `cub`; adding `cutensor` lets CuPy use the cuTENSOR backend for
-`tensordot`/`einsum` (the GPU B-spline / bias-field path in `linumpy.gpu.bspline`).
-cuTENSOR ships with the CUDA toolkit, so no extra install is needed.
-
-The Nextflow pipelines expose this via the `cupy_accelerators` param (default
-`'cub,cutensor'`), exported as `CUPY_ACCELERATORS` into every task:
-
-```bash
-# Default (cuTENSOR enabled)
-nextflow run workflows/reconst_3d/soct_3d_reconst.nf ...
-
-# Fall back to CuPy's built-in default
-nextflow run workflows/reconst_3d/soct_3d_reconst.nf ... --cupy_accelerators cub
-```
-
-Outside Nextflow, set the variable directly:
-
-```bash
-CUPY_ACCELERATORS=cub,cutensor linum-correct-bias-field ...
-```
-
-It only affects CuPy's `tensordot`/`einsum`; FFT phase correlation, morphology,
-Gaussian filtering, and N4 already run on dedicated CuPy/cuFFT kernels regardless.
-
----
-
 ## Multi-GPU Systems
 
 ```bash

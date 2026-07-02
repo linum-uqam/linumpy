@@ -3,7 +3,7 @@
 """Compute the average intensity projection of a 3D zarr volume."""
 
 # Configure thread limits before numpy/scipy imports
-import linumpy._thread_config  # noqa: F401
+import linumpy.config.threads  # noqa: F401
 
 import argparse
 from pathlib import Path
@@ -15,15 +15,16 @@ import zarr
 from linumpy.io.zarr import create_tempstore, read_omezarr, save_omezarr
 
 
-def _build_arg_parser():
+def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("input_zarr", help="Full path to the zarr volume.")
-    p.add_argument("output_image", default=None, help="Full path to the output zarr image")
+    p.add_argument("input_zarr", type=Path, help="Full path to the zarr volume.")
+    p.add_argument("output_image", type=Path, default=None, help="Full path to the output zarr image")
 
     return p
 
 
 def main() -> None:
+    """Run the average intensity projection script."""
     # Parse arguments
     p = _build_arg_parser()
     args = p.parse_args()
@@ -38,7 +39,9 @@ def main() -> None:
     # Prepare the output
     shape = vol.shape[1:3]
     zarr_store = create_tempstore(suffix=".zarr")
-    aip = zarr.open(zarr_store, mode="w", shape=shape, dtype=np.float32, chunks=vol.chunks[1:3])
+    _aip = zarr.open(zarr_store, mode="w", shape=shape, dtype=np.float32, chunks=vol.chunks[1:3])
+    assert isinstance(_aip, zarr.Array)
+    aip = _aip
 
     # Process every tile
     tile_shape = vol.chunks
@@ -50,7 +53,7 @@ def main() -> None:
             rmax = (i + 1) * tile_shape[1]
             cmin = j * tile_shape[2]
             cmax = (j + 1) * tile_shape[2]
-            tile = vol[:, rmin:rmax, cmin:cmax].mean(axis=0)
+            tile = np.asarray(vol[:, rmin:rmax, cmin:cmax]).mean(axis=0)
             aip[rmin:rmax, cmin:cmax] = tile
 
     out_dask = da.from_zarr(aip)

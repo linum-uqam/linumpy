@@ -1,22 +1,14 @@
 #!/usr/bin/env python3
-"""Stack 3D mosaics on top of each other in a single 3D volume using pairwise registration transforms.
+"""
+Stack 3D mosaics on top of each other in a single 3D volume using the.
 
-Expects all 3D mosaics to be in the same space
-(same dimensions for last two axes).
-
-DEPRECATED: This script is superseded by linum_stack_slices_motor.py, which
-provides the same functionality plus confidence-based transform degradation,
-translation filtering/accumulation, rotation smoothing, auto-exclude, and
-richer diagnostics. Use linum_stack_slices_motor.py with --no_xy_shift for
-equivalent behavior on common-space slices.
+transforms from `linum_estimate_transform_pairwise.py`. Expects all 3D
+mosaics to be in the same space (same dimensions for last two axes).
 """
 
-# Configure thread limits before numpy/scipy imports
 import argparse
 import re
-import warnings
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import SimpleITK as sitk
@@ -24,29 +16,20 @@ from scipy.ndimage import gaussian_filter
 from skimage.filters import threshold_otsu
 from tqdm import tqdm
 
-import linumpy.config.threads  # noqa: F401
-
-# Configure all libraries (especially SimpleITK) to respect thread limits
-from linumpy.config.threads import configure_all_libraries
-from linumpy.io.zarr import AnalysisOmeZarrWriter, read_omezarr
-from linumpy.metrics import collect_stack_metrics
+from linumpy.io.zarr import OmeZarrWriter, read_omezarr
 from linumpy.mosaic.grid import get_diffusion_blending_weights
 from linumpy.registration.sitk import apply_transform
 
-configure_all_libraries()
-
 
 def _build_arg_parser() -> argparse.ArgumentParser:
-    """Run function."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("in_mosaics_dir", help="Input mosaics directory in .ome.zarr format.")
+    p.add_argument("in_mosaics_dir", type=Path, help="Input mosaics directory in .ome.zarr format.")
     p.add_argument(
-        "in_transforms_dir",
-        help="Input transforms directory. Each subdirectory should have the\n"
+        "in_transforms_dir", type=Path, help="Input transforms directory. Each subdirectory should have the\n"
         "same name as the corresponding mosaic file (without the .ome.zarr\n"
         "extension) and contain a .mat transform file and .txt offsets file.",
     )
-    p.add_argument("out_stack", help="Output stack in .ome.zarr format.")
+    p.add_argument("out_stack", type=Path, help="Output stack in .ome.zarr format.")
     p.add_argument("--normalize", action="store_true", help="Normalize slices during reconstruction.")
     p.add_argument("--blend", action="store_true", help="Use diffusion method for blending consecutive slices.")
     p.add_argument(
@@ -54,47 +37,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         help="Number of overlapping voxels to keep from bottom of\nprevious mosaic. By default keeps all.",
     )
-    p.add_argument(
-        "--no_accumulate_transforms",
-        action="store_true",
-        help="Apply each transform independently instead of accumulating.\n"
-        "Use when slices are already in common space (XY aligned).",
-    )
-    p.add_argument(
-        "--max_pairwise_translation",
-        type=float,
-        default=0,
-        help="Maximum allowed pairwise translation magnitude in pixels.\n"
-        "Transforms whose translation exceeds this value have their\n"
-        "translation zeroed out (rotation is preserved) before\n"
-        "accumulation. 0 = keep all translations (default).\n"
-        "Recommended: 50. Prevents registration failures (clamped\n"
-        "translations) from compounding during accumulation.",
-    )
-    p.add_argument(
-        "--pyramid_resolutions",
-        type=float,
-        nargs="+",
-        default=[10, 25, 50, 100],
-        help="Target resolutions for pyramid levels in microns.\nDefault: 10 25 50 100 (for analysis at 10, 25, 50, 100 µm).",
-    )
-    p.add_argument(
-        "--n_levels",
-        type=int,
-        default=None,
-        help="Number of pyramid levels (overrides --pyramid_resolutions).\nUses power-of-2 downsampling if specified.",
-    )
-    p.add_argument(
-        "--make_isotropic", action="store_true", default=True, help="Resample anisotropic data to isotropic voxels (default)."
-    )
-    p.add_argument(
-        "--no-make_isotropic", dest="make_isotropic", action="store_false", help="Preserve aspect ratio (anisotropic output)."
-    )
     return p
 
 
-def get_input(mosaics_dir: Path, transforms_dir: Path, parser: Any) -> Any:
-    """Run function."""
+def get_input(mosaics_dir: Path, transforms_dir: Path, parser: argparse.ArgumentParser) -> tuple:
+    """Load and sort mosaic files and their associated transforms."""
     # get all .ome.zarr files in in_mosaics_dir
     in_mosaics_dir = Path(mosaics_dir)
     in_transforms_dir = Path(transforms_dir)
@@ -103,8 +50,7 @@ def get_input(mosaics_dir: Path, transforms_dir: Path, parser: Any) -> Any:
     slice_ids = []
     for f in mosaics_files:
         foo = re.match(pattern, f.name)
-        if foo is None:
-            continue
+        assert foo is not None
         slice_id = int(foo.groups()[0])
         slice_ids.append(slice_id)
 
@@ -116,17 +62,17 @@ def get_input(mosaics_dir: Path, transforms_dir: Path, parser: Any) -> Any:
     for arg_idx in slice_ids_argsort[1:]:
         f = mosaics_files[arg_idx]
         current_transform_dirname = Path(f.name).stem
-        while Path(current_transform_dirname).suffix != "":
+        while Path(current_transform_dirname).suffix != "":  # remove all trailing extensions
             current_transform_dirname = Path(current_transform_dirname).stem
         current_transform_dir = in_transforms_dir / current_transform_dirname
 
         if not current_transform_dir.exists():
             parser.error(f"Transform {current_transform_dir} not found.")
 
-        current_mat_file = list(current_transform_dir.glob("*.tfm"))
+        current_mat_file = list(current_transform_dir.glob("*.mat"))
         current_txt_file = list(current_transform_dir.glob("*.txt"))
         if len(current_mat_file) != 1:
-            parser.error(f"Found {len(current_mat_file)} .tfm file under {current_transform_dir.as_posix()}")
+            parser.error(f"Found {len(current_mat_file)} .mat file under {current_transform_dir.as_posix()}")
         current_mat_file = current_mat_file[0]
         if len(current_txt_file) > 1:
             parser.error(f"Found {len(current_txt_file)} .txt file under {current_transform_dir.as_posix()}")
@@ -137,8 +83,8 @@ def get_input(mosaics_dir: Path, transforms_dir: Path, parser: Any) -> Any:
     return first_mosaic, mosaics_sorted, transforms, np.array(offsets, dtype=int)
 
 
-def get_agarose_mask(vol: Any) -> Any:
-    """Run function."""
+def get_agarose_mask(vol: np.ndarray) -> np.ndarray:
+    """Compute a mask identifying agarose voxels from a volume."""
     reference = np.mean(vol, axis=0)
     reference_smooth = gaussian_filter(reference, sigma=1.0)
     threshold = threshold_otsu(reference_smooth[reference > 0])
@@ -148,8 +94,8 @@ def get_agarose_mask(vol: Any) -> Any:
     return agarose_mask
 
 
-def normalize(vol: Any, percentile_max: float = 99.9) -> Any:
-    """Run function."""
+def normalize(vol: np.ndarray, percentile_max: float = 99.9) -> np.ndarray:
+    """Normalize volume intensities per slice against agarose background."""
     # voxels in mask are expected to be agarose voxels
     agarose_mask = get_agarose_mask(vol)
 
@@ -172,8 +118,8 @@ def normalize(vol: Any, percentile_max: float = 99.9) -> Any:
     return vol
 
 
-def get_tissue_mask(vol: Any) -> Any:
-    """Run function."""
+def get_tissue_mask(vol: np.ndarray) -> np.ndarray:
+    """Compute a tissue mask from a volume using intensity thresholding."""
     vol_smooth = gaussian_filter(vol, sigma=(0.0, 1.0, 1.0))
     mask = vol_smooth > np.percentile(vol_smooth, 10)
 
@@ -181,35 +127,11 @@ def get_tissue_mask(vol: Any) -> Any:
 
 
 def main() -> None:
-    """Run function operation."""
-    warnings.warn(
-        "linum_stack_slices_3d.py is deprecated. Use linum_stack_slices_motor.py with --no_xy_shift instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
+    """Run the 3D slice stacking script."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 
     first_mosaic, mosaics_sorted, transforms, offsets = get_input(args.in_mosaics_dir, args.in_transforms_dir, parser)
-
-    # Filter large pairwise translations before accumulation if requested
-    if args.max_pairwise_translation > 0:
-        n_filtered = 0
-        for i, t in enumerate(transforms):
-            tx, ty = t.GetTranslation()
-            mag = np.sqrt(tx**2 + ty**2)
-            if mag > args.max_pairwise_translation:
-                filtered = sitk.Euler2DTransform()
-                filtered.SetCenter(t.GetCenter())
-                filtered.SetAngle(t.GetAngle())
-                filtered.SetTranslation([0.0, 0.0])
-                transforms[i] = filtered
-                n_filtered += 1
-        if n_filtered:
-            print(
-                f"Filtered {n_filtered}/{len(transforms)} transforms with translation "
-                f"> {args.max_pairwise_translation:.0f} px (translation zeroed, rotation kept)"
-            )
 
     vol, res = read_omezarr(first_mosaic)
     _, nr, nc = vol.shape
@@ -220,14 +142,14 @@ def main() -> None:
     nz = np.sum(fixed_offsets) + last_vol.shape[0]  # because we add the last volume as a whole
     output_shape = (nz, nr, nc)
 
-    # AnalysisOmeZarrWriter supports both custom resolutions and traditional n_levels
-    output_vol = AnalysisOmeZarrWriter(args.out_stack, output_shape, vol.chunks, dtype=vol.dtype)
+    output_vol = OmeZarrWriter(args.out_stack, output_shape, vol.chunks, dtype=vol.dtype)
 
+    vol_np: np.ndarray = np.asarray(vol)
     if args.normalize:
-        vol = normalize(vol)
+        vol_np = normalize(vol_np)
         if args.overlap is not None:
-            vol = vol[: fixed_offsets[0] + args.overlap]
-    output_vol[: vol.shape[0]] = vol[:]
+            vol_np = vol_np[: fixed_offsets[0] + args.overlap]
+    output_vol[: vol_np.shape[0]] = vol_np
 
     # fixed_offsets[0] is where the next moving slice will start
     stack_offset = fixed_offsets[0]
@@ -235,15 +157,8 @@ def main() -> None:
     # assemble volume
     for i in tqdm(range(len(mosaics_sorted)), desc="Apply transforms to volume"):
         vol, res = read_omezarr(mosaics_sorted[i])
-
-        # Apply transforms: either accumulate all previous transforms or apply only the current one
-        if args.no_accumulate_transforms:
-            # Slices are already in common space - only apply current transform (typically identity or small correction)
-            register_vol = apply_transform(vol, transforms[i])
-        else:
-            # Traditional mode: accumulate all transforms from first slice to current
-            composite_transform = sitk.CompositeTransform(transforms[i::-1])
-            register_vol = apply_transform(vol, composite_transform)
+        composite_transform = sitk.CompositeTransform(transforms[i::-1])
+        register_vol = apply_transform(np.asarray(vol), composite_transform)
 
         # cropping the registered volume to make sure it fits in output_vol
         register_vol = register_vol[: min(register_vol.shape[0], output_shape[0] - stack_offset)]
@@ -272,24 +187,7 @@ def main() -> None:
         ] + (alphas) * register_vol[:]
         stack_offset += next_fixed_offset
 
-    # Finalize with pyramid
-    # n_levels: traditional power-of-2 downsampling
-    # pyramid_resolutions: custom analysis-friendly resolutions (default)
-    # make_isotropic: resample anisotropic data to isotropic voxels
-    output_vol.finalize(
-        res, target_resolutions_um=args.pyramid_resolutions, n_levels=args.n_levels, make_isotropic=args.make_isotropic
-    )
-
-    # Collect metrics using helper function
-    collect_stack_metrics(
-        output_shape=output_shape,
-        z_offsets=fixed_offsets,
-        num_slices=len(mosaics_sorted) + 1,
-        resolution=list(res),
-        output_path=args.out_stack,
-        blend_enabled=args.blend,
-        normalize_enabled=args.normalize,
-    )
+    output_vol.finalize(res)
 
 
 if __name__ == "__main__":

@@ -45,7 +45,7 @@ def downsample_gpu(vol: np.ndarray, shrink_factor: int, use_gpu: bool = True) ->
         except Exception:
             pass  # fall through to CPU
 
-    # CPU fallback — scipy zoom with anti-aliasing via block-mean
+    # CPU fallback -- scipy zoom with anti-aliasing via block-mean
     from scipy.ndimage import zoom
 
     factor = 1.0 / shrink_factor

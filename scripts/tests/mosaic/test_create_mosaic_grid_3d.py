@@ -5,14 +5,14 @@ from linumpy.io.test_data import get_data
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_create_mosaic_grid_3d.py", "--help"])
+    ret = script_runner.run(["linum-create-mosaic-grid-3d", "--help"])
     assert ret.success
 
 
 def test_execution_from_directory(script_runner, tmp_path):
     input = get_data("raw_tiles")
     output = tmp_path / "output.ome.zarr"
-    ret = script_runner.run(["linum_create_mosaic_grid_3d.py", output, "--from_root_directory", input, "-z", 0, "-r", 2])
+    ret = script_runner.run(["linum-create-mosaic-grid-3d", output, "--from_root_directory", input, "-z", 0, "-r", 2])
     assert ret.success
 
 
@@ -22,7 +22,7 @@ def test_execution_from_list(script_runner, tmp_path):
     output = tmp_path / "output.ome.zarr"
     ret = script_runner.run(
         [
-            "linum_create_mosaic_grid_3d.py",
+            "linum-create-mosaic-grid-3d",
             output,
             "--from_tiles_list",
             str(input_path / "tile_x00_y00_z01"),

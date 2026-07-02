@@ -1,7 +1,5 @@
 # 2.5D Reconstruction Workflow
 
----
-
 ## Overview
 
 The 2.5D reconstruction workflow (`soct_2.5d_reconst.nf`) converts a set of per-slice 2D mosaic
@@ -118,19 +116,18 @@ A border is removed from each tile before processing to avoid edge artifacts.
 
 The workflow runs processes in a linear sequence:
 
-```
-crop_tiles
-    └─→ estimate_illumination_bias
-             └─→ compensate_illumination_bias
-                       │
-                       ├─→ estimate_position (pools all compensated grids)
-                       │
-                       └─→ stitch_mosaic (per-slice, uses shared position transform)
-                                  └─→ stack_mosaic
-                                            ├─→ compress_stack  → stack.zarr.zip
-                                            ├─→ convert_to_omezarr
-                                            │         └─→ resample_stack → stack_10um.nii.gz
-                                            └─→ (stack.zarr itself)
+```mermaid
+flowchart TD
+    A[crop_tiles] --> B[estimate_illumination_bias]
+    B --> C[compensate_illumination_bias]
+    C --> D[estimate_position<br/>pools all grids]
+    C --> E[stitch_mosaic<br/>per-slice]
+    D --> E
+    E --> F[stack_mosaic]
+    F --> G[compress_stack<br/>stack.zarr.zip]
+    F --> H[convert_to_omezarr]
+    H --> I[resample_stack<br/>stack_10um.nii.gz]
+    F --> J[(stack.zarr)]
 ```
 
 ### 1. `crop_tiles`
@@ -138,7 +135,7 @@ crop_tiles
 Crops a border from each tile within the mosaic grid TIFF to remove edge artifacts.
 
 ```
-linum_crop_tiles.py <mosaic_dir> <output.tiff> --xmin --xmax --ymin --ymax --tile_shape
+linum-crop-tiles <mosaic_dir> <output.tiff> --xmin --xmax --ymin --ymax --tile_shape
 ```
 
 **Input**: `mosaic_grid_z*.tiff` directory  
@@ -149,7 +146,7 @@ linum_crop_tiles.py <mosaic_dir> <output.tiff> --xmin --xmax --ymin --ymax --til
 Estimates per-tile flat-field and dark-field using the BaSIC algorithm.
 
 ```
-linum_estimate_illumination.py <mosaic.tiff> <flatfield.nii.gz> --tile_shape --output_darkfield
+linum-estimate-illumination <mosaic.tiff> <flatfield.nii.gz> --tile_shape --output_darkfield
 ```
 
 **Input**: Cropped mosaic grid (per slice)  
@@ -160,7 +157,7 @@ linum_estimate_illumination.py <mosaic.tiff> <flatfield.nii.gz> --tile_shape --o
 Applies the estimated flat/dark field correction to each mosaic grid.
 
 ```
-linum_compensate_illumination.py <mosaic.tiff> <output.nii.gz> --flatfield --darkfield --tile_shape
+linum-compensate-illumination <mosaic.tiff> <output.nii.gz> --flatfield --darkfield --tile_shape
 ```
 
 **Input**: Cropped mosaic + flat/dark field  
@@ -172,7 +169,7 @@ Pools all compensated mosaic grids to estimate a single shared tile-placement tr
 This single transform is applied to all slices, avoiding per-slice jitter.
 
 ```
-linum_estimate_transform.py <all_mosaics...> <position_transform.npy> --tile_shape --initial_overlap
+linum-estimate-transform <all_mosaics...> <position_transform.npy> --tile_shape --initial_overlap
 ```
 
 **Input**: All compensated mosaic grids (collected)  
@@ -184,7 +181,7 @@ Stitches each compensated mosaic grid into a 2D slice using the shared position 
 Blending method is `diffusion`.
 
 ```
-linum_stitch_2d.py <mosaic.nii.gz> <transform.npy> <output.nii.gz> --blending_method diffusion --tile_shape
+linum-stitch-2d <mosaic.nii.gz> <transform.npy> <output.nii.gz> --blending_method diffusion --tile_shape
 ```
 
 **Input**: Compensated mosaic (per slice) + position transform  
@@ -195,7 +192,7 @@ linum_stitch_2d.py <mosaic.nii.gz> <transform.npy> <output.nii.gz> --blending_me
 Stacks all stitched 2D slices into a 3D volume using XY shifts from `shifts_xy.csv`.
 
 ```
-linum_stack_slices.py <all_stitched...> stack.zarr --xy_shifts --resolution_xy --resolution_z
+linum-stack-slices <all_stitched...> stack.zarr --xy_shifts --resolution_xy --resolution_z
 ```
 
 **Input**: All stitched slices (collected) + shifts CSV  
@@ -220,7 +217,7 @@ Converts the Zarr stack to OME-Zarr format for visualization in napari/neuroglan
 Resamples the OME-Zarr to isotropic resolution and exports a NIfTI file.
 
 ```
-linum_convert_omezarr_to_nifti.py stack.ome.zarr stack_10um.nii.gz --resolution 10.0
+linum-convert-omezarr-to-nifti stack.ome.zarr stack_10um.nii.gz --resolution 10.0
 ```
 
 **Input**: `stack.ome.zarr`  

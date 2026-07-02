@@ -17,7 +17,7 @@ SCRIPT_PATH = Path(__file__).resolve().parents[2] / "stitching" / "linum_align_t
 
 @pytest.fixture(scope="module")
 def align_module():
-    """Load ``linum_align_to_ras.py`` as a module."""
+    """Load ``linum-align-to-ras`` as a module."""
     spec = importlib.util.spec_from_file_location("linum_align_to_ras", SCRIPT_PATH)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -31,7 +31,7 @@ def align_module():
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_align_to_ras.py", "--help"])
+    ret = script_runner.run(["linum-align-to-ras", "--help"])
     assert ret.success
 
 

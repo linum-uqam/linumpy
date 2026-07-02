@@ -2,5 +2,5 @@
 
 
 def test_help(script_runner):
-    ret = script_runner.run(["linum_merge_slices_into_folders.py", "--help"])
+    ret = script_runner.run(["linum-merge-slices-into-folders", "--help"])
     assert ret.success
