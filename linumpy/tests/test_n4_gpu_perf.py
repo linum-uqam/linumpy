@@ -6,6 +6,8 @@ The synthetic volume is sized so both backends complete in tens of
 seconds, not minutes.
 """
 
+from __future__ import annotations
+
 import time
 
 import numpy as np
@@ -29,10 +31,10 @@ def _make_perf_volume(shape=(64, 128, 128), seed=0):
 
 @pytest.mark.skipif(not GPU_AVAILABLE, reason="GPU not available")
 def test_n4_gpu_faster_than_cpu_synthetic():
-    """On a 128x512x512 synthetic volume (realistic OCT slab), GPU N4 should
-    be at least 2x faster than the SimpleITK CPU implementation.  Measured
-    speedup at this size is ~3.3x; we assert 2x to allow run-to-run variance.
-    Tiny volumes (e.g. 64x128x128) are dominated by CUDA launch overhead and
+    """On a 128×512×512 synthetic volume (realistic OCT slab), GPU N4 should
+    be at least 2× faster than the SimpleITK CPU implementation.  Measured
+    speedup at this size is ~3.3×; we assert 2× to allow run-to-run variance.
+    Tiny volumes (e.g. 64×128×128) are dominated by CUDA launch overhead and
     do NOT exercise the perf benefit of the GPU implementation."""
     vol, mask = _make_perf_volume(shape=(128, 512, 512))
     n_iters = [25, 25, 25]
@@ -42,11 +44,15 @@ def test_n4_gpu_faster_than_cpu_synthetic():
     n4_correct(vol[:8], mask[:8], shrink_factor=2, n_iterations=[5], backend="gpu", spline_distance_mm=spline_dist)
 
     t0 = time.perf_counter()
-    cpu_corr, _ = n4_correct(vol, mask, shrink_factor=2, n_iterations=n_iters, backend="cpu", spline_distance_mm=spline_dist)
+    cpu_corr, _ = n4_correct(
+        vol, mask, shrink_factor=2, n_iterations=n_iters, backend="cpu", spline_distance_mm=spline_dist
+    )
     cpu_time = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    gpu_corr, _ = n4_correct(vol, mask, shrink_factor=2, n_iterations=n_iters, backend="gpu", spline_distance_mm=spline_dist)
+    gpu_corr, _ = n4_correct(
+        vol, mask, shrink_factor=2, n_iterations=n_iters, backend="gpu", spline_distance_mm=spline_dist
+    )
     gpu_time = time.perf_counter() - t0
 
     speedup = cpu_time / max(gpu_time, 1e-6)
