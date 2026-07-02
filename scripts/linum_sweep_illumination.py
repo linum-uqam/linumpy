@@ -106,6 +106,7 @@ def run_one_config(
     smoothness_flatfield: float | None,
     working_size: int | None,
     apply_z: list[int],
+    preview_z: int,
     per_z_fit: bool = False,
     darkfield_smooth_sigma: float = 0.0,
     darkfield_z_window: int = 0,
@@ -120,9 +121,9 @@ def run_one_config(
     Returns
     -------
     corrected : dict mapping z-index -> corrected (float32, clipped >= 0)
-    flatfield : (ty, tx) float32 array (representative, from first successful fit)
-    darkfield : (ty, tx) float32 array or None
-    stats     : dict with fit diagnostics
+    flatfield : (ty, tx) float32 array — the model applied to ``preview_z``
+    darkfield : (ty, tx) float32 array or None — the model applied to ``preview_z``
+    stats     : dict with fit diagnostics for ``preview_z``
     """
     n_axial = vol.shape[0]
     plane_shape: tuple[int, int] = (vol.shape[1], vol.shape[2])
@@ -202,9 +203,9 @@ def run_one_config(
     else:
         # ── Per-Z fit ────────────────────────────────────────────────────────
         min_tiles = max(4, tiles_per_plane // 4)
-        flatfield = None
-        darkfield = None
-        n_fit = 0
+        ff_per_z: dict[int, np.ndarray] = {}
+        df_per_z: dict[int, np.ndarray | None] = {}
+        nfit_per_z: dict[int, int] = {}
 
         def _process_plane(z: int) -> tuple[int, np.ndarray, np.ndarray | None, np.ndarray | None, int]:
             plane = vol[z]
@@ -254,14 +255,20 @@ def run_one_config(
             for fut in tqdm(as_completed(plane_futures), total=len(apply_z), desc="  Per-Z fit+apply", leave=False):
                 z_idx, plane_result, ff_z, df_z, n = fut.result()
                 corrected[z_idx] = plane_result
-                if ff_z is not None and flatfield is None:
-                    flatfield = ff_z
-                    darkfield = df_z
-                    n_fit = n
+                if ff_z is not None:
+                    ff_per_z[z_idx] = ff_z
+                    df_per_z[z_idx] = df_z
+                    nfit_per_z[z_idx] = n
 
-        if flatfield is None:
+        if not ff_per_z:
             msg = "Per-Z fit: no plane had enough tiles for a successful BaSiC fit."
             raise RuntimeError(msg)
+
+        # Pick the preview slice's model if available, else the nearest fitted plane.
+        chosen_z = preview_z if preview_z in ff_per_z else min(ff_per_z.keys(), key=lambda z: abs(z - preview_z))
+        flatfield = ff_per_z[chosen_z]
+        darkfield = df_per_z[chosen_z]
+        n_fit = nfit_per_z[chosen_z]
 
     df = darkfield  # alias for stats
     stats: dict = {
@@ -637,6 +644,7 @@ def main() -> None:
                 smoothness_flatfield=smooth_ff,
                 working_size=int(ws) if ws is not None else None,
                 apply_z=apply_z,
+                preview_z=z_slice,
                 per_z_fit=per_z,
                 darkfield_smooth_sigma=df_sig if df_sig is not None else 0.0,
                 darkfield_z_window=df_zw,
