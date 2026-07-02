@@ -9,6 +9,7 @@ from typing import Any, Literal, overload
 import numpy as np
 import SimpleITK as sitk
 from dipy.segment.mask import median_otsu
+from numpy.ma import MaskedArray
 from scipy.interpolate import interp1d
 from scipy.ndimage import (
     binary_fill_holes,
@@ -150,7 +151,7 @@ def get_attenuation_vermeer2013(
     else:
         # Compensation profile with depth for each A-line. See Vermeer 2014
         # / Neubrand 2023 Appendix B for the derivation.
-        vol_p = np.ma.masked_array(vol, ~mask)
+        vol_p = MaskedArray(vol, mask=~mask)
         cum_rev = np.cumsum(vol_p[:, :, ::-1], axis=-1)
         tail = np.zeros_like(cum_rev)
         tail[:, :, 1:] = cum_rev[:, :, :-1]  # exclude I[i]
@@ -230,14 +231,14 @@ def get_attenuation_smith2015(
 
     # Per-A-line slope estimate mu*dz (round-trip), averaged inside the mask.
     exp_fit = get_gradient_attenuation(gaussian_filter(vol, (0, 0, sigma)))
-    exp_fit = np.ma.masked_array(exp_fit, ~mask).mean(axis=2)
+    exp_fit = MaskedArray(exp_fit, mask=~mask).mean(axis=2)
     exp_fit[np.isnan(exp_fit)] = 0
 
     # Mean intensity in a window of `dz` voxels above the bottom interface.
     interface_bottom = vol.shape[2] - get_interface_depth_from_mask(mask[:, :, ::-1]) - 1 - dz
     mask_bottom = mask_under_interface(vol, interface_bottom, return_mask=True)
     mask_bottom = (mask_bottom * mask).astype(bool)
-    i0 = np.ma.masked_array(vol, ~mask_bottom).mean(axis=2)
+    i0 = MaskedArray(vol, mask=~mask_bottom).mean(axis=2)
 
     # Linearized end-of-scan tail integral C ~= I[imax] / (2 * mu_E * dz).
     epsilon = 1e-3

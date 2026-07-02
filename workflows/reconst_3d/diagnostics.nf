@@ -28,6 +28,12 @@ process analyze_rotation_drift {
         --resolution ${params.resolution} \
         --rotation_threshold ${params.diagnostic_rotation_threshold}
     """
+
+    stub:
+    """
+    mkdir -p rotation_analysis
+    touch rotation_analysis/placeholder.txt
+    """
 }
 
 process stitch_motor_only {
@@ -45,6 +51,11 @@ process stitch_motor_only {
     linum-stitch-motor-only ${mosaic_grid} "slice_z${slice_id}_motor_only.ome.zarr" \
         --overlap_fraction ${params.motor_only_overlap} \
         --blending_method ${blending}
+    """
+
+    stub:
+    """
+    mkdir -p slice_z${slice_id}_motor_only.ome.zarr
     """
 }
 
@@ -68,6 +79,11 @@ process stitch_refined {
         --max_refinement_px ${params.max_blend_refinement_px} \
         ${refinement_out} -f
     """
+
+    stub:
+    """
+    mkdir -p slice_z${slice_id}_refined.ome.zarr
+    """
 }
 
 process compare_stitching {
@@ -85,6 +101,12 @@ process compare_stitching {
         "slice_z${slice_id}_comparison" \
         --label1 "Motor-only" --label2 "Refined" \
         --tile_step ${params.comparison_tile_step}
+    """
+
+    stub:
+    """
+    mkdir -p slice_z${slice_id}_comparison
+    touch slice_z${slice_id}_comparison/placeholder.txt
     """
 }
 
@@ -106,6 +128,11 @@ process stack_motor_only {
         --blending ${blending_arg} \
         --preview motor_only_stack_preview.png
     """
+
+    stub:
+    """
+    mkdir -p motor_only_stack.ome.zarr
+    """
 }
 
 process analyze_acquisition_rotation {
@@ -123,5 +150,11 @@ process analyze_acquisition_rotation {
     linum-analyze-acquisition-rotation ${shifts_file} acquisition_rotation_analysis \
         --registration_dir register_pairwise \
         --resolution ${params.resolution}
+    """
+
+    stub:
+    """
+    mkdir -p acquisition_rotation_analysis
+    touch acquisition_rotation_analysis/placeholder.txt
     """
 }

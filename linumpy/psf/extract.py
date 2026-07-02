@@ -1,10 +1,9 @@
 """Extract PSF parameters (focal depth, Rayleigh length) from a stitched mosaic."""
 
 import numpy as np
-from scipy.ndimage import binary_dilation, binary_fill_holes, gaussian_filter
+from scipy.ndimage import gaussian_filter
 from scipy.stats import zscore
-from skimage.filters import threshold_li
-from skimage.morphology import disk
+from skimage.filters import threshold_otsu
 
 from linumpy.geometry.interface import find_tissue_interface
 from linumpy.intensity.psf_model import confocal_psf, fit_tissue_confocal_model
@@ -60,18 +59,28 @@ def extract_psf_parameters_from_mosaic(
 
     """
     nx, ny, nz = vol.shape
-    k = int(0.5 * f * (nx + ny))
     aip = vol.mean(axis=2)
 
     # Compute water-tissue interface
     interface = find_tissue_interface(vol).astype(int)
 
-    # Compute the agarose mask with the li thresholding method
-    thresh = threshold_li(aip)
-    mask_tissue = binary_fill_holes(aip > thresh)
-    mask_agarose = ~binary_fill_holes(binary_dilation(mask_tissue, disk(k)))
-    mask_agarose[aip == 0] = 0
-    del mask_tissue
+    # Agarose mask: Otsu on smoothed AIP, restricted to non-zero (valid) pixels.
+    # Mirrors linumpy.intensity.normalization.get_agarose_mask so behaviour is
+    # consistent with the normalization step and robust to darkfield-corrected
+    # inputs, where Li thresholding tends to over-segment and collapse the mask.
+    aip_smooth = gaussian_filter(aip, sigma=max(0.5, f * (nx + ny) * 0.25))
+    valid = aip > 0
+    if not valid.any():
+        msg = "extract_psf_parameters_from_mosaic: AIP is all zero; cannot estimate agarose mask"
+        raise RuntimeError(msg)
+    thresh = threshold_otsu(aip_smooth[valid])
+    mask_agarose = (aip_smooth < thresh) & valid
+    if not mask_agarose.any():
+        msg = (
+            "extract_psf_parameters_from_mosaic: agarose mask is empty after Otsu thresholding "
+            "(tissue likely fills the FOV). Use compensate_psf_method='model_free' for this slice."
+        )
+        raise RuntimeError(msg)
 
     # Get min and max interface depth for the agarose
     zmin = np.percentile(interface[mask_agarose], 2.5)
@@ -136,4 +145,4 @@ def extract_psf_parameters_from_mosaic(
     zf_final = zf_list[min_err]
     zr_final = zr_list[min_err]
 
-    return zf_final, zr_final
+    return float(zf_final), float(zr_final)

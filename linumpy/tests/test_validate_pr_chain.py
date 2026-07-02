@@ -31,7 +31,7 @@ def _load_generator_module():
 
 def _header_order_body(order: tuple[int, ...]) -> str:
     order_str = " → ".join(f"#{n}" for n in order)
-    return f"> **Stacked PR 1/22 — review order:** {order_str}\n\n---\n"
+    return f"> **Stacked PR 1/24 — review order:** {order_str}\n\n---\n"
 
 
 def _consistent_open_prs() -> list[dict[str, str | int]]:
@@ -238,7 +238,7 @@ def _write_stack_index(path: Path, *, break_link_at: int | None = None) -> dict[
     lines.append("97,pr-c-utility-preprocessing,pr-a-build-tooling,1,merged,0,")
 
     index_by_pr: dict[int, dict[str, str]] = {}
-    predecessor = mod.FOUNDATION_HEAD_BRANCH
+    predecessor = "main"
     for i, pr in enumerate(mod.CANONICAL_OPEN_PR_ORDER):
         branch = f"pr-test-{pr}"
         intended = "wrong-base" if break_link_at == pr else predecessor
@@ -282,7 +282,7 @@ def test_stack_linearity(tmp_path: Path) -> None:
         [
             {"sha": "a" * 40, "pr_number": "98", "ambiguous": "false", "candidates": ""},
             {"sha": "b" * 40, "pr_number": "99", "ambiguous": "false", "candidates": ""},
-            {"sha": dev_tip, "pr_number": "125", "ambiguous": "false", "candidates": ""},
+            {"sha": dev_tip, "pr_number": "133", "ambiguous": "false", "candidates": ""},
         ],
     )
 
@@ -395,7 +395,7 @@ def test_all_mode_gate(tmp_path: Path) -> None:
         [
             {"sha": f"{1:040x}", "pr_number": "98", "ambiguous": "false", "candidates": ""},
             {"sha": f"{2:040x}", "pr_number": "99", "ambiguous": "false", "candidates": ""},
-            {"sha": dev_tip, "pr_number": "125", "ambiguous": "false", "candidates": ""},
+            {"sha": dev_tip, "pr_number": "133", "ambiguous": "false", "candidates": ""},
         ],
     )
     (chain_dir / "audit-report.md").write_text("# audit rollup\n", encoding="utf-8")
@@ -434,5 +434,25 @@ def test_header_consensus_blocks_on_order_mismatch() -> None:
 def test_header_consensus_blocks_on_wrong_open_pr_count() -> None:
     """validate_header_consensus aborts when open PR count does not match canonical set."""
     gen = _load_generator_module()
-    with pytest.raises(SystemExit, match="BLOCKING: expected"):
-        gen.validate_header_consensus(_consistent_open_prs()[:3])
+    open_prs = [pr for pr in _consistent_open_prs() if pr["number"] not in gen.PASS_THROUGH_PRS]
+    open_prs.append(dict(open_prs[0]))
+    with pytest.raises(SystemExit, match="BLOCKING: expected 20 open PRs, got 21"):
+        gen.validate_header_consensus(open_prs)
+
+
+def test_header_consensus_accepts_pass_through_closed_slots() -> None:
+    """validate_header_consensus allows 20 open PRs when 4 pass-through slots are CLOSED on GitHub."""
+    gen = _load_generator_module()
+    open_prs = [pr for pr in _consistent_open_prs() if pr["number"] not in gen.PASS_THROUGH_PRS]
+    assert len(open_prs) == len(gen.CANONICAL_OPEN_PR_ORDER) - len(gen.PASS_THROUGH_PRS)
+    canonical_order = gen.validate_header_consensus(open_prs)
+    expected = [115, 97, *gen.CANONICAL_OPEN_PR_ORDER]
+    assert canonical_order == expected
+
+
+def test_header_consensus_blocks_when_non_pass_through_missing() -> None:
+    """validate_header_consensus still requires every non-pass-through PR to be open."""
+    gen = _load_generator_module()
+    open_prs = [pr for pr in _consistent_open_prs() if pr["number"] not in gen.PASS_THROUGH_PRS and pr["number"] != 98]
+    with pytest.raises(SystemExit, match="BLOCKING: missing open PRs"):
+        gen.validate_header_consensus(open_prs)

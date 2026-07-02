@@ -254,7 +254,7 @@ def main() -> None:
     collect_xy_transform_metrics(
         transform=transform,
         tile_pairs_used=tile_count,
-        tile_shape=tuple(tile_shape),
+        tile_shape=(int(tile_shape[0]), int(tile_shape[1])),
         residuals=residuals,
         output_path=output_transform,
         input_paths=input_images,
