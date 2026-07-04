@@ -1,0 +1,32 @@
+# CODEOWNERS — linumpy
+# Placeholder usernames: replace @<username> with real GitHub usernames before merge.
+
+# Foundational / build config
+/pyproject.toml          @<username>
+/uv.lock                 @<username>
+/.github/workflows/      @<username>
+
+# Core library modules
+/linumpy/preproc/        @<username>
+/linumpy/stitching/      @<username>
+/linumpy/microscope/     @<username>
+/linumpy/io/             @<username>
+/linumpy/gpu/            @<username>
+/linumpy/shifts/         @<username>
+/linumpy/utils/          @<username>
+/linumpy/diagnostics/    @<username>
+/linumpy/metrics/        @<username>
+/linumpy/mosaic/         @<username>
+/linumpy/registration/   @<username>
+/linumpy/intensity/      @<username>
+/linumpy/geometry/       @<username>
+/linumpy/psf/            @<username>
+/linumpy/imaging/        @<username>
+/linumpy/segmentation/   @<username>
+/linumpy/config/         @<username>
+/linumpy/cli/            @<username>
+
+# Scripts, workflows, docs
+/scripts/                @<username>
+/workflows/              @<username>
+/docs/                   @<username>
