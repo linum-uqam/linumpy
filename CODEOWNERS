@@ -1,32 +1,31 @@
 # CODEOWNERS — linumpy
-# Placeholder usernames: replace @<username> with real GitHub usernames before merge.
 
 # Foundational / build config
-/pyproject.toml          @<username>
-/uv.lock                 @<username>
-/.github/workflows/      @<username>
+/pyproject.toml          @FIrgolitsch
+/uv.lock                 @FIrgolitsch
+/.github/workflows/      @FIrgolitsch
 
 # Core library modules
-/linumpy/preproc/        @<username>
-/linumpy/stitching/      @<username>
-/linumpy/microscope/     @<username>
-/linumpy/io/             @<username>
-/linumpy/gpu/            @<username>
-/linumpy/shifts/         @<username>
-/linumpy/utils/          @<username>
-/linumpy/diagnostics/    @<username>
-/linumpy/metrics/        @<username>
-/linumpy/mosaic/         @<username>
-/linumpy/registration/   @<username>
-/linumpy/intensity/      @<username>
-/linumpy/geometry/       @<username>
-/linumpy/psf/            @<username>
-/linumpy/imaging/        @<username>
-/linumpy/segmentation/   @<username>
-/linumpy/config/         @<username>
-/linumpy/cli/            @<username>
+/linumpy/preproc/        @joe-from-mtl
+/linumpy/stitching/      @joe-from-mtl
+/linumpy/microscope/     @joe-from-mtl
+/linumpy/io/             @joe-from-mtl
+/linumpy/gpu/            @joe-from-mtl
+/linumpy/shifts/         @joe-from-mtl
+/linumpy/utils/          @joe-from-mtl
+/linumpy/diagnostics/    @joe-from-mtl
+/linumpy/metrics/        @joe-from-mtl
+/linumpy/mosaic/         @joe-from-mtl
+/linumpy/registration/   @joe-from-mtl
+/linumpy/intensity/      @joe-from-mtl
+/linumpy/geometry/       @joe-from-mtl
+/linumpy/psf/            @joe-from-mtl
+/linumpy/imaging/        @joe-from-mtl
+/linumpy/segmentation/   @joe-from-mtl
+/linumpy/config/         @joe-from-mtl
+/linumpy/cli/            @joe-from-mtl
 
 # Scripts, workflows, docs
-/scripts/                @<username>
-/workflows/              @<username>
-/docs/                   @<username>
+/scripts/                @joe-from-mtl
+/workflows/              @joe-from-mtl
+/docs/                   @joe-from-mtl
