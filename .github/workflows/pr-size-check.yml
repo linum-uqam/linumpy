@@ -1,0 +1,74 @@
+# PR size check — warning only.
+# Posts a comment on PRs exceeding team size conventions (500 lines or 20 files).
+# This check NEVER fails the job: it is advisory, with reviewer discretion for
+# mechanical/refactoring PRs.
+name: PR size check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  size-check:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+    - uses: actions/checkout@v7.0.0
+      with:
+        fetch-depth: 0
+
+    - name: Compute diff size and comment if oversized
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -euo pipefail
+        BASE="${{ github.base_ref }}"
+        PR_NUMBER="${{ github.event.pull_request.number }}"
+
+        # Diff stat against the PR base ref.
+        # `git diff --stat` prints a final summary line like:
+        #   N files changed, M insertions(+), K deletions(-)
+        STAT=$(git diff --stat "origin/${BASE}...HEAD")
+        echo "::group::git diff --stat origin/${BASE}...HEAD"
+        echo "${STAT}"
+        echo "::endgroup::"
+
+        # Number of files changed = count of non-summary lines in the stat output.
+        FILES_CHANGED=$(echo "${STAT}" | grep -cE ' *\| ' || true)
+
+        # Total changed lines = insertions + deletions, parsed from the summary line.
+        INS=$(echo "${STAT}" | tail -n 1 | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo 0)
+        DELS=$(echo "${STAT}" | tail -n 1 | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo 0)
+        LINES_CHANGED=$((INS + DELS))
+
+        echo "Files changed: ${FILES_CHANGED}"
+        echo "Lines changed: ${LINES_CHANGED}"
+
+        MAX_FILES=20
+        MAX_LINES=500
+
+        if [ "${FILES_CHANGED}" -gt "${MAX_FILES}" ] || [ "${LINES_CHANGED}" -gt "${MAX_LINES}" ]; then
+          BODY=$(printf '%s\n' \
+            '### PR size advisory' \
+            '' \
+            "This PR exceeds the team's size conventions:" \
+            '' \
+            "- **Files changed:** ${FILES_CHANGED} (threshold: ${MAX_FILES})" \
+            "- **Lines changed:** ${LINES_CHANGED} (threshold: ${MAX_LINES})" \
+            '' \
+            'This is a **warning only** — the check does not fail. Reviewer discretion' \
+            'applies for mechanical/refactoring PRs. If this PR is intentional' \
+            'large-scale refactoring, no action is needed. Otherwise, consider splitting' \
+            'it into smaller PRs to ease review.')
+          gh pr comment "${PR_NUMBER}" --body "${BODY}"
+          echo "Posted size-advisory comment on PR #${PR_NUMBER}."
+        else
+          echo "PR within size conventions; no comment posted."
+        fi
+        # Never exit non-zero — this is a warning-only check.
+        exit 0
