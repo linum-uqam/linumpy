@@ -33,7 +33,7 @@ process resample_mosaic_grid {
         tuple val(slice_id), path("mosaic_grid_z${slice_id}_resampled.ome.zarr")
     script:
     """
-    linum_resample_mosaic_grid.py ${mosaic_grid} "mosaic_grid_z${slice_id}_resampled.ome.zarr" -r ${params.resolution}
+    linum-resample-mosaic-grid ${mosaic_grid} "mosaic_grid_z${slice_id}_resampled.ome.zarr" -r ${params.resolution}
     """
 }
 
@@ -44,7 +44,7 @@ process fix_focal_curvature {
         tuple val(slice_id), path("mosaic_grid_z${slice_id}_focal_fix.ome.zarr")
     script:
     """
-    linum_detect_focal_curvature.py ${mosaic_grid} "mosaic_grid_z${slice_id}_focal_fix.ome.zarr"
+    linum-detect-focal-curvature ${mosaic_grid} "mosaic_grid_z${slice_id}_focal_fix.ome.zarr"
     """
 }
 
@@ -56,7 +56,7 @@ process fix_illumination {
         tuple val(slice_id), path("mosaic_grid_z${slice_id}_illum_fix.ome.zarr")
     script:
     """
-    linum_fix_illumination_3d.py ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" --n_processes ${params.processes} --percentile_max ${params.clip_percentile_upper}
+    linum-fix-illumination-3d ${mosaic_grid} "mosaic_grid_z${slice_id}_illum_fix.ome.zarr" --n_processes ${params.processes} --percentile_max ${params.clip_percentile_upper}
     """
 }
 
@@ -67,7 +67,7 @@ process generate_aip {
         tuple val(slice_id), path("mosaic_grid_z${slice_id}_aip.ome.zarr")
     script:
     """
-    linum_aip.py ${mosaic_grid} "mosaic_grid_z${slice_id}_aip.ome.zarr"
+    linum-aip ${mosaic_grid} "mosaic_grid_z${slice_id}_aip.ome.zarr"
     """
 }
 
@@ -78,7 +78,7 @@ process estimate_xy_transformation {
         tuple val(slice_id), path("z${slice_id}_transform_xy.npy")
     script:
     """
-    linum_estimate_transform.py ${aip} "z${slice_id}_transform_xy.npy"
+    linum-estimate-transform ${aip} "z${slice_id}_transform_xy.npy"
     """
 }
 
@@ -89,7 +89,7 @@ process stitch_3d {
         tuple val(slice_id), path("slice_z${slice_id}_stitch_3d.ome.zarr")
     script:
     """
-    linum_stitch_3d.py ${mosaic_grid} ${transform_xy} "slice_z${slice_id}_stitch_3d.ome.zarr"
+    linum-stitch-3d ${mosaic_grid} ${transform_xy} "slice_z${slice_id}_stitch_3d.ome.zarr"
     """
 }
 
@@ -100,7 +100,7 @@ process beam_profile_correction {
         tuple val(slice_id), path("slice_z${slice_id}_axial_corr.ome.zarr")
     script:
     """
-    linum_compensate_psf_model_free.py ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" --percentile_max $params.clip_percentile_upper
+    linum-compensate-psf-model-free ${slice_3d} "slice_z${slice_id}_axial_corr.ome.zarr" --percentile_max $params.clip_percentile_upper
     """
 }
 
@@ -111,7 +111,7 @@ process crop_interface {
         tuple val(slice_id), path("slice_z${slice_id}_crop_interface.ome.zarr")
     script:
     """
-    linum_crop_3d_mosaic_below_interface.py $image "slice_z${slice_id}_crop_interface.ome.zarr" --depth $params.crop_interface_out_depth --crop_before_interface --percentile_max $params.clip_percentile_upper
+    linum-crop-3d-mosaic-below-interface $image "slice_z${slice_id}_crop_interface.ome.zarr" --depth $params.crop_interface_out_depth --crop_before_interface --percentile_max $params.clip_percentile_upper
     """
 }
 
@@ -122,7 +122,7 @@ process normalize {
         tuple val(slice_id), path("slice_z${slice_id}_normalize.ome.zarr")
     script:
     """
-    linum_normalize_intensities_per_slice.py ${image} "slice_z${slice_id}_normalize.ome.zarr" --percentile_max ${params.clip_percentile_upper}
+    linum-normalize-intensities-per-slice ${image} "slice_z${slice_id}_normalize.ome.zarr" --percentile_max ${params.clip_percentile_upper}
     """
 }
 
@@ -134,7 +134,7 @@ process bring_to_common_space {
         path("*.ome.zarr")
     script:
     """
-    linum_align_mosaics_3d_from_shifts.py inputs shifts_xy.csv common_space
+    linum-align-mosaics-3d-from-shifts inputs shifts_xy.csv common_space
     mv common_space/* .
     """
 }
@@ -148,7 +148,7 @@ process register_pairwise {
     script:
     """
     dirname=`basename $moving_vol .ome.zarr`
-    linum_estimate_transform_pairwise.py ${fixed_vol} ${moving_vol} \$dirname --moving_slice_index $params.moving_slice_first_index --transform $params.pairwise_transform --metric $params.pairwise_registration_metric
+    linum-register-pairwise ${fixed_vol} ${moving_vol} \$dirname --moving_slice_index $params.moving_slice_first_index --transform $params.pairwise_transform --metric $params.pairwise_registration_metric
     """
 }
 
@@ -169,9 +169,9 @@ process stack {
         }
     }
     """
-    linum_stack_slices_3d.py mosaics transforms 3d_volume.ome.zarr ${options}
+    linum-stack-slices-3d mosaics transforms 3d_volume.ome.zarr ${options}
     zip -r 3d_volume.ome.zarr.zip 3d_volume.ome.zarr
-    linum_screenshot_omezarr.py 3d_volume.ome.zarr 3d_volume.png
+    linum-screenshot-omezarr 3d_volume.ome.zarr 3d_volume.png
     """
 }
 
