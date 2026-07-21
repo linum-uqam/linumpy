@@ -7,7 +7,7 @@
 ## Installation
 *Although a version of the library is available on PyPI, it has not been updated in a while. We highly discourage its use.*
 
-The library is tested for python 3.12. To install the library, clone the repository, change directory to the repository root and then install it with the command below:
+The library is tested for python 3.14. To install the library, clone the repository, change directory to the repository root and then install it with the command below:
 ```
 pip install .
 ```
@@ -31,7 +31,7 @@ before installing (see [issue #45](https://github.com/linum-uqam/linumpy/issues/
 To execute the scripts, you can use the following command:
 
 ```
-linum_view_omezarr.py --help
+linum-view-omezarr --help
 ```
 
 [LINUM]:https://linum-lab.ca
