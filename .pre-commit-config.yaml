@@ -3,17 +3,18 @@ repos:
     rev: v0.15.8
     hooks:
       - id: ruff-format
+        exclude: ^\.planning/
       - id: ruff
         args: [--fix]
+        exclude: ^\.planning/
   - repo: local
     hooks:
       - id: ty
         name: ty (type check)
-        entry: bash -c 'uv run --frozen ty check || true'
+        entry: uv run --frozen ty check
         language: system
         types: [python]
-        files: ^linumpy/
+        files: ^(linumpy|scripts)/
         pass_filenames: false
-        # Non-blocking (advisory) until the existing error baseline is resolved.
-        # Switch entry to just "uv run ty check" once errors reach zero.
+        # Blocking — zero-error baseline enforced in CI and pre-commit.
         verbose: true

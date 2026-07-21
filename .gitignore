@@ -18,6 +18,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+!workflows/**/lib/
+!workflows/**/lib/**
 parts/
 sdist/
 var/
@@ -171,6 +173,10 @@ cython_debug/
 .nextflow/
 *.nextflow.log*
 
+# nf-test
+.nf-test/
+.nf-test.log
+
 # Standalone tools (separate git repos)
 tools/
 workflows/work/
@@ -183,6 +189,13 @@ workflows/work/
 *.zarr
 *.nii.gz
 *.sif
+
+# Test stub-data placeholders. The `*.zarr` rule above ignores zarr directories
+# wholesale; for nf-test stub runs we still need the empty directory markers
+# (`.gitkeep`) tracked so the workflow's input glob finds at least one
+# `mosaic_grid*.ome.zarr` directory. Re-include the directory and its keepers.
+!workflows/**/tests/data/*.ome.zarr
+!workflows/**/tests/data/*.ome.zarr/.gitkeep
 
 # Config files
 *.ini
@@ -197,3 +210,41 @@ draft.py
 sub-*
 
 .python-version
+# Sphinx auto-generated API docs (autoapi)
+docs/api/
+
+# === OpenGSD (gsd-core) — keep GSD-produced files out of git ===
+# Copilot local install (under .github/ — do NOT ignore .github/workflows/)
+.github/skills/
+.github/agents/
+.github/gsd-core/
+.github/copilot-instructions.md
+.github/gsd-file-manifest.json
+.github/gsd-install-state.json
+.github/gsd-local-patches/
+.github/gsd-pristine/
+.github/.gsd-surface.json
+.github/.gsd-profile
+.github/hooks/
+.github/scripts/
+# Other runtime installs (if present)
+.cursor/
+.claude/
+.windsurf/
+# Planning workspace — everything GSD writes during discuss/plan/execute/verify/ship
+.planning/
+.planning/tmp/
+# Generated agent instruction / rules files (repo root)
+/AGENTS.md
+/CLAUDE.md
+/GEMINI.md
+# Graphify working copy (canonical graph lives under .planning/graphs/)
+graphify-out/
+# GSD handoffs, repo memories, context intel, specs
+handoffs/
+memories/
+context/
+specs/
+# GSD meta / surface state
+.gsd/
+.gsd-profile

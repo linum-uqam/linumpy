@@ -29,7 +29,7 @@ process create_mosaic_grid {
     options += " "
     options += params.fix_camera_shift? "--fix_camera_shift":"--no-fix_camera_shift"
     """
-    linum_create_mosaic_grid_3d.py mosaic_grid_3d_z${slice_id}.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution} --n_levels 0 --sharding_factor ${params.sharding_factor} ${options}
+    linum-create-mosaic-grid-3d mosaic_grid_3d_z${slice_id}.ome.zarr --from_tiles_list $tiles --resolution ${params.resolution} --n_processes ${params.processes} --axial_resolution ${params.axial_resolution} --n_levels 0 --sharding_factor ${params.sharding_factor} ${options}
     """
 }
 
@@ -42,7 +42,7 @@ process estimate_xy_shifts_from_metadata {
         path("shifts_xy.csv")
     script:
     """
-    linum_estimate_xy_shift_from_metadata.py ${input_dir} shifts_xy.csv --n_processes $params.processes
+    linum-estimate-xy-shift-from-metadata ${input_dir} shifts_xy.csv --n_processes $params.processes
     """
 }
 
