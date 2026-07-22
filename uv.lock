@@ -1389,7 +1389,7 @@ wheels = [
 [[package]]
 name = "linum-basic"
 version = "2.0.0"
-source = { git = "https://github.com/linum-uqam/Linum-BaSiC.git?branch=modernisation#511c88c01173faaf548b4cf351901ae9bac298cc" }
+source = { git = "https://github.com/FIrgolitsch/Linum-BaSiC.git?branch=upstream-staging#65c0a92bc7f263cdd854b1133cb3591c707af430" }
 dependencies = [
     { name = "joblib" },
     { name = "numpy" },
@@ -1491,7 +1491,7 @@ requires-dist = [
     { name = "kvikio-cu12", marker = "extra == 'gds-cuda12'" },
     { name = "kvikio-cu13", marker = "extra == 'gds'" },
     { name = "linkify-it-py", marker = "extra == 'docs'", specifier = ">=2.1" },
-    { name = "linum-basic", extras = ["viz"], git = "https://github.com/linum-uqam/Linum-BaSiC.git?branch=modernisation" },
+    { name = "linum-basic", extras = ["viz"], git = "https://github.com/FIrgolitsch/Linum-BaSiC.git?branch=upstream-staging" },
     { name = "matplotlib" },
     { name = "myst-parser", marker = "extra == 'docs'", specifier = ">=5.0" },
     { name = "napari" },

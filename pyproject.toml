@@ -200,8 +200,11 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-# linum-basic is not published on PyPI; resolve it from the lab repository.
-linum-basic = { git = "https://github.com/linum-uqam/Linum-BaSiC.git", branch = "modernisation" }
+# linum-basic is not published on PyPI.
+# Temporarily sourced from the @FIrgolitsch fork (upstream-staging branch) so the
+# main linumpy tree remains installable while linum-basic changes are staged for
+# upstream. Switch back to linum-uqam/Linum-BaSiC@modernisation once those land.
+linum-basic = { git = "https://github.com/FIrgolitsch/Linum-BaSiC.git", branch = "upstream-staging" }
 
 [tool.pytest.ini_options]
 filterwarnings = [
